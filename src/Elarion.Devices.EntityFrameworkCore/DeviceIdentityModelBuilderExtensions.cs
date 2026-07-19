@@ -22,7 +22,8 @@ public static class DeviceIdentityModelBuilderExtensions {
         bool snakeCase = true) {
         ArgumentNullException.ThrowIfNull(modelBuilder);
         var keyTable = keyTableName ?? (snakeCase ? "elarion_device_keys" : "ElarionDeviceKeys");
-        var codeTable = pairingCodeTableName ?? (snakeCase ? "elarion_device_pairing_codes" : "ElarionDevicePairingCodes");
+        var codeTable = pairingCodeTableName ??
+                        (snakeCase ? "elarion_device_pairing_codes" : "ElarionDevicePairingCodes");
         ArgumentException.ThrowIfNullOrWhiteSpace(keyTable);
         ArgumentException.ThrowIfNullOrWhiteSpace(codeTable);
 

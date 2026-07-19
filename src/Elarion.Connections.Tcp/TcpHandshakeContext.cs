@@ -33,7 +33,9 @@ public sealed class TcpHandshakeContext {
 
     /// <summary>Receives the next framed message payload; <see langword="null"/> when the peer closed
     /// instead of answering (treat as a rejected handshake).</summary>
-    public ValueTask<ReadOnlyMemory<byte>?> ReceiveAsync(CancellationToken ct = default) => _reader.ReadAsync(ct);
+    public ValueTask<ReadOnlyMemory<byte>?> ReceiveAsync(CancellationToken ct = default) {
+        return _reader.ReadAsync(ct);
+    }
 
     /// <summary>Receives the next framed message decoded as UTF-8 text; <see langword="null"/> on close.</summary>
     public async ValueTask<string?> ReceiveTextAsync(CancellationToken ct = default) {

@@ -10,19 +10,19 @@
   <ItemGroup>
     <!-- Transport-agnostic: core depends only on Abstractions. The JSON-RPC transport (Elarion.JsonRpc) is a
          sibling that references Abstractions too; core does not reference any transport. -->
-    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj"/>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Elarion.Messaging.InMemory" />
-    <InternalsVisibleTo Include="Elarion.Tests" />
+    <InternalsVisibleTo Include="Elarion.Messaging.InMemory"/>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
   </ItemGroup>
 
   <!-- Bundle the Elarion source generator's analyzer into this runtime package. NuGet analyzer assets
@@ -34,20 +34,20 @@
        becoming a downstream package dependency. -->
   <ItemGroup>
     <ProjectReference Include="..\Elarion.Generators\Elarion.Generators.csproj"
-                     ReferenceOutputAssembly="false"
-                     PrivateAssets="all" />
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"/>
   </ItemGroup>
 
   <Target Name="_BundleElarionGenerator" BeforeTargets="_GetPackageFiles">
     <MSBuild Projects="..\Elarion.Generators\Elarion.Generators.csproj"
              Targets="GetTargetPath">
-      <Output TaskParameter="TargetOutputs" ItemName="_ElarionGeneratorAnalyzer" />
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionGeneratorAnalyzer"/>
     </MSBuild>
     <ItemGroup>
       <None Include="@(_ElarionGeneratorAnalyzer)"
             Pack="true"
             PackagePath="analyzers/dotnet/cs/"
-            Visible="false" />
+            Visible="false"/>
     </ItemGroup>
   </Target>
 

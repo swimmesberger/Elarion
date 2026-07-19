@@ -29,7 +29,7 @@ public sealed class CurrentUserTransportTests {
     public async Task HttpEndpoint_HandlerInRequestScope_ReadsCurrentUser() {
         await using var provider = BuildProvider();
         using var requestScope = provider.CreateScope();
-        var context = CreateContext(requestScope.ServiceProvider, body: "", userId: "user-http");
+        var context = CreateContext(requestScope.ServiceProvider, "", "user-http");
         await SeedRequestScopeAsync(context);
 
         // A minimal-API [HttpEndpoint] resolves its handler from the request scope (no child scope) — exactly
@@ -75,9 +75,8 @@ public sealed class CurrentUserTransportTests {
 
         var response = ReadResponse(context);
         response.RootElement.GetArrayLength().Should().Be(2);
-        foreach (var item in response.RootElement.EnumerateArray()) {
+        foreach (var item in response.RootElement.EnumerateArray())
             item.GetProperty("result").GetProperty("userId").GetString().Should().Be("user-99");
-        }
     }
 
     [Fact]
@@ -101,7 +100,7 @@ public sealed class CurrentUserTransportTests {
     }
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web) {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
     };
 
     private static ServiceProvider BuildProvider() {
@@ -118,13 +117,14 @@ public sealed class CurrentUserTransportTests {
         return services.BuildServiceProvider();
     }
 
-    private static ClaimsPrincipal Authenticated(string userId) =>
-        new(new ClaimsIdentity([new Claim("sub", userId)], authenticationType: "test"));
+    private static ClaimsPrincipal Authenticated(string userId) {
+        return new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", userId)], "test"));
+    }
 
     private static DefaultHttpContext CreateContext(IServiceProvider requestScope, string body, string userId) {
         var context = new DefaultHttpContext {
             RequestServices = requestScope,
-            User = Authenticated(userId),
+            User = Authenticated(userId)
         };
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         context.Response.Body = new MemoryStream();
@@ -133,8 +133,9 @@ public sealed class CurrentUserTransportTests {
 
     // Simulates app.UseElarionCurrentUser(): the middleware seeds the current-user snapshot into the request
     // scope (context.RequestServices), where the HTTP handler resolves it.
-    private static Task SeedRequestScopeAsync(HttpContext context) =>
-        new CurrentUserMiddleware(_ => Task.CompletedTask).InvokeAsync(context);
+    private static Task SeedRequestScopeAsync(HttpContext context) {
+        return new CurrentUserMiddleware(_ => Task.CompletedTask).InvokeAsync(context);
+    }
 
     private static JsonDocument ReadResponse(HttpContext context) {
         context.Response.Body.Position = 0;
@@ -147,7 +148,8 @@ public sealed class CurrentUserTransportTests {
     private sealed record WhoAmIResponse(string UserId, bool Authenticated);
 
     private sealed class WhoAmIHandler(ICurrentUser user) : IHandler<WhoAmIQuery, Result<WhoAmIResponse>> {
-        public ValueTask<Result<WhoAmIResponse>> HandleAsync(WhoAmIQuery request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<WhoAmIResponse>>(new WhoAmIResponse(user.UserId, user.IsAuthenticated));
+        public ValueTask<Result<WhoAmIResponse>> HandleAsync(WhoAmIQuery request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<WhoAmIResponse>>(new WhoAmIResponse(user.UserId, user.IsAuthenticated));
+        }
     }
 }

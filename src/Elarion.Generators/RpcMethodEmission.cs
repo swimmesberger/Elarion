@@ -10,8 +10,7 @@ namespace Elarion.Generators;
 /// <see cref="AppModuleDiscoveryGenerator"/> for the module-grouped, feature-flag-gated registration (the only
 /// transport-wiring path).
 /// </summary>
-internal static class RpcMethodEmission
-{
+internal static class RpcMethodEmission {
     public const string HandlerAttributeMetadataName = "Elarion.Abstractions.HandlerAttribute";
     public const string McpHandlerAttributeMetadataName = "Elarion.Abstractions.McpHandlerAttribute";
     private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
@@ -20,44 +19,40 @@ internal static class RpcMethodEmission
     private static readonly string[] OperationNameSuffixes = ["Handler", "Command", "Query", "Request"];
 
     public static readonly DiagnosticDescriptor UnmatchedModule = new(
-        id: "ELRPC001",
-        title: "Handler is not in any module",
-        messageFormat:
+        "ELRPC001",
+        "Handler is not in any module",
         "Handler '{0}' is annotated with [Handler] but its namespace is not under any [AppModule]; it will be "
         + "registered unconditionally (not gated by a module feature flag)",
-        category: "Elarion.JsonRpc",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        "Elarion.JsonRpc",
+        DiagnosticSeverity.Warning,
+        true);
 
     public static readonly DiagnosticDescriptor MissingHandlerShape = new(
-        id: "ELRPC002",
-        title: "Handler has no resolvable request/response shape",
-        messageFormat:
+        "ELRPC002",
+        "Handler has no resolvable request/response shape",
         "Handler '{0}' is annotated with [Handler] but does not implement IHandler<TRequest, TResponse> with a "
         + "Result<T> response; no operation will be generated",
-        category: "Elarion.JsonRpc",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        "Elarion.JsonRpc",
+        DiagnosticSeverity.Warning,
+        true);
 
     public static readonly DiagnosticDescriptor DuplicateOperationName = new(
-        id: "ELRPC003",
-        title: "Duplicate operation name",
-        messageFormat:
+        "ELRPC003",
+        "Duplicate operation name",
         "Operation name '{0}' is produced by more than one handler; operation names must be unique across the bus — "
         + "give one an explicit [Handler(\"...\")] name (inferred names can collide)",
-        category: "Elarion.JsonRpc",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        "Elarion.JsonRpc",
+        DiagnosticSeverity.Warning,
+        true);
 
     public static readonly DiagnosticDescriptor McpCustomizationIgnored = new(
-        id: "ELMCP003",
-        title: "MCP customization is ignored",
-        messageFormat:
+        "ELMCP003",
+        "MCP customization is ignored",
         "Handler '{0}' uses [McpHandler] but its [Handler] transports exclude MCP; remove [McpHandler] or include "
         + "HandlerTransports.Mcp for operation '{1}'",
-        category: "Elarion.Mcp",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        "Elarion.Mcp",
+        DiagnosticSeverity.Warning,
+        true);
 
     public sealed record ParameterDescription(string PropertyName, string Description);
 
@@ -82,16 +77,16 @@ internal static class RpcMethodEmission
     /// A handler carrying <c>[Idempotent]</c> is registered with <c>idempotent: true</c> so the exported schema
     /// advertises it and the generated TypeScript client attaches an idempotency key by default.
     /// </summary>
-    public static void AppendMapHandler(StringBuilder sb, Model entry, string indent, string registryVar) =>
+    public static void AppendMapHandler(StringBuilder sb, Model entry, string indent, string registryVar) {
         sb.AppendLine(
             $"{indent}{registryVar}.Map<{entry.RequestTypeFqn}, {entry.ResponseTypeFqn}>("
             + $"{Literal(entry.MethodName)}, {TransportsExpression(entry)}"
             + (entry.IsIdempotent ? ", idempotent: true" : "")
             + ");");
+    }
 
     /// <summary>The fully-qualified <c>HandlerTransports</c> flag expression for an entry's surfaces.</summary>
-    public static string TransportsExpression(Model entry)
-    {
+    public static string TransportsExpression(Model entry) {
         const string ns = "global::Elarion.Abstractions.HandlerTransports";
         if (entry.OnJsonRpc && entry.OnMcp && entry.OnConnection)
             return $"{ns}.All";
@@ -118,8 +113,7 @@ internal static class RpcMethodEmission
     public static Model? CreateModel(
         GeneratorAttributeSyntaxContext ctx,
         Action<DiagnosticInfo>? report,
-        CancellationToken ct)
-    {
+        CancellationToken ct) {
         if (ctx.TargetSymbol is not INamedTypeSymbol type)
             return null;
 
@@ -127,13 +121,10 @@ internal static class RpcMethodEmission
         var mcpMethodType = compilation.GetTypeByMetadataName(McpHandlerAttributeMetadataName);
         var descriptionType = compilation.GetTypeByMetadataName(DescriptionAttributeMetadataName);
         foreach (var attr in ctx.Attributes)
-        {
-            if (TryCreateModel(type, attr, mcpMethodType, descriptionType, SymbolDisplayFormat.FullyQualifiedFormat, report, ct, out var model)
+            if (TryCreateModel(type, attr, mcpMethodType, descriptionType, SymbolDisplayFormat.FullyQualifiedFormat,
+                    report, ct, out var model)
                 && model is not null)
-            {
                 return model;
-            }
-        }
 
         return null;
     }
@@ -146,8 +137,7 @@ internal static class RpcMethodEmission
         SymbolDisplayFormat fmt,
         Action<DiagnosticInfo>? report,
         CancellationToken ct,
-        out Model? model)
-    {
+        out Model? model) {
         model = null;
 
         // [Handler] has two ctors: the parameterless one (name inferred) and [Handler(string name)] (explicit).
@@ -160,8 +150,7 @@ internal static class RpcMethodEmission
         var (onJsonRpc, onMcp, onConnection) = ReadTransports(attr);
 
         ct.ThrowIfCancellationRequested();
-        if (!HandlerShape.TryResolve(type, out var requestType, out var responseInner, out _))
-        {
+        if (!HandlerShape.TryResolve(type, out var requestType, out var responseInner, out _)) {
             report?.Invoke(DiagnosticInfo.Create(
                 MissingHandlerShape, type.Locations.FirstOrDefault(), type.ToDisplayString()));
             return false;
@@ -169,13 +158,11 @@ internal static class RpcMethodEmission
 
         var (toolName, hasMcpMethod) = ReadMcpMethod(type, mcpMethodType);
         if (hasMcpMethod && !onMcp)
-        {
             report?.Invoke(DiagnosticInfo.Create(
                 McpCustomizationIgnored,
                 (Location?)null,
                 type.ToDisplayString(),
                 operationName));
-        }
 
         var description = GetDescription(type, descriptionType);
         var parameters = CollectParameterDescriptions(requestType, descriptionType);
@@ -196,13 +183,10 @@ internal static class RpcMethodEmission
         return true;
     }
 
-    private static bool HasIdempotentAttribute(INamedTypeSymbol type)
-    {
+    private static bool HasIdempotentAttribute(INamedTypeSymbol type) {
         foreach (var attr in type.GetAttributes())
-        {
             if (attr.AttributeClass?.ToDisplayString() == "Elarion.Abstractions.Idempotency.IdempotentAttribute")
                 return true;
-        }
 
         return false;
     }
@@ -212,17 +196,13 @@ internal static class RpcMethodEmission
     /// Handler/Command/Query/Request, then camel-case the first character (CreateClient -> createClient).
     /// The caller prepends the owning module (e.g. clients.createClient).
     /// </summary>
-    public static string InferOperationName(string typeName)
-    {
+    public static string InferOperationName(string typeName) {
         var name = typeName;
         foreach (var suffix in OperationNameSuffixes)
-        {
-            if (name.Length > suffix.Length && name.EndsWith(suffix, StringComparison.Ordinal))
-            {
+            if (name.Length > suffix.Length && name.EndsWith(suffix, StringComparison.Ordinal)) {
                 name = name.Substring(0, name.Length - suffix.Length);
                 break;
             }
-        }
 
         if (name.Length == 0)
             name = typeName;
@@ -234,44 +214,38 @@ internal static class RpcMethodEmission
     /// Camel-cases a module name for use as a wire-name prefix ("Clients" -&gt; "clients"), the counterpart of
     /// <see cref="InferOperationName"/> when composing "{module}.{operation}".
     /// </summary>
-    public static string CamelCaseModule(string moduleName) =>
-        moduleName.Length > 0 && char.IsUpper(moduleName[0])
+    public static string CamelCaseModule(string moduleName) {
+        return moduleName.Length > 0 && char.IsUpper(moduleName[0])
             ? char.ToLowerInvariant(moduleName[0]) + moduleName.Substring(1)
             : moduleName;
+    }
 
     // HandlerTransports flags: JsonRpc = 1, Mcp = 2, Connection = 4, All = 7 (default when the named
     // argument is absent). A constant baked by an older Elarion (All = 3) decodes as JSON-RPC + MCP only —
     // correct: that compilation never opted into the connection surface.
-    private static (bool OnJsonRpc, bool OnMcp, bool OnConnection) ReadTransports(AttributeData attr)
-    {
+    private static (bool OnJsonRpc, bool OnMcp, bool OnConnection) ReadTransports(AttributeData attr) {
         var transports = 7;
         foreach (var named in attr.NamedArguments)
-        {
-            if (named.Key == "Transports" && named.Value.Value is int value)
-            {
+            if (named.Key == "Transports" && named.Value.Value is int value) {
                 transports = value;
                 break;
             }
-        }
 
         return ((transports & 1) != 0, (transports & 2) != 0, (transports & 4) != 0);
     }
 
-    private static (string? ToolName, bool HasMcpMethod) ReadMcpMethod(INamedTypeSymbol type, INamedTypeSymbol? mcpMethodType)
-    {
+    private static (string? ToolName, bool HasMcpMethod) ReadMcpMethod(INamedTypeSymbol type,
+        INamedTypeSymbol? mcpMethodType) {
         if (mcpMethodType is null)
             return (null, false);
 
-        foreach (var attr in type.GetAttributes())
-        {
+        foreach (var attr in type.GetAttributes()) {
             if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, mcpMethodType))
                 continue;
 
             foreach (var named in attr.NamedArguments)
-            {
                 if (named.Key == "ToolName" && named.Value.Value is string name && name.Length > 0)
                     return (name, true);
-            }
 
             return (null, true);
         }
@@ -279,13 +253,11 @@ internal static class RpcMethodEmission
         return (null, false);
     }
 
-    private static string? GetDescription(ISymbol symbol, INamedTypeSymbol? descriptionType)
-    {
+    private static string? GetDescription(ISymbol symbol, INamedTypeSymbol? descriptionType) {
         if (descriptionType is null)
             return null;
 
-        foreach (var attr in symbol.GetAttributes())
-        {
+        foreach (var attr in symbol.GetAttributes()) {
             if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, descriptionType))
                 continue;
             if (attr.ConstructorArguments.Length == 0)
@@ -299,28 +271,23 @@ internal static class RpcMethodEmission
 
     private static EquatableArray<ParameterDescription> CollectParameterDescriptions(
         INamedTypeSymbol requestType,
-        INamedTypeSymbol? descriptionType)
-    {
+        INamedTypeSymbol? descriptionType) {
         if (descriptionType is null)
             return EquatableArray<ParameterDescription>.Empty;
 
         var byParameterName = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var ctor in requestType.InstanceConstructors)
-        {
+        foreach (var ctor in requestType.InstanceConstructors) {
             if (ctor.Parameters.Length == 1 &&
                 SymbolEqualityComparer.Default.Equals(ctor.Parameters[0].Type, requestType))
                 continue;
 
             foreach (var parameter in ctor.Parameters)
-            {
                 if (GetDescription(parameter, descriptionType) is { } desc)
                     byParameterName[parameter.Name] = desc;
-            }
         }
 
         var result = new List<ParameterDescription>();
-        foreach (var member in requestType.GetMembers())
-        {
+        foreach (var member in requestType.GetMembers()) {
             if (member is not IPropertySymbol property ||
                 property.IsStatic ||
                 property.IsIndexer ||
@@ -328,7 +295,9 @@ internal static class RpcMethodEmission
                 continue;
 
             var description = GetDescription(property, descriptionType)
-                ?? (byParameterName.TryGetValue(property.Name, out var fromParameter) ? fromParameter : null);
+                              ?? (byParameterName.TryGetValue(property.Name, out var fromParameter)
+                                  ? fromParameter
+                                  : null);
 
             if (description is not null)
                 result.Add(new ParameterDescription(property.Name, description));
@@ -337,5 +306,7 @@ internal static class RpcMethodEmission
         return result.ToEquatableArray();
     }
 
-    private static string Literal(string value) => SymbolDisplay.FormatLiteral(value, quote: true);
+    private static string Literal(string value) {
+        return SymbolDisplay.FormatLiteral(value, true);
+    }
 }

@@ -1,1 +1,4 @@
-CREATE TABLE mig_base_two (id int PRIMARY KEY);
+CREATE TABLE mig_base_two
+(
+  id int PRIMARY KEY
+);

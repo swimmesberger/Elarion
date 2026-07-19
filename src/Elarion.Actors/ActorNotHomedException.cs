@@ -39,6 +39,6 @@ public sealed class ActorNotHomedException(
             ? " Route the triggering work to the home instance or read state via IActorStateReader."
             : " Route the triggering work to the shard holder; actor calls are never forwarded.";
         return $"Actor '{actorName}' ({key}) cannot run on this instance: {leaseDescription} is held {holder}"
-            + routeHint;
+               + routeHint;
     }
 }

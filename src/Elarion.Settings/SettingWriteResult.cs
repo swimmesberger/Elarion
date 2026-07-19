@@ -22,8 +22,10 @@ public readonly record struct SettingWriteResult(SettingWriteStatus Status, int 
     public bool IsSuccess => Status == SettingWriteStatus.Success;
 
     /// <summary>Creates a successful result carrying the new version.</summary>
-    public static SettingWriteResult Success(int version) => new(SettingWriteStatus.Success, version);
+    public static SettingWriteResult Success(int version) {
+        return new SettingWriteResult(SettingWriteStatus.Success, version);
+    }
 
     /// <summary>A result indicating the expected version did not match.</summary>
-    public static SettingWriteResult ConcurrencyConflict { get; } = new(SettingWriteStatus.ConcurrencyConflict, Version: 0);
+    public static SettingWriteResult ConcurrencyConflict { get; } = new(SettingWriteStatus.ConcurrencyConflict, 0);
 }

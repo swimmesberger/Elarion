@@ -33,9 +33,7 @@ public static class ElarionIdentityServiceCollectionExtensions {
         var identityBuilder = services
             .AddIdentity<TUser, TRole>(identityOptions => configureIdentity?.Invoke(identityOptions))
             .AddEntityFrameworkStores<TDbContext>();
-        if (options.AddDefaultTokenProviders) {
-            identityBuilder.AddDefaultTokenProviders();
-        }
+        if (options.AddDefaultTokenProviders) identityBuilder.AddDefaultTokenProviders();
 
         // Identity issues the standard ClaimTypes; map the current-user snapshot to them (overridable).
         services.AddElarionCurrentUser(currentUser => {

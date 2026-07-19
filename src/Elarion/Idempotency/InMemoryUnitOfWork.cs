@@ -14,13 +14,11 @@ internal sealed class InMemoryUnitOfWork(ILogger<InMemoryUnitOfWork>? logger = n
     /// <inheritdoc />
     public ValueTask<IUnitOfWorkScope> BeginAsync(UnitOfWorkOptions options, CancellationToken ct) {
         WarnOnce();
-        return new(NoopScope.Instance);
+        return new ValueTask<IUnitOfWorkScope>(NoopScope.Instance);
     }
 
     private void WarnOnce() {
-        if (logger is null || Interlocked.Exchange(ref _warned, 1) != 0) {
-            return;
-        }
+        if (logger is null || Interlocked.Exchange(ref _warned, 1) != 0) return;
 
         logger.LogWarning(
             "The in-memory (no-op) IUnitOfWork is in use: commit and rollback do nothing, so a failed command's " +
@@ -32,10 +30,24 @@ internal sealed class InMemoryUnitOfWork(ILogger<InMemoryUnitOfWork>? logger = n
     private sealed class NoopScope : IUnitOfWorkScope {
         public static readonly NoopScope Instance = new();
 
-        public ValueTask CommitAsync(CancellationToken ct) => default;
-        public ValueTask RollbackAsync(CancellationToken ct) => default;
-        public ValueTask CreateSavepointAsync(string name, CancellationToken ct) => default;
-        public ValueTask RollbackToSavepointAsync(string name, CancellationToken ct) => default;
-        public ValueTask DisposeAsync() => default;
+        public ValueTask CommitAsync(CancellationToken ct) {
+            return default;
+        }
+
+        public ValueTask RollbackAsync(CancellationToken ct) {
+            return default;
+        }
+
+        public ValueTask CreateSavepointAsync(string name, CancellationToken ct) {
+            return default;
+        }
+
+        public ValueTask RollbackToSavepointAsync(string name, CancellationToken ct) {
+            return default;
+        }
+
+        public ValueTask DisposeAsync() {
+            return default;
+        }
     }
 }

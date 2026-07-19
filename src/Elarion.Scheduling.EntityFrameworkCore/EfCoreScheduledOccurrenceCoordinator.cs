@@ -76,20 +76,22 @@ public sealed class EfCoreScheduledOccurrenceCoordinator<TDbContext>(
 
     private static ClaimSql BuildClaimSql(DbContext context) {
         var entityType = context.Model.FindEntityType(typeof(SchedulerClaimEntity))
-            ?? throw new InvalidOperationException(
-                "The scheduler claim entity is not mapped. Call modelBuilder.UseElarionSchedulerClaims() in OnModelCreating.");
+                         ?? throw new InvalidOperationException(
+                             "The scheduler claim entity is not mapped. Call modelBuilder.UseElarionSchedulerClaims() in OnModelCreating.");
         var sqlHelper = context.GetService<ISqlGenerationHelper>();
 
         var tableName = entityType.GetTableName()
-            ?? throw new InvalidOperationException("The scheduler claim entity is not mapped to a table.");
+                        ?? throw new InvalidOperationException("The scheduler claim entity is not mapped to a table.");
         var schema = entityType.GetSchema();
         var storeObject = StoreObjectIdentifier.Table(tableName, schema);
 
         string Column(string propertyName) {
             var property = entityType.FindProperty(propertyName)
-                ?? throw new InvalidOperationException($"The {nameof(SchedulerClaimEntity)}.{propertyName} property is not mapped.");
+                           ?? throw new InvalidOperationException(
+                               $"The {nameof(SchedulerClaimEntity)}.{propertyName} property is not mapped.");
             var columnName = property.GetColumnName(storeObject)
-                ?? throw new InvalidOperationException($"The {nameof(SchedulerClaimEntity)}.{propertyName} property has no column.");
+                             ?? throw new InvalidOperationException(
+                                 $"The {nameof(SchedulerClaimEntity)}.{propertyName} property has no column.");
             return sqlHelper.DelimitIdentifier(columnName);
         }
 
@@ -99,14 +101,12 @@ public sealed class EfCoreScheduledOccurrenceCoordinator<TDbContext>(
         var claimedAt = Column(nameof(SchedulerClaimEntity.ClaimedAtUtc));
 
         return new ClaimSql(
-            ExactClaim:
-                $"INSERT INTO {table} ({jobName}, {occurrence}, {claimedAt}) VALUES ({{0}}, {{1}}, {{2}}) " +
-                $"ON CONFLICT ({jobName}, {occurrence}) DO NOTHING",
-            WindowClaim:
-                $"INSERT INTO {table} ({jobName}, {occurrence}, {claimedAt}) " +
-                $"SELECT {{0}}, {{1}}, {{2}} " +
-                $"WHERE NOT EXISTS (SELECT 1 FROM {table} WHERE {jobName} = {{0}} AND {occurrence} > {{3}}) " +
-                $"ON CONFLICT ({jobName}, {occurrence}) DO NOTHING",
-            AdvisoryLock: "SELECT pg_advisory_xact_lock(hashtextextended({0}, 0))");
+            $"INSERT INTO {table} ({jobName}, {occurrence}, {claimedAt}) VALUES ({{0}}, {{1}}, {{2}}) " +
+            $"ON CONFLICT ({jobName}, {occurrence}) DO NOTHING",
+            $"INSERT INTO {table} ({jobName}, {occurrence}, {claimedAt}) " +
+            $"SELECT {{0}}, {{1}}, {{2}} " +
+            $"WHERE NOT EXISTS (SELECT 1 FROM {table} WHERE {jobName} = {{0}} AND {occurrence} > {{3}}) " +
+            $"ON CONFLICT ({jobName}, {occurrence}) DO NOTHING",
+            "SELECT pg_advisory_xact_lock(hashtextextended({0}, 0))");
     }
 }

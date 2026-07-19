@@ -27,23 +27,23 @@ public sealed class ClientEventGeneratorTests {
     [Fact]
     public void RegistersTopicsPerModuleWithInferredNamesAndRequirements() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.Invoicing {
-                [AppModule("Invoicing")]
-                public static partial class InvoicingModule { }
+                              namespace Sample.Invoicing {
+                                  [AppModule("Invoicing")]
+                                  public static partial class InvoicingModule { }
 
-                [RequirePermission("invoices", "read")]
-                public sealed record InvoiceChanged : IClientEvent {
-                    public required Guid InvoiceId { get; init; }
-                }
+                                  [RequirePermission("invoices", "read")]
+                                  public sealed record InvoiceChanged : IClientEvent {
+                                      public required Guid InvoiceId { get; init; }
+                                  }
 
-                // Trailing "Event" suffix strips: importProgress, not importProgressEvent.
-                public sealed record ImportProgressEvent : IClientEvent {
-                    public required int Processed { get; init; }
-                }
-            }
-            """;
+                                  // Trailing "Event" suffix strips: importProgress, not importProgressEvent.
+                                  public sealed record ImportProgressEvent : IClientEvent {
+                                      public required int Processed { get; init; }
+                                  }
+                              }
+                              """;
 
         var result = Generate(source);
         var extensions = GetGenerated(result, "InvoicingClientEventExtensions.g.cs");
@@ -66,19 +66,19 @@ public sealed class ClientEventGeneratorTests {
     [Fact]
     public void ClientEventAttributeOverridesTheFullTopicName() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.Invoicing {
-                [AppModule("Invoicing")]
-                public static partial class InvoicingModule { }
+                              namespace Sample.Invoicing {
+                                  [AppModule("Invoicing")]
+                                  public static partial class InvoicingModule { }
 
-                [ClientEvent("invoicing.legacyName")]
-                [RequireRole("admin")]
-                public sealed record RenamedContract : IClientEvent {
-                    public required Guid Id { get; init; }
-                }
-            }
-            """;
+                                  [ClientEvent("invoicing.legacyName")]
+                                  [RequireRole("admin")]
+                                  public sealed record RenamedContract : IClientEvent {
+                                      public required Guid Id { get; init; }
+                                  }
+                              }
+                              """;
 
         var extensions = GetGenerated(Generate(source), "InvoicingClientEventExtensions.g.cs");
 
@@ -90,25 +90,25 @@ public sealed class ClientEventGeneratorTests {
     [Fact]
     public void AllowAnyResourceAttributeEmitsTheOptionsCall() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.Market {
-                [AppModule("Market")]
-                public static partial class MarketModule { }
+                              namespace Sample.Market {
+                                  [AppModule("Market")]
+                                  public static partial class MarketModule { }
 
-                // Resource segment declared a routing key — alone and combined with a requirement.
-                [AllowAnyResource]
-                public sealed record QuoteChanged : IClientEvent {
-                    public required string Symbol { get; init; }
-                }
+                                  // Resource segment declared a routing key — alone and combined with a requirement.
+                                  [AllowAnyResource]
+                                  public sealed record QuoteChanged : IClientEvent {
+                                      public required string Symbol { get; init; }
+                                  }
 
-                [AllowAnyResource]
-                [RequireRole("trader")]
-                public sealed record OrderBookChanged : IClientEvent {
-                    public required string Symbol { get; init; }
-                }
-            }
-            """;
+                                  [AllowAnyResource]
+                                  [RequireRole("trader")]
+                                  public sealed record OrderBookChanged : IClientEvent {
+                                      public required string Symbol { get; init; }
+                                  }
+                              }
+                              """;
 
         var extensions = GetGenerated(Generate(source), "MarketClientEventExtensions.g.cs");
 
@@ -123,21 +123,21 @@ public sealed class ClientEventGeneratorTests {
     [Fact]
     public void SubscriptionObserverAttributeEmitsTheOptionsCalls() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.Market {
-                [AppModule("Market")]
-                public static partial class MarketModule { }
+                              namespace Sample.Market {
+                                  [AppModule("Market")]
+                                  public static partial class MarketModule { }
 
-                internal sealed class QuoteObserver : IClientEventSubscriptionObserver;
+                                  internal sealed class QuoteObserver : IClientEventSubscriptionObserver;
 
-                [AllowAnyResource]
-                [SubscriptionObserver<QuoteObserver>(InterestLingerSeconds = 30)]
-                public sealed record QuoteChanged : IClientEvent {
-                    public required string Symbol { get; init; }
-                }
-            }
-            """;
+                                  [AllowAnyResource]
+                                  [SubscriptionObserver<QuoteObserver>(InterestLingerSeconds = 30)]
+                                  public sealed record QuoteChanged : IClientEvent {
+                                      public required string Symbol { get; init; }
+                                  }
+                              }
+                              """;
 
         var extensions = GetGenerated(Generate(source), "MarketClientEventExtensions.g.cs");
 
@@ -151,19 +151,19 @@ public sealed class ClientEventGeneratorTests {
     [Fact]
     public void ReportsElcev001WhenEventNotInAnyModule() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.Invoicing {
-                [AppModule("Invoicing")]
-                public static partial class InvoicingModule { }
-            }
+                              namespace Sample.Invoicing {
+                                  [AppModule("Invoicing")]
+                                  public static partial class InvoicingModule { }
+                              }
 
-            namespace Sample.Outside {
-                public sealed record OrphanChanged : IClientEvent {
-                    public required Guid Id { get; init; }
-                }
-            }
-            """;
+                              namespace Sample.Outside {
+                                  public sealed record OrphanChanged : IClientEvent {
+                                      public required Guid Id { get; init; }
+                                  }
+                              }
+                              """;
 
         var diagnostics = RunForDiagnostics(source);
 
@@ -173,22 +173,22 @@ public sealed class ClientEventGeneratorTests {
     [Fact]
     public void ReportsElcev002OnDuplicateTopicNames() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.Invoicing {
-                [AppModule("Invoicing")]
-                public static partial class InvoicingModule { }
+                              namespace Sample.Invoicing {
+                                  [AppModule("Invoicing")]
+                                  public static partial class InvoicingModule { }
 
-                public sealed record InvoiceChanged : IClientEvent {
-                    public required Guid Id { get; init; }
-                }
+                                  public sealed record InvoiceChanged : IClientEvent {
+                                      public required Guid Id { get; init; }
+                                  }
 
-                [ClientEvent("invoicing.invoiceChanged")]
-                public sealed record CollidingContract : IClientEvent {
-                    public required Guid Id { get; init; }
-                }
-            }
-            """;
+                                  [ClientEvent("invoicing.invoiceChanged")]
+                                  public sealed record CollidingContract : IClientEvent {
+                                      public required Guid Id { get; init; }
+                                  }
+                              }
+                              """;
 
         var diagnostics = RunForDiagnostics(source);
 
@@ -198,19 +198,19 @@ public sealed class ClientEventGeneratorTests {
     [Fact]
     public void ReportsElcev003WhenClientEventsPackageIsNotReferenced() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.Invoicing {
-                [AppModule("Invoicing")]
-                public static partial class InvoicingModule { }
+                              namespace Sample.Invoicing {
+                                  [AppModule("Invoicing")]
+                                  public static partial class InvoicingModule { }
 
-                public sealed record InvoiceChanged : IClientEvent {
-                    public required Guid Id { get; init; }
-                }
-            }
-            """;
+                                  public sealed record InvoiceChanged : IClientEvent {
+                                      public required Guid Id { get; init; }
+                                  }
+                              }
+                              """;
 
-        var diagnostics = RunForDiagnostics(source, excludeClientEventsPackage: true);
+        var diagnostics = RunForDiagnostics(source, true);
 
         diagnostics.Any(d => d.Id == "ELCEV003" && d.Severity == DiagnosticSeverity.Warning).Should().BeTrue();
     }
@@ -218,17 +218,17 @@ public sealed class ClientEventGeneratorTests {
     [Fact]
     public void IrrelevantEditReusesClientEvents() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.Invoicing {
-                [AppModule("Invoicing")]
-                public static partial class InvoicingModule { }
+                              namespace Sample.Invoicing {
+                                  [AppModule("Invoicing")]
+                                  public static partial class InvoicingModule { }
 
-                public sealed record InvoiceChanged : IClientEvent {
-                    public required Guid Id { get; init; }
-                }
-            }
-            """;
+                                  public sealed record InvoiceChanged : IClientEvent {
+                                      public required Guid Id { get; init; }
+                                  }
+                              }
+                              """;
 
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new ClientEventRegistrationGenerator(), source, "ClientEventContracts", "ClientEventContractsCombined");
@@ -240,16 +240,15 @@ public sealed class ClientEventGeneratorTests {
         var compilation = CSharpCompilation.Create(
             "ClientEventGeneratorTests",
             [CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: ct)],
-            CreateMetadataReferences(excludeClientEventsPackage: false),
+            CreateMetadataReferences(false),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         // The ConfigureDefaultServices skeleton (ModuleDefaultServicesGenerator) declares the partial hooks this
         // generator's filler implements, so both run together.
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            new[]
-            {
+            new[] {
                 new ClientEventRegistrationGenerator().AsSourceGenerator(),
-                new ModuleDefaultServicesGenerator().AsSourceGenerator(),
+                new ModuleDefaultServicesGenerator().AsSourceGenerator()
             },
             parseOptions: parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _, ct);
@@ -265,7 +264,10 @@ public sealed class ClientEventGeneratorTests {
         var ct = TestContext.Current.CancellationToken;
         var compilation = CSharpCompilation.Create(
             "ClientEventGeneratorDiagnostics",
-            [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: ct)],
+            [
+                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview),
+                    cancellationToken: ct)
+            ],
             CreateMetadataReferences(excludeClientEventsPackage),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
@@ -273,11 +275,12 @@ public sealed class ClientEventGeneratorTests {
         return driver.RunGenerators(compilation, ct).GetRunResult().Diagnostics;
     }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static IReadOnlyList<MetadataReference> CreateMetadataReferences(bool excludeClientEventsPackage) {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
@@ -285,7 +288,7 @@ public sealed class ClientEventGeneratorTests {
         return trustedPlatformAssemblies!
             .Split(Path.PathSeparator)
             .Where(path => !excludeClientEventsPackage ||
-                !Path.GetFileName(path).StartsWith("Elarion.ClientEvents", StringComparison.Ordinal))
+                           !Path.GetFileName(path).StartsWith("Elarion.ClientEvents", StringComparison.Ordinal))
             .Select(path => MetadataReference.CreateFromFile(path))
             .ToArray();
     }

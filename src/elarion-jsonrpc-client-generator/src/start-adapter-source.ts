@@ -1,4 +1,4 @@
-import { moduleSpecifier } from './rpc-client-source.js'
+import {moduleSpecifier} from './rpc-client-source.js'
 
 export interface GenerateStartAdapterSourceOptions {
   generatedBy: string

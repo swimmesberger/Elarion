@@ -18,15 +18,16 @@ public sealed class StreamAuthorizationDecorator<TRequest, TItem>(
 ) : IStreamHandler<TRequest, TItem> {
     public async ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) {
         var type = metadata.HandlerType;
-        var allowAnonymous = type.GetCustomAttribute<AllowAnonymousAttribute>(inherit: true) is not null;
+        var allowAnonymous = type.GetCustomAttribute<AllowAnonymousAttribute>(true) is not null;
         var requirements = new AuthorizationRequirements(
             allowAnonymous,
             requireAuthenticatedByDefault,
-            type.GetCustomAttributes<RequirePermissionAttribute>(inherit: true).Select(x => x.Permission).ToArray(),
-            type.GetCustomAttributes<RequireRoleAttribute>(inherit: true).Select(x => x.Role).ToArray(),
-            type.GetCustomAttributes<RequireClaimAttribute>(inherit: true).ToArray(),
-            type.GetCustomAttributes<RequirePolicyAttribute>(inherit: true).Select(x => x.Policy).ToArray(),
-            resourceBindings?.Select(binding => new ResourceRequirement(binding.ResourceType, binding.ResourceTypeName, binding.Operation, binding.IdSelector(request))).ToArray() ?? []);
+            type.GetCustomAttributes<RequirePermissionAttribute>(true).Select(x => x.Permission).ToArray(),
+            type.GetCustomAttributes<RequireRoleAttribute>(true).Select(x => x.Role).ToArray(),
+            type.GetCustomAttributes<RequireClaimAttribute>(true).ToArray(),
+            type.GetCustomAttributes<RequirePolicyAttribute>(true).Select(x => x.Policy).ToArray(),
+            resourceBindings?.Select(binding => new ResourceRequirement(binding.ResourceType, binding.ResourceTypeName,
+                binding.Operation, binding.IdSelector(request))).ToArray() ?? []);
         var error = await authorizer.AuthorizeAsync(requirements, request, ct).ConfigureAwait(false);
         if (error is null)
             return await inner.HandleAsync(request, ct).ConfigureAwait(false);
@@ -36,5 +37,4 @@ public sealed class StreamAuthorizationDecorator<TRequest, TItem>(
         HandlerTelemetry.RecordAuthorizationDenied(metadata.HandlerType.Name, outcome);
         return error;
     }
-
 }

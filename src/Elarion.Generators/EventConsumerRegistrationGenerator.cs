@@ -61,53 +61,49 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         "System.Threading.Tasks.ValueTask`1";
 
     private static readonly DiagnosticDescriptor ConsumerNotOnService = new(
-        id: "ELEVT001",
-        title: "Event consumer must be declared on a [Service] class",
-        messageFormat: "Event consumer method '{0}' must be declared on a class annotated with [Service]",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "ELEVT001",
+        "Event consumer must be declared on a [Service] class",
+        "Event consumer method '{0}' must be declared on a class annotated with [Service]",
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor InvalidConsumerSignature = new(
-        id: "ELEVT002",
-        title: "Invalid event consumer signature",
-        messageFormat:
+        "ELEVT002",
+        "Invalid event consumer signature",
         "Event consumer method '{0}' must be an accessible, non-generic, non-static instance method that accepts exactly one IDomainEvent or IIntegrationEvent parameter (optionally with IEventContext and/or CancellationToken) and returns void/Task/ValueTask or Result/Task<Result>/ValueTask<Result> — event consumers are fan-out subscribers, so a Result<T> with a value is request/reply, for which you use IHandlerSender/IHandler instead of the event bus",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor InvalidHandlerConsumer = new(
-        id: "ELEVT005",
-        title: "Invalid handler-form event consumer",
-        messageFormat:
+        "ELEVT005",
+        "Invalid handler-form event consumer",
         "Class '{0}' is annotated with [ConsumeEvent] but must implement exactly one "
         + "IHandler<TEvent> (or IHandler<TEvent, Result<Unit>>) whose request type implements "
         + "IDomainEvent or IIntegrationEvent — event consumers are fan-out subscribers, so the response must be "
         + "Result<Unit>; for a typed reply use IHandlerSender/IHandler instead of the event bus",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor ConsumerNotInModule = new(
-        id: "ELEVT003",
-        title: "Event consumer is not in any module",
-        messageFormat:
+        "ELEVT003",
+        "Event consumer is not in any module",
         "Event consumer '{0}' is annotated with [ConsumeEvent] but its namespace is not under any [AppModule]; "
         + "it will not be registered. Move the consumer under a module's namespace so it is wired by that module.",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Warning,
+        true);
 
     private static readonly DiagnosticDescriptor DuplicateConsumerIdentity = new(
-        id: "ELEVT006",
-        title: "Event consumers have the same durable identity",
-        messageFormat:
+        "ELEVT006",
+        "Event consumers have the same durable identity",
         "Event consumer identity '{0}' is produced by multiple [ConsumeEvent] declarations. "
         + "A service may have only one consumer method with a given name for an event type; rename or split a declaration.",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private enum ParameterKind {
         Message,
@@ -171,22 +167,16 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
 
         context.RegisterSourceOutput(combined, static (spc, source) => {
             var ((results, modules), hasTrigger) = source;
-            if (!hasTrigger) {
-                return;
-            }
+            if (!hasTrigger) return;
 
-            foreach (var result in results) {
-                foreach (var diagnostic in result.Diagnostics) {
-                    spc.ReportDiagnostic(diagnostic.ToDiagnostic());
-                }
-            }
+            foreach (var result in results)
+            foreach (var diagnostic in result.Diagnostics)
+                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
             var consumers = new List<EventConsumerInfo>();
-            foreach (var result in results) {
-                if (result.Consumer is not null) {
+            foreach (var result in results)
+                if (result.Consumer is not null)
                     consumers.Add(result.Consumer);
-                }
-            }
 
             consumers.Sort(static (left, right) =>
                 string.Compare(left.HintName, right.HintName, StringComparison.Ordinal));
@@ -195,14 +185,12 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
                 .GroupBy(BuildConsumerId, StringComparer.Ordinal)
                 .Where(static group => group.Count() > 1)
                 .ToArray();
-            foreach (var duplicate in duplicateIds) {
-                foreach (var consumer in duplicate) {
-                    spc.ReportDiagnostic(DiagnosticInfo.Create(
-                        DuplicateConsumerIdentity,
-                        consumer.Location,
-                        duplicate.Key).ToDiagnostic());
-                }
-            }
+            foreach (var duplicate in duplicateIds)
+            foreach (var consumer in duplicate)
+                spc.ReportDiagnostic(DiagnosticInfo.Create(
+                    DuplicateConsumerIdentity,
+                    consumer.Location,
+                    duplicate.Key).ToDiagnostic());
 
             if (duplicateIds.Length > 0) {
                 var ids = new HashSet<string>(
@@ -211,9 +199,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
                 consumers.RemoveAll(consumer => ids.Contains(BuildConsumerId(consumer)));
             }
 
-            if (consumers.Count == 0) {
-                return;
-            }
+            if (consumers.Count == 0) return;
 
             // Consumers are registered per module via ConfigureDefaultServices; there is no assembly-wide method.
             EmitPerModule(spc, modules, consumers);
@@ -221,14 +207,10 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
     }
 
     private static ConsumerResult? CreateConsumerResult(GeneratorAttributeSyntaxContext ctx, CancellationToken ct) {
-        if (ctx.Attributes.Length == 0) {
-            return null;
-        }
+        if (ctx.Attributes.Length == 0) return null;
 
         var symbols = ResolveSymbols(ctx.SemanticModel.Compilation);
-        if (symbols is null) {
-            return null;
-        }
+        if (symbols is null) return null;
 
         var consumeAttribute = ctx.Attributes[0];
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
@@ -236,9 +218,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         // [ConsumeEvent] on an [Actor] method is owned by the actor generator (ADR-0046: it emits the
         // integration-event relay). Yield here so this generator neither double-registers it nor reports a
         // misleading "not a [Service]".
-        if (IsOnActorClass(ctx.TargetSymbol)) {
-            return null;
-        }
+        if (IsOnActorClass(ctx.TargetSymbol)) return null;
 
         if (ctx.TargetSymbol is IMethodSymbol method) {
             var location = (ctx.TargetNode as MethodDeclarationSyntax)?.Identifier.GetLocation();
@@ -263,15 +243,11 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
 
     private static bool IsOnActorClass(ISymbol targetSymbol) {
         var type = targetSymbol as INamedTypeSymbol ?? targetSymbol.ContainingType;
-        if (type is null) {
-            return false;
-        }
+        if (type is null) return false;
 
-        foreach (var attribute in type.GetAttributes()) {
-            if (attribute.AttributeClass?.ToDisplayString() == "Elarion.Actors.ActorAttribute") {
+        foreach (var attribute in type.GetAttributes())
+            if (attribute.AttributeClass?.ToDisplayString() == "Elarion.Actors.ActorAttribute")
                 return true;
-            }
-        }
 
         return false;
     }
@@ -279,19 +255,13 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
     private static void EmitPerModule(
         SourceProductionContext spc,
         IReadOnlyList<ModuleScanner.Module> modules,
-        IReadOnlyList<EventConsumerInfo> consumers)
-    {
-        if (modules.Count == 0)
-        {
-            return;
-        }
+        IReadOnlyList<EventConsumerInfo> consumers) {
+        if (modules.Count == 0) return;
 
         var byModule = new Dictionary<ModuleScanner.Module, List<EventConsumerInfo>>();
-        foreach (var consumer in consumers)
-        {
+        foreach (var consumer in consumers) {
             var module = ModuleScanner.FindBest(consumer.ServiceNamespace, modules);
-            if (module is null)
-            {
+            if (module is null) {
                 // Modules exist (guarded above) but this consumer matches none: the per-module path
                 // is the only one a module-bootstrapper host calls, so warn that it would be dropped.
                 spc.ReportDiagnostic(Diagnostic.Create(
@@ -301,8 +271,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
                 continue;
             }
 
-            if (!byModule.TryGetValue(module, out var list))
-            {
+            if (!byModule.TryGetValue(module, out var list)) {
                 list = [];
                 byModule[module] = list;
             }
@@ -310,8 +279,7 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             list.Add(consumer);
         }
 
-        foreach (var kvp in byModule.OrderBy(x => x.Key.Name, StringComparer.Ordinal))
-        {
+        foreach (var kvp in byModule.OrderBy(x => x.Key.Name, StringComparer.Ordinal)) {
             var module = kvp.Key;
             var className = $"{module.Name}EventConsumerExtensions";
             var methodName = $"Add{module.Name}EventConsumers";
@@ -379,9 +347,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             task is null ||
             taskGeneric is null ||
             valueTask is null ||
-            valueTaskGeneric is null) {
+            valueTaskGeneric is null)
             return null;
-        }
 
         return new KnownSymbols(
             consumeEvent,
@@ -444,8 +411,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             returnShape,
             parameters,
             hintName,
-            IsHandler: false,
-            ConsumerKey: null,
+            false,
+            null,
             LocationInfo.From(location));
     }
 
@@ -466,27 +433,23 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         INamedTypeSymbol? match = null;
         ITypeSymbol? eventType = null;
         ITypeSymbol? responseValueType = null;
-        string plane = string.Empty;
+        var plane = string.Empty;
         var ambiguous = false;
 
         foreach (var iface in type.AllInterfaces) {
-            if (!SymbolEqualityComparer.Default.Equals(iface.OriginalDefinition, symbols.Handler)) {
-                continue;
-            }
+            if (!SymbolEqualityComparer.Default.Equals(iface.OriginalDefinition, symbols.Handler)) continue;
 
             var request = iface.TypeArguments[0];
             var isDomain = Implements(request, symbols.DomainEvent);
             var isIntegration = Implements(request, symbols.IntegrationEvent);
-            if (isDomain == isIntegration) {
+            if (isDomain == isIntegration)
                 // Not an event request, or a type that is both planes: skip (ambiguous if both).
                 continue;
-            }
 
             var response = iface.TypeArguments[1];
             if (response is not INamedTypeSymbol named ||
-                !SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, symbols.Result)) {
+                !SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, symbols.Result))
                 continue;
-            }
 
             if (match is not null) {
                 ambiguous = true;
@@ -532,8 +495,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             ReturnShape.SubscriberValueTask,
             ImmutableArray<ParameterKind>.Empty,
             hintName,
-            IsHandler: true,
-            ConsumerKey: type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            true,
+            type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             LocationInfo.From(location));
     }
 
@@ -554,10 +517,9 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             var isDomain = Implements(type, symbols.DomainEvent);
             var isIntegration = Implements(type, symbols.IntegrationEvent);
             if (isDomain || isIntegration) {
-                if (eventType is not null || (isDomain && isIntegration)) {
+                if (eventType is not null || (isDomain && isIntegration))
                     // More than one message parameter, or a type that is both planes: ambiguous.
                     return false;
-                }
 
                 eventType = type;
                 plane = isDomain ? "Domain" : "Integration";
@@ -585,19 +547,15 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             return false;
         }
 
-        if (eventType is null) {
-            return false;
-        }
+        if (eventType is null) return false;
 
         // A typed context parameter must match the message type so the generated cast is valid.
-        foreach (var parameter in method.Parameters) {
+        foreach (var parameter in method.Parameters)
             if (parameter.Type is INamedTypeSymbol named &&
                 named.IsGenericType &&
                 SymbolEqualityComparer.Default.Equals(named.OriginalDefinition, symbols.EventContextGeneric) &&
-                !SymbolEqualityComparer.Default.Equals(named.TypeArguments[0], eventType)) {
+                !SymbolEqualityComparer.Default.Equals(named.TypeArguments[0], eventType))
                 return false;
-            }
-        }
 
         parameters = builder.ToImmutable();
         return true;
@@ -666,7 +624,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
 
         sb.AppendLine($"public static class {className}");
         sb.AppendLine("{");
-        sb.AppendLine($"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {methodName}(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+        sb.AppendLine(
+            $"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {methodName}(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("    {");
 
         // Handler-form consumers resolve the IHandler<,> interface, which the handler generator
@@ -674,13 +633,10 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         foreach (var serviceFqn in consumers
                      .Where(consumer => !consumer.IsHandler)
                      .Select(consumer => consumer.ServiceTypeFqn)
-                     .Distinct(StringComparer.Ordinal)) {
+                     .Distinct(StringComparer.Ordinal))
             sb.AppendLine($"        services.TryAddScoped<{serviceFqn}>();");
-        }
 
-        foreach (var consumer in consumers) {
-            AppendDescriptorRegistration(sb, consumer);
-        }
+        foreach (var consumer in consumers) AppendDescriptorRegistration(sb, consumer);
 
         sb.AppendLine("        return services;");
         sb.AppendLine("    }");
@@ -691,7 +647,8 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
 
     private static void AppendDescriptorRegistration(StringBuilder sb, EventConsumerInfo consumer) {
         sb.AppendLine();
-        sb.AppendLine("        services.AddSingleton(new global::Elarion.Abstractions.Messaging.EventSubscriptionDescriptor");
+        sb.AppendLine(
+            "        services.AddSingleton(new global::Elarion.Abstractions.Messaging.EventSubscriptionDescriptor");
         sb.AppendLine("        {");
         var consumerId = BuildConsumerId(consumer);
         sb.AppendLine($"            ConsumerId = {FormatStringLiteral(consumerId)},");
@@ -700,19 +657,18 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         sb.AppendLine($"            ServiceType = typeof({consumer.ServiceTypeFqn}),");
 
         sb.AppendLine($"            Order = {consumer.Order},");
-        if (consumer.IsHandler) {
+        if (consumer.IsHandler)
             AppendHandlerSubscriberInvoke(sb, consumer);
-        }
-        else {
+        else
             AppendSubscriberInvoke(sb, consumer);
-        }
 
         sb.AppendLine("        });");
     }
 
     private static string BuildConsumerId(EventConsumerInfo consumer) {
         var owner = consumer.IsHandler ? consumer.ConsumerKey! : consumer.ServiceTypeFqn;
-        return $"{owner.Replace("global::", string.Empty)}.{consumer.MethodName}({consumer.EventTypeFqn.Replace("global::", string.Empty)})";
+        return
+            $"{owner.Replace("global::", string.Empty)}.{consumer.MethodName}({consumer.EventTypeFqn.Replace("global::", string.Empty)})";
     }
 
     private static void AppendSubscriberInvoke(StringBuilder sb, EventConsumerInfo consumer) {
@@ -725,14 +681,16 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
             case ReturnShape.SubscriberValueTask:
                 sb.AppendLine("            InvokeAsync = static (serviceProvider, @event, context, ct) =>");
                 sb.AppendLine("            {");
-                sb.AppendLine($"                var service = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
+                sb.AppendLine(
+                    $"                var service = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
                 switch (consumer.Return) {
                     case ReturnShape.SubscriberVoid:
                         sb.AppendLine($"                {invocation};");
                         sb.AppendLine("                return global::System.Threading.Tasks.ValueTask.CompletedTask;");
                         break;
                     case ReturnShape.SubscriberTask:
-                        sb.AppendLine($"                return new global::System.Threading.Tasks.ValueTask({invocation});");
+                        sb.AppendLine(
+                            $"                return new global::System.Threading.Tasks.ValueTask({invocation});");
                         break;
                     default:
                         sb.AppendLine($"                return {invocation};");
@@ -745,11 +703,13 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
                 // A synchronous non-generic Result: invoke, surface a failure as EventConsumerFailedException, complete.
                 sb.AppendLine("            InvokeAsync = static (serviceProvider, @event, context, ct) =>");
                 sb.AppendLine("            {");
-                sb.AppendLine($"                var service = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
+                sb.AppendLine(
+                    $"                var service = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
                 sb.AppendLine($"                var result = {invocation};");
                 sb.AppendLine("                if (!result.IsSuccess)");
                 sb.AppendLine("                {");
-                sb.AppendLine("                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
+                sb.AppendLine(
+                    "                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
                 sb.AppendLine("                }");
                 sb.AppendLine("                return global::System.Threading.Tasks.ValueTask.CompletedTask;");
                 sb.AppendLine("            }");
@@ -758,11 +718,13 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
                 // Task<Result> / ValueTask<Result>: await, surface a failure as EventConsumerFailedException.
                 sb.AppendLine("            InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
                 sb.AppendLine("            {");
-                sb.AppendLine($"                var service = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
+                sb.AppendLine(
+                    $"                var service = serviceProvider.GetRequiredService<{consumer.ServiceTypeFqn}>();");
                 sb.AppendLine($"                var result = await {invocation}.ConfigureAwait(false);");
                 sb.AppendLine("                if (!result.IsSuccess)");
                 sb.AppendLine("                {");
-                sb.AppendLine("                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
+                sb.AppendLine(
+                    "                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
                 sb.AppendLine("                }");
                 sb.AppendLine("            }");
                 break;
@@ -775,66 +737,71 @@ public sealed class EventConsumerRegistrationGenerator : IIncrementalGenerator {
         // subscriber has no return channel, so a failed Result is surfaced as an EventConsumerFailedException.
         sb.AppendLine("            InvokeAsync = static async (serviceProvider, @event, context, ct) =>");
         sb.AppendLine("            {");
-        sb.AppendLine($"                var handler = serviceProvider.GetRequiredKeyedService<{consumer.ServiceTypeFqn}>({FormatStringLiteral(consumer.ConsumerKey!)});");
-        sb.AppendLine($"                var result = await handler.HandleAsync(({consumer.EventTypeFqn})@event, ct).ConfigureAwait(false);");
+        sb.AppendLine(
+            $"                var handler = serviceProvider.GetRequiredKeyedService<{consumer.ServiceTypeFqn}>({FormatStringLiteral(consumer.ConsumerKey!)});");
+        sb.AppendLine(
+            $"                var result = await handler.HandleAsync(({consumer.EventTypeFqn})@event, ct).ConfigureAwait(false);");
         sb.AppendLine("                if (!result.IsSuccess)");
         sb.AppendLine("                {");
-        sb.AppendLine("                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
+        sb.AppendLine(
+            "                    throw new global::Elarion.Abstractions.Messaging.EventConsumerFailedException(result.Error);");
         sb.AppendLine("                }");
         sb.AppendLine("            }");
     }
 
-    private static string BuildArguments(EventConsumerInfo consumer, string messageVariable) =>
-        string.Join(", ", consumer.Parameters.Select(parameter => parameter switch {
+    private static string BuildArguments(EventConsumerInfo consumer, string messageVariable) {
+        return string.Join(", ", consumer.Parameters.Select(parameter => parameter switch {
             ParameterKind.Message => $"({consumer.EventTypeFqn}){messageVariable}",
             ParameterKind.Context => "context",
             ParameterKind.ContextGeneric =>
                 $"(global::Elarion.Abstractions.Messaging.IEventContext<{consumer.EventTypeFqn}>)context",
             _ => "ct"
         }));
+    }
 
     private static bool HasAttribute(ISymbol symbol, INamedTypeSymbol attributeType, out AttributeData? attribute) {
         attribute = symbol.GetAttributes()
-            .FirstOrDefault(candidate => SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, attributeType));
+            .FirstOrDefault(candidate =>
+                SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, attributeType));
         return attribute is not null;
     }
 
-    private static bool Implements(ITypeSymbol type, INamedTypeSymbol interfaceType) =>
-        type.AllInterfaces.Any(implemented =>
+    private static bool Implements(ITypeSymbol type, INamedTypeSymbol interfaceType) {
+        return type.AllInterfaces.Any(implemented =>
             SymbolEqualityComparer.Default.Equals(implemented, interfaceType));
+    }
 
     private static int GetIntNamedArgument(AttributeData attribute, string name, int defaultValue) {
-        foreach (var argument in attribute.NamedArguments) {
-            if (argument.Key == name && argument.Value.Value is int value) {
+        foreach (var argument in attribute.NamedArguments)
+            if (argument.Key == name && argument.Value.Value is int value)
                 return value;
-            }
-        }
 
         return defaultValue;
     }
 
-    private static string FormatStringLiteral(string value) =>
-        Microsoft.CodeAnalysis.CSharp.SymbolDisplay.FormatLiteral(value, quote: true);
+    private static string FormatStringLiteral(string value) {
+        return Microsoft.CodeAnalysis.CSharp.SymbolDisplay.FormatLiteral(value, true);
+    }
 
-    private static bool IsAccessible(Accessibility accessibility) =>
-        accessibility is Accessibility.Public or Accessibility.Internal;
+    private static bool IsAccessible(Accessibility accessibility) {
+        return accessibility is Accessibility.Public or Accessibility.Internal;
+    }
 
     private static bool IsGenericOrNestedInGenericType(INamedTypeSymbol type) {
-        for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType) {
-            if (current.TypeParameters.Length > 0) {
+        for (var current = type; current is not null; current = current.ContainingType)
+            if (current.TypeParameters.Length > 0)
                 return true;
-            }
-        }
 
         return false;
     }
 
-    private static string GetHintName(ITypeSymbol type) =>
-        type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+    private static string GetHintName(ITypeSymbol type) {
+        return type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
             .Replace("global::", string.Empty)
             .Replace(".", "_")
             .Replace("<", "_")
             .Replace(">", "_")
             .Replace(",", "_")
             .Replace(" ", string.Empty);
+    }
 }

@@ -3,8 +3,8 @@ using Elarion.Abstractions;
 using Elarion.Abstractions.Messaging;
 using Elarion.Abstractions.Pipeline;
 using Xunit;
-
 using Elarion.Pipeline;
+
 namespace Elarion.Tests.Pipeline;
 
 public sealed class TransactionDecoratorTests {
@@ -89,37 +89,43 @@ public sealed class TransactionDecoratorTests {
     private sealed record TestDomainEvent : IDomainEvent;
 
     private sealed class PlainCommandHandler : IHandler<TestCommand, Result<string>> {
-        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) =>
-            ValueTask.FromResult(Result<string>.Success("ok"));
+        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) {
+            return ValueTask.FromResult(Result<string>.Success("ok"));
+        }
     }
 
     [Elarion.Abstractions.Idempotency.Idempotent]
     private sealed class IdempotentCommandHandler : IHandler<TestCommand, Result<string>> {
-        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) =>
-            ValueTask.FromResult(Result<string>.Success("ok"));
+        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) {
+            return ValueTask.FromResult(Result<string>.Success("ok"));
+        }
     }
 
     private sealed class PlainIntegrationConsumer : IHandler<TestIntegrationEvent> {
-        public ValueTask<Result> HandleAsync(TestIntegrationEvent request, CancellationToken ct) =>
-            ValueTask.FromResult(Result.Success());
+        public ValueTask<Result> HandleAsync(TestIntegrationEvent request, CancellationToken ct) {
+            return ValueTask.FromResult(Result.Success());
+        }
     }
 
     [AllowDuplicates]
     private sealed class OptedOutIntegrationConsumer : IHandler<TestIntegrationEvent> {
-        public ValueTask<Result> HandleAsync(TestIntegrationEvent request, CancellationToken ct) =>
-            ValueTask.FromResult(Result.Success());
+        public ValueTask<Result> HandleAsync(TestIntegrationEvent request, CancellationToken ct) {
+            return ValueTask.FromResult(Result.Success());
+        }
     }
 
     private sealed class DomainConsumer : IHandler<TestDomainEvent> {
-        public ValueTask<Result> HandleAsync(TestDomainEvent request, CancellationToken ct) =>
-            ValueTask.FromResult(Result.Success());
+        public ValueTask<Result> HandleAsync(TestDomainEvent request, CancellationToken ct) {
+            return ValueTask.FromResult(Result.Success());
+        }
     }
 
     private sealed record TestCommand : ICommand;
 
     private sealed class StubHandler(Result<string> response) : IHandler<TestCommand, Result<string>> {
-        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) =>
-            ValueTask.FromResult(response);
+        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) {
+            return ValueTask.FromResult(response);
+        }
     }
 
     private sealed class CancelAfterSuccessHandler(CancellationTokenSource cts, Result<string> response)
@@ -142,11 +148,29 @@ public sealed class TransactionDecoratorTests {
             public int Commits { get; private set; }
             public int Rollbacks { get; private set; }
 
-            public ValueTask CommitAsync(CancellationToken ct) { ct.ThrowIfCancellationRequested(); Commits++; return default; }
-            public ValueTask RollbackAsync(CancellationToken ct) { ct.ThrowIfCancellationRequested(); Rollbacks++; return default; }
-            public ValueTask CreateSavepointAsync(string name, CancellationToken ct) => default;
-            public ValueTask RollbackToSavepointAsync(string name, CancellationToken ct) => default;
-            public ValueTask DisposeAsync() => default;
+            public ValueTask CommitAsync(CancellationToken ct) {
+                ct.ThrowIfCancellationRequested();
+                Commits++;
+                return default;
+            }
+
+            public ValueTask RollbackAsync(CancellationToken ct) {
+                ct.ThrowIfCancellationRequested();
+                Rollbacks++;
+                return default;
+            }
+
+            public ValueTask CreateSavepointAsync(string name, CancellationToken ct) {
+                return default;
+            }
+
+            public ValueTask RollbackToSavepointAsync(string name, CancellationToken ct) {
+                return default;
+            }
+
+            public ValueTask DisposeAsync() {
+                return default;
+            }
         }
     }
 }

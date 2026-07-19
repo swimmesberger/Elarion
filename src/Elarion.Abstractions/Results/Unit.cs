@@ -22,20 +22,32 @@ public readonly struct Unit : IEquatable<Unit> {
     public static Unit Value => default;
 
     /// <inheritdoc />
-    public bool Equals(Unit other) => true;
+    public bool Equals(Unit other) {
+        return true;
+    }
 
     /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is Unit;
+    public override bool Equals(object? obj) {
+        return obj is Unit;
+    }
 
     /// <inheritdoc />
-    public override int GetHashCode() => 0;
+    public override int GetHashCode() {
+        return 0;
+    }
 
     /// <summary>All <see cref="Unit"/> values are equal.</summary>
-    public static bool operator ==(Unit left, Unit right) => true;
+    public static bool operator ==(Unit left, Unit right) {
+        return true;
+    }
 
     /// <summary>All <see cref="Unit"/> values are equal.</summary>
-    public static bool operator !=(Unit left, Unit right) => false;
+    public static bool operator !=(Unit left, Unit right) {
+        return false;
+    }
 
     /// <inheritdoc />
-    public override string ToString() => "()";
+    public override string ToString() {
+        return "()";
+    }
 }

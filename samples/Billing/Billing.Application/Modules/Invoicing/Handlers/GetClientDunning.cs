@@ -25,8 +25,8 @@ public sealed class GetClientDunning(IActorStateReader dunningStates)
 
     public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {
         var state = await dunningStates
-            .ReadAsync<ClientDunningState>(ClientDunningState.SnapshotKey(query.ClientId), ct)
-            ?? ClientDunningState.Initial;
+                        .ReadAsync<ClientDunningState>(ClientDunningState.SnapshotKey(query.ClientId), ct)
+                    ?? ClientDunningState.Initial;
         return new Response(state.OverdueCount, state.Escalated, state.NeedsAttention);
     }
 }

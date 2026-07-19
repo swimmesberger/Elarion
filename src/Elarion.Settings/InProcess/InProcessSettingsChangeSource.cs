@@ -28,11 +28,9 @@ public sealed class InProcessSettingsChangeSource : ISettingsChangeSource, ISett
     /// <inheritdoc />
     public void Publish(SettingsScope scope, string key) {
         ArgumentNullException.ThrowIfNull(key);
-        foreach (var (watchKey, holder) in _holders) {
-            if (watchKey.Scope == scope && SettingsPath.IsUnderPrefix(key, watchKey.Prefix)) {
+        foreach (var (watchKey, holder) in _holders)
+            if (watchKey.Scope == scope && SettingsPath.IsUnderPrefix(key, watchKey.Prefix))
                 holder.Fire();
-            }
-        }
     }
 
     private readonly record struct WatchKey(SettingsScope Scope, string Prefix);
@@ -45,7 +43,9 @@ public sealed class InProcessSettingsChangeSource : ISettingsChangeSource, ISett
     private sealed class TokenHolder {
         private CancellationTokenSource _cts = new();
 
-        public IChangeToken GetToken() => new CancellationChangeToken(Volatile.Read(ref _cts).Token);
+        public IChangeToken GetToken() {
+            return new CancellationChangeToken(Volatile.Read(ref _cts).Token);
+        }
 
         public void Fire() {
             var previous = Interlocked.Exchange(ref _cts, new CancellationTokenSource());

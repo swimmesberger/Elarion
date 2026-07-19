@@ -36,8 +36,7 @@ namespace Elarion.Paging;
 /// </example>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class ResourceFilterAttribute<TEntity> : Attribute
-    where TEntity : class
-{
+    where TEntity : class {
     /// <summary>
     /// The entity property holding the owning principal's id (a <b>grant</b> rule, OR-combined): a row is
     /// accessible when this column equals the current principal's <c>UserId</c>. The property type may be

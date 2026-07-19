@@ -7,7 +7,8 @@ namespace Elarion.Settings.InProcess;
 /// single-process apps, tests, and development, and the reference implementation of the sink contract. Writes
 /// signal the supplied <see cref="ISettingsChangePublisher"/> so watchers observe changes.
 /// </summary>
-public sealed class InProcessSettingsStore(ISettingsChangePublisher publisher, TimeProvider timeProvider) : ISettingsStore {
+public sealed class InProcessSettingsStore(ISettingsChangePublisher publisher, TimeProvider timeProvider)
+    : ISettingsStore {
     private readonly ConcurrentDictionary<(SettingsScope Scope, string Key), SettingEntry> _entries = new();
 
     // Serializes the read-modify-write of the version check; in-memory writes are infrequent relative to reads.
@@ -20,13 +21,12 @@ public sealed class InProcessSettingsStore(ISettingsChangePublisher publisher, T
     }
 
     /// <inheritdoc />
-    public ValueTask<IReadOnlyList<SettingEntry>> GetAllAsync(SettingsScope scope, CancellationToken cancellationToken = default) {
+    public ValueTask<IReadOnlyList<SettingEntry>> GetAllAsync(SettingsScope scope,
+        CancellationToken cancellationToken = default) {
         var entries = new List<SettingEntry>();
-        foreach (var (entryKey, entry) in _entries) {
-            if (entryKey.Scope == scope) {
+        foreach (var (entryKey, entry) in _entries)
+            if (entryKey.Scope == scope)
                 entries.Add(entry);
-            }
-        }
 
         return ValueTask.FromResult<IReadOnlyList<SettingEntry>>(entries);
     }
@@ -47,7 +47,8 @@ public sealed class InProcessSettingsStore(ISettingsChangePublisher publisher, T
             if (_entries.TryGetValue(entryKey, out var existing)) {
                 if (expectedVersion is { } expected && expected != existing.Version) {
                     result = SettingWriteResult.ConcurrencyConflict;
-                } else {
+                }
+                else {
                     var updated = existing with {
                         Value = value,
                         Version = existing.Version + 1,
@@ -57,20 +58,21 @@ public sealed class InProcessSettingsStore(ISettingsChangePublisher publisher, T
                     result = SettingWriteResult.Success(updated.Version);
                     changed = true;
                 }
-            } else if (expectedVersion is { } expected && expected != 0) {
+            }
+            else if (expectedVersion is { } expected && expected != 0) {
                 result = SettingWriteResult.ConcurrencyConflict;
-            } else {
-                var created = new SettingEntry(key, value, timeProvider.GetUtcNow(), Version: 1);
+            }
+            else {
+                var created = new SettingEntry(key, value, timeProvider.GetUtcNow(), 1);
                 _entries[entryKey] = created;
                 result = SettingWriteResult.Success(created.Version);
                 changed = true;
             }
         }
 
-        if (changed) {
+        if (changed)
             // Published outside the lock so change callbacks never run while the write lock is held.
             publisher.Publish(scope, key);
-        }
 
         return ValueTask.FromResult(result);
     }
@@ -93,9 +95,7 @@ public sealed class InProcessSettingsStore(ISettingsChangePublisher publisher, T
             }
         }
 
-        if (removed) {
-            publisher.Publish(scope, key);
-        }
+        if (removed) publisher.Publish(scope, key);
 
         return ValueTask.FromResult(removed);
     }

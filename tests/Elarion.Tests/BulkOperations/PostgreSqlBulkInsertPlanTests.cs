@@ -14,9 +14,7 @@ public sealed class PostgreSqlBulkInsertPlanTests {
     private static BulkInsertDbContext CreateOfflineContext(bool withBulkOperations = true) {
         var builder = new DbContextOptionsBuilder<BulkInsertDbContext>()
             .UseNpgsql("Host=localhost;Database=never-connected;Username=u;Password=p");
-        if (withBulkOperations) {
-            builder.UseElarionPostgreSqlBulkOperations();
-        }
+        if (withBulkOperations) builder.UseElarionPostgreSqlBulkOperations();
 
         return new BulkInsertDbContext(builder.Options);
     }
@@ -54,8 +52,9 @@ public sealed class PostgreSqlBulkInsertPlanTests {
 
     [Fact]
     public async Task ExecuteInsert_WithoutProvider_ThrowsActionableError() {
-        await using var context = CreateOfflineContext(withBulkOperations: false);
-        var act = async () => await context.Orders.ExecuteInsertAsync([new BulkOrder { Id = Guid.CreateVersion7(), Name = "x" }]);
+        await using var context = CreateOfflineContext(false);
+        var act = async () =>
+            await context.Orders.ExecuteInsertAsync([new BulkOrder { Id = Guid.CreateVersion7(), Name = "x" }]);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*UseElarionPostgreSqlBulkOperations*");
@@ -110,7 +109,7 @@ public sealed class PostgreSqlBulkInsertPlanTests {
             [new BulkCounter { Id = Guid.CreateVersion7(), Key = "k", Count = 1 }],
             new BulkInsertOptions {
                 OnConflict = BulkInsertConflictBehavior.Update,
-                ConflictProperties = [nameof(BulkCounter.Count)],
+                ConflictProperties = [nameof(BulkCounter.Count)]
             });
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*unique*");
@@ -123,7 +122,7 @@ public sealed class PostgreSqlBulkInsertPlanTests {
             [new BulkCounter { Id = Guid.CreateVersion7(), Key = "k", Count = 1 }],
             new BulkInsertOptions {
                 OnConflict = BulkInsertConflictBehavior.DoNothing,
-                ConflictProperties = ["Nope"],
+                ConflictProperties = ["Nope"]
             });
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not a property*");

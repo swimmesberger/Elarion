@@ -16,9 +16,7 @@ public sealed class IngestReadings(NpgsqlDataSource db, TimeProvider time)
     public sealed record Command(ReadingInput[] Readings) : ICommand;
 
     public async ValueTask<Result<IngestResult>> HandleAsync(Command command, CancellationToken ct) {
-        if (command.Readings.Length == 0) {
-            return AppError.Validation("The batch is empty; send at least one reading.");
-        }
+        if (command.Readings.Length == 0) return AppError.Validation("The batch is empty; send at least one reading.");
 
         var rows = command.Readings.Select(input => new ReadingRow {
             DeviceId = input.DeviceId,
@@ -26,7 +24,7 @@ public sealed class IngestReadings(NpgsqlDataSource db, TimeProvider time)
             // PostgreSQL timestamptz stores an instant; normalize whatever offset the device sent.
             RecordedAt = (input.RecordedAt ?? time.GetUtcNow()).ToUniversalTime(),
             Value = input.Value,
-            Meta = input.Meta,
+            Meta = input.Meta
         });
 
         var written = await db.InsertManyAsync(rows, " ON CONFLICT DO NOTHING", ct);

@@ -37,22 +37,31 @@ public readonly struct Result : IResultLike, IResultError, IResultFailureFactory
     }
 
     /// <summary>Creates a successful result.</summary>
-    public static Result Success() => new(true, null);
+    public static Result Success() {
+        return new Result(true, null);
+    }
 
     /// <summary>Creates a failed result wrapping <paramref name="error"/>.</summary>
-    public static Result Failure(AppError error) => new(false, error);
+    public static Result Failure(AppError error) {
+        return new Result(false, error);
+    }
 
     /// <summary>Implicit conversion from <see cref="AppError"/> to a failure result.</summary>
-    public static implicit operator Result(AppError error) => Failure(error);
+    public static implicit operator Result(AppError error) {
+        return Failure(error);
+    }
 
     /// <summary>
     /// Converts to the generic <see cref="Result{T}"/> of <see cref="Unit"/>, preserving
     /// success/failure. This is what bridges the <see cref="IHandler{T}"/> surface onto the
     /// generic handler pipeline.
     /// </summary>
-    public Result<Unit> ToResultUnit() =>
-        IsSuccess ? Result<Unit>.Success(Unit.Value) : Result<Unit>.Failure(Error);
+    public Result<Unit> ToResultUnit() {
+        return IsSuccess ? Result<Unit>.Success(Unit.Value) : Result<Unit>.Failure(Error);
+    }
 
     /// <summary>Implicit conversion to <see cref="Result{T}"/> of <see cref="Unit"/>.</summary>
-    public static implicit operator Result<Unit>(Result result) => result.ToResultUnit();
+    public static implicit operator Result<Unit>(Result result) {
+        return result.ToResultUnit();
+    }
 }

@@ -36,15 +36,14 @@ public sealed class PostgreSqlUnitOfWorkFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
-    public UnitOfWorkDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<UnitOfWorkDbContext>()
+    public UnitOfWorkDbContext CreateContext() {
+        return new UnitOfWorkDbContext(new DbContextOptionsBuilder<UnitOfWorkDbContext>()
             .UseNpgsql(ConnectionString)
             .Options);
+    }
 }
 
 /// <summary>Context mapping a couple of demo tables so unit-of-work tests can prove writes commit/roll back.</summary>

@@ -22,9 +22,9 @@ public sealed class ClaimsPrincipalCurrentUserTests {
             [
                 new Claim("permission", "tenants.read"),
                 new Claim("permission", "tenants.write"),
-                new Claim("scope", "files"),
+                new Claim("scope", "files")
             ],
-            authenticationType: "test"));
+            "test"));
         var context = new DispatchScopeContext();
         context.Set<ClaimsPrincipal>(principal);
 
@@ -48,7 +48,7 @@ public sealed class ClaimsPrincipalCurrentUserTests {
             .BuildServiceProvider();
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim("sub", "user-1"), new Claim("role", "admin"), new Claim("role", "user")],
-            authenticationType: "test"));
+            "test"));
         var context = new DispatchScopeContext();
         context.Set<ClaimsPrincipal>(principal);
 

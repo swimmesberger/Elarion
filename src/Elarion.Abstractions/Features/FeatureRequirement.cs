@@ -9,5 +9,5 @@ public enum FeatureRequirement {
     All,
 
     /// <summary>At least one listed feature must be enabled (logical OR).</summary>
-    Any,
+    Any
 }

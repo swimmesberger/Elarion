@@ -44,7 +44,7 @@ public sealed class TcpConnectionAdapterTests {
 
     [Fact]
     public void DelimitedFramer_SkipsNoiseBeforeStart_AndRoundTrips() {
-        var framer = new DelimitedTcpFramer(end: (byte)'>', start: (byte)'<');
+        var framer = new DelimitedTcpFramer((byte)'>', (byte)'<');
         var wire = Encoding.UTF8.GetBytes("garbage<hello>");
 
         framer.TryReadMessage(wire, out var consumed, out var message).Should().BeTrue();
@@ -58,7 +58,7 @@ public sealed class TcpConnectionAdapterTests {
 
     [Fact]
     public void DelimitedFramer_WriteMessage_RejectsPayloadContainingTheEndDelimiter() {
-        var framer = new DelimitedTcpFramer(end: (byte)'\n');
+        var framer = new DelimitedTcpFramer((byte)'\n');
         var writer = new ArrayBufferWriter<byte>();
         var payload = Encoding.UTF8.GetBytes("first\nsecond");
 
@@ -70,7 +70,7 @@ public sealed class TcpConnectionAdapterTests {
 
     [Fact]
     public void DelimitedFramer_WriteMessage_RejectsPayloadContainingTheStartDelimiter() {
-        var framer = new DelimitedTcpFramer(end: (byte)'>', start: (byte)'<');
+        var framer = new DelimitedTcpFramer((byte)'>', (byte)'<');
         var writer = new ArrayBufferWriter<byte>();
         var payload = Encoding.UTF8.GetBytes("tele<gram");
 
@@ -81,7 +81,7 @@ public sealed class TcpConnectionAdapterTests {
 
     [Fact]
     public void DelimitedFramer_ConsumesNoiseEvenWithoutACompleteMessage() {
-        var framer = new DelimitedTcpFramer(end: (byte)'>', start: (byte)'<');
+        var framer = new DelimitedTcpFramer((byte)'>', (byte)'<');
 
         // Pure noise, no start byte: fully consumed so it can never accumulate against the size cap.
         var noise = Encoding.UTF8.GetBytes("static......");
@@ -107,7 +107,7 @@ public sealed class TcpConnectionAdapterTests {
         frame.WriteMessage([3], writer);
         var wire = writer.WrittenMemory.ToArray();
         await using var stream = new ChunkedReadStream(wire[..firstChunkLength], wire[firstChunkLength..]);
-        var reader = new TcpMessageReader(stream, frame, maxMessageBytes: 16, initialBufferBytes: 1);
+        var reader = new TcpMessageReader(stream, frame, 16, 1);
 
         (await reader.ReadAsync(TestContext.Current.CancellationToken))!.Value.ToArray().Should().Equal(1, 2);
         (await reader.ReadAsync(TestContext.Current.CancellationToken))!.Value.ToArray().Should().Equal(3);
@@ -119,7 +119,7 @@ public sealed class TcpConnectionAdapterTests {
         var writer = new ArrayBufferWriter<byte>();
         framer.WriteMessage([1, 2, 3, 4], writer);
         await using var stream = new ChunkedReadStream(writer.WrittenMemory.ToArray());
-        var reader = new TcpMessageReader(stream, framer, maxMessageBytes: 8, initialBufferBytes: 3);
+        var reader = new TcpMessageReader(stream, framer, 8, 3);
 
         (await reader.ReadAsync(TestContext.Current.CancellationToken))!.Value.ToArray().Should().Equal(1, 2, 3, 4);
     }
@@ -130,7 +130,7 @@ public sealed class TcpConnectionAdapterTests {
         var writer = new ArrayBufferWriter<byte>();
         framer.WriteMessage([1, 2, 3, 4], writer);
         await using var stream = new ChunkedReadStream(writer.WrittenMemory.ToArray());
-        var reader = new TcpMessageReader(stream, framer, maxMessageBytes: 7, initialBufferBytes: 3);
+        var reader = new TcpMessageReader(stream, framer, 7, 3);
 
         var read = async () => await reader.ReadAsync(TestContext.Current.CancellationToken);
         await read.Should().ThrowAsync<TcpMessageTooLargeException>();
@@ -140,7 +140,7 @@ public sealed class TcpConnectionAdapterTests {
     public async Task Reader_OneChunkOversizedFrame_IsCappedBeforeFramerCanCompleteIt() {
         var framer = new CompleteFrameFramer();
         await using var stream = new ChunkedReadStream([1, 2, 3, 4, 5]);
-        var reader = new TcpMessageReader(stream, framer, maxMessageBytes: 4, initialBufferBytes: 4);
+        var reader = new TcpMessageReader(stream, framer, 4, 4);
 
         var read = async () => await reader.ReadAsync(TestContext.Current.CancellationToken);
         await read.Should().ThrowAsync<TcpMessageTooLargeException>();
@@ -155,7 +155,7 @@ public sealed class TcpConnectionAdapterTests {
     [InlineData(FramerViolation.MessageBeyondConsumed)]
     public async Task Reader_RejectsMalformedCustomFramerResults(FramerViolation violation) {
         await using var stream = new ChunkedReadStream([1, 2]);
-        var reader = new TcpMessageReader(stream, new MalformedTcpFramer(violation), maxMessageBytes: 8, initialBufferBytes: 2);
+        var reader = new TcpMessageReader(stream, new MalformedTcpFramer(violation), 8, 2);
 
         var read = async () => await reader.ReadAsync(TestContext.Current.CancellationToken);
         await read.Should().ThrowAsync<TcpMessageFramingException>();
@@ -164,7 +164,7 @@ public sealed class TcpConnectionAdapterTests {
     [Fact]
     public async Task Reader_AtLimitIncompleteData_DoesNotReadOrAllocateBeyondCap() {
         await using var stream = new RecordingReadStream([1, 2, 3, 4]);
-        var reader = new TcpMessageReader(stream, new NeverCompleteFramer(), maxMessageBytes: 4, initialBufferBytes: 1);
+        var reader = new TcpMessageReader(stream, new NeverCompleteFramer(), 4, 1);
 
         var read = async () => await reader.ReadAsync(TestContext.Current.CancellationToken);
         await read.Should().ThrowAsync<TcpMessageTooLargeException>();
@@ -213,7 +213,7 @@ public sealed class TcpConnectionAdapterTests {
     [Fact]
     public async Task Listener_IdleHook_SendsProtocolKeepaliveOnSilentLink() {
         var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartListenerHostAsync(ct, idleTimeout: TimeSpan.FromMilliseconds(50));
+        await using var host = await StartListenerHostAsync(ct, TimeSpan.FromMilliseconds(50));
         using var client = await host.ConnectAsync(ct);
         var stream = client.GetStream();
 
@@ -289,7 +289,7 @@ public sealed class TcpConnectionAdapterTests {
         var handler = new ClosureRecordingHandler();
 
         await using (var link = InMemoryTcpLink.Start(handler, registry,
-                         o => o.Framer = new DelimitedTcpFramer(end: (byte)'\n'))) {
+                         o => o.Framer = new DelimitedTcpFramer((byte)'\n'))) {
             (await link.Client.ReceiveTextAsync(ct)).Should().Be("challenge");
             await link.Client.SendTextAsync("device:closed-1", ct);
             (await link.Client.ReceiveTextAsync(ct)).Should().Be("welcome");
@@ -307,10 +307,10 @@ public sealed class TcpConnectionAdapterTests {
         var ct = TestContext.Current.CancellationToken;
         await using var provider = new ServiceCollection().AddElarionConnections().BuildServiceProvider();
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
-        var handler = new ClosureRecordingHandler(throwOnMessage: true, throwOnClosed: true);
+        var handler = new ClosureRecordingHandler(true, true);
 
         await using var link = InMemoryTcpLink.Start(handler, registry,
-            o => o.Framer = new DelimitedTcpFramer(end: (byte)'\n'));
+            o => o.Framer = new DelimitedTcpFramer((byte)'\n'));
         (await link.Client.ReceiveTextAsync(ct)).Should().Be("challenge");
         await link.Client.SendTextAsync("device:closed-2", ct);
         (await link.Client.ReceiveTextAsync(ct)).Should().Be("welcome");
@@ -334,7 +334,8 @@ public sealed class TcpConnectionAdapterTests {
         await using var provider = services.BuildServiceProvider();
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
         var handler = new OpeningFailureTcpHandler();
-        await using var link = InMemoryTcpLink.Start(handler, registry, o => o.Framer = new DelimitedTcpFramer((byte)'\n'));
+        await using var link =
+            InMemoryTcpLink.Start(handler, registry, o => o.Framer = new DelimitedTcpFramer((byte)'\n'));
 
         (await link.Client.ReceiveTextAsync(ct)).Should().Be("challenge");
         await link.Client.SendTextAsync("device:opening", ct);
@@ -387,9 +388,7 @@ public sealed class TcpConnectionAdapterTests {
             catch (IOException) {
             }
 
-            if (line == "challenge") {
-                break;
-            }
+            if (line == "challenge") break;
 
             await Task.Delay(10, ct);
         }
@@ -408,7 +407,7 @@ public sealed class TcpConnectionAdapterTests {
         try {
             var apply = async () => await endpoints.ApplyListenerAsync<ChallengeTcpHandler>("bind-broken", o => {
                 o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
-                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
+                o.Framer = new DelimitedTcpFramer((byte)'\n');
             }, ct);
             await apply.Should().ThrowAsync<InvalidOperationException>();
 
@@ -439,15 +438,13 @@ public sealed class TcpConnectionAdapterTests {
         services.AddElarionTcpConnectionDialer<DialerHandler>(o => {
             o.Host = "127.0.0.1";
             o.Port = port;
-            o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
+            o.Framer = new DelimitedTcpFramer((byte)'\n');
             o.ReconnectMinDelay = TimeSpan.FromMilliseconds(50);
             o.ReconnectMaxDelay = TimeSpan.FromMilliseconds(200);
         });
         var provider = services.BuildServiceProvider();
         var hosted = provider.GetServices<IHostedService>().ToArray();
-        foreach (var service in hosted) {
-            await service.StartAsync(ct);
-        }
+        foreach (var service in hosted) await service.StartAsync(ct);
 
         try {
             // First session: the dialer initiates, the handler introduces itself, the device tickets it.
@@ -471,9 +468,7 @@ public sealed class TcpConnectionAdapterTests {
             (await observer.Connected.Task.WaitAsync(ct)).Connection.PrincipalId.Should().Be("dev-9");
         }
         finally {
-            foreach (var service in hosted) {
-                await service.StopAsync(CancellationToken.None);
-            }
+            foreach (var service in hosted) await service.StopAsync(CancellationToken.None);
             await provider.DisposeAsync();
             device.Stop();
         }
@@ -503,7 +498,7 @@ public sealed class TcpConnectionAdapterTests {
             await endpoints.ApplyDialerAsync<DialerHandler>("bind-1", o => {
                 o.Host = "127.0.0.1";
                 o.Port = ((IPEndPoint)deviceA.LocalEndpoint).Port;
-                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
+                o.Framer = new DelimitedTcpFramer((byte)'\n');
                 o.ReconnectMinDelay = TimeSpan.FromMilliseconds(50);
             }, ct);
             using (var session = await deviceA.AcceptTcpClientAsync(ct)) {
@@ -518,7 +513,7 @@ public sealed class TcpConnectionAdapterTests {
                 await endpoints.ApplyDialerAsync<DialerHandler>("bind-1", o => {
                     o.Host = "127.0.0.1";
                     o.Port = ((IPEndPoint)deviceB.LocalEndpoint).Port;
-                    o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
+                    o.Framer = new DelimitedTcpFramer((byte)'\n');
                     o.ReconnectMinDelay = TimeSpan.FromMilliseconds(50);
                 }, ct);
                 await observer.Disconnected.Task.WaitAsync(ct);
@@ -567,7 +562,7 @@ public sealed class TcpConnectionAdapterTests {
             // A healthy listener advertises Listening.
             await endpoints.ApplyListenerAsync<ChallengeTcpHandler>("bind-ok", o => {
                 o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
-                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
+                o.Framer = new DelimitedTcpFramer((byte)'\n');
             }, ct);
             var listening = await transitions.Reader.ReadAsync(ct);
             listening.Should().BeEquivalentTo(
@@ -577,7 +572,7 @@ public sealed class TcpConnectionAdapterTests {
             // A binding whose port is taken advertises Faulted with the reason — visible, not just logged.
             await endpoints.ApplyListenerAsync<ChallengeTcpHandler>("bind-taken", o => {
                 o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, occupiedPort);
-                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
+                o.Framer = new DelimitedTcpFramer((byte)'\n');
             }, ct);
             var faulted = await transitions.Reader.ReadAsync(ct);
             faulted.Name.Should().Be("bind-taken");
@@ -589,8 +584,8 @@ public sealed class TcpConnectionAdapterTests {
             occupant.Stop();
             await endpoints.ApplyDialerAsync<DialerHandler>("bind-unreachable", o => {
                 o.Host = "127.0.0.1";
-                o.Port = occupiedPort;                       // nothing listens here anymore
-                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
+                o.Port = occupiedPort; // nothing listens here anymore
+                o.Framer = new DelimitedTcpFramer((byte)'\n');
                 o.ReconnectMinDelay = TimeSpan.FromMilliseconds(20);
             }, ct);
             var dialing = await transitions.Reader.ReadAsync(ct);
@@ -625,7 +620,7 @@ public sealed class TcpConnectionAdapterTests {
             // The binding starts as a server-based endpoint: a device dials in.
             await endpoints.ApplyListenerAsync<ChallengeTcpHandler>("bind-flip", o => {
                 o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
-                o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
+                o.Framer = new DelimitedTcpFramer((byte)'\n');
                 o.OnListening = boundEndPoint.SetResult;
             }, ct);
             var listenPort = await boundEndPoint.Task.WaitAsync(ct);
@@ -643,7 +638,7 @@ public sealed class TcpConnectionAdapterTests {
                 await endpoints.ApplyDialerAsync<DialerHandler>("bind-flip", o => {
                     o.Host = "127.0.0.1";
                     o.Port = ((IPEndPoint)device.LocalEndpoint).Port;
-                    o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
+                    o.Framer = new DelimitedTcpFramer((byte)'\n');
                     o.ReconnectMinDelay = TimeSpan.FromMilliseconds(50);
                 }, ct);
                 await observer.Disconnected.Task.WaitAsync(ct);
@@ -657,7 +652,8 @@ public sealed class TcpConnectionAdapterTests {
 
             // The old listening socket is gone: a fresh connect to it must fail.
             using var probe = new TcpClient();
-            var reconnect = async () => await probe.ConnectAsync(listenPort, ct).AsTask().WaitAsync(TimeSpan.FromSeconds(2), ct);
+            var reconnect = async () =>
+                await probe.ConnectAsync(listenPort, ct).AsTask().WaitAsync(TimeSpan.FromSeconds(2), ct);
             await reconnect.Should().ThrowAsync<Exception>();
         }
         finally {
@@ -675,8 +671,8 @@ public sealed class TcpConnectionAdapterTests {
         var options = new ElarionTcpConnectionOptions { Framer = new DelimitedTcpFramer((byte)'\n') };
 
         await TcpConnectionRunner.RunAsync(
-            stream, new TcpConnectionPeer(null, null), stream, applyNoDelay: null, options, handler, registry,
-            defaultInvokeTimeout: null, TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+            stream, new TcpConnectionPeer(null, null), stream, null, options, handler, registry,
+            null, TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
             TestContext.Current.CancellationToken);
 
         handler.AuthenticateCalls.Should().Be(0);
@@ -686,15 +682,15 @@ public sealed class TcpConnectionAdapterTests {
 
     [Fact]
     public async Task Runner_RegistrationFailure_DoesNotUnregisterAnotherSink_AndFailsLoud() {
-        var existing = new SimulatedClientConnection(principalId: "existing", connectionId: "existing");
+        var existing = new SimulatedClientConnection("existing", connectionId: "existing");
         var registry = new RejectingRegistrationRegistry(existing);
         await using var stream = new ChunkedReadStream();
         var options = new ElarionTcpConnectionOptions { Framer = new DelimitedTcpFramer((byte)'\n') };
         var logger = new CollectingLogger();
 
         await TcpConnectionRunner.RunAsync(
-            stream, new TcpConnectionPeer(null, null), stream, applyNoDelay: null, options,
-            new RegistrationFailureTcpHandler(), registry, defaultInvokeTimeout: null, TimeProvider.System,
+            stream, new TcpConnectionPeer(null, null), stream, null, options,
+            new RegistrationFailureTcpHandler(), registry, null, TimeProvider.System,
             logger, TestContext.Current.CancellationToken);
 
         registry.UnregisterCalls.Should().Be(0);
@@ -709,17 +705,22 @@ public sealed class TcpConnectionAdapterTests {
     private sealed class CollectingLogger : Microsoft.Extensions.Logging.ILogger {
         public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = [];
 
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull {
+            return null;
+        }
 
-        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) {
+            return true;
+        }
 
         public void Log<TState>(
             Microsoft.Extensions.Logging.LogLevel logLevel,
             Microsoft.Extensions.Logging.EventId eventId,
             TState state,
             Exception? exception,
-            Func<TState, Exception?, string> formatter) =>
+            Func<TState, Exception?, string> formatter) {
             Entries.Add((logLevel, formatter(state, exception)));
+        }
     }
 
     [Fact]
@@ -731,12 +732,12 @@ public sealed class TcpConnectionAdapterTests {
         await using var provider = new ServiceCollection().AddElarionConnections().BuildServiceProvider();
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
         var options = new ElarionTcpConnectionOptions {
-            Framer = new LengthPrefixedTcpFramer(), MaxInboundFrameBytes = 7, InitialReadBufferBytes = 3,
+            Framer = new LengthPrefixedTcpFramer(), MaxInboundFrameBytes = 7, InitialReadBufferBytes = 3
         };
 
         await TcpConnectionRunner.RunAsync(
-            stream, new TcpConnectionPeer(null, null), stream, applyNoDelay: null, options, handler, registry,
-            defaultInvokeTimeout: null, TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+            stream, new TcpConnectionPeer(null, null), stream, null, options, handler, registry,
+            null, TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
             TestContext.Current.CancellationToken);
 
         handler.AuthenticateCalls.Should().Be(1);
@@ -747,7 +748,7 @@ public sealed class TcpConnectionAdapterTests {
     public async Task ClientConnection_MaliciousFramerCannotAllocatePastOutboundLimit() {
         await using var stream = new RecordingWriteStream();
         var (connection, _) = CreateStandaloneConnection(
-            stream, new GreedyTcpFramer(), initialSendBufferBytes: 4, maxOutboundMessageBytes: 8);
+            stream, new GreedyTcpFramer(), 4, 8);
 
         var send = async () => await connection.SendBinaryAsync(
             new byte[] { 1 }, TestContext.Current.CancellationToken);
@@ -760,7 +761,7 @@ public sealed class TcpConnectionAdapterTests {
     public async Task ClientConnection_OutboundExactLimitWrites_AndOneByteOverDoesNotWrite() {
         await using var stream = new RecordingWriteStream();
         var (connection, _) = CreateStandaloneConnection(
-            stream, new LengthPrefixedTcpFramer(), initialSendBufferBytes: 4, maxOutboundMessageBytes: 8);
+            stream, new LengthPrefixedTcpFramer(), 4, 8);
 
         await connection.SendBinaryAsync(new byte[] { 1, 2, 3, 4 }, TestContext.Current.CancellationToken);
         stream.Writes.Should().ContainSingle().Which.Should().HaveCount(8);
@@ -780,18 +781,19 @@ public sealed class TcpConnectionAdapterTests {
             ConnectionId = "standalone",
             Transport = "test",
             Principal = new ClaimsPrincipal(new ClaimsIdentity()),
-            ConnectedAt = DateTimeOffset.UtcNow,
+            ConnectedAt = DateTimeOffset.UtcNow
         };
         var lifetime = new TcpConnectionLifetime(stream, CancellationToken.None);
         var writer = new TcpOutboundWriter(
             stream, framer, initialSendBufferBytes, maxOutboundMessageBytes, maxPendingSends,
             identity.ConnectionId, identity.Transport, lifetime);
         lifetime.AttachWriter(writer);
-        return (new TcpClientConnection(identity, writer, lifetime, defaultInvokeTimeout: null), lifetime);
+        return (new TcpClientConnection(identity, writer, lifetime, null), lifetime);
     }
 
-    private static Task<TcpTestHost> StartListenerHostAsync(CancellationToken ct, TimeSpan? idleTimeout = null) =>
-        StartListenerHostAsync<ChallengeTcpHandler>(ct, idleTimeout);
+    private static Task<TcpTestHost> StartListenerHostAsync(CancellationToken ct, TimeSpan? idleTimeout = null) {
+        return StartListenerHostAsync<ChallengeTcpHandler>(ct, idleTimeout);
+    }
 
     private static async Task<TcpTestHost> StartListenerHostAsync<THandler>(
         CancellationToken ct, TimeSpan? idleTimeout = null, Action<ElarionTcpListenerOptions>? configure = null)
@@ -804,45 +806,43 @@ public sealed class TcpConnectionAdapterTests {
         services.AddSingleton<IClientConnectionObserver>(sp => sp.GetRequiredService<AwaitableConnectionObserver>());
         services.AddElarionTcpConnectionListener<THandler>(o => {
             o.ListenEndPoint = new IPEndPoint(IPAddress.Loopback, 0);
-            o.Framer = new DelimitedTcpFramer(end: (byte)'\n');
+            o.Framer = new DelimitedTcpFramer((byte)'\n');
             o.IdleTimeout = idleTimeout;
             o.OnListening = boundEndPoint.SetResult;
             configure?.Invoke(o);
         });
         var provider = services.BuildServiceProvider();
         var hosted = provider.GetServices<IHostedService>().ToArray();
-        foreach (var service in hosted) {
-            await service.StartAsync(ct);
-        }
+        foreach (var service in hosted) await service.StartAsync(ct);
 
         return new TcpTestHost(provider, hosted, await boundEndPoint.Task.WaitAsync(ct));
     }
 
-    private static async Task WriteLineAsync(NetworkStream stream, string line, CancellationToken ct) =>
+    private static async Task WriteLineAsync(NetworkStream stream, string line, CancellationToken ct) {
         await stream.WriteAsync(Encoding.UTF8.GetBytes(line + "\n"), ct);
+    }
 
-    private static Task<string?> ReadLineAsync(NetworkStream stream, CancellationToken ct) =>
-        ReadUntilAsync(stream, (byte)'\n', ct);
+    private static Task<string?> ReadLineAsync(NetworkStream stream, CancellationToken ct) {
+        return ReadUntilAsync(stream, (byte)'\n', ct);
+    }
 
     private static async Task<string?> ReadUntilAsync(NetworkStream stream, byte delimiter, CancellationToken ct) {
         var buffer = new List<byte>();
         var single = new byte[1];
         while (true) {
             var read = await stream.ReadAsync(single.AsMemory(), ct);
-            if (read == 0) {
-                return null;
-            }
+            if (read == 0) return null;
 
-            if (single[0] == delimiter) {
-                return Encoding.UTF8.GetString(buffer.ToArray());
-            }
+            if (single[0] == delimiter) return Encoding.UTF8.GetString(buffer.ToArray());
 
             buffer.Add(single[0]);
         }
     }
 
     private sealed class TcpTestHost(
-        ServiceProvider provider, IReadOnlyList<IHostedService> hosted, IPEndPoint endPoint) : IAsyncDisposable {
+        ServiceProvider provider,
+        IReadOnlyList<IHostedService> hosted,
+        IPEndPoint endPoint) : IAsyncDisposable {
         public IClientConnectionRegistry Registry => provider.GetRequiredService<IClientConnectionRegistry>();
 
         public AwaitableConnectionObserver Observer => provider.GetRequiredService<AwaitableConnectionObserver>();
@@ -854,9 +854,7 @@ public sealed class TcpConnectionAdapterTests {
         }
 
         public async ValueTask DisposeAsync() {
-            foreach (var service in hosted) {
-                await service.StopAsync(CancellationToken.None);
-            }
+            foreach (var service in hosted) await service.StopAsync(CancellationToken.None);
             await provider.DisposeAsync();
         }
     }
@@ -867,28 +865,29 @@ public sealed class TcpConnectionAdapterTests {
             TcpHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
             var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
-                return null;
-            }
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
 
             await handshake.SendTextAsync("welcome", ct);
             return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
-                PrincipalId = reply["device:".Length..],
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
+                PrincipalId = reply["device:".Length..]
             };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            new EchoTcpProtocol(connection);
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return new EchoTcpProtocol(connection);
+        }
     }
 
     private sealed class EchoTcpProtocol(TcpClientConnection connection) : IClientConnectionProtocol {
         // Bytes are bytes on TCP: text protocols decode in the codec — the one-liner the framer no longer does.
-        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
-            connection.SendTextAsync("echo:" + Encoding.UTF8.GetString(message.Span), ct);
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+            return connection.SendTextAsync("echo:" + Encoding.UTF8.GetString(message.Span), ct);
+        }
 
-        public ValueTask OnIdleAsync(CancellationToken ct) =>
-            connection.SendTextAsync("idle-poll", ct);
+        public ValueTask OnIdleAsync(CancellationToken ct) {
+            return connection.SendTextAsync("idle-poll", ct);
+        }
     }
 
     /// <summary>One endpoint, two wire framings: the first connection keeps the endpoint defaults, every
@@ -901,8 +900,8 @@ public sealed class TcpConnectionAdapterTests {
             var settings = Interlocked.Increment(ref _connections) == 1
                 ? new TcpConnectionSettings { Transport = "tcp-lines" }
                 : new TcpConnectionSettings {
-                    Framer = new DelimitedTcpFramer(end: (byte)'|'),
-                    Transport = "tcp-pipes",
+                    Framer = new DelimitedTcpFramer((byte)'|'),
+                    Transport = "tcp-pipes"
                 };
             return ValueTask.FromResult<TcpConnectionSettings?>(settings);
         }
@@ -911,19 +910,18 @@ public sealed class TcpConnectionAdapterTests {
             TcpHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
             var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
-                return null;
-            }
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
 
             await handshake.SendTextAsync("welcome", ct);
             return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
-                PrincipalId = reply["device:".Length..],
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
+                PrincipalId = reply["device:".Length..]
             };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            new EchoTcpProtocol(connection);
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return new EchoTcpProtocol(connection);
+        }
     }
 
     /// <summary>Dialer-side: introduces itself and expects a ticket line from the device.</summary>
@@ -932,23 +930,23 @@ public sealed class TcpConnectionAdapterTests {
             TcpHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("hello", ct);
             var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("ticket:", StringComparison.Ordinal)) {
-                return null;
-            }
+            if (reply is null || !reply.StartsWith("ticket:", StringComparison.Ordinal)) return null;
 
             return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
-                PrincipalId = reply["ticket:".Length..],
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
+                PrincipalId = reply["ticket:".Length..]
             };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            new RecordingTcpProtocol(inbound);
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return new RecordingTcpProtocol(inbound);
+        }
     }
 
     private sealed class RecordingTcpProtocol(ChannelWriter<string> inbound) : IClientConnectionProtocol {
-        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
-            inbound.WriteAsync(Encoding.UTF8.GetString(message.Span), ct);
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+            return inbound.WriteAsync(Encoding.UTF8.GetString(message.Span), ct);
+        }
     }
 
     /// <summary>Records the codec teardown signal; optionally fails on a message (to provoke a codec-fault
@@ -961,19 +959,18 @@ public sealed class TcpConnectionAdapterTests {
             TcpHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
             var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
-                return null;
-            }
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
 
             await handshake.SendTextAsync("welcome", ct);
             return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
-                PrincipalId = reply["device:".Length..],
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
+                PrincipalId = reply["device:".Length..]
             };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            Protocol = new ClosureRecordingProtocol(throwOnMessage, throwOnClosed);
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return Protocol = new ClosureRecordingProtocol(throwOnMessage, throwOnClosed);
+        }
     }
 
     private sealed class ClosureRecordingProtocol(bool throwOnMessage, bool throwOnClosed)
@@ -981,16 +978,15 @@ public sealed class TcpConnectionAdapterTests {
         public TaskCompletionSource<(ClientConnection Connection, Exception? Reason)> Closed { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
-            throwOnMessage
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+            return throwOnMessage
                 ? throw new InvalidOperationException("codec parse failure")
                 : ValueTask.CompletedTask;
+        }
 
         public ValueTask OnClosedAsync(ClientConnection connection, Exception? reason, CancellationToken ct) {
             Closed.TrySetResult((connection, reason));
-            if (throwOnClosed) {
-                throw new InvalidOperationException("teardown failure");
-            }
+            if (throwOnClosed) throw new InvalidOperationException("teardown failure");
 
             return ValueTask.CompletedTask;
         }
@@ -999,15 +995,19 @@ public sealed class TcpConnectionAdapterTests {
     private sealed class OpeningFailureTcpHandler : TcpConnectionHandler {
         public OpeningFailureTcpProtocol? Protocol { get; private set; }
 
-        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake, CancellationToken ct) {
+        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake,
+            CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
             var reply = await handshake.ReceiveTextAsync(ct);
             if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
             await handshake.SendTextAsync("welcome", ct);
-            return new ClientConnectionTicket { Principal = new ClaimsPrincipal(new ClaimsIdentity("device")), PrincipalId = reply[7..] };
+            return new ClientConnectionTicket
+                { Principal = new ClaimsPrincipal(new ClaimsIdentity("device")), PrincipalId = reply[7..] };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) => Protocol = new OpeningFailureTcpProtocol();
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return Protocol = new OpeningFailureTcpProtocol();
+        }
     }
 
     private sealed class OpeningFailureTcpProtocol : IClientConnectionProtocol {
@@ -1031,26 +1031,21 @@ public sealed class TcpConnectionAdapterTests {
         ConsumedPastAvailable,
         ZeroConsumedComplete,
         MessageOutsidePresentedMemory,
-        MessageBeyondConsumed,
+        MessageBeyondConsumed
     }
 
     private sealed class VariableHeaderTcpFramer : TcpMessageFramer {
-        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message) {
+        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed,
+            out ReadOnlyMemory<byte> message) {
             consumed = 0;
             message = default;
-            if (buffer.IsEmpty) {
-                return false;
-            }
+            if (buffer.IsEmpty) return false;
 
             var headerLength = buffer.Span[0];
-            if (headerLength < 2 || buffer.Length < headerLength) {
-                return false;
-            }
+            if (headerLength < 2 || buffer.Length < headerLength) return false;
 
             var payloadLength = buffer.Span[headerLength - 1];
-            if (buffer.Length < headerLength + payloadLength) {
-                return false;
-            }
+            if (buffer.Length < headerLength + payloadLength) return false;
 
             consumed = headerLength + payloadLength;
             message = buffer.Slice(headerLength, payloadLength);
@@ -1059,9 +1054,7 @@ public sealed class TcpConnectionAdapterTests {
 
         public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
             const byte headerLength = 5;
-            if (payload.Length > byte.MaxValue) {
-                throw new ArgumentOutOfRangeException(nameof(payload));
-            }
+            if (payload.Length > byte.MaxValue) throw new ArgumentOutOfRangeException(nameof(payload));
 
             var header = output.GetSpan(headerLength);
             header[0] = headerLength;
@@ -1084,12 +1077,14 @@ public sealed class TcpConnectionAdapterTests {
             return false;
         }
 
-        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) =>
+        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
             output.GetSpan(1024 * 1024);
+        }
     }
 
     private sealed class CompleteFrameFramer : TcpMessageFramer {
-        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message) {
+        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed,
+            out ReadOnlyMemory<byte> message) {
             // Completes only once the whole 5-byte frame arrived; incomplete bytes stay buffered (not
             // noise), so an oversized frame accumulates against the reader's cap.
             var complete = buffer.Length == 5;
@@ -1098,21 +1093,27 @@ public sealed class TcpConnectionAdapterTests {
             return complete;
         }
 
-        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) => output.Write(payload);
+        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
+            output.Write(payload);
+        }
     }
 
     private sealed class NeverCompleteFramer : TcpMessageFramer {
-        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message) {
+        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed,
+            out ReadOnlyMemory<byte> message) {
             consumed = 0;
             message = default;
             return false;
         }
 
-        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) => output.Write(payload);
+        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
+            output.Write(payload);
+        }
     }
 
     private sealed class MalformedTcpFramer(FramerViolation violation) : TcpMessageFramer {
-        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message) {
+        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed,
+            out ReadOnlyMemory<byte> message) {
             var foreign = new byte[] { 9 };
             switch (violation) {
                 case FramerViolation.NegativeConsumed:
@@ -1140,7 +1141,9 @@ public sealed class TcpConnectionAdapterTests {
             }
         }
 
-        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) => output.Write(payload);
+        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
+            output.Write(payload);
+        }
     }
 
     private class ChunkedReadStream(params byte[][] chunks) : Stream {
@@ -1152,7 +1155,11 @@ public sealed class TcpConnectionAdapterTests {
         public override bool CanSeek => false;
         public override bool CanWrite => false;
         public override long Length => throw new NotSupportedException();
-        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override long Position {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
 
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) {
             ReadRequests.Add(buffer.Length);
@@ -1171,12 +1178,24 @@ public sealed class TcpConnectionAdapterTests {
             return ValueTask.FromResult(0);
         }
 
-        public override int Read(byte[] buffer, int offset, int count) =>
-            ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
-        public override void Flush() { }
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) {
+            return ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+        }
+
+        public override void Flush() {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) {
+            throw new NotSupportedException();
+        }
+
+        public override void SetLength(long value) {
+            throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count) {
+            throw new NotSupportedException();
+        }
     }
 
     private sealed class RecordingReadStream(params byte[] bytes) : ChunkedReadStream(bytes);
@@ -1187,40 +1206,68 @@ public sealed class TcpConnectionAdapterTests {
         public override bool CanSeek => false;
         public override bool CanWrite => true;
         public override long Length => throw new NotSupportedException();
-        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override long Position {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) {
             Writes.Add(buffer.ToArray());
             return ValueTask.CompletedTask;
         }
 
-        public override void Flush() { }
-        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => Writes.Add(buffer.AsSpan(offset, count).ToArray());
+        public override void Flush() {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) {
+            throw new NotSupportedException();
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) {
+            throw new NotSupportedException();
+        }
+
+        public override void SetLength(long value) {
+            throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count) {
+            Writes.Add(buffer.AsSpan(offset, count).ToArray());
+        }
     }
 
     private sealed class InvalidOverrideTcpHandler : TcpConnectionHandler {
         public int AuthenticateCalls { get; private set; }
-        public override ValueTask<TcpConnectionSettings?> ConfigureConnectionAsync(TcpConnectionPeer peer, CancellationToken ct) =>
-            ValueTask.FromResult<TcpConnectionSettings?>(new TcpConnectionSettings { MaxInboundFrameBytes = 0 });
-        public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake, CancellationToken ct) {
+
+        public override ValueTask<TcpConnectionSettings?> ConfigureConnectionAsync(TcpConnectionPeer peer,
+            CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSettings?>(new TcpConnectionSettings { MaxInboundFrameBytes = 0 });
+        }
+
+        public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake,
+            CancellationToken ct) {
             AuthenticateCalls++;
             return ValueTask.FromResult<ClientConnectionTicket?>(null);
         }
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) => throw new NotSupportedException();
+
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            throw new NotSupportedException();
+        }
     }
 
     private sealed class RegistrationFailureTcpHandler : TcpConnectionHandler {
         public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake,
-            CancellationToken ct) =>
-            ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity()),
+            CancellationToken ct) {
+            return ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
+                Principal = new ClaimsPrincipal(new ClaimsIdentity())
             });
+        }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            new NoOpTcpProtocol();
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return new NoOpTcpProtocol();
+        }
     }
 
     private sealed class RejectingRegistrationRegistry(IClientConnectionSink existing) : IClientConnectionRegistry {
@@ -1228,8 +1275,9 @@ public sealed class TcpConnectionAdapterTests {
         public int UnregisterCalls { get; private set; }
         public IReadOnlyCollection<IClientConnectionSink> Connections => [Existing];
 
-        public ValueTask RegisterAsync(IClientConnectionSink connection, CancellationToken ct = default) =>
+        public ValueTask RegisterAsync(IClientConnectionSink connection, CancellationToken ct = default) {
             throw new InvalidOperationException("duplicate connection id");
+        }
 
         public ValueTask UnregisterAsync(string connectionId, CancellationToken ct = default) {
             UnregisterCalls++;
@@ -1239,31 +1287,41 @@ public sealed class TcpConnectionAdapterTests {
         public ValueTask<ClientConnectionPromotionStatus> PromoteAsync(
             string connectionId,
             ClientConnectionIdentity identity,
-            CancellationToken ct = default) =>
-            ValueTask.FromResult(ClientConnectionPromotionStatus.ConnectionNotFound);
+            CancellationToken ct = default) {
+            return ValueTask.FromResult(ClientConnectionPromotionStatus.ConnectionNotFound);
+        }
 
         public bool TryGet(
             string connectionId,
-            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IClientConnectionSink? connection) {
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)]
+            out IClientConnectionSink? connection) {
             connection = Existing;
             return true;
         }
 
-        public IReadOnlyList<IClientConnectionSink> GetForPrincipal(string principalId) => [Existing];
+        public IReadOnlyList<IClientConnectionSink> GetForPrincipal(string principalId) {
+            return [Existing];
+        }
     }
 
     private sealed class NoOpTcpProtocol : IClientConnectionProtocol {
-        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
-            ValueTask.CompletedTask;
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class AuthenticationRecordingTcpHandler : TcpConnectionHandler {
         public int AuthenticateCalls { get; private set; }
-        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake, CancellationToken ct) {
+
+        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake,
+            CancellationToken ct) {
             AuthenticateCalls++;
             await handshake.ReceiveAsync(ct);
             return null;
         }
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) => throw new NotSupportedException();
+
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            throw new NotSupportedException();
+        }
     }
 }

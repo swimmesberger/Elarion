@@ -34,8 +34,8 @@ public static class HandlerCacheTelemetry {
     public static readonly Histogram<double> OperationDuration =
         MeterInstance.CreateHistogram<double>(
             "handler.cache.operation.duration",
-            unit: "s",
-            description: "Duration of handler cache operations",
+            "s",
+            "Duration of handler cache operations",
             advice: DurationAdvice);
 
     internal static void RecordOperation(string operation, string outcome, TimeSpan elapsed) {

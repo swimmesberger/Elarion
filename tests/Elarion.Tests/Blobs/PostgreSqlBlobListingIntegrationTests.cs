@@ -33,7 +33,7 @@ public sealed class PostgreSqlBlobListingIntegrationTests(PostgreSqlBlobStoreFix
 
         var second = await store.ListAsync(
             new BlobListRequest {
-                Container = container, Prefix = "docs/", PageSize = 2, ContinuationToken = first.ContinuationToken,
+                Container = container, Prefix = "docs/", PageSize = 2, ContinuationToken = first.ContinuationToken
             },
             ct);
 
@@ -78,7 +78,7 @@ public sealed class PostgreSqlBlobListingIntegrationTests(PostgreSqlBlobStoreFix
 
         var second = await store.ListAsync(
             new BlobListRequest {
-                Container = container, Delimiter = "/", PageSize = 2, ContinuationToken = first.ContinuationToken,
+                Container = container, Delimiter = "/", PageSize = 2, ContinuationToken = first.ContinuationToken
             },
             ct);
         second.Blobs.Select(b => b.Name).Should().Equal("z.txt");
@@ -97,7 +97,7 @@ public sealed class PostgreSqlBlobListingIntegrationTests(PostgreSqlBlobStoreFix
         await store.SaveAsync(
             NewRequest(container, "staged.bin") with {
                 InitialState = BlobLifecycleState.Pending,
-                ExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(1),
+                ExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(1)
             },
             new MemoryStream([2]),
             ct);
@@ -146,20 +146,22 @@ public sealed class PostgreSqlBlobListingIntegrationTests(PostgreSqlBlobStoreFix
         PostgreSqlBlobStore<IntegrationBlobDbContext> store,
         CancellationToken ct) {
         var container = $"c-{Guid.NewGuid():N}";
-        foreach (var name in new[] { "a.txt", "docs/1.txt", "docs/2.txt", "docs/sub/3.txt", "z.txt" }) {
+        foreach (var name in new[] { "a.txt", "docs/1.txt", "docs/2.txt", "docs/sub/3.txt", "z.txt" })
             await store.SaveAsync(NewRequest(container, name), new MemoryStream([1]), ct);
-        }
 
         return container;
     }
 
-    private static BlobUploadRequest NewRequest(string container, string name) =>
-        new() {
+    private static BlobUploadRequest NewRequest(string container, string name) {
+        return new BlobUploadRequest {
             Container = container,
             Name = name,
-            ContentType = "application/octet-stream",
+            ContentType = "application/octet-stream"
         };
+    }
 
-    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
-        new(context, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) {
+        return new PostgreSqlBlobStore<IntegrationBlobDbContext>(context,
+            NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    }
 }

@@ -35,19 +35,22 @@ public sealed class HybridHandlerCache(
             var key = CreatePhysicalKey(policy, request);
             var options = new HybridCacheEntryOptions {
                 Expiration = policy.Expiration,
-                LocalCacheExpiration = policy.Expiration,
+                LocalCacheExpiration = policy.Expiration
             };
             // Tags are how HybridCache supports group invalidation without knowing every individual key.
             var tags = CreateEntryTags(policy.Scope, policy.Tags);
 
             if (policy is IHandlerCachePayloadPolicy<TRequest, TResponse> payloadPolicy) {
                 // Payload policies store a serialized representation, useful when response types should not be cached directly.
-                var payloadState = new PayloadFactoryState<TRequest, TResponse>(payloadPolicy, factory, jsonSerialization.Options, activity);
+                var payloadState =
+                    new PayloadFactoryState<TRequest, TResponse>(payloadPolicy, factory, jsonSerialization.Options,
+                        activity);
                 try {
                     var response = await GetOrCreatePayloadAsync(payloadState, key, options, tags, ct);
                     outcome = payloadState.FactoryExecuted ? "miss-factory-executed" : "cached-or-coalesced";
                     return response;
-                } catch (NonCacheableResultException<TResponse> ex) {
+                }
+                catch (NonCacheableResultException<TResponse> ex) {
                     outcome = "miss-non-cacheable";
                     return ex.Response;
                 }
@@ -61,34 +64,37 @@ public sealed class HybridHandlerCache(
                     static async (state, token) => {
                         state.MarkFactoryExecuted();
                         var response = await state.Factory(token);
-                        if (response is IResultLike { IsSuccess: false }) {
+                        if (response is IResultLike { IsSuccess: false })
                             // Throwing here is a control-flow adapter for HybridCache: it prevents failed Result<T> values from being cached.
                             throw new NonCacheableResultException<TResponse>(response);
-                        }
 
                         return response;
                     },
                     options,
                     tags,
-                    cancellationToken: ct);
+                    ct);
                 outcome = state.FactoryExecuted ? "miss-factory-executed" : "cached-or-coalesced";
                 return response;
-            } catch (NonCacheableResultException<TResponse> ex) {
+            }
+            catch (NonCacheableResultException<TResponse> ex) {
                 outcome = "miss-non-cacheable";
                 return ex.Response;
             }
-        } catch (Exception ex) {
+        }
+        catch (Exception ex) {
             outcome = "error";
             RecordException(activity, ex);
             throw;
-        } finally {
+        }
+        finally {
             RecordCacheOutcome(activity, "get", outcome, started);
         }
     }
 
     /// <inheritdoc />
     public async ValueTask InvalidateAsync(IHandlerCacheInvalidationPolicy policy, CancellationToken ct) {
-        using var activity = HandlerCacheTelemetry.Source.StartActivity("handler cache invalidate", ActivityKind.Internal);
+        using var activity =
+            HandlerCacheTelemetry.Source.StartActivity("handler cache invalidate", ActivityKind.Internal);
         var started = Stopwatch.GetTimestamp();
         var outcome = "success";
         SetCacheTags(activity, "invalidate", null, policy.Scope, policy.Tags.Count);
@@ -96,14 +102,14 @@ public sealed class HybridHandlerCache(
         try {
             // Invalidating by tag keeps command handlers independent from the exact read keys they invalidate.
             var tags = CreateInvalidationTags(policy.Scope, policy.Tags);
-            foreach (var tag in tags) {
-                await cache.RemoveByTagAsync(tag, ct);
-            }
-        } catch (Exception ex) {
+            foreach (var tag in tags) await cache.RemoveByTagAsync(tag, ct);
+        }
+        catch (Exception ex) {
             outcome = "error";
             RecordException(activity, ex);
             throw;
-        } finally {
+        }
+        finally {
             RecordCacheOutcome(activity, "invalidate", outcome, started);
         }
     }
@@ -120,15 +126,14 @@ public sealed class HybridHandlerCache(
             static async (state, token) => {
                 state.MarkFactoryExecuted();
                 var response = await state.Factory(token);
-                if (response is IResultLike { IsSuccess: false }) {
+                if (response is IResultLike { IsSuccess: false })
                     throw new NonCacheableResultException<TResponse>(response);
-                }
 
                 return state.Policy.Serialize(response, state.JsonOptions);
             },
             options,
             tags,
-            cancellationToken: ct);
+            ct);
 
         return payloadState.Policy.Deserialize(payload, jsonSerialization.Options);
     }
@@ -150,9 +155,7 @@ public sealed class HybridHandlerCache(
     /// </summary>
     private IReadOnlyList<string> CreateEntryTags(HandlerCacheScope scope, IReadOnlyList<string> tags) {
         var scoped = CreateInvalidationTags(scope, tags);
-        if (scope == HandlerCacheScope.Global) {
-            return scoped;
-        }
+        if (scope == HandlerCacheScope.Global) return scoped;
 
         var physicalTags = new string[scoped.Count * 2];
         for (var i = 0; i < scoped.Count; i++) {
@@ -169,18 +172,16 @@ public sealed class HybridHandlerCache(
     /// calling user's namespace.
     /// </summary>
     private IReadOnlyList<string> CreateInvalidationTags(HandlerCacheScope scope, IReadOnlyList<string> tags) {
-        if (tags.Count == 0) {
+        if (tags.Count == 0)
             throw new InvalidOperationException("Handler cache policies must define at least one tag.");
-        }
 
         var physicalScope = CreatePhysicalScope(scope);
         var physicalTags = new string[tags.Count];
 
         for (var i = 0; i < tags.Count; i++) {
             var tag = tags[i];
-            if (string.IsNullOrWhiteSpace(tag) || tag == "*") {
+            if (string.IsNullOrWhiteSpace(tag) || tag == "*")
                 throw new InvalidOperationException($"Invalid handler cache tag '{tag}'.");
-            }
 
             physicalTags[i] = $"handler-cache:{physicalScope}:tag:{tag}";
         }
@@ -188,19 +189,20 @@ public sealed class HybridHandlerCache(
         return physicalTags;
     }
 
-    private string CreatePhysicalScope(HandlerCacheScope scope) =>
-        scope switch {
+    private string CreatePhysicalScope(HandlerCacheScope scope) {
+        return scope switch {
             HandlerCacheScope.Global => "global",
             // User ids are hashed before entering cache keys so infrastructure logs do not expose raw identifiers.
             HandlerCacheScope.CurrentUser => $"user:{Hash(GetCurrentUserId())}",
-            _ => throw new InvalidOperationException($"Unsupported handler cache scope '{scope}'."),
+            _ => throw new InvalidOperationException($"Unsupported handler cache scope '{scope}'.")
         };
+    }
 
     private string GetCurrentUserId() {
         var currentUser = services.GetRequiredService<ICurrentUser>();
-        if (!currentUser.IsAuthenticated || string.IsNullOrWhiteSpace(currentUser.UserId)) {
-            throw new InvalidOperationException("Current-user scoped handler caching requires an authenticated current user with a user id.");
-        }
+        if (!currentUser.IsAuthenticated || string.IsNullOrWhiteSpace(currentUser.UserId))
+            throw new InvalidOperationException(
+                "Current-user scoped handler caching requires an authenticated current user with a user id.");
 
         return currentUser.UserId;
     }
@@ -217,14 +219,10 @@ public sealed class HybridHandlerCache(
         string? keyPrefix,
         HandlerCacheScope scope,
         int tagCount) {
-        if (activity?.IsAllDataRequested != true) {
-            return;
-        }
+        if (activity?.IsAllDataRequested != true) return;
 
         activity.SetTag("handler.cache.operation", operation);
-        if (!string.IsNullOrWhiteSpace(keyPrefix)) {
-            activity.SetTag("handler.cache.policy_prefix", keyPrefix);
-        }
+        if (!string.IsNullOrWhiteSpace(keyPrefix)) activity.SetTag("handler.cache.policy_prefix", keyPrefix);
 
         activity.SetTag("handler.cache.scope", scope.ToString());
         activity.SetTag("handler.cache.tag_count", tagCount);
@@ -233,11 +231,10 @@ public sealed class HybridHandlerCache(
     private static void RecordCacheOutcome(Activity? activity, string operation, string outcome, long started) {
         if (activity?.IsAllDataRequested == true) {
             activity.SetTag("handler.cache.outcome", outcome);
-            activity.SetTag("handler.cache.factory_executed", outcome == "miss-factory-executed" || outcome == "miss-non-cacheable");
+            activity.SetTag("handler.cache.factory_executed",
+                outcome == "miss-factory-executed" || outcome == "miss-non-cacheable");
 
-            if (outcome == "error") {
-                activity.SetStatus(ActivityStatusCode.Error);
-            }
+            if (outcome == "error") activity.SetStatus(ActivityStatusCode.Error);
         }
 
         HandlerCacheTelemetry.RecordOperation(

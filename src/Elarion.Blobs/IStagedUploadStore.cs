@@ -53,7 +53,8 @@ public interface IStagedUploadStore {
     /// Thrown when the session does not exist, or declares a length the received bytes do not reach
     /// (a premature completion).
     /// </exception>
-    Task<StagedUpload> CompleteAsync(string uploadId, StagedUploadCompletion completion, CancellationToken cancellationToken);
+    Task<StagedUpload> CompleteAsync(string uploadId, StagedUploadCompletion completion,
+        CancellationToken cancellationToken);
 
     /// <summary>Deletes an upload session and any staged bytes.</summary>
     Task DeleteAsync(string uploadId, CancellationToken cancellationToken);

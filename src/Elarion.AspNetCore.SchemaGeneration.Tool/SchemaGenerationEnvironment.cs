@@ -16,8 +16,10 @@ internal sealed class SchemaGenerationEnvironment : IDisposable {
         var previousValues = new Dictionary<string, string?> {
             [DotnetEnvironmentVariable] = Environment.GetEnvironmentVariable(DotnetEnvironmentVariable),
             [AspNetCoreEnvironmentVariable] = Environment.GetEnvironmentVariable(AspNetCoreEnvironmentVariable),
-            [JsonRpcSchemaGeneration.IsRunningEnvironmentVariable] = Environment.GetEnvironmentVariable(JsonRpcSchemaGeneration.IsRunningEnvironmentVariable),
-            [JsonRpcSchemaGeneration.OutputPathEnvironmentVariable] = Environment.GetEnvironmentVariable(JsonRpcSchemaGeneration.OutputPathEnvironmentVariable),
+            [JsonRpcSchemaGeneration.IsRunningEnvironmentVariable] =
+                Environment.GetEnvironmentVariable(JsonRpcSchemaGeneration.IsRunningEnvironmentVariable),
+            [JsonRpcSchemaGeneration.OutputPathEnvironmentVariable] =
+                Environment.GetEnvironmentVariable(JsonRpcSchemaGeneration.OutputPathEnvironmentVariable)
         };
 
         Environment.SetEnvironmentVariable(DotnetEnvironmentVariable, environmentName);
@@ -29,8 +31,6 @@ internal sealed class SchemaGenerationEnvironment : IDisposable {
     }
 
     public void Dispose() {
-        foreach (var (name, value) in _previousValues) {
-            Environment.SetEnvironmentVariable(name, value);
-        }
+        foreach (var (name, value) in _previousValues) Environment.SetEnvironmentVariable(name, value);
     }
 }

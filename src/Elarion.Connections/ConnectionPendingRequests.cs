@@ -54,7 +54,8 @@ public sealed class ConnectionPendingRequests<TKey, TResponse> where TKey : notn
         try {
             await send(ct);
         }
-        catch (Exception) when (_pending.TryRemove(new KeyValuePair<TKey, TaskCompletionSource<TResponse>>(key, source))) {
+        catch (Exception) when
+            (_pending.TryRemove(new KeyValuePair<TKey, TaskCompletionSource<TResponse>>(key, source))) {
             // The send failed with no reply seen: the registration is withdrawn and the key reusable.
             throw;
         }
@@ -68,21 +69,17 @@ public sealed class ConnectionPendingRequests<TKey, TResponse> where TKey : notn
     }
 
     private TaskCompletionSource<TResponse> Register(TKey key) {
-        if (Volatile.Read(ref _completion) is { } alreadyFailed) {
-            throw alreadyFailed;
-        }
+        if (Volatile.Read(ref _completion) is { } alreadyFailed) throw alreadyFailed;
 
         var source = new TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!_pending.TryAdd(key, source)) {
+        if (!_pending.TryAdd(key, source))
             throw new InvalidOperationException(
                 $"A request with key '{key}' is already in flight — duplicate correlation keys are a codec bug.");
-        }
 
         // FailAll may have swept between the completion check and the add; re-check so the registration
         // cannot outlive the teardown.
-        if (Volatile.Read(ref _completion) is { } failed && _pending.TryRemove(new KeyValuePair<TKey, TaskCompletionSource<TResponse>>(key, source))) {
-            throw failed;
-        }
+        if (Volatile.Read(ref _completion) is { } failed &&
+            _pending.TryRemove(new KeyValuePair<TKey, TaskCompletionSource<TResponse>>(key, source))) throw failed;
 
         return source;
     }
@@ -94,7 +91,8 @@ public sealed class ConnectionPendingRequests<TKey, TResponse> where TKey : notn
                 ? await source.Task.WaitAsync(window, ct)
                 : await source.Task.WaitAsync(ct);
         }
-        catch (Exception) when (!_pending.TryRemove(new KeyValuePair<TKey, TaskCompletionSource<TResponse>>(key, source))) {
+        catch (Exception) when (!_pending.TryRemove(
+                                    new KeyValuePair<TKey, TaskCompletionSource<TResponse>>(key, source))) {
             // The reply raced the timeout/cancellation and already completed this registration — hand it
             // over instead of losing it.
             return await source.Task;
@@ -103,13 +101,15 @@ public sealed class ConnectionPendingRequests<TKey, TResponse> where TKey : notn
 
     /// <summary>Completes the in-flight request for <paramref name="key"/>; <see langword="false"/> when
     /// nothing was waiting (late or unsolicited reply — the codec decides whether that is an error).</summary>
-    public bool TryComplete(TKey key, TResponse response) =>
-        _pending.TryRemove(key, out var source) && source.TrySetResult(response);
+    public bool TryComplete(TKey key, TResponse response) {
+        return _pending.TryRemove(key, out var source) && source.TrySetResult(response);
+    }
 
     /// <summary>Faults the in-flight request for <paramref name="key"/> (e.g. the peer answered with a
     /// protocol-level rejection).</summary>
-    public bool TryFail(TKey key, Exception error) =>
-        _pending.TryRemove(key, out var source) && source.TrySetException(error);
+    public bool TryFail(TKey key, Exception error) {
+        return _pending.TryRemove(key, out var source) && source.TrySetException(error);
+    }
 
     /// <summary>
     /// Faults everything in flight and every future <see cref="WaitAsync"/> with <paramref name="error"/> —
@@ -119,14 +119,10 @@ public sealed class ConnectionPendingRequests<TKey, TResponse> where TKey : notn
     /// </summary>
     public void FailAll(Exception error) {
         ArgumentNullException.ThrowIfNull(error);
-        if (Interlocked.CompareExchange(ref _completion, error, null) is not null) {
-            return;
-        }
+        if (Interlocked.CompareExchange(ref _completion, error, null) is not null) return;
 
-        foreach (var key in _pending.Keys) {
-            if (_pending.TryRemove(key, out var source)) {
+        foreach (var key in _pending.Keys)
+            if (_pending.TryRemove(key, out var source))
                 source.TrySetException(error);
-            }
-        }
     }
 }

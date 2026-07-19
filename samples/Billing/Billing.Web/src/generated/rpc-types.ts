@@ -4,87 +4,87 @@
 export interface RpcMethods {
   "clients.create": {
     params: {
-    name: string
-    email: string
-  }
+      name: string
+      email: string
+    }
     result: {
-    id: string
-    number: string
-  }
+      id: string
+      number: string
+    }
   }
   "clients.get": {
     params: {
-    id: string
-  }
+      id: string
+    }
     result: {
-    id: string
-    number: string
-    name: string
-    email: string
-  }
-  }
-  "clients.list": {
-    params: unknown
-    result: {
-    clients: {
       id: string
       number: string
       name: string
       email: string
-    }[]
+    }
   }
+  "clients.list": {
+    params: unknown
+    result: {
+      clients: {
+        id: string
+        number: string
+        name: string
+        email: string
+      }[]
+    }
   }
   "elarion.session": {
     params: unknown
     result: {
-    user: {
-      id: string
-      email?: string | null | undefined
-      isAuthenticated: boolean
-      roles: string[]
-      permissions: string[]
+      user: {
+        id: string
+        email?: string | null | undefined
+        isAuthenticated: boolean
+        roles: string[]
+        permissions: string[]
+      }
+      modules: unknown
+      flags: unknown
+      variants: unknown
     }
-    modules: unknown
-    flags: unknown
-    variants: unknown
-  }
   }
   "invoices.create": {
     params: {
-    clientId: string
-    amountCents: number
-    currency: string
-    dueDate: string
-  }
+      clientId: string
+      amountCents: number
+      currency: string
+      dueDate: string
+    }
     result: {
-    invoiceId: string
-    number: string
-    sendJobId: string
-  }
+      invoiceId: string
+      number: string
+      sendJobId: string
+    }
   }
   "invoices.list": {
     params: unknown
     result: {
-    invoices: {
-      id: string
-      number: string
-      amountCents: number
-      currency: string
-      status: string
-      dueDate: string
-    }[]
-  }
+      invoices: {
+        id: string
+        number: string
+        amountCents: number
+        currency: string
+        status: string
+        dueDate: string
+      }[]
+    }
   }
   "invoices.sendStatus": {
     params: {
-    jobId: string
-  }
+      jobId: string
+    }
     result: {
-    status: string
-    attempt: number
-    maxAttempts: number
-    nextAttemptAt: string | null | undefined
-    lastError: string | null | undefined
-  }
+      status: string
+      attempt: number
+      maxAttempts: number
+      nextAttemptAt: string | null | undefined
+      lastError: string | null | undefined
+    }
   }
 }

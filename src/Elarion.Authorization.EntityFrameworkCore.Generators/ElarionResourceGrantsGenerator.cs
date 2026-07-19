@@ -15,7 +15,9 @@ namespace Elarion.Authorization.EntityFrameworkCore.Generators;
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class ElarionResourceGrantsGenerator : IIncrementalGenerator {
-    private const string AttributeMetadataName = "Elarion.Authorization.EntityFrameworkCore.GenerateElarionResourceGrantsAttribute";
+    private const string AttributeMetadataName =
+        "Elarion.Authorization.EntityFrameworkCore.GenerateElarionResourceGrantsAttribute";
+
     private const string GenerateDbSetsAttributeName = ElarionGeneratorConventions.GenerateDbSetsAttribute;
     private const string GrantsNamespace = "global::Elarion.Authorization.EntityFrameworkCore";
 
@@ -31,7 +33,7 @@ public sealed class ElarionResourceGrantsGenerator : IIncrementalGenerator {
         + "so the resource-grants DbSet and model-configuration seam are generated",
         "Elarion.Authorization.EntityFrameworkCore",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var targets = context.SyntaxProvider
@@ -43,17 +45,11 @@ public sealed class ElarionResourceGrantsGenerator : IIncrementalGenerator {
             .WithTrackingName("ResourceGrantsTargets");
 
         context.RegisterSourceOutput(targets, static (spc, target) => {
-            if (target is null) {
-                return;
-            }
+            if (target is null) return;
 
-            foreach (var diagnostic in target.Diagnostics) {
-                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
-            }
+            foreach (var diagnostic in target.Diagnostics) spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
-            if (target.Emit) {
-                Emit(spc, target);
-            }
+            if (target.Emit) Emit(spc, target);
         });
     }
 
@@ -68,15 +64,13 @@ public sealed class ElarionResourceGrantsGenerator : IIncrementalGenerator {
         EquatableArray<DiagnosticInfo> Diagnostics);
 
     private static GrantsTarget? GetTarget(GeneratorAttributeSyntaxContext ctx) {
-        if (ctx.TargetSymbol is not INamedTypeSymbol contextSymbol) {
-            return null;
-        }
+        if (ctx.TargetSymbol is not INamedTypeSymbol contextSymbol) return null;
 
         var snakeCase = true;
         string? tableName = null;
         string? schema = null;
-        if (ctx.Attributes.Length > 0) {
-            foreach (var namedArgument in ctx.Attributes[0].NamedArguments) {
+        if (ctx.Attributes.Length > 0)
+            foreach (var namedArgument in ctx.Attributes[0].NamedArguments)
                 switch (namedArgument.Key) {
                     case "SnakeCase" when namedArgument.Value.Value is bool value:
                         snakeCase = value;
@@ -88,8 +82,6 @@ public sealed class ElarionResourceGrantsGenerator : IIncrementalGenerator {
                         schema = schemaValue;
                         break;
                 }
-            }
-        }
 
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
         var ns = contextSymbol.ContainingNamespace is { IsGlobalNamespace: false } containing
@@ -102,10 +94,9 @@ public sealed class ElarionResourceGrantsGenerator : IIncrementalGenerator {
             .Any(attribute => attribute.AttributeClass?.ToDisplayString() == GenerateDbSetsAttributeName);
 
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
-        if (!hasGenerateDbSets) {
+        if (!hasGenerateDbSets)
             diagnostics.Add(DiagnosticInfo.Create(
                 MissingGenerateDbSets, LocationInfo.From(contextSymbol), contextSymbol.ToDisplayString(fmt)));
-        }
 
         return new GrantsTarget(
             ns,
@@ -114,7 +105,7 @@ public sealed class ElarionResourceGrantsGenerator : IIncrementalGenerator {
             snakeCase,
             tableName,
             schema,
-            Emit: hasGenerateDbSets,
+            hasGenerateDbSets,
             diagnostics.ToImmutable());
     }
 
@@ -133,10 +124,13 @@ public sealed class ElarionResourceGrantsGenerator : IIncrementalGenerator {
 
         sb.AppendLine($"partial class {target.ContextName}");
         sb.AppendLine("{");
-        sb.AppendLine($"    public DbSet<{GrantsNamespace}.ResourceGrantEntity> ResourceGrants => Set<{GrantsNamespace}.ResourceGrantEntity>();");
+        sb.AppendLine(
+            $"    public DbSet<{GrantsNamespace}.ResourceGrantEntity> ResourceGrants => Set<{GrantsNamespace}.ResourceGrantEntity>();");
         sb.AppendLine();
-        sb.AppendLine("    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
-        sb.AppendLine("    // end of ConfigureEntities, so it composes with [GenerateElarionIdentity] on the same context.");
+        sb.AppendLine(
+            "    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
+        sb.AppendLine(
+            "    // end of ConfigureEntities, so it composes with [GenerateElarionIdentity] on the same context.");
         sb.AppendLine($"    partial void {SeamMethodName}(ModelBuilder modelBuilder) =>");
         sb.AppendLine($"        {GrantsNamespace}.ResourceGrantsModelBuilderExtensions.ApplyElarionResourceGrants(");
         sb.AppendLine(

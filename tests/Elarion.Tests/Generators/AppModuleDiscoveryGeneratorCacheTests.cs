@@ -42,7 +42,7 @@ public sealed class AppModuleDiscoveryGeneratorCacheTests {
         """;
 
     [Fact]
-    public void ReusesOutputsAfterIrrelevantEdit() =>
+    public void ReusesOutputsAfterIrrelevantEdit() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new AppModuleDiscoveryGenerator(),
             Source,
@@ -53,9 +53,10 @@ public sealed class AppModuleDiscoveryGeneratorCacheTests {
             "BootstrapperResourceFilters",
             "BootstrapperSiblings",
             "Bootstrapper");
+    }
 
     [Fact]
-    public void BootstrapperStaysCached_WhenAnUnrelatedFileChanges() =>
+    public void BootstrapperStaysCached_WhenAnUnrelatedFileChanges() {
         // The strict form: every input of the final model either is per-node cached (modules, manifests,
         // [ModuleEndpoints] contributors, transport handlers, resource filters) or projects to an equal small
         // value (trigger, sibling probes, root namespace), so the expensive collect + topological-sort +
@@ -69,4 +70,5 @@ public sealed class AppModuleDiscoveryGeneratorCacheTests {
             "BootstrapperRpcMethods",
             "BootstrapperResourceFilters",
             "Bootstrapper");
+    }
 }

@@ -9,5 +9,5 @@ public enum ClientConnectionPromotionStatus {
     ConnectionNotFound,
 
     /// <summary>The connection already has an authenticated identity or was promoted by a concurrent caller.</summary>
-    AlreadyAuthenticated,
+    AlreadyAuthenticated
 }

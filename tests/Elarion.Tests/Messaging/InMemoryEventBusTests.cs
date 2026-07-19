@@ -17,8 +17,8 @@ public sealed class InMemoryEventBusTests {
     public async Task PublishAsync_DomainEvent_InvokesSubscribersInOrder() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         await using var provider = BuildProvider(
-            Subscriber(typeof(SampleDomainEvent), order: 1, label: "second"),
-            Subscriber(typeof(SampleDomainEvent), order: 0, label: "first"));
+            Subscriber(typeof(SampleDomainEvent), 1, "second"),
+            Subscriber(typeof(SampleDomainEvent), 0, "first"));
 
         using var scope = provider.CreateScope();
         var bus = scope.ServiceProvider.GetRequiredService<IDomainEventBus>();
@@ -33,9 +33,9 @@ public sealed class InMemoryEventBusTests {
     public async Task PublishAsync_DomainEvent_RunsEverySubscriberAndAggregatesFailures() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         await using var provider = BuildProvider(
-            Throwing(typeof(SampleDomainEvent), order: 0, message: "boom-1"),
-            Subscriber(typeof(SampleDomainEvent), order: 1, label: "ran"),
-            Throwing(typeof(SampleDomainEvent), order: 2, message: "boom-2"));
+            Throwing(typeof(SampleDomainEvent), 0, "boom-1"),
+            Subscriber(typeof(SampleDomainEvent), 1, "ran"),
+            Throwing(typeof(SampleDomainEvent), 2, "boom-2"));
 
         using var scope = provider.CreateScope();
         var bus = scope.ServiceProvider.GetRequiredService<IDomainEventBus>();
@@ -51,7 +51,7 @@ public sealed class InMemoryEventBusTests {
     public async Task PublishAsync_DomainEvent_SingleFailureIsNotWrapped() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         await using var provider = BuildProvider(
-            Throwing(typeof(SampleDomainEvent), order: 0, message: "only"));
+            Throwing(typeof(SampleDomainEvent), 0, "only"));
 
         using var scope = provider.CreateScope();
         var bus = scope.ServiceProvider.GetRequiredService<IDomainEventBus>();
@@ -79,7 +79,7 @@ public sealed class InMemoryEventBusTests {
     public async Task IntegrationEvent_IsDeliveredOnlyAfterFlush() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         await using var provider = BuildProvider(
-            Subscriber(typeof(SampleIntegrationEvent), order: 0, label: "integration"));
+            Subscriber(typeof(SampleIntegrationEvent), 0, "integration"));
 
         var pump = provider.GetServices<IHostedService>().Single();
         await pump.StartAsync(cts.Token);
@@ -113,7 +113,8 @@ public sealed class InMemoryEventBusTests {
             Order = 0,
             InvokeAsync = (sp, _, context, _) => {
                 contextMessageId = context.MessageId;
-                sp.GetRequiredService<Elarion.Abstractions.Idempotency.IIdempotencyKeyAccessor>().TryGetKey(out seededKey);
+                sp.GetRequiredService<Elarion.Abstractions.Idempotency.IIdempotencyKeyAccessor>()
+                    .TryGetKey(out seededKey);
                 sp.GetRequiredService<EventRecorder>().Add("probed");
                 return ValueTask.CompletedTask;
             }
@@ -168,7 +169,7 @@ public sealed class InMemoryEventBusTests {
     public async Task IntegrationEvent_DiscardDropsBufferedEvents() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         await using var provider = BuildProvider(
-            Subscriber(typeof(SampleIntegrationEvent), order: 0, label: "integration"));
+            Subscriber(typeof(SampleIntegrationEvent), 0, "integration"));
 
         var pump = provider.GetServices<IHostedService>().Single();
         await pump.StartAsync(cts.Token);
@@ -219,8 +220,9 @@ public sealed class InMemoryEventBusTests {
         ex.Error.Kind.Should().Be(ErrorKind.Conflict);
     }
 
-    private static ServiceProvider BuildProvider(params EventSubscriptionDescriptor[] descriptors) =>
-        BuildProvider(static _ => { }, descriptors);
+    private static ServiceProvider BuildProvider(params EventSubscriptionDescriptor[] descriptors) {
+        return BuildProvider(static _ => { }, descriptors);
+    }
 
     private static ServiceProvider BuildProvider(
         Action<IServiceCollection> configure,
@@ -230,9 +232,7 @@ public sealed class InMemoryEventBusTests {
         services.AddSingleton<EventRecorder>();
         services.AddSingleton<ScopeProbe>();
         services.AddScoped<ScopeMarker>();
-        foreach (var descriptor in descriptors) {
-            services.AddSingleton(descriptor);
-        }
+        foreach (var descriptor in descriptors) services.AddSingleton(descriptor);
 
         configure(services);
         // These tests drive FlushAsync/Discard by hand (no database), so they use the low-level building blocks
@@ -245,8 +245,8 @@ public sealed class InMemoryEventBusTests {
     // Mirrors the descriptor emitted by EventConsumerRegistrationGenerator for a handler-form
     // consumer: resolve the IHandler<,> interface (decorated), invoke it, and surface a failed
     // Result as an EventConsumerFailedException.
-    private static EventSubscriptionDescriptor HandlerSubscriber(Type eventType) =>
-        new() {
+    private static EventSubscriptionDescriptor HandlerSubscriber(Type eventType) {
+        return new EventSubscriptionDescriptor {
             EventType = eventType,
             Plane = EventPlane.Domain,
             ServiceType = typeof(IHandler<SampleDomainEvent, Result<Unit>>),
@@ -254,14 +254,13 @@ public sealed class InMemoryEventBusTests {
             InvokeAsync = static async (sp, evt, _, ct) => {
                 var handler = sp.GetRequiredService<IHandler<SampleDomainEvent, Result<Unit>>>();
                 var result = await handler.HandleAsync((SampleDomainEvent)evt, ct).ConfigureAwait(false);
-                if (!result.IsSuccess) {
-                    throw new EventConsumerFailedException(result.Error);
-                }
+                if (!result.IsSuccess) throw new EventConsumerFailedException(result.Error);
             }
         };
+    }
 
-    private static EventSubscriptionDescriptor Subscriber(Type eventType, int order, string label) =>
-        new() {
+    private static EventSubscriptionDescriptor Subscriber(Type eventType, int order, string label) {
+        return new EventSubscriptionDescriptor {
             EventType = eventType,
             Plane = eventType == typeof(SampleIntegrationEvent) ? EventPlane.Integration : EventPlane.Domain,
             ServiceType = typeof(EventRecorder),
@@ -272,18 +271,20 @@ public sealed class InMemoryEventBusTests {
                 return ValueTask.CompletedTask;
             }
         };
+    }
 
-    private static EventSubscriptionDescriptor Throwing(Type eventType, int order, string message) =>
-        new() {
+    private static EventSubscriptionDescriptor Throwing(Type eventType, int order, string message) {
+        return new EventSubscriptionDescriptor {
             EventType = eventType,
             Plane = EventPlane.Domain,
             ServiceType = typeof(EventRecorder),
             Order = order,
             InvokeAsync = (_, _, _, _) => throw new InvalidOperationException(message)
         };
+    }
 
-    private static EventSubscriptionDescriptor ScopeCapturing(Type eventType) =>
-        new() {
+    private static EventSubscriptionDescriptor ScopeCapturing(Type eventType) {
+        return new EventSubscriptionDescriptor {
             EventType = eventType,
             Plane = EventPlane.Domain,
             ServiceType = typeof(ScopeProbe),
@@ -293,12 +294,15 @@ public sealed class InMemoryEventBusTests {
                 return ValueTask.CompletedTask;
             }
         };
+    }
 
-    private static string Payload(object evt) => evt switch {
-        SampleDomainEvent domain => domain.Value,
-        SampleIntegrationEvent integration => integration.Value,
-        _ => evt.ToString() ?? string.Empty
-    };
+    private static string Payload(object evt) {
+        return evt switch {
+            SampleDomainEvent domain => domain.Value,
+            SampleIntegrationEvent integration => integration.Value,
+            _ => evt.ToString() ?? string.Empty
+        };
+    }
 
     private sealed record SampleDomainEvent(string Value) : IDomainEvent;
 
@@ -314,8 +318,9 @@ public sealed class InMemoryEventBusTests {
     }
 
     private sealed class FailingHandler : IHandler<SampleDomainEvent> {
-        public ValueTask<Result> HandleAsync(SampleDomainEvent request, CancellationToken ct) =>
-            ValueTask.FromResult(Result.Failure(AppError.Conflict("nope")));
+        public ValueTask<Result> HandleAsync(SampleDomainEvent request, CancellationToken ct) {
+            return ValueTask.FromResult(Result.Failure(AppError.Conflict("nope")));
+        }
     }
 
     private sealed class ScopeMarker;
@@ -346,9 +351,7 @@ public sealed class InMemoryEventBusTests {
         }
 
         public async Task WaitForAsync(int count, CancellationToken ct) {
-            for (var i = 0; i < count; i++) {
-                await _signal.WaitAsync(ct);
-            }
+            for (var i = 0; i < count; i++) await _signal.WaitAsync(ct);
         }
     }
 }

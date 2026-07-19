@@ -15,10 +15,12 @@ internal sealed class FakeBlobStore : IBlobStore {
 
     public bool LastContentStreamWasReadable { get; private set; }
 
-    public void Seed(BlobRef blobRef, BlobMetadata metadata, byte[] data) =>
+    public void Seed(BlobRef blobRef, BlobMetadata metadata, byte[] data) {
         _blobs[blobRef.Value] = (metadata, data);
+    }
 
-    public async Task<BlobRef> SaveAsync(BlobUploadRequest request, Stream content, CancellationToken cancellationToken) {
+    public async Task<BlobRef> SaveAsync(BlobUploadRequest request, Stream content,
+        CancellationToken cancellationToken) {
         LastRequest = request;
         LastContentStreamWasReadable = content.CanRead;
 
@@ -30,22 +32,23 @@ internal sealed class FakeBlobStore : IBlobStore {
     }
 
     public Task<BlobDownload?> OpenReadAsync(BlobRef blobRef, CancellationToken cancellationToken) {
-        if (!_blobs.TryGetValue(blobRef.Value, out var entry)) {
-            return Task.FromResult<BlobDownload?>(null);
-        }
+        if (!_blobs.TryGetValue(blobRef.Value, out var entry)) return Task.FromResult<BlobDownload?>(null);
 
-        var download = new BlobDownload(entry.Metadata, new MemoryStream(entry.Data, writable: false));
+        var download = new BlobDownload(entry.Metadata, new MemoryStream(entry.Data, false));
         return Task.FromResult<BlobDownload?>(download);
     }
 
-    public Task<BlobMetadata?> GetMetadataAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-        Task.FromResult(_blobs.TryGetValue(blobRef.Value, out var entry) ? entry.Metadata : null);
+    public Task<BlobMetadata?> GetMetadataAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+        return Task.FromResult(_blobs.TryGetValue(blobRef.Value, out var entry) ? entry.Metadata : null);
+    }
 
-    public Task<bool> DeleteAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-        Task.FromResult(_blobs.Remove(blobRef.Value));
+    public Task<bool> DeleteAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+        return Task.FromResult(_blobs.Remove(blobRef.Value));
+    }
 
-    public Task<bool> ExistsAsync(BlobRef blobRef, CancellationToken cancellationToken) =>
-        Task.FromResult(_blobs.ContainsKey(blobRef.Value));
+    public Task<bool> ExistsAsync(BlobRef blobRef, CancellationToken cancellationToken) {
+        return Task.FromResult(_blobs.ContainsKey(blobRef.Value));
+    }
 
     // Flat, ordinal-ordered listing over the seeded blobs (hierarchy is not modeled by the fake), so
     // the auto-paging extension can be exercised without a database.
@@ -55,7 +58,7 @@ internal sealed class FakeBlobStore : IBlobStore {
             .Select(entry => entry.Metadata)
             .Where(metadata => metadata.Container == request.Container)
             .Where(metadata => request.Prefix is null
-                || metadata.Name.StartsWith(request.Prefix, StringComparison.Ordinal))
+                               || metadata.Name.StartsWith(request.Prefix, StringComparison.Ordinal))
             .Where(metadata => request.State is null || metadata.State == request.State)
             .Where(metadata => after is null || string.CompareOrdinal(metadata.Name, after) > 0)
             .OrderBy(metadata => metadata.Name, StringComparer.Ordinal)
@@ -65,14 +68,15 @@ internal sealed class FakeBlobStore : IBlobStore {
         return Task.FromResult(new BlobListing {
             Blobs = page,
             Prefixes = [],
-            ContinuationToken = page.Count == request.PageSize ? page[^1].Name : null,
+            ContinuationToken = page.Count == request.PageSize ? page[^1].Name : null
         });
     }
 
-    public Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<string>>(_blobs.Values
+    public Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) {
+        return Task.FromResult<IReadOnlyList<string>>(_blobs.Values
             .Select(entry => entry.Metadata.Container)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToList());
+    }
 }

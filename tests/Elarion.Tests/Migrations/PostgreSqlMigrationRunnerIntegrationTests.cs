@@ -139,8 +139,9 @@ public sealed class PostgreSqlMigrationRunnerIntegrationTests(PostgreSqlMigratio
         var applied = await fixedRunner.MigrateAsync(TestToken);
         applied.Should().ContainSingle().Which.Version.Should().Be("2");
         (await ScalarAsync(
-            connectionString,
-            "SELECT count(*) FROM information_schema.columns WHERE table_name = 'mig_points' AND column_name = 'extra'")).Should().Be(1L);
+                connectionString,
+                "SELECT count(*) FROM information_schema.columns WHERE table_name = 'mig_points' AND column_name = 'extra'"))
+            .Should().Be(1L);
     }
 
     [Fact]
@@ -187,9 +188,7 @@ public sealed class PostgreSqlMigrationRunnerIntegrationTests(PostgreSqlMigratio
             "SELECT version FROM elarion_schema_history ORDER BY installed_rank", connection);
         await using var reader = await command.ExecuteReaderAsync(TestToken);
         var versions = new List<string>();
-        while (await reader.ReadAsync(TestToken)) {
-            versions.Add(reader.GetString(0));
-        }
+        while (await reader.ReadAsync(TestToken)) versions.Add(reader.GetString(0));
 
         versions.Should().Equal("1", "3", "2");
     }

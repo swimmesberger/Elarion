@@ -18,15 +18,18 @@ public sealed class EfCoreSettingsStoreTransactionTests(PostgreSqlSettingsStoreF
     : IClassFixture<PostgreSqlSettingsStoreFixture> {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static string UniqueKey() => $"app:{Guid.NewGuid():N}";
+    private static string UniqueKey() {
+        return $"app:{Guid.NewGuid():N}";
+    }
 
-    private static EfCoreSettingsStore<SettingsIntegrationDbContext> CreateStore(SettingsIntegrationDbContext context) =>
-        new(
+    private static EfCoreSettingsStore<SettingsIntegrationDbContext> CreateStore(SettingsIntegrationDbContext context) {
+        return new EfCoreSettingsStore<SettingsIntegrationDbContext>(
             context,
             new ChangePublisherSettingsChangeNotifier(
                 new SettingsChangeDispatchScope(
                     new InProcessSettingsChangeSource(), NullLogger<SettingsChangeDispatchScope>.Instance)),
             TimeProvider.System);
+    }
 
     [Fact]
     public async Task SetAsync_Insert_RolledBackWithCallerTransaction_PersistsNothing() {

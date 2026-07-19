@@ -88,9 +88,7 @@ public sealed class TcpSimulatorClient : IAsyncDisposable {
                     _receiveBuffer.AsMemory(_start, _end - _start), out var consumed, out var message);
                 var copy = complete ? message.ToArray() : null;
                 _start += consumed;
-                if (copy is not null) {
-                    return copy;
-                }
+                if (copy is not null) return copy;
             }
 
             if (_start > 0) {
@@ -99,14 +97,10 @@ public sealed class TcpSimulatorClient : IAsyncDisposable {
                 _start = 0;
             }
 
-            if (_end == _receiveBuffer.Length) {
-                Array.Resize(ref _receiveBuffer, _receiveBuffer.Length * 2);
-            }
+            if (_end == _receiveBuffer.Length) Array.Resize(ref _receiveBuffer, _receiveBuffer.Length * 2);
 
             var read = await _stream.ReadAsync(_receiveBuffer.AsMemory(_end), ct);
-            if (read == 0) {
-                return null;
-            }
+            if (read == 0) return null;
 
             _end += read;
         }

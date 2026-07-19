@@ -61,35 +61,37 @@ public sealed class WebSocketTestHost : IAsyncDisposable {
     /// <summary>Connects a real client, optionally with a query string beginning with <c>?</c>.</summary>
     public async Task<ClientWebSocket> ConnectAsync(CancellationToken cancellationToken = default, string query = "") {
         var socket = new ClientWebSocket();
-        await socket.ConnectAsync(new Uri(HttpBase.Replace("http://", "ws://", StringComparison.Ordinal) + Route + query), cancellationToken)
+        await socket
+            .ConnectAsync(new Uri(HttpBase.Replace("http://", "ws://", StringComparison.Ordinal) + Route + query),
+                cancellationToken)
             .ConfigureAwait(false);
         return socket;
     }
 
     /// <summary>Sends one complete UTF-8 text frame.</summary>
-    public static Task SendTextAsync(ClientWebSocket socket, string message, CancellationToken cancellationToken = default) {
+    public static Task SendTextAsync(ClientWebSocket socket, string message,
+        CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(socket);
         return socket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, true, cancellationToken);
     }
 
     /// <summary>Receives one complete UTF-8 text frame, or <see langword="null"/> on a close frame.</summary>
-    public static async Task<string?> ReceiveTextAsync(ClientWebSocket socket, CancellationToken cancellationToken = default) {
+    public static async Task<string?> ReceiveTextAsync(ClientWebSocket socket,
+        CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(socket);
         var buffer = new byte[8192];
         using var assembled = new MemoryStream();
         while (true) {
             var result = await socket.ReceiveAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
-            if (result.MessageType == WebSocketMessageType.Close) {
-                return null;
-            }
+            if (result.MessageType == WebSocketMessageType.Close) return null;
 
             assembled.Write(buffer, 0, result.Count);
-            if (result.EndOfMessage) {
-                return Encoding.UTF8.GetString(assembled.ToArray());
-            }
+            if (result.EndOfMessage) return Encoding.UTF8.GetString(assembled.ToArray());
         }
     }
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync() => _application.DisposeAsync();
+    public ValueTask DisposeAsync() {
+        return _application.DisposeAsync();
+    }
 }

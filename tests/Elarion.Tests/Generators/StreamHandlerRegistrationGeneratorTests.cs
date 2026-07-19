@@ -29,8 +29,10 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
         var aggregate = Get(result, "Sample_Sales.StreamHandlerExtensions.g.cs");
 
         handler.Should().Contain("OuterStreamDecorator<").And.NotContain("AssemblyStreamDecorator<");
-        aggregate.Should().Contain("AddSalesStreamHandlers").And.Contain("ReadHandlerStreamRegistration.AddReadHandlerStream");
-        result.GeneratedTrees.Select(t => Path.GetFileName(t.FilePath)).Should().Contain(name => name.EndsWith("StreamHandlers.g.cs", StringComparison.Ordinal));
+        aggregate.Should().Contain("AddSalesStreamHandlers").And
+            .Contain("ReadHandlerStreamRegistration.AddReadHandlerStream");
+        result.GeneratedTrees.Select(t => Path.GetFileName(t.FilePath)).Should()
+            .Contain(name => name.EndsWith("StreamHandlers.g.cs", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -44,10 +46,16 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
 
         var compilation = CSharpCompilation.Create(
             "NullableDisabledStreamConsumer",
-            [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: TestContext.Current.CancellationToken),
-                .. result.GeneratedTrees.Select(tree => CSharpSyntaxTree.ParseText(tree.GetText(), new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: TestContext.Current.CancellationToken))],
+            [
+                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview),
+                    cancellationToken: TestContext.Current.CancellationToken),
+                .. result.GeneratedTrees.Select(tree => CSharpSyntaxTree.ParseText(tree.GetText(),
+                    new CSharpParseOptions(LanguageVersion.Preview),
+                    cancellationToken: TestContext.Current.CancellationToken))
+            ],
             References(),
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Disable));
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Disable));
 
         compilation.GetDiagnostics(TestContext.Current.CancellationToken)
             .Should().NotContain(diagnostic => diagnostic.Id == "CS8669");
@@ -59,7 +67,8 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
         var generated = Get(result, "Sample_Handlers_ReadHandler.stream.g.cs");
 
         generated.Should().Contain("StreamValidationDecorator<");
-        result.GeneratedTrees.Count(t => Path.GetFileName(t.FilePath).EndsWith(".stream.g.cs", StringComparison.Ordinal)).Should().Be(1);
+        result.GeneratedTrees
+            .Count(t => Path.GetFileName(t.FilePath).EndsWith(".stream.g.cs", StringComparison.Ordinal)).Should().Be(1);
     }
 
     [Fact]
@@ -77,12 +86,18 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
 
         var generatedHandlers = result.GeneratedTrees
             .Where(tree => Path.GetFileName(tree.FilePath).EndsWith(".stream.g.cs", StringComparison.Ordinal))
-            .Select(tree => CSharpSyntaxTree.ParseText(tree.GetText(), new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: TestContext.Current.CancellationToken));
+            .Select(tree => CSharpSyntaxTree.ParseText(tree.GetText(), new CSharpParseOptions(LanguageVersion.Preview),
+                cancellationToken: TestContext.Current.CancellationToken));
         var compilation = CSharpCompilation.Create(
             "StreamConstraintCompilation",
-            [CSharpSyntaxTree.ParseText(ConstraintSource, new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: TestContext.Current.CancellationToken), .. generatedHandlers],
+            [
+                CSharpSyntaxTree.ParseText(ConstraintSource, new CSharpParseOptions(LanguageVersion.Preview),
+                    cancellationToken: TestContext.Current.CancellationToken),
+                .. generatedHandlers
+            ],
             References(), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-        compilation.GetDiagnostics(TestContext.Current.CancellationToken).Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        compilation.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
     }
 
     [Fact]
@@ -96,40 +111,50 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
     public void InvalidResourcePaths_ReportELAUTH002_AndValidInheritedPathCompiles() {
         var result = Run(ResourceAndPredicateSource);
 
-        result.Diagnostics.Should().Contain(diagnostic => diagnostic.Id == "ELAUTH002" && diagnostic.Severity == DiagnosticSeverity.Error);
+        result.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "ELAUTH002" && diagnostic.Severity == DiagnosticSeverity.Error);
         var generated = Get(result, "Sample_Handlers_InheritedResourceHandler.stream.g.cs");
         generated.Should().Contain("static request => request.Owner.Id").And.NotContain("request => null");
         generated.Should().Contain("ConditionalStreamDecorator<");
         var compilation = CSharpCompilation.Create(
             "StreamResourceCompilation",
-            [CSharpSyntaxTree.ParseText(ResourceAndPredicateSource, new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: TestContext.Current.CancellationToken), .. result.GeneratedTrees.Where(tree => Path.GetFileName(tree.FilePath).EndsWith(".stream.g.cs", StringComparison.Ordinal)).Select(tree => CSharpSyntaxTree.ParseText(tree.GetText(), new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: TestContext.Current.CancellationToken))],
+            [
+                CSharpSyntaxTree.ParseText(ResourceAndPredicateSource, new CSharpParseOptions(LanguageVersion.Preview),
+                    cancellationToken: TestContext.Current.CancellationToken),
+                .. result.GeneratedTrees
+                    .Where(tree => Path.GetFileName(tree.FilePath).EndsWith(".stream.g.cs", StringComparison.Ordinal))
+                    .Select(tree => CSharpSyntaxTree.ParseText(tree.GetText(),
+                        new CSharpParseOptions(LanguageVersion.Preview),
+                        cancellationToken: TestContext.Current.CancellationToken))
+            ],
             References(), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-        compilation.GetDiagnostics(TestContext.Current.CancellationToken).Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error && diagnostic.Id != "CS0246").Should().BeEmpty();
+        compilation.GetDiagnostics(TestContext.Current.CancellationToken).Where(diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Error && diagnostic.Id != "CS0246").Should().BeEmpty();
     }
 
     [Fact]
     public void ResourceOperationAndTypeName_AreEmittedAsEscapedCSharpLiterals() {
         const string source = """
-            using System.Collections.Generic;
-            using System.Threading;
-            using System.Threading.Tasks;
-            using Elarion.Abstractions;
-            using Elarion.Abstractions.Authorization;
-            using Elarion.Abstractions.Modules;
-            [assembly: GenerateModuleHandlers]
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                public sealed class Resource;
-                public sealed record Request(int Id);
-                [RequireResource(typeof(Resource), Id = nameof(Request.Id),
-                    Operation = "read\"quoted\\path\nline", ResourceTypeName = "type\"quoted\\path\nline")]
-                public sealed class Handler : IStreamHandler<Request, string> {
-                    public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
-                    private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
-                }
-            }
-            """;
+                              using System.Collections.Generic;
+                              using System.Threading;
+                              using System.Threading.Tasks;
+                              using Elarion.Abstractions;
+                              using Elarion.Abstractions.Authorization;
+                              using Elarion.Abstractions.Modules;
+                              [assembly: GenerateModuleHandlers]
+                              namespace Sample.App {
+                                  [AppModule("App")] public static class AppModule { }
+                                  public sealed class Resource;
+                                  public sealed record Request(int Id);
+                                  [RequireResource(typeof(Resource), Id = nameof(Request.Id),
+                                      Operation = "read\"quoted\\path\nline", ResourceTypeName = "type\"quoted\\path\nline")]
+                                  public sealed class Handler : IStreamHandler<Request, string> {
+                                      public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+                                      private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
+                                  }
+                              }
+                              """;
 
         var result = Run(source);
         var generated = Get(result, "Sample_App_Handler.stream.g.cs");
@@ -137,9 +162,15 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
             .And.Contain("type\\\"quoted\\\\path\\nline");
         var compilation = CSharpCompilation.Create(
             "EscapedStreamResourceCompilation",
-            [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: TestContext.Current.CancellationToken),
-                .. result.GeneratedTrees.Where(tree => Path.GetFileName(tree.FilePath).EndsWith(".stream.g.cs", StringComparison.Ordinal))
-                    .Select(tree => CSharpSyntaxTree.ParseText(tree.GetText(), new CSharpParseOptions(LanguageVersion.Preview), cancellationToken: TestContext.Current.CancellationToken))],
+            [
+                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview),
+                    cancellationToken: TestContext.Current.CancellationToken),
+                .. result.GeneratedTrees.Where(tree =>
+                        Path.GetFileName(tree.FilePath).EndsWith(".stream.g.cs", StringComparison.Ordinal))
+                    .Select(tree => CSharpSyntaxTree.ParseText(tree.GetText(),
+                        new CSharpParseOptions(LanguageVersion.Preview),
+                        cancellationToken: TestContext.Current.CancellationToken))
+            ],
             References(), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         compilation.GetDiagnostics(TestContext.Current.CancellationToken)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
@@ -149,36 +180,38 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
     public void InvalidStreamAppliesToDeclarations_ReportUnaryPipelineDiagnostics() {
         var result = Run(InvalidPredicateSource);
 
-        result.Diagnostics.Should().Contain(diagnostic => diagnostic.Id == "ELPIPE001" && diagnostic.Severity == DiagnosticSeverity.Error)
+        result.Diagnostics.Should().Contain(diagnostic =>
+                diagnostic.Id == "ELPIPE001" && diagnostic.Severity == DiagnosticSeverity.Error)
             .And.Contain(diagnostic => diagnostic.Id == "ELPIPE002" && diagnostic.Severity == DiagnosticSeverity.Error);
         result.Diagnostics.Where(diagnostic => diagnostic.Id is "ELPIPE001" or "ELPIPE002")
-            .Should().OnlyContain(diagnostic => diagnostic.GetMessage().Contains("StreamHandlerMetadata", StringComparison.Ordinal));
+            .Should().OnlyContain(diagnostic =>
+                diagnostic.GetMessage().Contains("StreamHandlerMetadata", StringComparison.Ordinal));
     }
 
     [Fact]
     public void AllowAnonymousAndEmptyFeatureGate_DoNotAttachStreamServices() {
         const string source = """
-            using System.Collections.Generic;
-            using System.Threading;
-            using System.Threading.Tasks;
-            using Elarion.Abstractions;
-            using Elarion.Abstractions.Authorization;
-            using Elarion.Abstractions.Features;
-            using Elarion.Abstractions.Modules;
-            [assembly: GenerateModuleHandlers]
-            [assembly: ElarionAuthorizationDefaults]
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                [RequirePermission("reports", "read")] public abstract class SecuredBase { }
-                [AllowAnonymous] [FeatureGate(Negate = true)]
-                public sealed class ExportHandler : SecuredBase, IStreamHandler<Request, string> {
-                    public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
-                    private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
-                }
-                public sealed record Request;
-            }
-            """;
+                              using System.Collections.Generic;
+                              using System.Threading;
+                              using System.Threading.Tasks;
+                              using Elarion.Abstractions;
+                              using Elarion.Abstractions.Authorization;
+                              using Elarion.Abstractions.Features;
+                              using Elarion.Abstractions.Modules;
+                              [assembly: GenerateModuleHandlers]
+                              [assembly: ElarionAuthorizationDefaults]
+                              namespace Sample.App {
+                                  [AppModule("App")] public static class AppModule { }
+                                  [RequirePermission("reports", "read")] public abstract class SecuredBase { }
+                                  [AllowAnonymous] [FeatureGate(Negate = true)]
+                                  public sealed class ExportHandler : SecuredBase, IStreamHandler<Request, string> {
+                                      public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+                                      private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
+                                  }
+                                  public sealed record Request;
+                              }
+                              """;
 
         var result = Run(source);
         var generated = Get(result, "Sample_App_ExportHandler.stream.g.cs");
@@ -189,18 +222,18 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
     [Fact]
     public void MixedFeatureGate_ReportsBlankNameButRetainsEffectiveGate_WhileAllBlankRemainsInert() {
         const string source = """
-            using System.Collections.Generic; using System.Threading; using System.Threading.Tasks;
-            using Elarion.Abstractions; using Elarion.Abstractions.Features; using Elarion.Abstractions.Modules;
-            [assembly: GenerateModuleHandlers]
-            namespace Sample.App {
-                [AppModule("App")] public static class AppModule { }
-                public sealed record Request;
-                [FeatureGate("paid-export", "")] public sealed class Mixed : IStreamHandler<Request, string> {
-                    public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request r, CancellationToken ct) => throw null!; }
-                [FeatureGate("", Negate = true)] public sealed class Blank : IStreamHandler<Request, string> {
-                    public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request r, CancellationToken ct) => throw null!; }
-            }
-            """;
+                              using System.Collections.Generic; using System.Threading; using System.Threading.Tasks;
+                              using Elarion.Abstractions; using Elarion.Abstractions.Features; using Elarion.Abstractions.Modules;
+                              [assembly: GenerateModuleHandlers]
+                              namespace Sample.App {
+                                  [AppModule("App")] public static class AppModule { }
+                                  public sealed record Request;
+                                  [FeatureGate("paid-export", "")] public sealed class Mixed : IStreamHandler<Request, string> {
+                                      public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request r, CancellationToken ct) => throw null!; }
+                                  [FeatureGate("", Negate = true)] public sealed class Blank : IStreamHandler<Request, string> {
+                                      public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request r, CancellationToken ct) => throw null!; }
+                              }
+                              """;
 
         var result = Run(source);
         Get(result, "Sample_App_Mixed.stream.g.cs").Should().Contain("StreamFeatureGateDecorator");
@@ -248,22 +281,27 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
         var services = new ServiceCollection();
         services.AddKeyedScoped(handlerType, "alternate", handlerType);
 
-        assembly.GetType("Sample.App.DualHandlerRegistration")!.GetMethod("AddDualHandler", BindingFlags.Public | BindingFlags.Static)!
+        assembly.GetType("Sample.App.DualHandlerRegistration")!.GetMethod("AddDualHandler",
+                BindingFlags.Public | BindingFlags.Static)!
             .Invoke(null, [services, ServiceLifetime.Singleton]);
-        assembly.GetType("Sample.App.DualHandlerStreamRegistration")!.GetMethod("AddDualHandlerStream", BindingFlags.Public | BindingFlags.Static)!
+        assembly.GetType("Sample.App.DualHandlerStreamRegistration")!.GetMethod("AddDualHandlerStream",
+                BindingFlags.Public | BindingFlags.Static)!
             .Invoke(null, [services, ServiceLifetime.Transient]);
 
         services.Count(d => d.ServiceType == handlerType && !d.IsKeyedService).Should().Be(1);
-        services.Single(d => d.ServiceType == handlerType && !d.IsKeyedService).Lifetime.Should().Be(ServiceLifetime.Singleton);
+        services.Single(d => d.ServiceType == handlerType && !d.IsKeyedService).Lifetime.Should()
+            .Be(ServiceLifetime.Singleton);
         ResolveAllFromOneScope(services, handlerType, unaryType, streamType);
     }
 
-    private static void AssertOneConcreteDescriptor(IServiceCollection services, Type handlerType, ServiceLifetime lifetime) {
+    private static void AssertOneConcreteDescriptor(IServiceCollection services, Type handlerType,
+        ServiceLifetime lifetime) {
         var descriptors = services.Where(descriptor => descriptor.ServiceType == handlerType).ToArray();
         descriptors.Should().ContainSingle().Which.Lifetime.Should().Be(lifetime);
     }
 
-    private static void ResolveAllFromOneScope(IServiceCollection services, Type handlerType, Type unaryType, Type streamType) {
+    private static void ResolveAllFromOneScope(IServiceCollection services, Type handlerType, Type unaryType,
+        Type streamType) {
         handlerType.GetField("Instances", BindingFlags.Public | BindingFlags.Static)!.SetValue(null, 0);
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
         using var scope = provider.CreateScope();
@@ -277,16 +315,21 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var compilation = CSharpCompilation.Create(
             "DualStreamHandlerRegistration",
-            [CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken)],
+            [
+                CSharpSyntaxTree.ParseText(source, parseOptions,
+                    cancellationToken: TestContext.Current.CancellationToken)
+            ],
             References(), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            [
-                new HandlerRegistrationGenerator().AsSourceGenerator(),
-                new StreamHandlerRegistrationGenerator().AsSourceGenerator(),
-                new ModuleDefaultServicesGenerator().AsSourceGenerator()
-            ], parseOptions: parseOptions);
-        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _, TestContext.Current.CancellationToken);
-        output.GetDiagnostics(TestContext.Current.CancellationToken).Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        [
+            new HandlerRegistrationGenerator().AsSourceGenerator(),
+            new StreamHandlerRegistrationGenerator().AsSourceGenerator(),
+            new ModuleDefaultServicesGenerator().AsSourceGenerator()
+        ], parseOptions: parseOptions);
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _,
+            TestContext.Current.CancellationToken);
+        output.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
         using var image = new MemoryStream();
         output.Emit(image, cancellationToken: TestContext.Current.CancellationToken).Success.Should().BeTrue();
         return Assembly.Load(image.ToArray());
@@ -298,12 +341,17 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
             [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview))],
             References(), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
-        return CSharpGeneratorDriver.Create(new StreamHandlerRegistrationGenerator()).RunGenerators(compilation).GetRunResult();
+        return CSharpGeneratorDriver.Create(new StreamHandlerRegistrationGenerator()).RunGenerators(compilation)
+            .GetRunResult();
     }
 
-    private static string Generated(string source, string file) => Get(Run(source), file);
+    private static string Generated(string source, string file) {
+        return Get(Run(source), file);
+    }
 
-    private static string Get(GeneratorDriverRunResult result, string file) => result.GeneratedTrees.Single(t => Path.GetFileName(t.FilePath) == file).GetText().ToString();
+    private static string Get(GeneratorDriverRunResult result, string file) {
+        return result.GeneratedTrees.Single(t => Path.GetFileName(t.FilePath) == file).GetText().ToString();
+    }
 
     private static IReadOnlyList<MetadataReference> References() {
         var tpa = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
@@ -311,206 +359,209 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
         return tpa.Concat([
             MetadataReference.CreateFromFile(typeof(IStreamHandler<,>).Assembly.Location),
             MetadataReference.CreateFromFile(typeof(StreamHandlerInvoker).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Elarion.Validation.ElarionValidationServiceCollectionExtensions).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Elarion.Validation.ElarionValidationServiceCollectionExtensions)
+                .Assembly.Location)
         ]).ToArray();
     }
 
-    private static string Source(string handlerAttribute) => $$"""
-        using System;
-        using System.Collections.Generic;
-        using System.ComponentModel.DataAnnotations;
-        using System.Threading;
-        using System.Threading.Tasks;
-        using Elarion.Abstractions;
-        using Elarion.Abstractions.Modules;
-        using Elarion.Abstractions.Pipeline;
+    private static string Source(string handlerAttribute) {
+        return $$"""
+                 using System;
+                 using System.Collections.Generic;
+                 using System.ComponentModel.DataAnnotations;
+                 using System.Threading;
+                 using System.Threading.Tasks;
+                 using Elarion.Abstractions;
+                 using Elarion.Abstractions.Modules;
+                 using Elarion.Abstractions.Pipeline;
 
-        [assembly: GenerateModuleHandlers]
-        [assembly: AssemblyPipeline]
+                 [assembly: GenerateModuleHandlers]
+                 [assembly: AssemblyPipeline]
 
-        [DecoratorList(typeof(Sample.Handlers.AssemblyStreamDecorator<,>))]
-        [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
-        public sealed class AssemblyPipelineAttribute : Attribute;
+                 [DecoratorList(typeof(Sample.Handlers.AssemblyStreamDecorator<,>))]
+                 [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+                 public sealed class AssemblyPipelineAttribute : Attribute;
 
-        [DecoratorList(typeof(Sample.Handlers.OuterStreamDecorator<,>), typeof(Sample.Handlers.UnaryDecorator<,>), typeof(Sample.Handlers.InnerStreamDecorator<,>))]
-        [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
-        public sealed class HandlerPipelineAttribute : Attribute;
+                 [DecoratorList(typeof(Sample.Handlers.OuterStreamDecorator<,>), typeof(Sample.Handlers.UnaryDecorator<,>), typeof(Sample.Handlers.InnerStreamDecorator<,>))]
+                 [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+                 public sealed class HandlerPipelineAttribute : Attribute;
 
-        namespace Sample {
-            [AppModule("Sales")]
-            [AssemblyPipeline]
-            public static class SalesModule { }
-        }
+                 namespace Sample {
+                     [AppModule("Sales")]
+                     [AssemblyPipeline]
+                     public static class SalesModule { }
+                 }
 
-        namespace Sample.Handlers {
-            public interface IExtra { }
-            public sealed record Request([property: StringLength(20)] string Name);
-            public sealed record UnaryRequest(string Name);
+                 namespace Sample.Handlers {
+                     public interface IExtra { }
+                     public sealed record Request([property: StringLength(20)] string Name);
+                     public sealed record UnaryRequest(string Name);
 
-            {{handlerAttribute}}
-            public sealed class ReadHandler : IStreamHandler<Request, string>, IHandler<UnaryRequest, Result<string>> {
-                public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request request, CancellationToken ct) =>
-                    ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
-                public ValueTask<Result<string>> HandleAsync(UnaryRequest request, CancellationToken ct) =>
-                    ValueTask.FromResult(Result<string>.Success(request.Name));
-                private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
-            }
+                     {{handlerAttribute}}
+                     public sealed class ReadHandler : IStreamHandler<Request, string>, IHandler<UnaryRequest, Result<string>> {
+                         public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request request, CancellationToken ct) =>
+                             ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+                         public ValueTask<Result<string>> HandleAsync(UnaryRequest request, CancellationToken ct) =>
+                             ValueTask.FromResult(Result<string>.Success(request.Name));
+                         private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
+                     }
 
-            public sealed class OuterStreamDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner, IExtra extra)
-                : IStreamHandler<TRequest, TItem> {
-                public static bool AppliesTo(StreamHandlerMetadata metadata) => metadata.ItemType == typeof(string);
-                public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct);
-            }
-            public sealed class InnerStreamDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner)
-                : IStreamHandler<TRequest, TItem> {
-                public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct);
-            }
-            public sealed class AssemblyStreamDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner)
-                : IStreamHandler<TRequest, TItem> {
-                public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct);
-            }
-            public sealed class UnaryDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner) : IHandler<TRequest, TResponse> {
-                public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct);
-            }
-        }
-        """;
+                     public sealed class OuterStreamDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner, IExtra extra)
+                         : IStreamHandler<TRequest, TItem> {
+                         public static bool AppliesTo(StreamHandlerMetadata metadata) => metadata.ItemType == typeof(string);
+                         public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct);
+                     }
+                     public sealed class InnerStreamDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner)
+                         : IStreamHandler<TRequest, TItem> {
+                         public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct);
+                     }
+                     public sealed class AssemblyStreamDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner)
+                         : IStreamHandler<TRequest, TItem> {
+                         public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct);
+                     }
+                     public sealed class UnaryDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner) : IHandler<TRequest, TResponse> {
+                         public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct);
+                     }
+                 }
+                 """;
+    }
 
     private const string ConstraintSource = """
-        using System;
-        using System.Collections.Generic;
-        using System.Threading;
-        using System.Threading.Tasks;
-        using Elarion.Abstractions;
-        using Elarion.Abstractions.Modules;
-        using Elarion.Abstractions.Pipeline;
+                                            using System;
+                                            using System.Collections.Generic;
+                                            using System.Threading;
+                                            using System.Threading.Tasks;
+                                            using Elarion.Abstractions;
+                                            using Elarion.Abstractions.Modules;
+                                            using Elarion.Abstractions.Pipeline;
 
-        [assembly: GenerateModuleHandlers]
-        [assembly: Sample.ConstraintPipeline]
+                                            [assembly: GenerateModuleHandlers]
+                                            [assembly: Sample.ConstraintPipeline]
 
-        namespace Sample {
-            [AppModule("Constraints")]
-            public static class ConstraintsModule { }
+                                            namespace Sample {
+                                                [AppModule("Constraints")]
+                                                public static class ConstraintsModule { }
 
-            [DecoratorList(
-                typeof(Sample.Handlers.EquatableSelfDecorator<,>),
-                typeof(Sample.Handlers.NewDecorator<,>),
-                typeof(Sample.Handlers.UnmanagedDecorator<,>),
-                typeof(Sample.Handlers.ReferenceDecorator<,>),
-                typeof(Sample.Handlers.ValueDecorator<,>),
-                typeof(Sample.Handlers.CrossParameterDecorator<,>))]
-            [AttributeUsage(AttributeTargets.Assembly)]
-            public sealed class ConstraintPipelineAttribute : Attribute { }
-        }
+                                                [DecoratorList(
+                                                    typeof(Sample.Handlers.EquatableSelfDecorator<,>),
+                                                    typeof(Sample.Handlers.NewDecorator<,>),
+                                                    typeof(Sample.Handlers.UnmanagedDecorator<,>),
+                                                    typeof(Sample.Handlers.ReferenceDecorator<,>),
+                                                    typeof(Sample.Handlers.ValueDecorator<,>),
+                                                    typeof(Sample.Handlers.CrossParameterDecorator<,>))]
+                                                [AttributeUsage(AttributeTargets.Assembly)]
+                                                public sealed class ConstraintPipelineAttribute : Attribute { }
+                                            }
 
-        namespace Sample.Handlers {
-            public sealed class EquatableRequest : IEquatable<EquatableRequest> {
-                public bool Equals(EquatableRequest? other) => other is not null;
-            }
-            public sealed class PublicDefault { public PublicDefault() { } }
-            public sealed class NoDefault { public NoDefault(int value) { } }
-            public abstract class AbstractDefault { public AbstractDefault() { } }
-            public readonly struct UnmanagedRequest;
-            public readonly struct ManagedRequest { public ManagedRequest(string value) => Value = value; public string Value { get; } }
-            public sealed class CrossRequest : IEquatable<string> {
-                public bool Equals(string? other) => other is not null;
-            }
+                                            namespace Sample.Handlers {
+                                                public sealed class EquatableRequest : IEquatable<EquatableRequest> {
+                                                    public bool Equals(EquatableRequest? other) => other is not null;
+                                                }
+                                                public sealed class PublicDefault { public PublicDefault() { } }
+                                                public sealed class NoDefault { public NoDefault(int value) { } }
+                                                public abstract class AbstractDefault { public AbstractDefault() { } }
+                                                public readonly struct UnmanagedRequest;
+                                                public readonly struct ManagedRequest { public ManagedRequest(string value) => Value = value; public string Value { get; } }
+                                                public sealed class CrossRequest : IEquatable<string> {
+                                                    public bool Equals(string? other) => other is not null;
+                                                }
 
-            public sealed class EquatableHandler : IStreamHandler<EquatableRequest, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(EquatableRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
-            public sealed class PublicCtorHandler : IStreamHandler<PublicDefault, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(PublicDefault request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
-            public sealed class NoDefaultCtorHandler : IStreamHandler<NoDefault, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(NoDefault request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
-            public sealed class AbstractDefaultHandler : IStreamHandler<AbstractDefault, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(AbstractDefault request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
-            public sealed class UnmanagedHandler : IStreamHandler<UnmanagedRequest, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(UnmanagedRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
-            public sealed class ManagedHandler : IStreamHandler<ManagedRequest, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(ManagedRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
-            public sealed class ReferenceHandler : IStreamHandler<string, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(string request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
-            public sealed class ValueHandler : IStreamHandler<int, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(int request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
-            public sealed class CrossParameterHandler : IStreamHandler<CrossRequest, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(CrossRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
+                                                public sealed class EquatableHandler : IStreamHandler<EquatableRequest, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(EquatableRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
+                                                public sealed class PublicCtorHandler : IStreamHandler<PublicDefault, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(PublicDefault request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
+                                                public sealed class NoDefaultCtorHandler : IStreamHandler<NoDefault, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(NoDefault request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
+                                                public sealed class AbstractDefaultHandler : IStreamHandler<AbstractDefault, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(AbstractDefault request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
+                                                public sealed class UnmanagedHandler : IStreamHandler<UnmanagedRequest, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(UnmanagedRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
+                                                public sealed class ManagedHandler : IStreamHandler<ManagedRequest, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(ManagedRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
+                                                public sealed class ReferenceHandler : IStreamHandler<string, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(string request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
+                                                public sealed class ValueHandler : IStreamHandler<int, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(int request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
+                                                public sealed class CrossParameterHandler : IStreamHandler<CrossRequest, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(CrossRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(StreamValues.Values())); }
 
-            public sealed class EquatableSelfDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : IEquatable<TRequest> { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
-            public sealed class NewDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : new() { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
-            public sealed class UnmanagedDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : unmanaged { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
-            public sealed class ReferenceDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : class { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
-            public sealed class ValueDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : struct { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
-            public sealed class CrossParameterDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : IEquatable<TItem> { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
+                                                public sealed class EquatableSelfDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : IEquatable<TRequest> { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
+                                                public sealed class NewDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : new() { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
+                                                public sealed class UnmanagedDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : unmanaged { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
+                                                public sealed class ReferenceDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : class { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
+                                                public sealed class ValueDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : struct { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
+                                                public sealed class CrossParameterDecorator<TRequest, TItem>(IStreamHandler<TRequest, TItem> inner) : IStreamHandler<TRequest, TItem> where TRequest : IEquatable<TItem> { public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
 
-            public static class StreamValues { public static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); } }
-        }
-        """;
+                                                public static class StreamValues { public static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); } }
+                                            }
+                                            """;
 
     private const string DualShapeSource = """
-        using System.Collections.Generic;
-        using System.Threading;
-        using System.Threading.Tasks;
-        using Elarion.Abstractions;
-        using Elarion.Abstractions.Authorization;
-        using Elarion.Abstractions.Modules;
+                                           using System.Collections.Generic;
+                                           using System.Threading;
+                                           using System.Threading.Tasks;
+                                           using Elarion.Abstractions;
+                                           using Elarion.Abstractions.Authorization;
+                                           using Elarion.Abstractions.Modules;
 
-        [assembly: GenerateModuleHandlers]
-        [assembly: ElarionAuthorizationDefaults(RequireAuthenticated = false)]
+                                           [assembly: GenerateModuleHandlers]
+                                           [assembly: ElarionAuthorizationDefaults(RequireAuthenticated = false)]
 
-        namespace Sample.App {
-            [AppModule("App")]
-            public static class AppModule { }
+                                           namespace Sample.App {
+                                               [AppModule("App")]
+                                               public static class AppModule { }
 
-            public sealed record UnaryRequest(int Id);
-            public sealed record StreamRequest(int Id);
-            public sealed class DualHandler : IHandler<UnaryRequest, Result<string>>, IStreamHandler<StreamRequest, string> {
-                public static int Instances;
-                public DualHandler() => Instances++;
-                public ValueTask<Result<string>> HandleAsync(UnaryRequest request, CancellationToken ct) => ValueTask.FromResult(Result<string>.Success("ok"));
-                public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(StreamRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
-                private static async IAsyncEnumerable<string> Values() { yield return "ok"; await Task.Yield(); }
-            }
-        }
-        """;
+                                               public sealed record UnaryRequest(int Id);
+                                               public sealed record StreamRequest(int Id);
+                                               public sealed class DualHandler : IHandler<UnaryRequest, Result<string>>, IStreamHandler<StreamRequest, string> {
+                                                   public static int Instances;
+                                                   public DualHandler() => Instances++;
+                                                   public ValueTask<Result<string>> HandleAsync(UnaryRequest request, CancellationToken ct) => ValueTask.FromResult(Result<string>.Success("ok"));
+                                                   public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(StreamRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+                                                   private static async IAsyncEnumerable<string> Values() { yield return "ok"; await Task.Yield(); }
+                                               }
+                                           }
+                                           """;
 
     private const string ResourceAndPredicateSource = """
-        using System;
-        using System.Collections.Generic;
-        using System.Threading;
-        using System.Threading.Tasks;
-        using Elarion.Abstractions;
-        using Elarion.Abstractions.Authorization;
-        using Elarion.Abstractions.Modules;
-        using Elarion.Abstractions.Pipeline;
-        [assembly: GenerateModuleHandlers]
-        [assembly: Sample.Pipeline]
-        namespace Sample {
-            [AppModule("App")] public static class AppModule { }
-            [DecoratorList(typeof(Handlers.ConditionalStreamDecorator<,>))]
-            [AttributeUsage(AttributeTargets.Assembly)] public sealed class PipelineAttribute : Attribute { }
-        }
-        namespace Sample.Handlers {
-            public sealed class Resource;
-            public class OwnerBase { public Owner Owner { get; } = new(); }
-            public sealed class Owner { public int Id { get; } }
-            public sealed class PrivateOwner { public int Id { private get; set; } }
-            public sealed class PrivateOwnerRequest { public PrivateOwner Owner { get; } = new(); }
-            [RequireResource(typeof(Resource), Id = "Owner.Id")]
-            public sealed class InheritedResourceHandler : IStreamHandler<OwnerBase, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(OwnerBase request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values())); private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); } }
-            [RequireResource(typeof(Resource), Id = "Missing")]
-            public sealed class InvalidResourceHandler : IStreamHandler<OwnerBase, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(OwnerBase request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values())); private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); } }
-            [RequireResource(typeof(Resource), Id = "Owner.Id")]
-            public sealed class PrivateGetterResourceHandler : IStreamHandler<PrivateOwnerRequest, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(PrivateOwnerRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values())); private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); } }
-            public sealed class ConditionalStreamDecorator<TRequest, TItem>(IStreamHandler<TRequest,TItem> inner) : IStreamHandler<TRequest,TItem> { public static bool AppliesTo(StreamHandlerMetadata metadata) => true; public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
-        }
-        """;
+                                                      using System;
+                                                      using System.Collections.Generic;
+                                                      using System.Threading;
+                                                      using System.Threading.Tasks;
+                                                      using Elarion.Abstractions;
+                                                      using Elarion.Abstractions.Authorization;
+                                                      using Elarion.Abstractions.Modules;
+                                                      using Elarion.Abstractions.Pipeline;
+                                                      [assembly: GenerateModuleHandlers]
+                                                      [assembly: Sample.Pipeline]
+                                                      namespace Sample {
+                                                          [AppModule("App")] public static class AppModule { }
+                                                          [DecoratorList(typeof(Handlers.ConditionalStreamDecorator<,>))]
+                                                          [AttributeUsage(AttributeTargets.Assembly)] public sealed class PipelineAttribute : Attribute { }
+                                                      }
+                                                      namespace Sample.Handlers {
+                                                          public sealed class Resource;
+                                                          public class OwnerBase { public Owner Owner { get; } = new(); }
+                                                          public sealed class Owner { public int Id { get; } }
+                                                          public sealed class PrivateOwner { public int Id { private get; set; } }
+                                                          public sealed class PrivateOwnerRequest { public PrivateOwner Owner { get; } = new(); }
+                                                          [RequireResource(typeof(Resource), Id = "Owner.Id")]
+                                                          public sealed class InheritedResourceHandler : IStreamHandler<OwnerBase, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(OwnerBase request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values())); private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); } }
+                                                          [RequireResource(typeof(Resource), Id = "Missing")]
+                                                          public sealed class InvalidResourceHandler : IStreamHandler<OwnerBase, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(OwnerBase request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values())); private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); } }
+                                                          [RequireResource(typeof(Resource), Id = "Owner.Id")]
+                                                          public sealed class PrivateGetterResourceHandler : IStreamHandler<PrivateOwnerRequest, string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(PrivateOwnerRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values())); private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); } }
+                                                          public sealed class ConditionalStreamDecorator<TRequest, TItem>(IStreamHandler<TRequest,TItem> inner) : IStreamHandler<TRequest,TItem> { public static bool AppliesTo(StreamHandlerMetadata metadata) => true; public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request, ct); }
+                                                      }
+                                                      """;
 
     private const string InvalidPredicateSource = """
-        using System;
-        using System.Collections.Generic;
-        using System.Threading;
-        using System.Threading.Tasks;
-        using Elarion.Abstractions;
-        using Elarion.Abstractions.Modules;
-        using Elarion.Abstractions.Pipeline;
-        [assembly: GenerateModuleHandlers]
-        [assembly: Sample.Pipeline]
-        namespace Sample { [AppModule("App")] public static class AppModule { } [DecoratorList(typeof(Handlers.PrivateDecorator<,>), typeof(Handlers.WrongDecorator<,>))] [AttributeUsage(AttributeTargets.Assembly)] public sealed class PipelineAttribute : Attribute { } }
-        namespace Sample.Handlers {
-            public sealed class Request;
-            public sealed class Handler : IStreamHandler<Request,string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values())); private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); } }
-            public sealed class PrivateDecorator<TRequest,TItem>(IStreamHandler<TRequest,TItem> inner) : IStreamHandler<TRequest,TItem> { private static bool AppliesTo(StreamHandlerMetadata metadata) => true; public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request,ct); }
-            public sealed class WrongDecorator<TRequest,TItem>(IStreamHandler<TRequest,TItem> inner) : IStreamHandler<TRequest,TItem> { public static bool AppliesTo(HandlerMetadata metadata) => true; public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request,ct); }
-        }
-        """;
+                                                  using System;
+                                                  using System.Collections.Generic;
+                                                  using System.Threading;
+                                                  using System.Threading.Tasks;
+                                                  using Elarion.Abstractions;
+                                                  using Elarion.Abstractions.Modules;
+                                                  using Elarion.Abstractions.Pipeline;
+                                                  [assembly: GenerateModuleHandlers]
+                                                  [assembly: Sample.Pipeline]
+                                                  namespace Sample { [AppModule("App")] public static class AppModule { } [DecoratorList(typeof(Handlers.PrivateDecorator<,>), typeof(Handlers.WrongDecorator<,>))] [AttributeUsage(AttributeTargets.Assembly)] public sealed class PipelineAttribute : Attribute { } }
+                                                  namespace Sample.Handlers {
+                                                      public sealed class Request;
+                                                      public sealed class Handler : IStreamHandler<Request,string> { public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values())); private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); } }
+                                                      public sealed class PrivateDecorator<TRequest,TItem>(IStreamHandler<TRequest,TItem> inner) : IStreamHandler<TRequest,TItem> { private static bool AppliesTo(StreamHandlerMetadata metadata) => true; public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request,ct); }
+                                                      public sealed class WrongDecorator<TRequest,TItem>(IStreamHandler<TRequest,TItem> inner) : IStreamHandler<TRequest,TItem> { public static bool AppliesTo(HandlerMetadata metadata) => true; public ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) => inner.HandleAsync(request,ct); }
+                                                  }
+                                                  """;
 }

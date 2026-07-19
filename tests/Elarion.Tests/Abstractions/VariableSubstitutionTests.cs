@@ -6,8 +6,9 @@ using Xunit;
 namespace Elarion.Tests.Abstractions;
 
 public sealed class VariableSubstitutionTests {
-    private static IVariableSource Source(params (string Key, string? Value)[] values) =>
-        new DictionaryVariableSource(values.ToDictionary(pair => pair.Key, pair => pair.Value));
+    private static IVariableSource Source(params (string Key, string? Value)[] values) {
+        return new DictionaryVariableSource(values.ToDictionary(pair => pair.Key, pair => pair.Value));
+    }
 
     [Theory]
     [InlineData("${a}", true)]
@@ -149,6 +150,8 @@ public sealed class VariableSubstitutionTests {
     }
 
     private sealed class DictionaryVariableSource(Dictionary<string, string?> values) : IVariableSource {
-        public bool TryGetValue(string key, out string? value) => values.TryGetValue(key, out value);
+        public bool TryGetValue(string key, out string? value) {
+            return values.TryGetValue(key, out value);
+        }
     }
 }

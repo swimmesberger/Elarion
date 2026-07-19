@@ -44,12 +44,13 @@ public sealed class ResourceGrantSharingIntegrationTests(ResourceGrantSharingFix
 
         // Share the one contact with the "Hausmeister" role for read.
         await grantStore.GrantAsync(
-            new ResourceGrant("Contact", shared.ToString(), ResourcePrincipal.Role("Hausmeister"), ResourceOperation.Read), ct);
+            new ResourceGrant("Contact", shared.ToString(), ResourcePrincipal.Role("Hausmeister"),
+                ResourceOperation.Read), ct);
 
         var hausmeister = new FakeCurrentUser {
             IsAuthenticated = true,
             UserId = Guid.NewGuid().ToString(),
-            Roles = ["Hausmeister"],
+            Roles = ["Hausmeister"]
         };
         var authorizer = new ContactAccess(grantSource);
 
@@ -84,12 +85,13 @@ public sealed class ResourceGrantSharingIntegrationTests(ResourceGrantSharingFix
 
         var shared = await SeedContactAsync(db, OwnerB, "Shared with Hausmeister only", ct);
         await grantStore.GrantAsync(
-            new ResourceGrant("Contact", shared.ToString(), ResourcePrincipal.Role("Hausmeister"), ResourceOperation.Read), ct);
+            new ResourceGrant("Contact", shared.ToString(), ResourcePrincipal.Role("Hausmeister"),
+                ResourceOperation.Read), ct);
 
         var outsider = new FakeCurrentUser {
             IsAuthenticated = true,
             UserId = Guid.NewGuid().ToString(),
-            Roles = ["Tenant"],
+            Roles = ["Tenant"]
         };
 
         var page = await db.Contacts
@@ -120,13 +122,14 @@ public sealed class ResourceGrantSharingIntegrationTests(ResourceGrantSharingFix
 
         var shared = await SeedContactAsync(db, OwnerB, "Point-check shared with Hausmeister", ct);
         await grantStore.GrantAsync(
-            new ResourceGrant("Contact", shared.ToString(), ResourcePrincipal.Role("Hausmeister"), ResourceOperation.Read), ct);
+            new ResourceGrant("Contact", shared.ToString(), ResourcePrincipal.Role("Hausmeister"),
+                ResourceOperation.Read), ct);
 
         var member = new FakeCurrentUser {
-            IsAuthenticated = true, UserId = Guid.NewGuid().ToString(), Roles = ["Hausmeister"],
+            IsAuthenticated = true, UserId = Guid.NewGuid().ToString(), Roles = ["Hausmeister"]
         };
         var outsider = new FakeCurrentUser {
-            IsAuthenticated = true, UserId = Guid.NewGuid().ToString(), Roles = ["Other"],
+            IsAuthenticated = true, UserId = Guid.NewGuid().ToString(), Roles = ["Other"]
         };
 
         var memberAllowed = await resourceAuthorizer.AuthorizeResourceAsync(
@@ -138,7 +141,8 @@ public sealed class ResourceGrantSharingIntegrationTests(ResourceGrantSharingFix
         outsiderAllowed.Should().BeFalse();
     }
 
-    private static async Task<Guid> SeedContactAsync(ContactsDbContext db, Guid ownerId, string name, CancellationToken ct) {
+    private static async Task<Guid> SeedContactAsync(ContactsDbContext db, Guid ownerId, string name,
+        CancellationToken ct) {
         var contact = new Contact { Id = Guid.NewGuid(), OwnerId = ownerId, Name = name };
         db.Contacts.Add(contact);
         await db.SaveChangesAsync(ct);
@@ -175,9 +179,7 @@ public sealed class ContactsDbContext(DbContextOptions<ContactsDbContext> option
 /// </summary>
 internal sealed class ContactAccess(IResourceGrantSource grants) : IQueryAuthorizer<Contact> {
     public Expression<Func<Contact, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) {
-        if (!user.IsAuthenticated) {
-            return _ => false;
-        }
+        if (!user.IsAuthenticated) return _ => false;
 
         var ownerOk = Guid.TryParse(user.UserId, out var ownerKey);
         var op = operation.Name;
@@ -186,11 +188,12 @@ internal sealed class ContactAccess(IResourceGrantSource grants) : IQueryAuthori
         var grantsQuery = grants.Grants;
 
         return contact => (ownerOk && contact.OwnerId == ownerKey)
-            || grantsQuery.Any(grant => grant.ResourceType == "Contact"
-                && grant.ResourceId == contact.Id.ToString()
-                && grant.Operation == op
-                && ((grant.PrincipalKind == "user" && grant.PrincipalId == uid)
-                    || (grant.PrincipalKind == "role" && roles.Contains(grant.PrincipalId))));
+                          || grantsQuery.Any(grant => grant.ResourceType == "Contact"
+                                                      && grant.ResourceId == contact.Id.ToString()
+                                                      && grant.Operation == op
+                                                      && ((grant.PrincipalKind == "user" && grant.PrincipalId == uid)
+                                                          || (grant.PrincipalKind == "role" &&
+                                                              roles.Contains(grant.PrincipalId))));
     }
 }
 
@@ -224,8 +227,6 @@ public sealed class ResourceGrantSharingFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 }

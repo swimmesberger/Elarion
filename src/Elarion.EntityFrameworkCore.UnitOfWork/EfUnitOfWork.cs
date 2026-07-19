@@ -55,9 +55,8 @@ public sealed class EfUnitOfWork<TDbContext>(TDbContext dbContext) : IUnitOfWork
 
         var transaction = await dbContext.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        if (options.LockTimeout is { } lockTimeout && IsPostgres(dbContext)) {
+        if (options.LockTimeout is { } lockTimeout && IsPostgres(dbContext))
             await ApplyLockTimeoutAsync(lockTimeout, ct).ConfigureAwait(false);
-        }
 
         return new EfUnitOfWorkScope(dbContext, transaction);
     }
@@ -70,8 +69,9 @@ public sealed class EfUnitOfWork<TDbContext>(TDbContext dbContext) : IUnitOfWork
         await dbContext.Database.ExecuteSqlRawAsync(sql, ct).ConfigureAwait(false);
     }
 
-    private static bool IsPostgres(DbContext context) =>
-        string.Equals(context.Database.ProviderName, NpgsqlProviderName, StringComparison.Ordinal);
+    private static bool IsPostgres(DbContext context) {
+        return string.Equals(context.Database.ProviderName, NpgsqlProviderName, StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// The root scope that owns the physical transaction. Commit flushes the change tracker first (so a handler
@@ -84,15 +84,21 @@ public sealed class EfUnitOfWork<TDbContext>(TDbContext dbContext) : IUnitOfWork
             await transaction.CommitAsync(ct).ConfigureAwait(false);
         }
 
-        public ValueTask RollbackAsync(CancellationToken ct) => new(transaction.RollbackAsync(ct));
+        public ValueTask RollbackAsync(CancellationToken ct) {
+            return new ValueTask(transaction.RollbackAsync(ct));
+        }
 
-        public ValueTask CreateSavepointAsync(string name, CancellationToken ct) =>
-            new(transaction.CreateSavepointAsync(name, ct));
+        public ValueTask CreateSavepointAsync(string name, CancellationToken ct) {
+            return new ValueTask(transaction.CreateSavepointAsync(name, ct));
+        }
 
-        public ValueTask RollbackToSavepointAsync(string name, CancellationToken ct) =>
-            new(transaction.RollbackToSavepointAsync(name, ct));
+        public ValueTask RollbackToSavepointAsync(string name, CancellationToken ct) {
+            return new ValueTask(transaction.RollbackToSavepointAsync(name, ct));
+        }
 
-        public ValueTask DisposeAsync() => transaction.DisposeAsync();
+        public ValueTask DisposeAsync() {
+            return transaction.DisposeAsync();
+        }
     }
 
     /// <summary>
@@ -113,12 +119,11 @@ public sealed class EfUnitOfWork<TDbContext>(TDbContext dbContext) : IUnitOfWork
         public async ValueTask CommitAsync(CancellationToken ct) {
             await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
             await transaction.ReleaseSavepointAsync(savepoint, ct).ConfigureAwait(false);
-            if (restoreLockTimeout is not null) {
+            if (restoreLockTimeout is not null)
                 // Releasing the savepoint keeps this scope's SET LOCAL alive for the rest of the physical
                 // transaction — put the ambient value back so the outer scope's statements are unaffected.
                 await dbContext.Database.ExecuteSqlRawAsync(
                     "SELECT set_config('lock_timeout', {0}, true)", [restoreLockTimeout], ct).ConfigureAwait(false);
-            }
 
             _completed = true;
         }
@@ -128,18 +133,19 @@ public sealed class EfUnitOfWork<TDbContext>(TDbContext dbContext) : IUnitOfWork
             _completed = true;
         }
 
-        public ValueTask CreateSavepointAsync(string name, CancellationToken ct) =>
-            new(transaction.CreateSavepointAsync(name, ct));
+        public ValueTask CreateSavepointAsync(string name, CancellationToken ct) {
+            return new ValueTask(transaction.CreateSavepointAsync(name, ct));
+        }
 
-        public ValueTask RollbackToSavepointAsync(string name, CancellationToken ct) =>
-            new(transaction.RollbackToSavepointAsync(name, ct));
+        public ValueTask RollbackToSavepointAsync(string name, CancellationToken ct) {
+            return new ValueTask(transaction.RollbackToSavepointAsync(name, ct));
+        }
 
         public async ValueTask DisposeAsync() {
-            if (!_completed) {
+            if (!_completed)
                 // Dispose without an explicit commit rolls back this nested unit of work only — never the
                 // ambient transaction the outer scope still owns.
                 await transaction.RollbackToSavepointAsync(savepoint, CancellationToken.None).ConfigureAwait(false);
-            }
         }
     }
 }

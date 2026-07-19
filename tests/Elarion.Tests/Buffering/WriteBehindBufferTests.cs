@@ -37,7 +37,7 @@ public sealed class WriteBehindBufferTests {
         await using var buffer = new WriteBehindBuffer<int>(
             async (batch, _) => await batches.Writer.WriteAsync(batch, TestToken),
             new WriteBehindBufferOptions {
-                MaxItems = 100, FlushInterval = TimeSpan.FromSeconds(10), TimeProvider = time,
+                MaxItems = 100, FlushInterval = TimeSpan.FromSeconds(10), TimeProvider = time
             });
 
         buffer.Add(1);
@@ -60,7 +60,7 @@ public sealed class WriteBehindBufferTests {
                 return ValueTask.CompletedTask;
             },
             new WriteBehindBufferOptions {
-                MaxItems = 100, FlushInterval = Timeout.InfiniteTimeSpan, TimeProvider = new FakeTimeProvider(),
+                MaxItems = 100, FlushInterval = Timeout.InfiniteTimeSpan, TimeProvider = new FakeTimeProvider()
             });
 
         buffer.Add(1);
@@ -89,9 +89,7 @@ public sealed class WriteBehindBufferTests {
         await firstBatchStarted.Task.WaitAsync(TestToken);
 
         // The flush target is stalled: five more samples against capacity 4 evict the oldest one.
-        for (var i = 3; i <= 7; i++) {
-            buffer.Add(i);
-        }
+        for (var i = 3; i <= 7; i++) buffer.Add(i);
 
         buffer.Count.Should().Be(4);
         buffer.DroppedCount.Should().Be(1);

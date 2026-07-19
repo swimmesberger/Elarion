@@ -21,77 +21,76 @@ public sealed partial class SqlRecordMapperGenerator {
         var columns = model.Columns;
 
         builder.AppendLine($$"""
-            /// <summary>Generated SQL row mapper for <see cref="{{type}}"/> (table "{{model.TableName}}").</summary>
-            {{model.Accessibility}} sealed partial class {{model.MapperName}} : global::Elarion.Sql.ISqlRowMapper<{{type}}> {
-                /// <summary>The mapped table name.</summary>
-                public const string TableName = {{SourceLiterals.String(model.TableName)}};
-            """);
+                             /// <summary>Generated SQL row mapper for <see cref="{{type}}"/> (table "{{model.TableName}}").</summary>
+                             {{model.Accessibility}} sealed partial class {{model.MapperName}} : global::Elarion.Sql.ISqlRowMapper<{{type}}> {
+                                 /// <summary>The mapped table name.</summary>
+                                 public const string TableName = {{SourceLiterals.String(model.TableName)}};
+                             """);
 
         if (model.RequiresJson) {
             builder.AppendLine($$"""
 
-                    private readonly global::Elarion.Abstractions.Serialization.IElarionJsonSerialization? _json;
+                                     private readonly global::Elarion.Abstractions.Serialization.IElarionJsonSerialization? _json;
 
-                    /// <summary>
-                    /// JSON columns serialize through the canonical accessor (ADR-0023). The DI registration
-                    /// constructs the mapper with it; the static <see cref="Instance"/> reads it lazily from
-                    /// the ambient <c>ElarionSqlJson</c> at first JSON-column use (installed at startup).
-                    /// </summary>
-                    public {{model.MapperName}}(global::Elarion.Abstractions.Serialization.IElarionJsonSerialization json) {
-                        _json = json;
-                    }
+                                     /// <summary>
+                                     /// JSON columns serialize through the canonical accessor (ADR-0023). The DI registration
+                                     /// constructs the mapper with it; the static <see cref="Instance"/> reads it lazily from
+                                     /// the ambient <c>ElarionSqlJson</c> at first JSON-column use (installed at startup).
+                                     /// </summary>
+                                     public {{model.MapperName}}(global::Elarion.Abstractions.Serialization.IElarionJsonSerialization json) {
+                                         _json = json;
+                                     }
 
-                    private {{model.MapperName}}() {
-                    }
+                                     private {{model.MapperName}}() {
+                                     }
 
-                    /// <summary>The shared instance; its JSON accessor comes from the ambient <c>ElarionSqlJson</c>.</summary>
-                    public static {{model.MapperName}} Instance { get; } = new {{model.MapperName}}();
+                                     /// <summary>The shared instance; its JSON accessor comes from the ambient <c>ElarionSqlJson</c>.</summary>
+                                     public static {{model.MapperName}} Instance { get; } = new {{model.MapperName}}();
 
-                    private global::Elarion.Abstractions.Serialization.IElarionJsonSerialization Json =>
-                        _json ?? global::Elarion.Sql.ElarionSqlJson.Serialization;
-                """);
+                                     private global::Elarion.Abstractions.Serialization.IElarionJsonSerialization Json =>
+                                         _json ?? global::Elarion.Sql.ElarionSqlJson.Serialization;
+                                 """);
 
             foreach (var column in columns) {
-                if (column.Kind != ColumnKind.Json) {
-                    continue;
-                }
+                if (column.Kind != ColumnKind.Json) continue;
 
                 builder.AppendLine($$"""
 
-                        private global::System.Text.Json.Serialization.Metadata.JsonTypeInfo<{{column.JsonTypeFqn}}>? _jsonTypeInfo{{column.PropertyName}};
+                                         private global::System.Text.Json.Serialization.Metadata.JsonTypeInfo<{{column.JsonTypeFqn}}>? _jsonTypeInfo{{column.PropertyName}};
 
-                        private global::System.Text.Json.Serialization.Metadata.JsonTypeInfo<{{column.JsonTypeFqn}}> JsonTypeInfo{{column.PropertyName}} =>
-                            _jsonTypeInfo{{column.PropertyName}} ??= Json.GetTypeInfo<{{column.JsonTypeFqn}}>();
-                    """);
+                                         private global::System.Text.Json.Serialization.Metadata.JsonTypeInfo<{{column.JsonTypeFqn}}> JsonTypeInfo{{column.PropertyName}} =>
+                                             _jsonTypeInfo{{column.PropertyName}} ??= Json.GetTypeInfo<{{column.JsonTypeFqn}}>();
+                                     """);
             }
         }
         else {
             builder.AppendLine($$"""
 
-                    /// <summary>The shared stateless instance, for DI-free hosts.</summary>
-                    public static {{model.MapperName}} Instance { get; } = new {{model.MapperName}}();
-                """);
+                                     /// <summary>The shared stateless instance, for DI-free hosts.</summary>
+                                     public static {{model.MapperName}} Instance { get; } = new {{model.MapperName}}();
+                                 """);
         }
 
         // Column-name constants: hand-written SQL composes without stringly duplication.
         builder.AppendLine();
         builder.AppendLine("    /// <summary>The mapped column names, for composing hand-written SQL.</summary>");
         builder.AppendLine("    public static class Columns {");
-        foreach (var column in columns) {
+        foreach (var column in columns)
             builder.AppendLine(
                 $"        public const string {column.PropertyName} = {SourceLiterals.String(column.ColumnName)};");
-        }
 
         builder.AppendLine();
         builder.AppendLine("        /// <summary>All mapped columns, comma-separated, in declaration order.</summary>");
         builder.AppendLine(
             $"        public const string All = {SourceLiterals.String(string.Join(", ", columns.Select(static c => c.ColumnName)))};");
         builder.AppendLine();
-        builder.AppendLine("        /// <summary>One named placeholder per column, matching <c>BindParameters</c>.</summary>");
+        builder.AppendLine(
+            "        /// <summary>One named placeholder per column, matching <c>BindParameters</c>.</summary>");
         builder.AppendLine(
             $"        public const string AllParameters = {SourceLiterals.String(string.Join(", ", columns.Select(static c => "@" + c.ColumnName)))};");
         builder.AppendLine();
-        builder.AppendLine("        /// <summary>The mechanical <c>UPDATE … SET</c> list: every column assigned its placeholder.</summary>");
+        builder.AppendLine(
+            "        /// <summary>The mechanical <c>UPDATE … SET</c> list: every column assigned its placeholder.</summary>");
         builder.AppendLine(
             $"        public const string AllAssignments = {SourceLiterals.String(string.Join(", ", columns.Select(static c => c.ColumnName + " = @" + c.ColumnName)))};");
         builder.AppendLine("    }");
@@ -106,90 +105,88 @@ public sealed partial class SqlRecordMapperGenerator {
             $"SELECT {string.Join(", ", columns.Select(static c => c.ColumnName))} FROM {model.TableName}";
         builder.AppendLine($$"""
 
-                /// <summary>
-                /// The full-row INSERT, parameters matching <c>BindParameters</c> — append conflict/returning
-                /// clauses as needed (<c>Insert + " ON CONFLICT DO NOTHING"</c>).
-                /// </summary>
-                public const string Insert = {{SourceLiterals.String(insert)}};
+                                 /// <summary>
+                                 /// The full-row INSERT, parameters matching <c>BindParameters</c> — append conflict/returning
+                                 /// clauses as needed (<c>Insert + " ON CONFLICT DO NOTHING"</c>).
+                                 /// </summary>
+                                 public const string Insert = {{SourceLiterals.String(insert)}};
 
-                /// <summary>
-                /// The SELECT-list prefix over all mapped columns — append <c>WHERE</c>/<c>ORDER BY</c>/… as
-                /// needed; rows read back through the mapper's typed reads.
-                /// </summary>
-                public const string Select = {{SourceLiterals.String(select)}};
-            """);
+                                 /// <summary>
+                                 /// The SELECT-list prefix over all mapped columns — append <c>WHERE</c>/<c>ORDER BY</c>/… as
+                                 /// needed; rows read back through the mapper's typed reads.
+                                 /// </summary>
+                                 public const string Select = {{SourceLiterals.String(select)}};
+                             """);
 
         // Ordinals: the once-per-result-set name lookup; every row read after it is positional and typed.
         builder.AppendLine();
         builder.AppendLine("    /// <summary>Column ordinals resolved once per result set.</summary>");
         builder.AppendLine("    public readonly struct Ordinals {");
-        foreach (var column in columns) {
-            builder.AppendLine($"        public readonly int {column.PropertyName};");
-        }
+        foreach (var column in columns) builder.AppendLine($"        public readonly int {column.PropertyName};");
 
         builder.AppendLine();
         builder.AppendLine("        public Ordinals(global::System.Data.Common.DbDataReader reader) {");
-        foreach (var column in columns) {
-            builder.AppendLine($"            {column.PropertyName} = reader.GetOrdinal(Columns.{column.PropertyName});");
-        }
+        foreach (var column in columns)
+            builder.AppendLine(
+                $"            {column.PropertyName} = reader.GetOrdinal(Columns.{column.PropertyName});");
 
         builder.AppendLine("        }");
         builder.AppendLine("    }");
 
         builder.AppendLine($$"""
 
-                /// <inheritdoc />
-                public {{type}} Read(global::System.Data.Common.DbDataReader reader) => Read(reader, new Ordinals(reader));
+                                 /// <inheritdoc />
+                                 public {{type}} Read(global::System.Data.Common.DbDataReader reader) => Read(reader, new Ordinals(reader));
 
-                /// <summary>Reads the current row with pre-resolved ordinals — the hot-loop overload.</summary>
-                public {{type}} Read(global::System.Data.Common.DbDataReader reader, in Ordinals ordinals) {
-            """);
+                                 /// <summary>Reads the current row with pre-resolved ordinals — the hot-loop overload.</summary>
+                                 public {{type}} Read(global::System.Data.Common.DbDataReader reader, in Ordinals ordinals) {
+                             """);
         EmitReadBody(builder, model);
         builder.AppendLine($$"""
-                }
+                                 }
 
-                /// <inheritdoc />
-                public global::System.Collections.Generic.List<{{type}}> ReadAll(global::System.Data.Common.DbDataReader reader) {
-                    var ordinals = new Ordinals(reader);
-                    var rows = new global::System.Collections.Generic.List<{{type}}>();
-                    while (reader.Read()) {
-                        rows.Add(Read(reader, in ordinals));
-                    }
+                                 /// <inheritdoc />
+                                 public global::System.Collections.Generic.List<{{type}}> ReadAll(global::System.Data.Common.DbDataReader reader) {
+                                     var ordinals = new Ordinals(reader);
+                                     var rows = new global::System.Collections.Generic.List<{{type}}>();
+                                     while (reader.Read()) {
+                                         rows.Add(Read(reader, in ordinals));
+                                     }
 
-                    return rows;
-                }
+                                     return rows;
+                                 }
 
-                /// <inheritdoc />
-                public async global::System.Threading.Tasks.Task<global::System.Collections.Generic.List<{{type}}>> ReadAllAsync(
-                    global::System.Data.Common.DbDataReader reader,
-                    global::System.Threading.CancellationToken cancellationToken = default) {
-                    var ordinals = new Ordinals(reader);
-                    var rows = new global::System.Collections.Generic.List<{{type}}>();
-                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
-                        rows.Add(Read(reader, in ordinals));
-                    }
+                                 /// <inheritdoc />
+                                 public async global::System.Threading.Tasks.Task<global::System.Collections.Generic.List<{{type}}>> ReadAllAsync(
+                                     global::System.Data.Common.DbDataReader reader,
+                                     global::System.Threading.CancellationToken cancellationToken = default) {
+                                     var ordinals = new Ordinals(reader);
+                                     var rows = new global::System.Collections.Generic.List<{{type}}>();
+                                     while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
+                                         rows.Add(Read(reader, in ordinals));
+                                     }
 
-                    return rows;
-                }
+                                     return rows;
+                                 }
 
-                /// <inheritdoc />
-                public async global::System.Collections.Generic.IAsyncEnumerable<{{type}}> ReadAllStreamAsync(
-                    global::System.Data.Common.DbDataReader reader,
-                    [global::System.Runtime.CompilerServices.EnumeratorCancellation] global::System.Threading.CancellationToken cancellationToken = default) {
-                    var ordinals = new Ordinals(reader);
-                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
-                        yield return Read(reader, in ordinals);
-                    }
-                }
+                                 /// <inheritdoc />
+                                 public async global::System.Collections.Generic.IAsyncEnumerable<{{type}}> ReadAllStreamAsync(
+                                     global::System.Data.Common.DbDataReader reader,
+                                     [global::System.Runtime.CompilerServices.EnumeratorCancellation] global::System.Threading.CancellationToken cancellationToken = default) {
+                                     var ordinals = new Ordinals(reader);
+                                     while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) {
+                                         yield return Read(reader, in ordinals);
+                                     }
+                                 }
 
-                /// <inheritdoc />
-                public void BindParameters(global::System.Data.Common.DbCommand command, {{type}} row) {
-            """);
+                                 /// <inheritdoc />
+                                 public void BindParameters(global::System.Data.Common.DbCommand command, {{type}} row) {
+                             """);
         EmitBindBody(builder, model, provider);
         builder.AppendLine("""
-                }
-            }
-            """);
+                               }
+                           }
+                           """);
 
         context.AddSource($"{model.HintName}.SqlMapper.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
     }
@@ -212,22 +209,22 @@ public sealed partial class SqlRecordMapperGenerator {
             : "global::" + model.Namespace + "." + model.MapperName;
 
         builder.AppendLine($$"""
-            partial {{model.TypeKeyword}} {{model.TypeName}} : global::Elarion.Sql.ISqlRecord<{{model.TypeName}}> {
-                /// <summary>The row's generated mapper (a cached singleton).</summary>
-                public static global::Elarion.Sql.ISqlRowMapper<{{model.TypeName}}> SqlMapper => {{mapperRef}}.Instance;
+                             partial {{model.TypeKeyword}} {{model.TypeName}} : global::Elarion.Sql.ISqlRecord<{{model.TypeName}}> {
+                                 /// <summary>The row's generated mapper (a cached singleton).</summary>
+                                 public static global::Elarion.Sql.ISqlRowMapper<{{model.TypeName}}> SqlMapper => {{mapperRef}}.Instance;
 
-                /// <summary>The full-row INSERT command text (backs the insert helpers).</summary>
-                public static string InsertCommandText => {{mapperRef}}.Insert;
+                                 /// <summary>The full-row INSERT command text (backs the insert helpers).</summary>
+                                 public static string InsertCommandText => {{mapperRef}}.Insert;
 
-                /// <summary>The table name as a trusted SQL fragment, for composing hand-written SQL.</summary>
-                public static global::Elarion.Sql.SqlStatement Table { get; } =
-                    global::Elarion.Sql.SqlStatement.Verbatim({{SourceLiterals.String(model.TableName)}});
+                                 /// <summary>The table name as a trusted SQL fragment, for composing hand-written SQL.</summary>
+                                 public static global::Elarion.Sql.SqlStatement Table { get; } =
+                                     global::Elarion.Sql.SqlStatement.Verbatim({{SourceLiterals.String(model.TableName)}});
 
-                /// <summary>The <c>SELECT</c>-list prefix over all mapped columns, as a trusted SQL fragment.</summary>
-                public static global::Elarion.Sql.SqlStatement Select { get; } =
-                    global::Elarion.Sql.SqlStatement.Verbatim({{SourceLiterals.String(model.SelectSql)}});
-            }
-            """);
+                                 /// <summary>The <c>SELECT</c>-list prefix over all mapped columns, as a trusted SQL fragment.</summary>
+                                 public static global::Elarion.Sql.SqlStatement Select { get; } =
+                                     global::Elarion.Sql.SqlStatement.Verbatim({{SourceLiterals.String(model.SelectSql)}});
+                             }
+                             """);
 
         context.AddSource($"{model.HintName}.SqlRecord.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
     }
@@ -238,9 +235,8 @@ public sealed partial class SqlRecordMapperGenerator {
 
         if (!viaCtor) {
             builder.AppendLine($"        return new {model.TypeFqn} {{");
-            foreach (var column in columns) {
+            foreach (var column in columns)
                 builder.AppendLine($"            {column.PropertyName} = {ReadExpression(column)},");
-            }
 
             builder.AppendLine("        };");
             return;
@@ -248,9 +244,8 @@ public sealed partial class SqlRecordMapperGenerator {
 
         // Constructor path: read every column into a local first (declaration order — one deterministic
         // read order for both construction styles), then construct.
-        foreach (var column in columns) {
+        foreach (var column in columns)
             builder.AppendLine($"        var __{column.PropertyName} = {ReadExpression(column)};");
-        }
 
         var arguments = columns
             .Where(static column => column.CtorPosition >= 0)
@@ -265,9 +260,8 @@ public sealed partial class SqlRecordMapperGenerator {
         }
 
         builder.AppendLine(" {");
-        foreach (var column in initialized) {
+        foreach (var column in initialized)
             builder.AppendLine($"            {column.PropertyName} = __{column.PropertyName},");
-        }
 
         builder.AppendLine("        };");
     }
@@ -279,25 +273,23 @@ public sealed partial class SqlRecordMapperGenerator {
                 $"({column.EnumTypeFqn})reader.GetFieldValue<{column.ReadTypeFqn}>({ordinal})",
             ColumnKind.Json =>
                 $"global::System.Text.Json.JsonSerializer.Deserialize(reader.GetFieldValue<string>({ordinal}), JsonTypeInfo{column.PropertyName})",
-            _ => $"reader.GetFieldValue<{column.ReadTypeFqn}>({ordinal})",
+            _ => $"reader.GetFieldValue<{column.ReadTypeFqn}>({ordinal})"
         };
 
-        if (column.Kind == ColumnKind.Json && !column.IsNullable) {
+        if (column.Kind == ColumnKind.Json && !column.IsNullable)
             // Deserialize is annotated T?; a non-nullable JSON column trusts the stored document.
             value += "!";
-        }
 
-        if (!column.IsNullable) {
-            return value;
-        }
+        if (!column.IsNullable) return value;
 
         var nullValue = column.IsValueType
             ? $"default({(column.Kind == ColumnKind.Enum ? column.EnumTypeFqn : ValueTypeFqn(column))}?)"
             : "null";
         return $"reader.IsDBNull({ordinal}) ? {nullValue} : {value}";
 
-        static string ValueTypeFqn(ColumnModel column) =>
-            column.Kind == ColumnKind.Json ? column.JsonTypeFqn! : column.ReadTypeFqn;
+        static string ValueTypeFqn(ColumnModel column) {
+            return column.Kind == ColumnKind.Json ? column.JsonTypeFqn! : column.ReadTypeFqn;
+        }
     }
 
     private static void EmitBindBody(StringBuilder builder, SqlRecordModel model, SqlProviderKind provider) {
@@ -306,10 +298,9 @@ public sealed partial class SqlRecordMapperGenerator {
             builder.AppendLine();
             builder.AppendLine("        parameter = command.CreateParameter();");
             builder.AppendLine($"        parameter.ParameterName = Columns.{column.PropertyName};");
-            if (column.Kind == ColumnKind.Json && provider == SqlProviderKind.Npgsql) {
+            if (column.Kind == ColumnKind.Json && provider == SqlProviderKind.Npgsql)
                 builder.AppendLine(
                     "        ((global::Npgsql.NpgsqlParameter)parameter).NpgsqlDbType = global::NpgsqlTypes.NpgsqlDbType.Jsonb;");
-            }
 
             builder.AppendLine($"        parameter.Value = {BindExpression(column)};");
             builder.AppendLine("        command.Parameters.Add(parameter);");
@@ -329,7 +320,7 @@ public sealed partial class SqlRecordMapperGenerator {
                 $"{value} is null ? (object)global::System.DBNull.Value : ({column.ReadTypeFqn}){value}.Value",
             ColumnKind.Enum => $"({column.ReadTypeFqn}){value}",
             _ when column.IsNullable => $"(object?){value} ?? global::System.DBNull.Value",
-            _ => value,
+            _ => value
         };
     }
 
@@ -340,23 +331,21 @@ public sealed partial class SqlRecordMapperGenerator {
             .Select(static model => model!)
             .OrderBy(static model => model.TypeFqn, StringComparer.Ordinal)
             .ToList();
-        if (mappers.Count == 0) {
-            return;
-        }
+        if (mappers.Count == 0) return;
 
         var sanitized = Sanitize(assemblyName);
         var builder = new StringBuilder();
         builder.AppendLine($$"""
-            // <auto-generated/>
-            #nullable enable
+                             // <auto-generated/>
+                             #nullable enable
 
-            namespace Microsoft.Extensions.DependencyInjection;
+                             namespace Microsoft.Extensions.DependencyInjection;
 
-            /// <summary>Registers the generated Elarion.Sql row mappers of this assembly as <c>ISqlRowMapper&lt;T&gt;</c> singletons.</summary>
-            public static class {{sanitized}}SqlMapperRegistration {
-                public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddElarionSqlMappers(
-                    this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services) {
-            """);
+                             /// <summary>Registers the generated Elarion.Sql row mappers of this assembly as <c>ISqlRowMapper&lt;T&gt;</c> singletons.</summary>
+                             public static class {{sanitized}}SqlMapperRegistration {
+                                 public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddElarionSqlMappers(
+                                     this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services) {
+                             """);
         foreach (var mapper in mappers) {
             var mapperFqn = mapper.Namespace.Length == 0
                 ? "global::" + mapper.MapperName
@@ -370,16 +359,15 @@ public sealed partial class SqlRecordMapperGenerator {
 
         // JSON-column mappers self-map through the ambient canonical accessor (their static Instance),
         // so install it at startup — convention over configuration: a JSON-column host wires nothing.
-        if (mappers.Any(static m => m.RequiresJson)) {
+        if (mappers.Any(static m => m.RequiresJson))
             builder.AppendLine(
                 "        global::Microsoft.Extensions.DependencyInjection.ServiceCollectionHostedServiceExtensions.AddHostedService<global::Elarion.Sql.ElarionSqlJsonInstaller>(services);");
-        }
 
         builder.AppendLine("""
-                    return services;
-                }
-            }
-            """);
+                                   return services;
+                               }
+                           }
+                           """);
 
         context.AddSource("ElarionSqlMapperRegistration.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
     }
@@ -387,7 +375,7 @@ public sealed partial class SqlRecordMapperGenerator {
     private static string Sanitize(string assemblyName) {
         var builder = new StringBuilder(assemblyName.Length);
         var upperNext = true;
-        foreach (var c in assemblyName) {
+        foreach (var c in assemblyName)
             if (char.IsLetterOrDigit(c)) {
                 builder.Append(upperNext && char.IsLetter(c) ? char.ToUpperInvariant(c) : c);
                 upperNext = false;
@@ -395,7 +383,6 @@ public sealed partial class SqlRecordMapperGenerator {
             else {
                 upperNext = true;
             }
-        }
 
         return builder.Length == 0 ? "Assembly" : builder.ToString();
     }

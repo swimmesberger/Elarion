@@ -33,7 +33,8 @@ public sealed class ElarionIdentityGeneratorTests {
         var result = RunIdentityGenerator(ContextSource);
         var generated = GetGenerated(result, "Sample_App_AuthDbContext.ElarionIdentity.g.cs");
 
-        generated.Should().Contain("public DbSet<global::Sample.App.AppUser> Users => Set<global::Sample.App.AppUser>();");
+        generated.Should()
+            .Contain("public DbSet<global::Sample.App.AppUser> Users => Set<global::Sample.App.AppUser>();");
         generated.Should().Contain("public DbSet<global::Sample.App.AppRole> Roles");
         generated.Should().Contain("global::Microsoft.AspNetCore.Identity.IdentityUserClaim<global::System.Guid>");
         generated.Should().Contain("global::Microsoft.AspNetCore.Identity.IdentityUserToken<global::System.Guid>");
@@ -166,11 +167,12 @@ public sealed class ElarionIdentityGeneratorTests {
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");

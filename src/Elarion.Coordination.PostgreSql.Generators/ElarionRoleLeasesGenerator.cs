@@ -31,7 +31,7 @@ public sealed class ElarionRoleLeasesGenerator : IIncrementalGenerator {
         + "so the role-lease DbSet and model-configuration seam are generated",
         "Elarion.Coordination.PostgreSql",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var targets = context.SyntaxProvider
@@ -43,17 +43,11 @@ public sealed class ElarionRoleLeasesGenerator : IIncrementalGenerator {
             .WithTrackingName("RoleLeasesTargets");
 
         context.RegisterSourceOutput(targets, static (spc, target) => {
-            if (target is null) {
-                return;
-            }
+            if (target is null) return;
 
-            foreach (var diagnostic in target.Diagnostics) {
-                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
-            }
+            foreach (var diagnostic in target.Diagnostics) spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
-            if (target.Emit) {
-                Emit(spc, target);
-            }
+            if (target.Emit) Emit(spc, target);
         });
     }
 
@@ -68,15 +62,13 @@ public sealed class ElarionRoleLeasesGenerator : IIncrementalGenerator {
         EquatableArray<DiagnosticInfo> Diagnostics);
 
     private static RoleLeasesTarget? GetTarget(GeneratorAttributeSyntaxContext ctx) {
-        if (ctx.TargetSymbol is not INamedTypeSymbol contextSymbol) {
-            return null;
-        }
+        if (ctx.TargetSymbol is not INamedTypeSymbol contextSymbol) return null;
 
         var snakeCase = true;
         string? tableName = null;
         string? schema = null;
-        if (ctx.Attributes.Length > 0) {
-            foreach (var namedArgument in ctx.Attributes[0].NamedArguments) {
+        if (ctx.Attributes.Length > 0)
+            foreach (var namedArgument in ctx.Attributes[0].NamedArguments)
                 switch (namedArgument.Key) {
                     case "SnakeCase" when namedArgument.Value.Value is bool value:
                         snakeCase = value;
@@ -88,8 +80,6 @@ public sealed class ElarionRoleLeasesGenerator : IIncrementalGenerator {
                         schema = schemaValue;
                         break;
                 }
-            }
-        }
 
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
         var ns = contextSymbol.ContainingNamespace is { IsGlobalNamespace: false } containing
@@ -102,10 +92,9 @@ public sealed class ElarionRoleLeasesGenerator : IIncrementalGenerator {
             .Any(attribute => attribute.AttributeClass?.ToDisplayString() == GenerateDbSetsAttributeName);
 
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
-        if (!hasGenerateDbSets) {
+        if (!hasGenerateDbSets)
             diagnostics.Add(DiagnosticInfo.Create(
                 MissingGenerateDbSets, LocationInfo.From(contextSymbol), contextSymbol.ToDisplayString(fmt)));
-        }
 
         return new RoleLeasesTarget(
             ns,
@@ -114,7 +103,7 @@ public sealed class ElarionRoleLeasesGenerator : IIncrementalGenerator {
             snakeCase,
             tableName,
             schema,
-            Emit: hasGenerateDbSets,
+            hasGenerateDbSets,
             diagnostics.ToImmutable());
     }
 
@@ -133,10 +122,13 @@ public sealed class ElarionRoleLeasesGenerator : IIncrementalGenerator {
 
         sb.AppendLine($"partial class {target.ContextName}");
         sb.AppendLine("{");
-        sb.AppendLine($"    public DbSet<{CoordinationNamespace}.RoleLeaseEntity> RoleLeases => Set<{CoordinationNamespace}.RoleLeaseEntity>();");
+        sb.AppendLine(
+            $"    public DbSet<{CoordinationNamespace}.RoleLeaseEntity> RoleLeases => Set<{CoordinationNamespace}.RoleLeaseEntity>();");
         sb.AppendLine();
-        sb.AppendLine("    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
-        sb.AppendLine("    // end of ConfigureEntities, so it composes with [GenerateElarionActorSnapshots] and friends.");
+        sb.AppendLine(
+            "    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
+        sb.AppendLine(
+            "    // end of ConfigureEntities, so it composes with [GenerateElarionActorSnapshots] and friends.");
         sb.AppendLine($"    partial void {SeamMethodName}(ModelBuilder modelBuilder) =>");
         sb.AppendLine($"        {CoordinationNamespace}.RoleLeaseModelBuilderExtensions.UseElarionRoleLeases(");
         sb.AppendLine(

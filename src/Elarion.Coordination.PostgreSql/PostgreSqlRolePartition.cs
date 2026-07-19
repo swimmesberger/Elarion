@@ -19,7 +19,7 @@ internal sealed class PostgreSqlRolePartition(string name, IReadOnlyList<IRoleLe
 
     private RolePartitionTarget Target(int partition) {
         var lease = leases[partition];
-        return new(
+        return new RolePartitionTarget(
             partition,
             lease.Role,
             lease.IsHeld,

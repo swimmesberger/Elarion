@@ -27,8 +27,7 @@ namespace Elarion.Generators;
 /// </para>
 /// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
-{
+public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer {
     private const string AppModuleAttributeMetadataName = "Elarion.Abstractions.Modules.AppModuleAttribute";
     private const string ModuleContractAttributeMetadataName = "Elarion.Abstractions.Modules.ModuleContractAttribute";
 
@@ -38,8 +37,7 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         "Type '{0}' belongs to module '{1}'; module '{2}' must not depend on another module's internals — reach it through a [ModuleContract], or move the shared type out of the module",
         "Elarion.Modules",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true,
-        description:
+        true,
         "Everything under an [AppModule] is module-internal and not shareable across modules except a " +
         "published [ModuleContract]; everything outside every module is shareable. Resolve a cross-module " +
         "dependency by (a) using a [ModuleContract] for a genuine, sparingly-used cross-module domain call, " +
@@ -55,12 +53,10 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => SupportedDiagnosticsArray;
 
     /// <inheritdoc />
-    public override void Initialize(AnalysisContext context)
-    {
+    public override void Initialize(AnalysisContext context) {
         context.EnableConcurrentExecution();
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
-        context.RegisterCompilationStartAction(start =>
-        {
+        context.RegisterCompilationStartAction(start => {
             var appModule = start.Compilation.GetTypeByMetadataName(AppModuleAttributeMetadataName);
             if (appModule is null)
                 return;
@@ -76,8 +72,7 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         });
     }
 
-    private static void AnalyzeType(SymbolAnalysisContext context, BoundaryState state)
-    {
+    private static void AnalyzeType(SymbolAnalysisContext context, BoundaryState state) {
         if (context.Symbol is not INamedTypeSymbol type || type.IsImplicitlyDeclared)
             return;
 
@@ -87,9 +82,7 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
             return; // The referencing type is not in any module: nothing to enforce.
 
         foreach (var member in type.GetMembers())
-        {
-            switch (member)
-            {
+            switch (member) {
                 case IMethodSymbol { MethodKind: MethodKind.Constructor } ctor:
                     foreach (var parameter in ctor.Parameters)
                         Check(context, state, owner, parameter.Type, parameter.Locations);
@@ -101,7 +94,6 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
                     Check(context, state, owner, property.Type, property.Locations);
                     break;
             }
-        }
     }
 
     private static void Check(
@@ -109,10 +101,8 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         BoundaryState state,
         ModuleInfo owner,
         ITypeSymbol referenced,
-        ImmutableArray<Location> locations)
-    {
-        foreach (var candidate in Flatten(referenced))
-        {
+        ImmutableArray<Location> locations) {
+        foreach (var candidate in Flatten(referenced)) {
             if (candidate is not INamedTypeSymbol named)
                 continue;
 
@@ -137,42 +127,34 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    private static IEnumerable<ITypeSymbol> Flatten(ITypeSymbol type)
-    {
+    private static IEnumerable<ITypeSymbol> Flatten(ITypeSymbol type) {
         yield return type;
         if (type is INamedTypeSymbol { IsGenericType: true } named)
-        {
             foreach (var argument in named.TypeArguments)
-            {
-                foreach (var nested in Flatten(argument))
-                    yield return nested;
-            }
-        }
+            foreach (var nested in Flatten(argument))
+                yield return nested;
     }
 
-    private static bool HasAttribute(ISymbol symbol, INamedTypeSymbol? attribute)
-    {
+    private static bool HasAttribute(ISymbol symbol, INamedTypeSymbol? attribute) {
         if (attribute is null)
             return false;
 
         foreach (var data in symbol.GetAttributes())
-        {
             if (SymbolEqualityComparer.Default.Equals(data.AttributeClass, attribute))
                 return true;
-        }
 
         return false;
     }
 
-    private static List<ModuleInfo> CollectModules(Compilation compilation, INamedTypeSymbol appModule, CancellationToken ct)
-    {
+    private static List<ModuleInfo> CollectModules(Compilation compilation, INamedTypeSymbol appModule,
+        CancellationToken ct) {
         var modules = new List<ModuleInfo>();
         Walk(compilation.Assembly.GlobalNamespace, appModule, modules, ct);
         return modules;
     }
 
-    private static void Walk(INamespaceSymbol namespaceSymbol, INamedTypeSymbol appModule, List<ModuleInfo> modules, CancellationToken ct)
-    {
+    private static void Walk(INamespaceSymbol namespaceSymbol, INamedTypeSymbol appModule, List<ModuleInfo> modules,
+        CancellationToken ct) {
         ct.ThrowIfCancellationRequested();
 
         foreach (var type in namespaceSymbol.GetTypeMembers())
@@ -182,15 +164,13 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
             Walk(nested, appModule, modules, ct);
     }
 
-    private static void Inspect(INamedTypeSymbol type, INamedTypeSymbol appModule, List<ModuleInfo> modules, CancellationToken ct)
-    {
-        foreach (var data in type.GetAttributes())
-        {
+    private static void Inspect(INamedTypeSymbol type, INamedTypeSymbol appModule, List<ModuleInfo> modules,
+        CancellationToken ct) {
+        foreach (var data in type.GetAttributes()) {
             if (!SymbolEqualityComparer.Default.Equals(data.AttributeClass, appModule))
                 continue;
 
-            if (data.ConstructorArguments.Length > 0 && data.ConstructorArguments[0].Value is string name)
-            {
+            if (data.ConstructorArguments.Length > 0 && data.ConstructorArguments[0].Value is string name) {
                 var ns = type.ContainingNamespace is { IsGlobalNamespace: false } containing
                     ? containing.ToDisplayString()
                     : string.Empty;
@@ -204,11 +184,9 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
             Inspect(nested, appModule, modules, ct);
     }
 
-    private static ModuleInfo? FindBest(string candidateNamespace, IReadOnlyList<ModuleInfo> modules)
-    {
+    private static ModuleInfo? FindBest(string candidateNamespace, IReadOnlyList<ModuleInfo> modules) {
         ModuleInfo? best = null;
-        foreach (var module in modules)
-        {
+        foreach (var module in modules) {
             if (!IsInScope(candidateNamespace, module.Namespace))
                 continue;
             if (best is null || module.Namespace.Length > best.Namespace.Length)
@@ -218,10 +196,11 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer
         return best;
     }
 
-    private static bool IsInScope(string candidateNamespace, string moduleNamespace) =>
-        moduleNamespace.Length == 0 ||
-        candidateNamespace == moduleNamespace ||
-        candidateNamespace.StartsWith(moduleNamespace + ".", StringComparison.Ordinal);
+    private static bool IsInScope(string candidateNamespace, string moduleNamespace) {
+        return moduleNamespace.Length == 0 ||
+               candidateNamespace == moduleNamespace ||
+               candidateNamespace.StartsWith(moduleNamespace + ".", StringComparison.Ordinal);
+    }
 
     private sealed record ModuleInfo(string Name, string Namespace);
 

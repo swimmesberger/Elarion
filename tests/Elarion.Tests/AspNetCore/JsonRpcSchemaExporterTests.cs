@@ -177,11 +177,9 @@ public sealed class JsonRpcSchemaExporterTests {
         var untouched = properties.GetProperty("untouched");
         string[] constraintKeywords = [
             "minLength", "maxLength", "minItems", "maxItems", "pattern", "format",
-            "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "enum",
+            "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "enum"
         ];
-        foreach (var keyword in constraintKeywords) {
-            untouched.TryGetProperty(keyword, out _).Should().BeFalse();
-        }
+        foreach (var keyword in constraintKeywords) untouched.TryGetProperty(keyword, out _).Should().BeFalse();
     }
 
     [Fact]
@@ -197,18 +195,19 @@ public sealed class JsonRpcSchemaExporterTests {
             ClientCapabilities = new ClientCapabilityManifest {
                 Modules = [
                     new ClientModuleManifest { Name = "Invoicing", Enabled = true, Features = ["late-fees"] },
-                    new ClientModuleManifest { Name = "Clients", Enabled = true, Features = ["client-portal-v2", "bulk-import"] },
-                    new ClientModuleManifest { Name = "Experiments", Enabled = false, Features = ["beta-x"] },
-                ],
+                    new ClientModuleManifest
+                        { Name = "Clients", Enabled = true, Features = ["client-portal-v2", "bulk-import"] },
+                    new ClientModuleManifest { Name = "Experiments", Enabled = false, Features = ["beta-x"] }
+                ]
             },
             PermissionCatalog = new FakePermissionCatalog(
                 [
                     new PermissionCatalogEntry { Permission = "invoices.read", Resource = "invoices", Verb = "read" },
                     new PermissionCatalogEntry { Permission = "clients.read", Resource = "clients", Verb = "read" },
                     // Duplicate across modules — must be deduplicated in the export.
-                    new PermissionCatalogEntry { Permission = "clients.read", Resource = "clients", Verb = "read" },
+                    new PermissionCatalogEntry { Permission = "clients.read", Resource = "clients", Verb = "read" }
                 ],
-                ["billing-admin", "auditor"]),
+                ["billing-admin", "auditor"])
         };
 
         var schema = JsonRpcSchemaExporter.Generate(dispatcher, options, exportOptions);
@@ -273,13 +272,13 @@ public sealed class JsonRpcSchemaExporterTests {
             ClientEventTopics = new ClientEventTopicManifest {
                 Topics = [
                     new ClientEventTopicManifestEntry {
-                        Name = "invoicing.importProgress", EventType = typeof(ImportProgressEvent),
+                        Name = "invoicing.importProgress", EventType = typeof(ImportProgressEvent)
                     },
                     new ClientEventTopicManifestEntry {
-                        Name = "invoicing.invoiceChanged", EventType = typeof(InvoiceChangedEvent),
-                    },
-                ],
-            },
+                        Name = "invoicing.invoiceChanged", EventType = typeof(InvoiceChangedEvent)
+                    }
+                ]
+            }
         };
 
         var schema = JsonRpcSchemaExporter.Generate(dispatcher, options, exportOptions);
@@ -311,7 +310,7 @@ public sealed class JsonRpcSchemaExporterTests {
             new Dictionary<string, IReadOnlyList<string>>();
 
         public IReadOnlyList<PermissionCatalogModule> Modules { get; } = [
-            new PermissionCatalogModule { Module = "Test", Permissions = permissions, Roles = roles },
+            new() { Module = "Test", Permissions = permissions, Roles = roles }
         ];
     }
 
@@ -320,14 +319,11 @@ public sealed class JsonRpcSchemaExporterTests {
     private sealed record PingResponse(string Message);
 
     private sealed record ConstrainedRequest {
-        [StringLength(100, MinimumLength = 3)]
-        public required string Name { get; init; }
+        [StringLength(100, MinimumLength = 3)] public required string Name { get; init; }
 
-        [RegularExpression("^[a-z0-9-]+$")]
-        public required string Slug { get; init; }
+        [RegularExpression("^[a-z0-9-]+$")] public required string Slug { get; init; }
 
-        [Range(1, 500)]
-        public required int Quantity { get; init; }
+        [Range(1, 500)] public required int Quantity { get; init; }
 
         [Range(0d, 1d, MinimumIsExclusive = true, MaximumIsExclusive = true)]
         public required double Ratio { get; init; }
@@ -335,14 +331,11 @@ public sealed class JsonRpcSchemaExporterTests {
         [Range(typeof(decimal), "0.5", "99.9")]
         public required decimal Price { get; init; }
 
-        [EmailAddress]
-        public required string Email { get; init; }
+        [EmailAddress] public required string Email { get; init; }
 
-        [AllowedValues("smtp", "office365")]
-        public required string Backend { get; init; }
+        [AllowedValues("smtp", "office365")] public required string Backend { get; init; }
 
-        [MaxLength(10)]
-        public required IReadOnlyList<string> Tags { get; init; }
+        [MaxLength(10)] public required IReadOnlyList<string> Tags { get; init; }
 
         public required string Untouched { get; init; }
     }

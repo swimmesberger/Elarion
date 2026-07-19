@@ -11,21 +11,21 @@ namespace Elarion.Connections.Tcp;
 internal sealed class TcpLiveConnectionSet {
     private readonly ConcurrentDictionary<TcpConnectionLifetime, byte> _live = new();
 
-    public void Add(TcpConnectionLifetime lifetime) => _live[lifetime] = 0;
+    public void Add(TcpConnectionLifetime lifetime) {
+        _live[lifetime] = 0;
+    }
 
-    public void Remove(TcpConnectionLifetime lifetime) => _live.TryRemove(lifetime, out _);
+    public void Remove(TcpConnectionLifetime lifetime) {
+        _live.TryRemove(lifetime, out _);
+    }
 
     /// <summary>Requests a clean close on every live connection: sends drain, teardown runs in order.</summary>
     public void RequestGracefulCloseAll() {
-        foreach (var lifetime in _live.Keys) {
-            lifetime.RequestGracefulClose(null);
-        }
+        foreach (var lifetime in _live.Keys) lifetime.RequestGracefulClose(null);
     }
 
     /// <summary>Force-aborts every remaining connection's raw transport so blocked I/O fails immediately.</summary>
     public void AbortAll() {
-        foreach (var lifetime in _live.Keys) {
-            lifetime.Abort(null);
-        }
+        foreach (var lifetime in _live.Keys) lifetime.Abort(null);
     }
 }

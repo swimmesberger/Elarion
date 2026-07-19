@@ -17,19 +17,21 @@ public sealed class PostgreSqlBulkInsertIntegrationTests(PostgreSqlBulkInsertFix
 
     private static readonly DateTimeOffset FixedInstant = new(2026, 7, 11, 12, 30, 45, 123, TimeSpan.Zero);
 
-    private static BulkOrder NewOrder(int index) => new() {
-        Id = Guid.CreateVersion7(),
-        Name = $"order-{index}",
-        Description = index % 3 == 0 ? null : $"description {index}",
-        Quantity = index,
-        Price = 10.25m + index,
-        CreatedAt = FixedInstant.AddSeconds(index),
-        Active = index % 2 == 0,
-        Status = (BulkOrderStatus)(index % 3),
-        Rating = index % 4 == 0 ? null : index % 5,
-        Tags = index % 5 == 0 ? null : ["bulk", $"t{index}"],
-        Payload = index % 6 == 0 ? null : [1, 2, (byte)index],
-    };
+    private static BulkOrder NewOrder(int index) {
+        return new BulkOrder {
+            Id = Guid.CreateVersion7(),
+            Name = $"order-{index}",
+            Description = index % 3 == 0 ? null : $"description {index}",
+            Quantity = index,
+            Price = 10.25m + index,
+            CreatedAt = FixedInstant.AddSeconds(index),
+            Active = index % 2 == 0,
+            Status = (BulkOrderStatus)(index % 3),
+            Rating = index % 4 == 0 ? null : index % 5,
+            Tags = index % 5 == 0 ? null : ["bulk", $"t{index}"],
+            Payload = index % 6 == 0 ? null : [1, 2, (byte)index]
+        };
+    }
 
     [Fact]
     public async Task ExecuteInsert_RoundTripsAllValueShapes() {
@@ -106,7 +108,8 @@ public sealed class PostgreSqlBulkInsertIntegrationTests(PostgreSqlBulkInsertFix
         var read = await verify.AuditEvents.AsNoTracking().Where(e => e.Message.StartsWith("m")).ToListAsync(Ct);
         read.Should().HaveCount(events.Count);
         read.Should().OnlyContain(e => e.Id > 0, "the identity column is database-assigned");
-        read.Should().OnlyContain(e => e.RecordedAt > DateTimeOffset.MinValue, "the now() default is database-assigned");
+        read.Should().OnlyContain(e => e.RecordedAt > DateTimeOffset.MinValue,
+            "the now() default is database-assigned");
     }
 
     [Fact]
@@ -120,9 +123,7 @@ public sealed class PostgreSqlBulkInsertIntegrationTests(PostgreSqlBulkInsertFix
                 var order = NewOrder(i);
                 ids.Add(order.Id);
                 yield return order;
-                if (i % 25 == 0) {
-                    await Task.Yield();
-                }
+                if (i % 25 == 0) await Task.Yield();
             }
         }
 
@@ -148,7 +149,7 @@ public sealed class PostgreSqlBulkInsertIntegrationTests(PostgreSqlBulkInsertFix
 
         var dogs = new List<BulkDog> {
             new() { Id = Guid.CreateVersion7(), Name = "rex", FavoriteToy = "ball" },
-            new() { Id = Guid.CreateVersion7(), Name = "bello", FavoriteToy = null },
+            new() { Id = Guid.CreateVersion7(), Name = "bello", FavoriteToy = null }
         };
         var cats = new List<BulkCat> { new() { Id = Guid.CreateVersion7(), Name = "mio", Indoor = true } };
 
@@ -185,8 +186,8 @@ public sealed class PostgreSqlBulkInsertIntegrationTests(PostgreSqlBulkInsertFix
             Address = new ShippingAddress {
                 Street = $"Street {i}",
                 Note = i % 2 == 0 ? null : $"note {i}",
-                Geo = new GeoPoint { Latitude = 47.0 + i, Longitude = 13.0 - i },
-            },
+                Geo = new GeoPoint { Latitude = 47.0 + i, Longitude = 13.0 - i }
+            }
         }).ToList();
 
         await using var context = fixture.CreateContext();
@@ -205,7 +206,7 @@ public sealed class PostgreSqlBulkInsertIntegrationTests(PostgreSqlBulkInsertFix
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
 
         var existing = Enumerable.Range(0, 5).Select(i => new BulkCounter {
-            Id = Guid.CreateVersion7(), Key = $"dn-{Guid.CreateVersion7():N}-{i}", Count = i,
+            Id = Guid.CreateVersion7(), Key = $"dn-{Guid.CreateVersion7():N}-{i}", Count = i
         }).ToList();
         await using var context = fixture.CreateContext();
         await context.Counters.ExecuteInsertAsync(existing, cancellationToken: Ct);
@@ -213,7 +214,7 @@ public sealed class PostgreSqlBulkInsertIntegrationTests(PostgreSqlBulkInsertFix
         var retry = existing
             .Select(c => new BulkCounter { Id = c.Id, Key = c.Key, Count = c.Count + 100 })
             .Concat(Enumerable.Range(0, 3).Select(i => new BulkCounter {
-                Id = Guid.CreateVersion7(), Key = $"dn-new-{Guid.CreateVersion7():N}-{i}", Count = i,
+                Id = Guid.CreateVersion7(), Key = $"dn-new-{Guid.CreateVersion7():N}-{i}", Count = i
             }))
             .ToList();
         var written = await context.Counters.ExecuteInsertAsync(
@@ -231,14 +232,16 @@ public sealed class PostgreSqlBulkInsertIntegrationTests(PostgreSqlBulkInsertFix
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
 
         var existing = Enumerable.Range(0, 5).Select(i => new BulkCounter {
-            Id = Guid.CreateVersion7(), Key = $"up-{Guid.CreateVersion7():N}-{i}", Count = i,
+            Id = Guid.CreateVersion7(), Key = $"up-{Guid.CreateVersion7():N}-{i}", Count = i
         }).ToList();
         await using var context = fixture.CreateContext();
         await context.Counters.ExecuteInsertAsync(existing, cancellationToken: Ct);
 
         var upsert = existing
             .Select(c => new BulkCounter { Id = c.Id, Key = c.Key, Count = c.Count + 100 })
-            .Concat([new BulkCounter { Id = Guid.CreateVersion7(), Key = $"up-new-{Guid.CreateVersion7():N}", Count = 1 }])
+            .Concat([
+                new BulkCounter { Id = Guid.CreateVersion7(), Key = $"up-new-{Guid.CreateVersion7():N}", Count = 1 }
+            ])
             .ToList();
         var written = await context.Counters.ExecuteInsertAsync(
             upsert, new BulkInsertOptions { OnConflict = BulkInsertConflictBehavior.Update }, Ct);
@@ -263,7 +266,7 @@ public sealed class PostgreSqlBulkInsertIntegrationTests(PostgreSqlBulkInsertFix
             [new BulkCounter { Id = Guid.CreateVersion7(), Key = key, Count = 42 }],
             new BulkInsertOptions {
                 OnConflict = BulkInsertConflictBehavior.Update,
-                ConflictProperties = [nameof(BulkCounter.Key)],
+                ConflictProperties = [nameof(BulkCounter.Key)]
             },
             Ct);
 

@@ -46,9 +46,7 @@ public static class BlobUploadEndpointsExtensions {
         BlobUploadEndpointOptions options,
         TimeProvider timeProvider,
         CancellationToken cancellationToken) {
-        if (!currentUser.IsAuthenticated) {
-            return Results.Unauthorized();
-        }
+        if (!currentUser.IsAuthenticated) return Results.Unauthorized();
 
         string contentType;
         string clientName;
@@ -58,9 +56,7 @@ public static class BlobUploadEndpointsExtensions {
         if (request.HasFormContentType) {
             var form = await request.ReadFormAsync(cancellationToken);
             var file = form.Files.GetFile("file") ?? (form.Files.Count > 0 ? form.Files[0] : null);
-            if (file is null) {
-                return Results.BadRequest("No file part was found in the multipart form.");
-            }
+            if (file is null) return Results.BadRequest("No file part was found in the multipart form.");
 
             contentType = NormalizeContentType(file.ContentType);
             clientName = file.FileName;
@@ -80,21 +76,16 @@ public static class BlobUploadEndpointsExtensions {
             source = request.Body;
         }
 
-        if (!IsAllowedContentType(contentType, options.AllowedContentTypes)) {
+        if (!IsAllowedContentType(contentType, options.AllowedContentTypes))
             return Results.BadRequest($"Content type '{contentType}' is not allowed.");
-        }
 
         if (options.MaxContentLength is long cap) {
             // Reject early when the declared length already exceeds the cap (multipart, or a raw body with
             // a Content-Length); otherwise cap the unknown-length stream while it is read.
             var declared = lengthHint ?? request.ContentLength;
-            if (declared is long length && length > cap) {
-                return TooLarge(cap);
-            }
+            if (declared is long length && length > cap) return TooLarge(cap);
 
-            if (lengthHint is null) {
-                source = new LengthCappingStream(source, cap);
-            }
+            if (lengthHint is null) source = new LengthCappingStream(source, cap);
         }
 
         var uploadRequest = new BlobUploadRequest {
@@ -104,7 +95,7 @@ public static class BlobUploadEndpointsExtensions {
             ContentLength = lengthHint,
             InitialState = BlobLifecycleState.Pending,
             ExpiresAt = timeProvider.GetUtcNow() + options.Ttl,
-            OwnerId = currentUser.UserId,
+            OwnerId = currentUser.UserId
         };
 
         try {
@@ -124,9 +115,7 @@ public static class BlobUploadEndpointsExtensions {
         IBlobStore blobStore,
         BlobUploadEndpointOptions options,
         CancellationToken cancellationToken) {
-        if (!currentUser.IsAuthenticated) {
-            return Results.Unauthorized();
-        }
+        if (!currentUser.IsAuthenticated) return Results.Unauthorized();
 
         var blobRef = new BlobRef { Value = blobId };
         var metadata = await blobStore.GetMetadataAsync(blobRef, cancellationToken);
@@ -135,57 +124,51 @@ public static class BlobUploadEndpointsExtensions {
         // ownership is never leaked. Cancel is intended for a pending blob before it is committed.
         if (metadata is null
             || metadata.Container != options.Container
-            || !BlobEndpointOwnership.IsOwnedBy(metadata, currentUser.UserId)) {
+            || !BlobEndpointOwnership.IsOwnedBy(metadata, currentUser.UserId))
             return Results.NotFound();
-        }
 
         await blobStore.DeleteAsync(blobRef, cancellationToken);
         return Results.NoContent();
     }
 
-    private static string BuildStorageName(string ownerId, string clientName) =>
-        $"{ownerId}/{Guid.CreateVersion7():N}/{SanitizeFileName(clientName)}";
+    private static string BuildStorageName(string ownerId, string clientName) {
+        return $"{ownerId}/{Guid.CreateVersion7():N}/{SanitizeFileName(clientName)}";
+    }
 
     private static string SanitizeFileName(string name) {
-        if (string.IsNullOrWhiteSpace(name)) {
-            return "upload";
-        }
+        if (string.IsNullOrWhiteSpace(name)) return "upload";
 
         // Keep only the leaf and drop path separators so the owner/guid prefix stays the only structure.
         var leaf = name.Replace('\\', '/');
         var slash = leaf.LastIndexOf('/');
-        if (slash >= 0) {
-            leaf = leaf[(slash + 1)..];
-        }
+        if (slash >= 0) leaf = leaf[(slash + 1)..];
 
         // Strip control characters and double quotes: a CR/LF or quote in the stored name would later be
         // rejected by the server when rendered into the download Content-Disposition header, leaving the
         // blob permanently undownloadable. (Mirrored in the tus transport's sanitizer.)
         var builder = new StringBuilder(leaf.Length);
-        foreach (var ch in leaf) {
-            if (!char.IsControl(ch) && ch != '"') {
+        foreach (var ch in leaf)
+            if (!char.IsControl(ch) && ch != '"')
                 builder.Append(ch);
-            }
-        }
 
         leaf = builder.ToString();
         return string.IsNullOrWhiteSpace(leaf) ? "upload" : leaf;
     }
 
     private static string NormalizeContentType(string? contentType) {
-        if (string.IsNullOrWhiteSpace(contentType)) {
-            return string.Empty;
-        }
+        if (string.IsNullOrWhiteSpace(contentType)) return string.Empty;
 
         var semicolon = contentType.IndexOf(';');
         return (semicolon >= 0 ? contentType[..semicolon] : contentType).Trim();
     }
 
-    private static bool IsAllowedContentType(string contentType, IReadOnlyCollection<string>? allowed) =>
-        allowed is null || allowed.Count == 0 || allowed.Contains(contentType, StringComparer.OrdinalIgnoreCase);
+    private static bool IsAllowedContentType(string contentType, IReadOnlyCollection<string>? allowed) {
+        return allowed is null || allowed.Count == 0 || allowed.Contains(contentType, StringComparer.OrdinalIgnoreCase);
+    }
 
-    private static IResult TooLarge(long cap) =>
-        Results.Problem(
+    private static IResult TooLarge(long cap) {
+        return Results.Problem(
             statusCode: StatusCodes.Status413PayloadTooLarge,
             detail: $"The upload exceeded the maximum allowed size of {cap} bytes.");
+    }
 }

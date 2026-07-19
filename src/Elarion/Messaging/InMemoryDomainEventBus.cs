@@ -33,18 +33,15 @@ internal sealed class InMemoryDomainEventBus(
         EventTelemetry.RecordPublish(eventName, EventPlane.Domain);
 
         var subscribers = registry.GetDomainSubscribers(typeof(TEvent));
-        if (subscribers.Length == 0) {
-            return;
-        }
+        if (subscribers.Length == 0) return;
 
         var depth = PublishDepth.Value + 1;
-        if (depth > MaxPublishDepth) {
+        if (depth > MaxPublishDepth)
             throw new InvalidOperationException(
                 $"Domain event publish exceeded the maximum inline re-entrancy depth of {MaxPublishDepth} " +
                 $"while publishing '{typeof(TEvent)}'. A domain-event consumer is re-publishing an event " +
                 "that (transitively) triggers itself; break the publish cycle or move the follow-up to an " +
                 "integration event (Plane B), which is delivered after commit rather than inline.");
-        }
 
         PublishDepth.Value = depth;
         try {

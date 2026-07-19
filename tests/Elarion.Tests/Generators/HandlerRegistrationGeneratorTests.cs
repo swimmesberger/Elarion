@@ -11,8 +11,8 @@ public sealed class HandlerRegistrationGeneratorTests {
     public void GenerateRegistration_HandlerWithoutPipelineAttribute_UsesAssemblyPipeline() {
         var source = CreateSource(
             "[assembly: Sample.Pipeline.DefaultPipeline]",
-            modulePipelineAttribute: "",
-            handlerPipelineAttribute: "");
+            "",
+            "");
 
         var generated = GenerateHandlerRegistrationSource(source);
 
@@ -25,8 +25,8 @@ public sealed class HandlerRegistrationGeneratorTests {
     public void GenerateRegistration_ModulePipelineAttribute_OverridesAssemblyPipeline() {
         var source = CreateSource(
             "[assembly: Sample.Pipeline.DefaultPipeline]",
-            modulePipelineAttribute: "[Sample.Pipeline.ReadOnlyPipeline]",
-            handlerPipelineAttribute: "");
+            "[Sample.Pipeline.ReadOnlyPipeline]",
+            "");
 
         var generated = GenerateHandlerRegistrationSource(source);
 
@@ -39,8 +39,8 @@ public sealed class HandlerRegistrationGeneratorTests {
     public void GenerateRegistration_HandlerPipelineAttribute_OverridesModulePipeline() {
         var source = CreateSource(
             "[assembly: Sample.Pipeline.DefaultPipeline]",
-            modulePipelineAttribute: "[Sample.Pipeline.ReadOnlyPipeline]",
-            handlerPipelineAttribute: "[Sample.Pipeline.DefaultPipeline]");
+            "[Sample.Pipeline.ReadOnlyPipeline]",
+            "[Sample.Pipeline.DefaultPipeline]");
 
         var generated = GenerateHandlerRegistrationSource(source);
 
@@ -56,22 +56,22 @@ public sealed class HandlerRegistrationGeneratorTests {
             [assembly: Elarion.Abstractions.UseElarion]
             [assembly: Sample.Pipeline.DefaultPipeline]
             """,
-            modulePipelineAttribute: "",
-            handlerPipelineAttribute: "");
+            "",
+            "");
 
         var result = GenerateHandlerRegistrationRunResult(source);
         var generated = GetGeneratedSource(result, "SalesHandlerExtensions.g.cs");
 
         generated.Should().Contain("public static IServiceCollection AddSalesHandlers(");
-        generated.Should().Contain("Sample.Modules.Sales.Handlers.CreateOrderRegistration.AddCreateOrder(services, lifetime);");
+        generated.Should()
+            .Contain("Sample.Modules.Sales.Handlers.CreateOrderRegistration.AddCreateOrder(services, lifetime);");
     }
 
     [Fact]
     public void GenerateRegistration_CacheableHandler_EmitsCacheDecoratorAndPolicy() {
         var source = CreateSource(
             "[assembly: Sample.Pipeline.DefaultPipeline]",
-            modulePipelineAttribute: "",
-            handlerPipelineAttribute:
+            "",
             """
             [Sample.Pipeline.ReadOnlyPipeline]
             [Elarion.Abstractions.Caching.Cacheable(
@@ -95,8 +95,7 @@ public sealed class HandlerRegistrationGeneratorTests {
     public void GenerateRegistration_CacheInvalidatingHandler_EmitsInvalidationDecoratorOutermost() {
         var source = CreateSource(
             "[assembly: Sample.Pipeline.DefaultPipeline]",
-            modulePipelineAttribute: "",
-            handlerPipelineAttribute:
+            "",
             """
             [Elarion.Abstractions.Caching.CacheInvalidate(
                 "sample:sales",
@@ -116,8 +115,8 @@ public sealed class HandlerRegistrationGeneratorTests {
     public void GenerateRegistration_ResilientHandler_EmitsResilienceDecoratorOutsidePipeline() {
         var source = CreateSource(
             "[assembly: Sample.Pipeline.DefaultPipeline]",
-            modulePipelineAttribute: "",
-            handlerPipelineAttribute: """[Elarion.Abstractions.Resilience.Resilient("invoice-email")]""");
+            "",
+            """[Elarion.Abstractions.Resilience.Resilient("invoice-email")]""");
 
         var generated = GenerateHandlerRegistrationSource(source);
 
@@ -133,8 +132,8 @@ public sealed class HandlerRegistrationGeneratorTests {
     public void GenerateRegistration_AnyHandler_EmitsObservabilityDecoratorOutermost() {
         var source = CreateSource(
             "[assembly: Sample.Pipeline.DefaultPipeline]",
-            modulePipelineAttribute: "",
-            handlerPipelineAttribute: "");
+            "",
+            "");
 
         var generated = GenerateHandlerRegistrationSource(source);
 
@@ -150,9 +149,9 @@ public sealed class HandlerRegistrationGeneratorTests {
     [Fact]
     public void GenerateRegistration_HandlerWithoutPipeline_StillEmitsObservabilityDecorator() {
         var source = CreateSource(
-            assemblyPipelineAttribute: "",
-            modulePipelineAttribute: "",
-            handlerPipelineAttribute: "");
+            "",
+            "",
+            "");
 
         var generated = GenerateHandlerRegistrationSource(source);
 
@@ -165,9 +164,9 @@ public sealed class HandlerRegistrationGeneratorTests {
     [Fact]
     public void GenerateRegistration_AnyHandler_EmitsObservabilityDecoratorWithEnrichersAndLogger() {
         var source = CreateSource(
-            assemblyPipelineAttribute: "",
-            modulePipelineAttribute: "",
-            handlerPipelineAttribute: "");
+            "",
+            "",
+            "");
 
         var generated = GenerateHandlerRegistrationSource(source);
 
@@ -175,7 +174,8 @@ public sealed class HandlerRegistrationGeneratorTests {
         // enricher plus any host IHandlerContextEnricher, on by default) and the logger factory — both
         // soft-resolved so a bare host never fails resolution.
         generated.Should().Contain("global::Elarion.Pipeline.ObservabilityDecorator<");
-        generated.Should().Contain("sp.GetServices<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>()");
+        generated.Should()
+            .Contain("sp.GetServices<global::Elarion.Abstractions.Diagnostics.IHandlerContextEnricher>()");
         generated.Should().Contain("sp.GetService<global::Microsoft.Extensions.Logging.ILoggerFactory>()");
     }
 
@@ -308,8 +308,10 @@ public sealed class HandlerRegistrationGeneratorTests {
         var full = CSharpCompilation.Create(
             "HandlerMetadataCompile",
             [
-                CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
-                CSharpSyntaxTree.ParseText(generated, parseOptions, cancellationToken: TestContext.Current.CancellationToken)
+                CSharpSyntaxTree.ParseText(source, parseOptions,
+                    cancellationToken: TestContext.Current.CancellationToken),
+                CSharpSyntaxTree.ParseText(generated, parseOptions,
+                    cancellationToken: TestContext.Current.CancellationToken)
             ],
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -440,7 +442,8 @@ public sealed class HandlerRegistrationGeneratorTests {
         doThing.Should().Contain(".AppliesTo(__handlerMetadata)");
         readThing.Should().Contain(".AppliesTo(__handlerMetadata)");
         doThing.Should().Contain("new(typeof(global::Sample.App.DoThing), typeof(global::Sample.App.DoThingCommand),");
-        readThing.Should().Contain("new(typeof(global::Sample.App.ReadThing), typeof(global::Sample.App.ReadThingQuery),");
+        readThing.Should()
+            .Contain("new(typeof(global::Sample.App.ReadThing), typeof(global::Sample.App.ReadThingQuery),");
         // ...and the decorator is wrapped in a runtime conditional in every in-scope handler (attachment is decided at run time).
         doThing.Should().Contain("if (__pipelineApplies0)");
         readThing.Should().Contain("if (__pipelineApplies0)");
@@ -562,17 +565,17 @@ public sealed class HandlerRegistrationGeneratorTests {
         // The IHandler<T> sugar inherits IHandler<T, Result<Unit>> via a default interface method,
         // so the generator discovers and registers it as the two-arg interface with no special-casing.
         var source = """
-            namespace Sample.Modules.Sales.Handlers {
-                public sealed record Ping(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
+                     namespace Sample.Modules.Sales.Handlers {
+                         public sealed record Ping(int Id) : Elarion.Abstractions.Messaging.IDomainEvent;
 
-                public sealed class PingHandler : Elarion.Abstractions.IHandler<Ping> {
-                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
-                        Ping request,
-                        System.Threading.CancellationToken ct) =>
-                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
-                }
-            }
-            """;
+                         public sealed class PingHandler : Elarion.Abstractions.IHandler<Ping> {
+                             public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
+                                 Ping request,
+                                 System.Threading.CancellationToken ct) =>
+                                 System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
+                         }
+                     }
+                     """;
 
         var result = GenerateHandlerRegistrationRunResult(source);
         var generated = GetGeneratedSource(result, "Sample_Modules_Sales_Handlers_PingHandler.g.cs");
@@ -588,23 +591,23 @@ public sealed class HandlerRegistrationGeneratorTests {
         // of one event coexist; a command/query stays UNKEYED — exactly one handler per request, injectable
         // typed-direct as IHandler<TReq, TResp>.
         var source = """
-            namespace Sample.Modules.Sales.Handlers {
-                public sealed record OrderPlaced(int Id) : Elarion.Abstractions.Messaging.IIntegrationEvent;
-                public sealed record DoThing(int Id) : Elarion.Abstractions.ICommand;
+                     namespace Sample.Modules.Sales.Handlers {
+                         public sealed record OrderPlaced(int Id) : Elarion.Abstractions.Messaging.IIntegrationEvent;
+                         public sealed record DoThing(int Id) : Elarion.Abstractions.ICommand;
 
-                public sealed class OnOrderPlaced : Elarion.Abstractions.IHandler<OrderPlaced> {
-                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
-                        OrderPlaced request, System.Threading.CancellationToken ct) =>
-                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
-                }
+                         public sealed class OnOrderPlaced : Elarion.Abstractions.IHandler<OrderPlaced> {
+                             public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
+                                 OrderPlaced request, System.Threading.CancellationToken ct) =>
+                                 System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
+                         }
 
-                public sealed class DoThingHandler : Elarion.Abstractions.IHandler<DoThing, Elarion.Abstractions.Result> {
-                    public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
-                        DoThing request, System.Threading.CancellationToken ct) =>
-                        System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
-                }
-            }
-            """;
+                         public sealed class DoThingHandler : Elarion.Abstractions.IHandler<DoThing, Elarion.Abstractions.Result> {
+                             public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result> HandleAsync(
+                                 DoThing request, System.Threading.CancellationToken ct) =>
+                                 System.Threading.Tasks.ValueTask.FromResult(Elarion.Abstractions.Result.Success());
+                         }
+                     }
+                     """;
 
         var result = GenerateHandlerRegistrationRunResult(source);
 
@@ -658,10 +661,9 @@ public sealed class HandlerRegistrationGeneratorTests {
         // a `ThrowingHandler<TRequest, TResponse>` registration that failed to compile (CS0246).
         result.GeneratedTrees.Should().NotContain(tree =>
             Path.GetFileName(tree.FilePath).Contains("ThrowingHandler", StringComparison.Ordinal));
-        foreach (var tree in result.GeneratedTrees) {
+        foreach (var tree in result.GeneratedTrees)
             tree.GetText(TestContext.Current.CancellationToken).ToString()
                 .Should().NotContain("ThrowingHandler");
-        }
 
         // ...while the concrete handler is still registered as normal, and its registration compiles cleanly
         // alongside the source. Only the handler tree is compiled here — the cross-generator module-services
@@ -673,8 +675,10 @@ public sealed class HandlerRegistrationGeneratorTests {
         var full = CSharpCompilation.Create(
             "OpenGenericHandlerCompile",
             [
-                CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
-                CSharpSyntaxTree.ParseText(doThing, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
+                CSharpSyntaxTree.ParseText(source, parseOptions,
+                    cancellationToken: TestContext.Current.CancellationToken),
+                CSharpSyntaxTree.ParseText(doThing, parseOptions,
+                    cancellationToken: TestContext.Current.CancellationToken)
             ],
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -687,8 +691,8 @@ public sealed class HandlerRegistrationGeneratorTests {
     public void GenerateRegistration_IrrelevantEdit_ReusesPipeline() {
         var source = CreateSource(
             "[assembly: Sample.Pipeline.DefaultPipeline]",
-            modulePipelineAttribute: "",
-            handlerPipelineAttribute: "");
+            "",
+            "");
 
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new HandlerRegistrationGenerator(),
@@ -746,7 +750,9 @@ public sealed class HandlerRegistrationGeneratorTests {
         var generated = GetGeneratedSource(result, "Sample_App_AuditedHandler.g.cs");
 
         // The predicate is invoked with the handler metadata (not typeof(request)), cached as a runtime conditional.
-        generated.Should().Contain("global::Sample.App.AuditDecorator<global::Sample.App.DoThingCommand, global::Elarion.Abstractions.Result<global::Sample.App.DoThingResponse>>.AppliesTo(__handlerMetadata)");
+        generated.Should()
+            .Contain(
+                "global::Sample.App.AuditDecorator<global::Sample.App.DoThingCommand, global::Elarion.Abstractions.Result<global::Sample.App.DoThingResponse>>.AppliesTo(__handlerMetadata)");
         generated.Should().Contain("if (__pipelineApplies0)");
         generated.Should().Contain("new global::Sample.App.AuditDecorator<");
         // The metadata field is declared before the AppliesTo field that reads it (static initializer order).
@@ -758,8 +764,10 @@ public sealed class HandlerRegistrationGeneratorTests {
         var full = CSharpCompilation.Create(
             "AppliesToMetadataCompile",
             [
-                CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
-                CSharpSyntaxTree.ParseText(generated, parseOptions, cancellationToken: TestContext.Current.CancellationToken)
+                CSharpSyntaxTree.ParseText(source, parseOptions,
+                    cancellationToken: TestContext.Current.CancellationToken),
+                CSharpSyntaxTree.ParseText(generated, parseOptions,
+                    cancellationToken: TestContext.Current.CancellationToken)
             ],
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -802,7 +810,8 @@ public sealed class HandlerRegistrationGeneratorTests {
         registration.Should().Contain("public static IServiceCollection AddPriceCake(");
 
         var aggregation = GetGeneratedSource(result, "PricingHandlerExtensions.g.cs");
-        aggregation.Should().Contain("MyApp.Decorators.Pricing.PriceCakeRegistration.AddPriceCake(services, lifetime);");
+        aggregation.Should()
+            .Contain("MyApp.Decorators.Pricing.PriceCakeRegistration.AddPriceCake(services, lifetime);");
     }
 
     [Fact]
@@ -936,11 +945,12 @@ public sealed class HandlerRegistrationGeneratorTests {
         return result;
     }
 
-    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
@@ -956,125 +966,126 @@ public sealed class HandlerRegistrationGeneratorTests {
     private static string CreateSource(
         string assemblyPipelineAttribute,
         string modulePipelineAttribute,
-        string handlerPipelineAttribute) =>
-        $$"""
-        {{assemblyPipelineAttribute}}
+        string handlerPipelineAttribute) {
+        return $$"""
+                 {{assemblyPipelineAttribute}}
 
-        namespace Elarion.Abstractions {
-            [System.AttributeUsage(System.AttributeTargets.Assembly)]
-            public sealed class UseElarionAttribute : System.Attribute;
+                 namespace Elarion.Abstractions {
+                     [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                     public sealed class UseElarionAttribute : System.Attribute;
 
-            [System.AttributeUsage(System.AttributeTargets.Assembly)]
-            public sealed class GenerateModuleHandlersAttribute : System.Attribute;
+                     [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                     public sealed class GenerateModuleHandlersAttribute : System.Attribute;
 
-            public interface IHandler<TRequest, TResponse> {
-                System.Threading.Tasks.ValueTask<TResponse> HandleAsync(
-                    TRequest request,
-                    System.Threading.CancellationToken ct);
-            }
+                     public interface IHandler<TRequest, TResponse> {
+                         System.Threading.Tasks.ValueTask<TResponse> HandleAsync(
+                             TRequest request,
+                             System.Threading.CancellationToken ct);
+                     }
 
-            public readonly record struct Result<T>(T Value);
-        }
+                     public readonly record struct Result<T>(T Value);
+                 }
 
-        namespace Elarion.Abstractions.Caching {
-            public enum HandlerCacheScope {
-                CurrentUser = 0,
-                Global = 1,
-            }
+                 namespace Elarion.Abstractions.Caching {
+                     public enum HandlerCacheScope {
+                         CurrentUser = 0,
+                         Global = 1,
+                     }
 
-            [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
-            public sealed class CacheableAttribute(params string[] tags) : System.Attribute {
-                public string[] Tags { get; } = tags;
-                public int DurationSeconds { get; init; } = 60;
-                public HandlerCacheScope Scope { get; init; } = HandlerCacheScope.CurrentUser;
-                public string[] KeyProperties { get; init; } = [];
-            }
+                     [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
+                     public sealed class CacheableAttribute(params string[] tags) : System.Attribute {
+                         public string[] Tags { get; } = tags;
+                         public int DurationSeconds { get; init; } = 60;
+                         public HandlerCacheScope Scope { get; init; } = HandlerCacheScope.CurrentUser;
+                         public string[] KeyProperties { get; init; } = [];
+                     }
 
-            [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
-            public sealed class CacheInvalidateAttribute(params string[] tags) : System.Attribute {
-                public string[] Tags { get; } = tags;
-                public HandlerCacheScope Scope { get; init; } = HandlerCacheScope.CurrentUser;
-            }
-        }
+                     [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
+                     public sealed class CacheInvalidateAttribute(params string[] tags) : System.Attribute {
+                         public string[] Tags { get; } = tags;
+                         public HandlerCacheScope Scope { get; init; } = HandlerCacheScope.CurrentUser;
+                     }
+                 }
 
-        namespace Elarion.Abstractions.Resilience {
-            [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
-            public sealed class ResilientAttribute(string policyName) : System.Attribute {
-                public string PolicyName { get; } = policyName;
-            }
-        }
+                 namespace Elarion.Abstractions.Resilience {
+                     [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
+                     public sealed class ResilientAttribute(string policyName) : System.Attribute {
+                         public string PolicyName { get; } = policyName;
+                     }
+                 }
 
-        namespace Sample.Decorators {
-            public sealed class TransactionDecorator<TRequest, TResponse> {
-                public TransactionDecorator(Elarion.Abstractions.IHandler<TRequest, TResponse> inner) {
-                }
-            }
+                 namespace Sample.Decorators {
+                     public sealed class TransactionDecorator<TRequest, TResponse> {
+                         public TransactionDecorator(Elarion.Abstractions.IHandler<TRequest, TResponse> inner) {
+                         }
+                     }
 
-            public sealed class DbConstraintDecorator<TRequest, TResponse> {
-                public DbConstraintDecorator(Elarion.Abstractions.IHandler<TRequest, TResponse> inner) {
-                }
-            }
+                     public sealed class DbConstraintDecorator<TRequest, TResponse> {
+                         public DbConstraintDecorator(Elarion.Abstractions.IHandler<TRequest, TResponse> inner) {
+                         }
+                     }
 
-            public sealed class ValidationDecorator<TRequest, TResponse> {
-                public ValidationDecorator(Elarion.Abstractions.IHandler<TRequest, TResponse> inner) {
-                }
-            }
-        }
+                     public sealed class ValidationDecorator<TRequest, TResponse> {
+                         public ValidationDecorator(Elarion.Abstractions.IHandler<TRequest, TResponse> inner) {
+                         }
+                     }
+                 }
 
-        namespace Elarion.Abstractions.Pipeline {
-            [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
-            public sealed class DecoratorListAttribute(params System.Type[] decorators) : System.Attribute {
-                public System.Type[] Decorators { get; } = decorators;
-            }
-        }
+                 namespace Elarion.Abstractions.Pipeline {
+                     [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
+                     public sealed class DecoratorListAttribute(params System.Type[] decorators) : System.Attribute {
+                         public System.Type[] Decorators { get; } = decorators;
+                     }
+                 }
 
-        namespace Sample.Pipeline {
-            [Elarion.Abstractions.Pipeline.DecoratorList(
-                typeof(Sample.Decorators.TransactionDecorator<,>),
-                typeof(Sample.Decorators.DbConstraintDecorator<,>),
-                typeof(Sample.Decorators.ValidationDecorator<,>))]
-            [System.AttributeUsage(
-                System.AttributeTargets.Assembly | System.AttributeTargets.Class,
-                Inherited = false,
-                AllowMultiple = false)]
-            public sealed class DefaultPipelineAttribute : System.Attribute;
+                 namespace Sample.Pipeline {
+                     [Elarion.Abstractions.Pipeline.DecoratorList(
+                         typeof(Sample.Decorators.TransactionDecorator<,>),
+                         typeof(Sample.Decorators.DbConstraintDecorator<,>),
+                         typeof(Sample.Decorators.ValidationDecorator<,>))]
+                     [System.AttributeUsage(
+                         System.AttributeTargets.Assembly | System.AttributeTargets.Class,
+                         Inherited = false,
+                         AllowMultiple = false)]
+                     public sealed class DefaultPipelineAttribute : System.Attribute;
 
-            [Elarion.Abstractions.Pipeline.DecoratorList(typeof(Sample.Decorators.ValidationDecorator<,>))]
-            [System.AttributeUsage(
-                System.AttributeTargets.Assembly | System.AttributeTargets.Class,
-                Inherited = false,
-                AllowMultiple = false)]
-            public sealed class ReadOnlyPipelineAttribute : System.Attribute;
-        }
+                     [Elarion.Abstractions.Pipeline.DecoratorList(typeof(Sample.Decorators.ValidationDecorator<,>))]
+                     [System.AttributeUsage(
+                         System.AttributeTargets.Assembly | System.AttributeTargets.Class,
+                         Inherited = false,
+                         AllowMultiple = false)]
+                     public sealed class ReadOnlyPipelineAttribute : System.Attribute;
+                 }
 
-        namespace Elarion.Abstractions.Modules {
-            [System.AttributeUsage(System.AttributeTargets.Class)]
-            public sealed class AppModuleAttribute(string name) : System.Attribute {
-                public string Name { get; } = name;
-            }
-        }
+                 namespace Elarion.Abstractions.Modules {
+                     [System.AttributeUsage(System.AttributeTargets.Class)]
+                     public sealed class AppModuleAttribute(string name) : System.Attribute {
+                         public string Name { get; } = name;
+                     }
+                 }
 
-        namespace Sample.Modules.Sales {
-            [Elarion.Abstractions.Modules.AppModule("Sales")]
-            {{modulePipelineAttribute}}
-            public static partial class SalesModule;
-        }
+                 namespace Sample.Modules.Sales {
+                     [Elarion.Abstractions.Modules.AppModule("Sales")]
+                     {{modulePipelineAttribute}}
+                     public static partial class SalesModule;
+                 }
 
-        namespace Sample.Modules.Sales.Handlers {
-            {{handlerPipelineAttribute}}
-            public sealed class CreateOrder
-                : Elarion.Abstractions.IHandler<CreateOrder.Command, Elarion.Abstractions.Result<CreateOrder.Response>> {
-                public sealed record Command {
-                    public required string CustomerId { get; init; }
-                }
+                 namespace Sample.Modules.Sales.Handlers {
+                     {{handlerPipelineAttribute}}
+                     public sealed class CreateOrder
+                         : Elarion.Abstractions.IHandler<CreateOrder.Command, Elarion.Abstractions.Result<CreateOrder.Response>> {
+                         public sealed record Command {
+                             public required string CustomerId { get; init; }
+                         }
 
-                public sealed record Response;
+                         public sealed record Response;
 
-                public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result<Response>> HandleAsync(
-                    Command request,
-                    System.Threading.CancellationToken ct) =>
-                    default;
-            }
-        }
-        """;
+                         public System.Threading.Tasks.ValueTask<Elarion.Abstractions.Result<Response>> HandleAsync(
+                             Command request,
+                             System.Threading.CancellationToken ct) =>
+                             default;
+                     }
+                 }
+                 """;
+    }
 }

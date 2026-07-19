@@ -5,50 +5,50 @@
     <_ElarionJsonRpcSchemaOutputPath>$([System.IO.Path]::GetFullPath('$(ElarionJsonRpcSchemaOutputPath)'))</_ElarionJsonRpcSchemaOutputPath>
     <_ElarionJsonRpcSchemaCache>$(BaseIntermediateOutputPath)$(MSBuildProjectName).ElarionJsonRpcSchemaFiles.cache</_ElarionJsonRpcSchemaCache>
     <_ElarionJsonRpcSchemaToolPath>$([System.IO.Path]::GetFullPath('$(ElarionJsonRpcSchemaToolPath)'))</_ElarionJsonRpcSchemaToolPath>
-    <_ElarionJsonRpcSchemaApplicationArguments Condition="'$(ElarionJsonRpcSchemaApplicationArguments)' != ''"> -- $(ElarionJsonRpcSchemaApplicationArguments)</_ElarionJsonRpcSchemaApplicationArguments>
+    <_ElarionJsonRpcSchemaApplicationArguments Condition="'$(ElarionJsonRpcSchemaApplicationArguments)' != ''">-- $(ElarionJsonRpcSchemaApplicationArguments)</_ElarionJsonRpcSchemaApplicationArguments>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(ElarionJsonRpcGenerateSchema)' == 'true'">
-    <ProjectCapability Include="ElarionJsonRpcGenerateSchema" />
+    <ProjectCapability Include="ElarionJsonRpcGenerateSchema"/>
   </ItemGroup>
 
   <Target Name="ElarionJsonRpcGetSchemaDocuments" Returns="@(_ElarionJsonRpcSchemaDocuments)">
     <Error Condition="'$(ElarionJsonRpcGenerateSchema)' != 'true'"
-           Text="Elarion JSON-RPC schema generation is disabled. Add '&lt;ElarionJsonRpcGenerateSchema&gt;true&lt;/ElarionJsonRpcGenerateSchema&gt;' to the project." />
+           Text="Elarion JSON-RPC schema generation is disabled. Add '&lt;ElarionJsonRpcGenerateSchema&gt;true&lt;/ElarionJsonRpcGenerateSchema&gt;' to the project."/>
     <Error Condition="!Exists('$(_ElarionJsonRpcSchemaCache)')"
-           Text="$(_ElarionJsonRpcSchemaCache) file does not exist. Add '&lt;ElarionJsonRpcGenerateSchemaOnBuild&gt;true&lt;/ElarionJsonRpcGenerateSchemaOnBuild&gt;' to the project or call the GenerateElarionJsonRpcSchema target." />
+           Text="$(_ElarionJsonRpcSchemaCache) file does not exist. Add '&lt;ElarionJsonRpcGenerateSchemaOnBuild&gt;true&lt;/ElarionJsonRpcGenerateSchemaOnBuild&gt;' to the project or call the GenerateElarionJsonRpcSchema target."/>
 
     <ReadLinesFromFile File="$(_ElarionJsonRpcSchemaCache)">
-      <Output TaskParameter="Lines" ItemName="_ElarionJsonRpcSchemaDocuments" />
+      <Output TaskParameter="Lines" ItemName="_ElarionJsonRpcSchemaDocuments"/>
     </ReadLinesFromFile>
 
     <Error Condition="'@(_ElarionJsonRpcSchemaDocuments)' == ''"
-           Text="Elarion JSON-RPC schema generation did not produce any documents." />
+           Text="Elarion JSON-RPC schema generation did not produce any documents."/>
   </Target>
 
   <Target Name="GenerateElarionJsonRpcSchema"
           Inputs="$(TargetPath)"
           Outputs="$(_ElarionJsonRpcSchemaOutputPath)">
     <Error Condition="'$(ElarionJsonRpcGenerateSchema)' != 'true'"
-           Text="Elarion JSON-RPC schema generation is disabled. Add '&lt;ElarionJsonRpcGenerateSchema&gt;true&lt;/ElarionJsonRpcGenerateSchema&gt;' to the project." />
+           Text="Elarion JSON-RPC schema generation is disabled. Add '&lt;ElarionJsonRpcGenerateSchema&gt;true&lt;/ElarionJsonRpcGenerateSchema&gt;' to the project."/>
     <Error Condition="'$(TargetFrameworkIdentifier)' != '.NETCoreApp'"
-           Text="Elarion JSON-RPC schema generation requires an executable .NET application target." />
+           Text="Elarion JSON-RPC schema generation requires an executable .NET application target."/>
     <Error Condition="!Exists('$(_ElarionJsonRpcSchemaToolPath)')"
-           Text="Elarion JSON-RPC schema generation tool '$(_ElarionJsonRpcSchemaToolPath)' does not exist." />
+           Text="Elarion JSON-RPC schema generation tool '$(_ElarionJsonRpcSchemaToolPath)' does not exist."/>
     <Error Condition="!Exists('$(TargetPath)')"
-           Text="Application assembly '$(TargetPath)' does not exist. Build the application before generating the Elarion JSON-RPC schema." />
+           Text="Application assembly '$(TargetPath)' does not exist. Build the application before generating the Elarion JSON-RPC schema."/>
 
     <PropertyGroup>
       <_ElarionJsonRpcSchemaCommand>dotnet "$(_ElarionJsonRpcSchemaToolPath)" --assembly "$(TargetPath)" --output "$(_ElarionJsonRpcSchemaOutputPath)" --file-list "$(_ElarionJsonRpcSchemaCache)" --project "$(MSBuildProjectName)" --framework "$(TargetFrameworkMoniker)" --environment "$(ElarionJsonRpcSchemaEnvironment)" $(ElarionJsonRpcSchemaGenerationOptions)$(_ElarionJsonRpcSchemaApplicationArguments)</_ElarionJsonRpcSchemaCommand>
     </PropertyGroup>
 
-    <Message Importance="high" Text="%0AGenerateElarionJsonRpcSchema:" />
-    <Message Importance="high" Text="  $(_ElarionJsonRpcSchemaCommand)" />
-    <Exec Command="$(_ElarionJsonRpcSchemaCommand)" LogStandardErrorAsError="true" />
+    <Message Importance="high" Text="%0AGenerateElarionJsonRpcSchema:"/>
+    <Message Importance="high" Text="  $(_ElarionJsonRpcSchemaCommand)"/>
+    <Exec Command="$(_ElarionJsonRpcSchemaCommand)" LogStandardErrorAsError="true"/>
   </Target>
 
   <Target Name="_GenerateElarionJsonRpcSchema"
           AfterTargets="Build"
           Condition="'$(ElarionJsonRpcGenerateSchemaOnBuild)' == 'true' AND ('$(TargetFramework)' == '' OR '$(TargetFrameworks)' == '')"
-          DependsOnTargets="GenerateElarionJsonRpcSchema" />
+          DependsOnTargets="GenerateElarionJsonRpcSchema"/>
 </Project>

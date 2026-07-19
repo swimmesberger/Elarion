@@ -38,15 +38,14 @@ public sealed class PostgreSqlDeviceIdentityFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
-    public DeviceIdentityIntegrationDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<DeviceIdentityIntegrationDbContext>()
+    public DeviceIdentityIntegrationDbContext CreateContext() {
+        return new DeviceIdentityIntegrationDbContext(new DbContextOptionsBuilder<DeviceIdentityIntegrationDbContext>()
             .UseNpgsql(ConnectionString)
             .Options);
+    }
 }
 
 /// <summary>Context mapping the device identity tables the way a generated context would
@@ -57,6 +56,7 @@ public sealed class DeviceIdentityIntegrationDbContext(DbContextOptions<DeviceId
 
     public DbSet<DevicePairingCodeEntity> DevicePairingCodes => Set<DevicePairingCodeEntity>();
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder) =>
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.UseElarionDeviceIdentity();
+    }
 }

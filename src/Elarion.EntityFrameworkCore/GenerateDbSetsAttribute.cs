@@ -18,8 +18,7 @@ namespace Elarion.EntityFrameworkCore;
 /// via <see cref="Scopes"/>, which configured entities it should include.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-public sealed class GenerateDbSetsAttribute : Attribute
-{
+public sealed class GenerateDbSetsAttribute : Attribute {
     /// <summary>
     /// Initializes a new instance of the <see cref="GenerateDbSetsAttribute"/> class.
     /// </summary>
@@ -27,8 +26,7 @@ public sealed class GenerateDbSetsAttribute : Attribute
     /// Optional context scopes generated for this context. Omit scopes to include every
     /// <c>[EntityConfiguration]</c>.
     /// </param>
-    public GenerateDbSetsAttribute(params string[] scopes)
-    {
+    public GenerateDbSetsAttribute(params string[] scopes) {
         Scopes = scopes;
     }
 

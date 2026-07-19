@@ -1,5 +1,5 @@
-import { Suspense, useState } from "react"
-import { Button } from "@/components/ui/button"
+import {Suspense, useState} from "react"
+import {Button} from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -8,12 +8,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ExtensionSlot, useContributions } from "@swimmesberger/elarion-contributions/react"
-import { useClients } from "../hooks/useClients"
-import { clientRowActions, type ClientRow } from "../points"
+import {ExtensionSlot, useContributions} from "@swimmesberger/elarion-contributions/react"
+import {useClients} from "../hooks/useClients"
+import {clientRowActions, type ClientRow} from "../points"
 
 export function ClientsTable() {
-  const { data, isPending, isError } = useClients()
+  const {data, isPending, isError} = useClients()
   // This module renders its row-action slot without knowing who contributes: Invoicing adds "new invoice"
   // through the published clientRowActions point, and a module that is disabled contributes nothing.
   const actions = useContributions(clientRowActions)
@@ -35,7 +35,7 @@ export function ClientsTable() {
             <TableHead>Number</TableHead>
             <TableHead>Name</TableHead>
             <TableHead>Email</TableHead>
-            {actions.length > 0 && <TableHead className="w-0" />}
+            {actions.length > 0 && <TableHead className="w-0"/>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -54,9 +54,9 @@ export function ClientsTable() {
                           variant="ghost"
                           size="sm"
                           title={action.label}
-                          onClick={() => setActive({ actionId: action.id, client: c })}
+                          onClick={() => setActive({actionId: action.id, client: c})}
                         >
-                          <action.icon className="h-4 w-4" />
+                          <action.icon className="h-4 w-4"/>
                           <span className="sr-only">{action.label}</span>
                         </Button>
                       )}
@@ -71,7 +71,7 @@ export function ClientsTable() {
       {/* The invoked action's component mounts lazily — a contributed dialog's chunk downloads on first use. */}
       {activeAction !== undefined && active !== null && (
         <Suspense>
-          <activeAction.component client={active.client} onClose={() => setActive(null)} />
+          <activeAction.component client={active.client} onClose={() => setActive(null)}/>
         </Suspense>
       )}
     </>

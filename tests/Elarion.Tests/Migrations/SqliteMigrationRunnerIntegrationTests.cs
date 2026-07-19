@@ -164,8 +164,10 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
         var applied = await runner.MigrateAsync(TestToken);
         applied.Should().ContainSingle().Which.Version.Should().Be("2");
 
-        (await ScalarAsync(connectionString, "SELECT count(*) FROM sqlite_master WHERE name = 'mig_base_one'")).Should().Be(0L);
-        (await ScalarAsync(connectionString, "SELECT count(*) FROM sqlite_master WHERE name = 'mig_base_two'")).Should().Be(1L);
+        (await ScalarAsync(connectionString, "SELECT count(*) FROM sqlite_master WHERE name = 'mig_base_one'")).Should()
+            .Be(0L);
+        (await ScalarAsync(connectionString, "SELECT count(*) FROM sqlite_master WHERE name = 'mig_base_two'")).Should()
+            .Be(1L);
 
         var again = () => runner.BaselineAsync("2", cancellationToken: TestToken);
         (await again.Should().ThrowAsync<MigrationException>()).Which.Message.Should().Contain("already has");

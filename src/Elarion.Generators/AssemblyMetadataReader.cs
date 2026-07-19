@@ -10,16 +10,14 @@ namespace Elarion.Generators;
 /// <c>MetadataReferencesProvider</c> pipelines (cached per reference — a source edit re-reads nothing).
 /// Both <see cref="ElarionManifest"/> and <c>EntityConfigurationManifest</c> delegate their reference reading here.
 /// </summary>
-internal static class AssemblyMetadataReader
-{
+internal static class AssemblyMetadataReader {
     /// <summary>
     /// Returns every <c>[assembly: AssemblyMetadata(key, value)]</c> pair found in
     /// <paramref name="reference"/>, reading PE metadata directly for PE references and
     /// using symbol attributes for in-compilation references.
     /// Returns an empty list for unrecognised reference kinds.
     /// </summary>
-    public static List<(string Key, string Value)> ReadRawEntries(MetadataReference reference, CancellationToken ct)
-    {
+    public static List<(string Key, string Value)> ReadRawEntries(MetadataReference reference, CancellationToken ct) {
         if (reference is CompilationReference compilationReference)
             return ReadCompilation(compilationReference.Compilation, ct);
 
@@ -29,11 +27,9 @@ internal static class AssemblyMetadataReader
         return [];
     }
 
-    private static List<(string Key, string Value)> ReadCompilation(Compilation compilation, CancellationToken ct)
-    {
+    private static List<(string Key, string Value)> ReadCompilation(Compilation compilation, CancellationToken ct) {
         var entries = new List<(string, string)>();
-        foreach (var attribute in compilation.Assembly.GetAttributes())
-        {
+        foreach (var attribute in compilation.Assembly.GetAttributes()) {
             ct.ThrowIfCancellationRequested();
             if (!IsAssemblyMetadataAttribute(attribute) || attribute.ConstructorArguments.Length != 2)
                 continue;
@@ -45,24 +41,21 @@ internal static class AssemblyMetadataReader
         return entries;
     }
 
-    private static List<(string Key, string Value)> ReadPortableExecutable(PortableExecutableReference portable, CancellationToken ct)
-    {
+    private static List<(string Key, string Value)> ReadPortableExecutable(PortableExecutableReference portable,
+        CancellationToken ct) {
         var entries = new List<(string, string)>();
-        try
-        {
+        try {
             if (portable.GetMetadata() is not AssemblyMetadata metadata)
                 return entries;
 
-            foreach (var module in metadata.GetModules())
-            {
+            foreach (var module in metadata.GetModules()) {
                 ct.ThrowIfCancellationRequested();
                 var reader = module.GetMetadataReader();
                 if (!reader.IsAssembly)
                     continue;
 
                 var assemblyDefinition = reader.GetAssemblyDefinition();
-                foreach (var attributeHandle in assemblyDefinition.GetCustomAttributes())
-                {
+                foreach (var attributeHandle in assemblyDefinition.GetCustomAttributes()) {
                     ct.ThrowIfCancellationRequested();
                     var attribute = reader.GetCustomAttribute(attributeHandle);
                     if (TryReadAssemblyMetadata(reader, attribute, out var key, out var value))
@@ -70,33 +63,32 @@ internal static class AssemblyMetadataReader
                 }
             }
         }
-        catch (BadImageFormatException) { }
-        catch (IOException) { }
+        catch (BadImageFormatException) {
+        }
+        catch (IOException) {
+        }
 
         return entries;
     }
 
-    private static bool IsAssemblyMetadataAttribute(AttributeData attribute) =>
-        attribute.AttributeClass is
-        {
+    private static bool IsAssemblyMetadataAttribute(AttributeData attribute) {
+        return attribute.AttributeClass is {
             Name: "AssemblyMetadataAttribute",
-            ContainingNamespace:
-            {
+            ContainingNamespace: {
                 Name: "Reflection",
-                ContainingNamespace:
-                {
+                ContainingNamespace: {
                     Name: "System",
                     ContainingNamespace.IsGlobalNamespace: true
                 }
             }
         };
+    }
 
     private static bool TryReadAssemblyMetadata(
         MetadataReader reader,
         CustomAttribute attribute,
         out string key,
-        out string value)
-    {
+        out string value) {
         key = string.Empty;
         value = string.Empty;
 
@@ -117,11 +109,9 @@ internal static class AssemblyMetadataReader
         return true;
     }
 
-    private static bool IsAssemblyMetadataAttribute(MetadataReader reader, EntityHandle constructor)
-    {
+    private static bool IsAssemblyMetadataAttribute(MetadataReader reader, EntityHandle constructor) {
         EntityHandle typeHandle;
-        switch (constructor.Kind)
-        {
+        switch (constructor.Kind) {
             case HandleKind.MemberReference:
                 typeHandle = reader.GetMemberReference((MemberReferenceHandle)constructor).Parent;
                 break;
@@ -135,10 +125,8 @@ internal static class AssemblyMetadataReader
         return IsType(reader, typeHandle, "System.Reflection", "AssemblyMetadataAttribute");
     }
 
-    private static bool IsType(MetadataReader reader, EntityHandle typeHandle, string ns, string name)
-    {
-        switch (typeHandle.Kind)
-        {
+    private static bool IsType(MetadataReader reader, EntityHandle typeHandle, string ns, string name) {
+        switch (typeHandle.Kind) {
             case HandleKind.TypeDefinition:
                 var typeDefinition = reader.GetTypeDefinition((TypeDefinitionHandle)typeHandle);
                 return reader.GetString(typeDefinition.Namespace) == ns &&

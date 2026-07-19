@@ -20,9 +20,7 @@ public sealed class SettingsConfigurationProvider : ConfigurationProvider {
         // IConfiguration keys are case-insensitive; settings keys are already ':'-separated, so they map
         // straight onto the IConfiguration hierarchy.
         var data = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in entries) {
-            data[entry.Key] = entry.Value;
-        }
+        foreach (var entry in entries) data[entry.Key] = entry.Value;
 
         Data = data;
         OnReload();

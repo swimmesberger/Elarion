@@ -50,9 +50,7 @@ public static class StreamEndpointRouteBuilderExtensions {
 
         return endpoints.MapGet(pattern, (HttpContext context) => {
             var stream = subscribe(context, ResumePoint(context.Request));
-            if (stream is null) {
-                return Results.NotFound();
-            }
+            if (stream is null) return Results.NotFound();
 
             var typeInfo = context.RequestServices.GetRequiredService<IElarionJsonSerialization>().GetTypeInfo<T>();
             return (IResult)TypedResults.ServerSentEvents(
@@ -95,10 +93,11 @@ public static class StreamEndpointRouteBuilderExtensions {
 
                 var item = enumerator.Current;
                 yield return new SseItem<string>(JsonSerializer.Serialize(item.Value, typeInfo)) {
-                    EventId = item.Sequence.ToString(CultureInfo.InvariantCulture),
+                    EventId = item.Sequence.ToString(CultureInfo.InvariantCulture)
                 };
             }
-        } finally {
+        }
+        finally {
             // A response-writer failure can dispose this iterator while a keep-alive leaves MoveNext pending.
             // Cancel and settle that exact move before the await-using disposes the enumerator: concurrent
             // MoveNextAsync/DisposeAsync calls are outside the IAsyncEnumerator contract.
@@ -133,8 +132,9 @@ public static class StreamEndpointRouteBuilderExtensions {
         IAsyncEnumerable<T> source,
         JsonTypeInfo<T> typeInfo,
         TimeProvider timeProvider,
-        CancellationToken ct) =>
-        TypedResults.ServerSentEvents(StreamHandlerEventsAsync(source, typeInfo, timeProvider, ct));
+        CancellationToken ct) {
+        return TypedResults.ServerSentEvents(StreamHandlerEventsAsync(source, typeInfo, timeProvider, ct));
+    }
 
     internal static async IAsyncEnumerable<SseItem<string>> StreamHandlerEventsAsync<T>(
         IAsyncEnumerable<T> source,
@@ -162,24 +162,29 @@ public static class StreamEndpointRouteBuilderExtensions {
 
                 yield return new SseItem<string>(JsonSerializer.Serialize(enumerator.Current, typeInfo));
             }
-        } finally {
+        }
+        finally {
             await SettlePendingMoveAsync(pendingMove, enumerationCts).ConfigureAwait(false);
         }
     }
 
-    private static async ValueTask SettlePendingMoveAsync(Task<bool>? pendingMove, CancellationTokenSource enumerationCts) {
+    private static async ValueTask SettlePendingMoveAsync(Task<bool>? pendingMove,
+        CancellationTokenSource enumerationCts) {
         if (pendingMove is null)
             return;
 
         try {
             enumerationCts.Cancel();
-        } catch {
+        }
+        catch {
             // A cancellation callback failure must not skip settling the active MoveNext. The terminal response
             // path already owns the primary failure; safety here is serializing cleanup and observing the task.
         }
+
         try {
             _ = await pendingMove.ConfigureAwait(false);
-        } catch {
+        }
+        catch {
             // The terminal path already owns the primary response/timer/cancellation outcome. Awaiting here is
             // solely to serialize enumerator cleanup and observe the pending task before DisposeAsync.
         }
@@ -188,9 +193,10 @@ public static class StreamEndpointRouteBuilderExtensions {
     private enum MoveWaitResult {
         MoveCompleted,
         KeepAlive,
-        Cancelled,
+        Cancelled
     }
 
-    private static TimeProvider GetTimeProvider(HttpContext context) =>
-        context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System;
+    private static TimeProvider GetTimeProvider(HttpContext context) {
+        return context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System;
+    }
 }

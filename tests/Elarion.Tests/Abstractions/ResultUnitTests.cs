@@ -101,8 +101,9 @@ public sealed class ResultUnitTests {
     private sealed record Ping(bool Allow);
 
     private sealed class PingHandler : IHandler<Ping> {
-        public ValueTask<Result> HandleAsync(Ping request, CancellationToken ct) =>
-            ValueTask.FromResult(
+        public ValueTask<Result> HandleAsync(Ping request, CancellationToken ct) {
+            return ValueTask.FromResult(
                 request.Allow ? Result.Success() : Result.Failure(AppError.BusinessRule("denied")));
+        }
     }
 }

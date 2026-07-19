@@ -98,9 +98,7 @@ internal static class HandlerObservability {
         if (activity is not null) {
             activity.SetTag("elarion.handler", handlerName);
             activity.SetTag("elarion.handler.request_type", typeof(TRequest).Name);
-            if (pipelineTag is not null) {
-                activity.SetTag("elarion.handler.pipeline", pipelineTag);
-            }
+            if (pipelineTag is not null) activity.SetTag("elarion.handler.pipeline", pipelineTag);
         }
 
         var startTimestamp = Stopwatch.GetTimestamp();
@@ -112,26 +110,21 @@ internal static class HandlerObservability {
             var list = AsList(enrichers);
             if (list.Count > 0) {
                 var context = new HandlerEnrichmentContext();
-                for (var i = 0; i < list.Count; i++) {
-                    list[i].Enrich(context);
-                }
+                for (var i = 0; i < list.Count; i++) list[i].Enrich(context);
 
                 // Traces: tag the current span. Activity.Current is the span started above when a listener is
                 // attached; otherwise it is whatever ambient span the transport started (e.g. the ASP.NET request
                 // span), which is still the correct enrichment target — matching the former decorator's behavior.
                 var tags = context.Tags;
-                if (tags.Count > 0 && Activity.Current is { } current) {
-                    for (var i = 0; i < tags.Count; i++) {
+                if (tags.Count > 0 && Activity.Current is { } current)
+                    for (var i = 0; i < tags.Count; i++)
                         current.SetTag(tags[i].Key, tags[i].Value);
-                    }
-                }
 
                 // Logs: open one scope over the remaining pipeline so every log line carries the context. Only when
                 // an enricher contributed scope items and a logger factory is available.
                 var scopeItems = context.ScopeItems;
-                if (scopeItems.Count > 0) {
+                if (scopeItems.Count > 0)
                     logScope = loggerFactory?.CreateLogger(LoggerCategory)?.BeginScope(scopeItems);
-                }
             }
 
             TResponse response;
@@ -143,15 +136,14 @@ internal static class HandlerObservability {
             var outcome = response is IResultLike { IsSuccess: false } ? "error" : "ok";
             if (activity is not null) {
                 activity.SetTag("elarion.handler.outcome", outcome);
-                if (outcome == "error") {
-                    activity.SetStatus(ActivityStatusCode.Error);
-                }
+                if (outcome == "error") activity.SetStatus(ActivityStatusCode.Error);
             }
 
             HandlerTelemetry.RecordExecution(
                 handlerName, outcome, Stopwatch.GetElapsedTime(startTimestamp));
             return response;
-        } catch (Exception ex) {
+        }
+        catch (Exception ex) {
             if (activity is not null) {
                 activity.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
                     { "exception.type", ex.GetType().FullName },
@@ -172,21 +164,16 @@ internal static class HandlerObservability {
     // A conditionally-attached decorator (soft service / AppliesTo) is marked with a trailing "?".
     internal static string RenderPipeline(IHandlerPipeline pipeline) {
         var steps = pipeline.Steps;
-        if (steps.Count == 0) {
-            return "";
-        }
+        if (steps.Count == 0) return "";
 
         var parts = new string[steps.Count];
         for (var i = 0; i < steps.Count; i++) {
             var name = steps[i].Decorator.Name;
             var tick = name.IndexOf('`');
-            if (tick >= 0) {
-                name = name.Substring(0, tick);
-            }
+            if (tick >= 0) name = name.Substring(0, tick);
 
-            if (name.EndsWith("Decorator", StringComparison.Ordinal)) {
+            if (name.EndsWith("Decorator", StringComparison.Ordinal))
                 name = name.Substring(0, name.Length - "Decorator".Length);
-            }
 
             parts[i] = steps[i].Conditional ? name + "?" : name;
         }
@@ -196,14 +183,10 @@ internal static class HandlerObservability {
 
     private static IReadOnlyList<IHandlerContextEnricher> AsList(IEnumerable<IHandlerContextEnricher> enrichers) {
         // Microsoft DI resolves IEnumerable<T> to a T[]; take the fast cast and only materialize a foreign enumerable.
-        if (enrichers is IReadOnlyList<IHandlerContextEnricher> list) {
-            return list;
-        }
+        if (enrichers is IReadOnlyList<IHandlerContextEnricher> list) return list;
 
         var materialized = new List<IHandlerContextEnricher>();
-        foreach (var enricher in enrichers) {
-            materialized.Add(enricher);
-        }
+        foreach (var enricher in enrichers) materialized.Add(enricher);
 
         return materialized;
     }

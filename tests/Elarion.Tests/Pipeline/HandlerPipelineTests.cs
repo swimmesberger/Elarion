@@ -3,7 +3,7 @@ using Elarion.Abstractions;
 using Elarion.Abstractions.Pipeline;
 using Elarion.Diagnostics;
 using Elarion.Pipeline;
-using Elarion.Tests.Services;   // ActivityCollector (internal, same assembly)
+using Elarion.Tests.Services; // ActivityCollector (internal, same assembly)
 using Xunit;
 
 namespace Elarion.Tests.Pipeline;
@@ -33,8 +33,8 @@ public sealed class HandlerPipelineTests {
         meta.Pipeline.Steps.Should().BeEmpty();
 
         cache = new[] {
-            new PipelineStep(typeof(ObservabilityDecorator<,>), Conditional: false),
-            new PipelineStep(typeof(AuditDecorator<,>), Conditional: true),
+            new PipelineStep(typeof(ObservabilityDecorator<,>), false),
+            new PipelineStep(typeof(AuditDecorator<,>), true)
         };
 
         meta.Pipeline.Steps.Should().HaveCount(2);
@@ -49,9 +49,9 @@ public sealed class HandlerPipelineTests {
     public async Task ObservabilityDecorator_RendersPipelineTag_InExecutionOrder_MarkingConditionalSteps() {
         using var activities = new ActivityCollector(HandlerTelemetry.ActivitySourceName);
         var meta = new HandlerMetadata(typeof(PipeReq), typeof(PipeReq), typeof(Result<int>), () => new[] {
-            new PipelineStep(typeof(ObservabilityDecorator<,>), Conditional: false),
-            new PipelineStep(typeof(AuthorizationDecorator<,>), Conditional: false),
-            new PipelineStep(typeof(AuditDecorator<,>), Conditional: true),   // soft-attached → trailing '?'
+            new PipelineStep(typeof(ObservabilityDecorator<,>), false),
+            new PipelineStep(typeof(AuthorizationDecorator<,>), false),
+            new PipelineStep(typeof(AuditDecorator<,>), true) // soft-attached → trailing '?'
         });
         var decorator = new ObservabilityDecorator<PipeReq, Result<int>>(new PipeHandler(), "Pipe", meta, [], null);
 
@@ -62,7 +62,8 @@ public sealed class HandlerPipelineTests {
     }
 
     private sealed class PipeHandler : IHandler<PipeReq, Result<int>> {
-        public ValueTask<Result<int>> HandleAsync(PipeReq request, CancellationToken ct) =>
-            ValueTask.FromResult(Result<int>.Success(1));
+        public ValueTask<Result<int>> HandleAsync(PipeReq request, CancellationToken ct) {
+            return ValueTask.FromResult(Result<int>.Success(1));
+        }
     }
 }

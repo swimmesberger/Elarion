@@ -26,7 +26,7 @@ public static class BlobStoreExtensions {
         var hinted = request.ContentLength is null
             ? request with { ContentLength = content.Length }
             : request;
-        var stream = new MemoryStream(content, writable: false);
+        var stream = new MemoryStream(content, false);
         return SaveAndDisposeAsync(store, hinted, stream, cancellationToken);
     }
 
@@ -53,7 +53,7 @@ public static class BlobStoreExtensions {
             FileMode.Open,
             FileAccess.Read,
             FileShare.Read,
-            bufferSize: 4096,
+            4096,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
         var hinted = request.ContentLength is null
             ? request with { ContentLength = stream.Length }
@@ -72,9 +72,7 @@ public static class BlobStoreExtensions {
         ArgumentNullException.ThrowIfNull(store);
 
         await using var download = await store.OpenReadAsync(blobRef, cancellationToken).ConfigureAwait(false);
-        if (download is null) {
-            return null;
-        }
+        if (download is null) return null;
 
         var data = await ReadToArrayAsync(download, cancellationToken).ConfigureAwait(false);
         var metadata = download.Metadata;
@@ -101,9 +99,7 @@ public static class BlobStoreExtensions {
         ArgumentNullException.ThrowIfNull(store);
 
         await using var download = await store.OpenReadAsync(blobRef, cancellationToken).ConfigureAwait(false);
-        if (download is null) {
-            return null;
-        }
+        if (download is null) return null;
 
         return await ReadToArrayAsync(download, cancellationToken).ConfigureAwait(false);
     }
@@ -121,9 +117,7 @@ public static class BlobStoreExtensions {
         ArgumentNullException.ThrowIfNull(destination);
 
         await using var download = await store.OpenReadAsync(blobRef, cancellationToken).ConfigureAwait(false);
-        if (download is null) {
-            return false;
-        }
+        if (download is null) return false;
 
         await download.Content.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
         return true;
@@ -157,13 +151,11 @@ public static class BlobStoreExtensions {
                     Prefix = prefix,
                     State = state,
                     PageSize = pageSize,
-                    ContinuationToken = continuationToken,
+                    ContinuationToken = continuationToken
                 },
                 cancellationToken).ConfigureAwait(false);
 
-            foreach (var blob in page.Blobs) {
-                yield return blob;
-            }
+            foreach (var blob in page.Blobs) yield return blob;
 
             continuationToken = page.ContinuationToken;
         } while (continuationToken is not null);
@@ -180,9 +172,8 @@ public static class BlobStoreExtensions {
     }
 
     private static async Task<byte[]> ReadToArrayAsync(BlobDownload download, CancellationToken cancellationToken) {
-        if (download.Content is MemoryStream buffered && buffered.TryGetBuffer(out var segment)) {
+        if (download.Content is MemoryStream buffered && buffered.TryGetBuffer(out var segment))
             return segment.AsSpan().ToArray();
-        }
 
         var capacity = download.Metadata.Size is > 0 and <= int.MaxValue ? (int)download.Metadata.Size : 0;
         using var memory = new MemoryStream(capacity);

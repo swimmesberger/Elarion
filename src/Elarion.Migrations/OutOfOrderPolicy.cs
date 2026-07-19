@@ -13,5 +13,5 @@ public enum OutOfOrderPolicy {
     Warn,
 
     /// <summary>Fail the run, naming the out-of-order scripts. The opt-in for teams that want strict version ordering.</summary>
-    Deny,
+    Deny
 }

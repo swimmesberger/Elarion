@@ -31,7 +31,7 @@ public sealed class FeatureGateDecorator<TRequest, TResponse>(
 
     /// <inheritdoc />
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
-        foreach (var gate in ResolveGates()) {
+        foreach (var gate in ResolveGates())
             if (!await IsSatisfiedAsync(gate, ct).ConfigureAwait(false)) {
                 // The wire response stays an opaque 404, but telemetry is operator-facing, so the
                 // closed gate is tagged on the handler span and counted per handler.
@@ -39,7 +39,6 @@ public sealed class FeatureGateDecorator<TRequest, TResponse>(
                 HandlerTelemetry.RecordFeatureGateClosed(metadata.HandlerType.Name);
                 return TResponse.Failure(AppError.NotFound(NotFoundMessage));
             }
-        }
 
         return await inner.HandleAsync(request, ct).ConfigureAwait(false);
     }
@@ -47,42 +46,41 @@ public sealed class FeatureGateDecorator<TRequest, TResponse>(
     private async ValueTask<bool> IsSatisfiedAsync(Gate gate, CancellationToken ct) {
         // A gate with no features is treated as satisfied so an empty [FeatureGate] never spuriously 404s; the
         // generator reports it at build time.
-        if (gate.Features.Length == 0) {
-            return true;
-        }
+        if (gate.Features.Length == 0) return true;
 
         bool enabled;
         if (gate.Requirement == FeatureRequirement.Any) {
             enabled = false;
-            foreach (var feature in gate.Features) {
+            foreach (var feature in gate.Features)
                 if (await features.IsEnabledAsync(feature, ct).ConfigureAwait(false)) {
                     enabled = true;
                     break;
                 }
-            }
-        } else {
+        }
+        else {
             enabled = true;
-            foreach (var feature in gate.Features) {
+            foreach (var feature in gate.Features)
                 if (!await features.IsEnabledAsync(feature, ct).ConfigureAwait(false)) {
                     enabled = false;
                     break;
                 }
-            }
         }
 
         return gate.Negate ? !enabled : enabled;
     }
 
-    private Gate[] ResolveGates() =>
-        Cache.GetValue(metadata.HandlerType, static type => new GatesBox(Parse(type))).Value;
+    private Gate[] ResolveGates() {
+        return Cache.GetValue(metadata.HandlerType, static type => new GatesBox(Parse(type))).Value;
+    }
 
-    private static Gate[] Parse(Type handlerType) =>
-        handlerType.GetCustomAttributes<FeatureGateAttribute>(inherit: true)
+    private static Gate[] Parse(Type handlerType) {
+        return handlerType.GetCustomAttributes<FeatureGateAttribute>(true)
             .Select(static attribute => new Gate(
                 attribute.Features.Where(static feature => !string.IsNullOrWhiteSpace(feature)).ToArray(),
                 attribute.Requirement,
                 attribute.Negate))
             .ToArray();
+    }
 
     private readonly record struct Gate(string[] Features, FeatureRequirement Requirement, bool Negate);
 

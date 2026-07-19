@@ -53,6 +53,7 @@ public interface IHandlerSender {
     /// <typeparam name="TResponse">The success value type (inferred from the marker).</typeparam>
     ValueTask<Result<TResponse>> SendAsync<TRequest, TResponse>(
         IRequest<TRequest, TResponse> request, CancellationToken ct = default)
-        where TRequest : notnull, IRequest<TRequest, TResponse> =>
-        SendAsync<TRequest, TResponse>((TRequest)request, ct);
+        where TRequest : notnull, IRequest<TRequest, TResponse> {
+        return SendAsync<TRequest, TResponse>((TRequest)request, ct);
+    }
 }

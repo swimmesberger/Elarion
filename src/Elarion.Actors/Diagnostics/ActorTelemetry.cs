@@ -42,16 +42,16 @@ public static class ActorTelemetry {
     public static readonly Histogram<double> MessageDuration =
         MeterInstance.CreateHistogram<double>(
             "actor.message.duration",
-            unit: "s",
-            description: "Execution duration of actor messages",
+            "s",
+            "Execution duration of actor messages",
             advice: DurationAdvice);
 
     /// <summary>Records time a message spent queued in the mailbox before execution started.</summary>
     public static readonly Histogram<double> MessageQueueWait =
         MeterInstance.CreateHistogram<double>(
             "actor.message.queue_wait",
-            unit: "s",
-            description: "Time actor messages spent waiting in the mailbox",
+            "s",
+            "Time actor messages spent waiting in the mailbox",
             advice: DurationAdvice);
 
     /// <summary>Tracks currently live activations by actor.</summary>
@@ -92,9 +92,7 @@ public static class ActorTelemetry {
     internal static Activity? StartCall(string actor, string method, object key) {
         // Guard before interpolating the span name: with no listener StartActivity returns null, but
         // the name string would still be built on every call — the actor/method already ride as tags.
-        if (!Source.HasListeners()) {
-            return null;
-        }
+        if (!Source.HasListeners()) return null;
 
         var activity = Source.StartActivity($"actor.call {actor}.{method}", ActivityKind.Client);
         if (activity is not null) {
@@ -107,17 +105,13 @@ public static class ActorTelemetry {
     }
 
     internal static Activity? StartProcess(string actor, string method, object? key, ActivityContext parent) {
-        if (!Source.HasListeners()) {
-            return null;
-        }
+        if (!Source.HasListeners()) return null;
 
         var activity = Source.StartActivity($"actor.process {actor}.{method}", ActivityKind.Internal, parent);
         if (activity is not null) {
             activity.SetTag("elarion.actor", actor);
             activity.SetTag("elarion.actor.method", method);
-            if (key is not null) {
-                activity.SetTag("elarion.actor.key", key.ToString());
-            }
+            if (key is not null) activity.SetTag("elarion.actor.key", key.ToString());
         }
 
         return activity;

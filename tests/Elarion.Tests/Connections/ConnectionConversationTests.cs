@@ -63,7 +63,7 @@ public sealed class ConnectionConversationTests {
     [Fact]
     public async Task Inbox_BoundedBuffer_DropsOldest() {
         var ct = TestContext.Current.CancellationToken;
-        var inbox = new ConnectionInbox<string>(bufferCapacity: 2);
+        var inbox = new ConnectionInbox<string>(2);
         inbox.Post("one");
         inbox.Post("two");
         inbox.Post("three");

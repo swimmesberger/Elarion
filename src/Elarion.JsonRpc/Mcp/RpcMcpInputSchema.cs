@@ -35,9 +35,8 @@ public static class RpcMcpInputSchema {
         Func<JsonSchemaExporterContext, JsonNode, JsonNode>? injectDescriptions = null;
         if (parameterDescriptions.Count > 0) {
             var descriptionsByPropertyName = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var descriptor in parameterDescriptions) {
+            foreach (var descriptor in parameterDescriptions)
                 descriptionsByPropertyName[descriptor.PropertyName] = descriptor.Description;
-            }
 
             injectDescriptions = (ctx, schema) => InjectDescription(ctx, schema, descriptionsByPropertyName);
         }
@@ -62,9 +61,8 @@ public static class RpcMcpInputSchema {
         Dictionary<string, string> descriptionsByPropertyName) {
         if (ctx.PropertyInfo?.AttributeProvider is MemberInfo member &&
             descriptionsByPropertyName.TryGetValue(member.Name, out var description) &&
-            schema is JsonObject obj) {
+            schema is JsonObject obj)
             obj["description"] = description;
-        }
 
         return schema;
     }

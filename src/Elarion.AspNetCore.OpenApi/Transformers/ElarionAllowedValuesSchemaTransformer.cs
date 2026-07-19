@@ -23,15 +23,13 @@ internal sealed class ElarionAllowedValuesSchemaTransformer : IOpenApiSchemaTran
         OpenApiSchemaTransformerContext context,
         CancellationToken cancellationToken) {
         if (context.JsonPropertyInfo?.AttributeProvider is { } provider &&
-            provider.GetCustomAttributes(typeof(AllowedValuesAttribute), inherit: false)
+            provider.GetCustomAttributes(typeof(AllowedValuesAttribute), false)
                 is [AllowedValuesAttribute allowedValues, ..] &&
             schema.Enum is not { Count: > 0 }) {
             var nodes = new List<JsonNode>();
-            foreach (var value in allowedValues.Values) {
-                if (ToJsonNode(value) is { } node) {
+            foreach (var value in allowedValues.Values)
+                if (ToJsonNode(value) is { } node)
                     nodes.Add(node);
-                }
-            }
 
             schema.Enum = nodes;
         }
@@ -39,8 +37,8 @@ internal sealed class ElarionAllowedValuesSchemaTransformer : IOpenApiSchemaTran
         return Task.CompletedTask;
     }
 
-    private static JsonNode? ToJsonNode(object? value) =>
-        value switch {
+    private static JsonNode? ToJsonNode(object? value) {
+        return value switch {
             null => null,
             string text => JsonValue.Create(text),
             bool flag => JsonValue.Create(flag),
@@ -52,6 +50,7 @@ internal sealed class ElarionAllowedValuesSchemaTransformer : IOpenApiSchemaTran
             float number => JsonValue.Create(number),
             decimal number => JsonValue.Create(number),
             char character => JsonValue.Create(character.ToString()),
-            _ => JsonValue.Create(Convert.ToString(value, CultureInfo.InvariantCulture)),
+            _ => JsonValue.Create(Convert.ToString(value, CultureInfo.InvariantCulture))
         };
+    }
 }

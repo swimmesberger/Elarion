@@ -24,11 +24,9 @@ public sealed class OutboxDeliveryService(
     OutboxEventDispatcher dispatcher,
     OutboxOptions options,
     TimeProvider timeProvider,
-    ILogger<OutboxDeliveryService> logger) : BackgroundService
-{
+    ILogger<OutboxDeliveryService> logger) : BackgroundService {
     /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
         using var timer = new PeriodicTimer(options.PollingInterval, timeProvider);
 
         // Retention purging is a maintenance sweep, not per-poll work: without a cadence guard every idle poll
@@ -36,57 +34,42 @@ public sealed class OutboxDeliveryService(
         // per PurgeInterval; a failed purge waits for the next interval rather than hammering every tick.
         var lastPurge = timeProvider.GetUtcNow();
 
-        while (!stoppingToken.IsCancellationRequested)
-        {
+        while (!stoppingToken.IsCancellationRequested) {
             int delivered;
-            try
-            {
+            try {
                 delivered = await ProcessBatchAsync(stoppingToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) {
                 break;
             }
-            catch (Exception ex)
-            {
+            catch (Exception ex) {
                 // A failed cycle (e.g. a transient database error) must not stop the worker; the next tick retries.
                 logger.LogError(ex, "Outbox delivery cycle failed.");
                 delivered = 0;
             }
 
             // A full batch likely means more work is waiting, so drain without waiting; otherwise idle until the next tick.
-            if (delivered >= options.BatchSize)
-            {
-                continue;
-            }
+            if (delivered >= options.BatchSize) continue;
 
             var now = timeProvider.GetUtcNow();
-            if (now - lastPurge >= options.PurgeInterval)
-            {
+            if (now - lastPurge >= options.PurgeInterval) {
                 lastPurge = now;
-                try
-                {
+                try {
                     await PurgeAsync(stoppingToken).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) {
                     break;
                 }
-                catch (Exception ex)
-                {
+                catch (Exception ex) {
                     logger.LogError(ex, "Outbox retention purge failed.");
                 }
             }
 
-            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
-            {
-                break;
-            }
+            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) break;
         }
     }
 
-    private async Task<int> ProcessBatchAsync(CancellationToken ct)
-    {
+    private async Task<int> ProcessBatchAsync(CancellationToken ct) {
         await using var pollScope = scopeFactory.CreateAsyncScope();
 
         var store = pollScope.ServiceProvider.GetRequiredService<IOutboxStore>();
@@ -106,22 +89,19 @@ public sealed class OutboxDeliveryService(
             heldRoles,
             ct).ConfigureAwait(false);
 
-        foreach (var group in claimed)
-        {
+        foreach (var group in claimed) {
             ct.ThrowIfCancellationRequested();
             if (group.TargetRole is { } targetRole
                 && (roleLeases is null
                     || !roleLeases.TryGetValue(targetRole, out var targetLease)
                     || !targetLease.IsHeld)) {
-                if (!await store.ReleaseClaimAsync(group.Id, lockId, ct).ConfigureAwait(false)) {
+                if (!await store.ReleaseClaimAsync(group.Id, lockId, ct).ConfigureAwait(false))
                     LogLeaseLost(group);
-                }
-                else {
+                else
                     logger.LogInformation(
                         "Released outbox delivery group {GroupId} for role '{Role}' because this process no longer holds the role.",
                         group.Id,
                         targetRole);
-                }
 
                 continue;
             }
@@ -132,16 +112,14 @@ public sealed class OutboxDeliveryService(
         return claimed.Count;
     }
 
-    private async Task DeliverAsync(IOutboxStore store, Guid lockId, OutboxMessage message, CancellationToken ct)
-    {
+    private async Task DeliverAsync(IOutboxStore store, Guid lockId, OutboxMessage message, CancellationToken ct) {
         // Parent the consume span on the traceparent persisted at publish time, so delivery stays in the
         // publishing operation's trace even on another worker instance or after a restart.
-        ActivityContext.TryParse(message.TraceParent, null, isRemote: true, out var traceParent);
+        ActivityContext.TryParse(message.TraceParent, null, true, out var traceParent);
         using var activity = EventTelemetry.Source.HasListeners()
             ? EventTelemetry.Source.StartActivity($"consume {message.EventType}", ActivityKind.Internal, traceParent)
             : null;
-        if (activity is not null)
-        {
+        if (activity is not null) {
             activity.SetTag("messaging.event.type", message.EventType);
             activity.SetTag("messaging.event.plane", "integration");
             activity.SetTag("messaging.correlation_id", message.CorrelationId);
@@ -152,16 +130,14 @@ public sealed class OutboxDeliveryService(
         }
 
         var startTimestamp = Stopwatch.GetTimestamp();
-        try
-        {
+        try {
             OutboxDispatchOutcome outcome;
-            await using (var consumerScope = scopeFactory.CreateAsyncScope())
-            {
-                outcome = await dispatcher.DispatchAsync(consumerScope.ServiceProvider, message, ct).ConfigureAwait(false);
+            await using (var consumerScope = scopeFactory.CreateAsyncScope()) {
+                outcome = await dispatcher.DispatchAsync(consumerScope.ServiceProvider, message, ct)
+                    .ConfigureAwait(false);
             }
 
-            if (outcome is OutboxDispatchOutcome.Unresolvable)
-            {
+            if (outcome is OutboxDispatchOutcome.Unresolvable) {
                 // The event type resolves to no consumer or the payload is null — a retry can never succeed, so park
                 // the message for inspection instead of redelivering it every poll (the dispatcher already logged why).
                 var parked = await store.MarkPermanentlyFailedAsync(
@@ -169,10 +145,7 @@ public sealed class OutboxDeliveryService(
                     lockId,
                     "Event type unresolvable or payload null; parked for inspection.",
                     ct).ConfigureAwait(false);
-                if (!parked)
-                {
-                    LogLeaseLost(message);
-                }
+                if (!parked) LogLeaseLost(message);
 
                 EventTelemetry.RecordDelivery(
                     message.EventType, "unresolvable", Stopwatch.GetElapsedTime(startTimestamp));
@@ -180,23 +153,19 @@ public sealed class OutboxDeliveryService(
             }
 
             if (!await store.MarkProcessedAsync(message.Id, lockId, timeProvider.GetUtcNow(), ct).ConfigureAwait(false))
-            {
                 LogLeaseLost(message);
-            }
 
             EventTelemetry.RecordDelivery(
                 message.EventType, "delivered", Stopwatch.GetElapsedTime(startTimestamp));
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) {
             // Shutdown mid-delivery: leave the lease to expire so another worker reclaims the message.
             throw;
         }
-        catch (Exception ex)
-        {
+        catch (Exception ex) {
             activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
                 { "exception.type", ex.GetType().FullName },
-                { "exception.message", ex.Message },
+                { "exception.message", ex.Message }
             }));
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             EventTelemetry.RecordDelivery(
@@ -211,14 +180,12 @@ public sealed class OutboxDeliveryService(
                 message.CorrelationId,
                 message.Attempts + 1);
             var retryVisibleAfter = timeProvider.GetUtcNow() + ComputeBackoff(message.Attempts + 1);
-            if (!await store.MarkFailedAsync(message.Id, lockId, Describe(ex), retryVisibleAfter, ct).ConfigureAwait(false))
-            {
-                LogLeaseLost(message);
-            }
+            if (!await store.MarkFailedAsync(message.Id, lockId, Describe(ex), retryVisibleAfter, ct)
+                    .ConfigureAwait(false)) LogLeaseLost(message);
         }
     }
 
-    private void LogLeaseLost(OutboxMessage message) =>
+    private void LogLeaseLost(OutboxMessage message) {
         // Zero rows updated means our lease expired and another worker legitimately reclaimed the message while we
         // were dispatching. Finalizing anyway would wipe the new owner's active lease and cause overlapping
         // redelivery, so we skip and let the current owner finalize it.
@@ -227,45 +194,31 @@ public sealed class OutboxDeliveryService(
             message.Id,
             message.MessageId,
             message.EventType);
+    }
 
     /// <summary>Exponential backoff for the next attempt: <c>BaseRetryDelay × 2^(attempt-1)</c>, capped at <see cref="OutboxOptions.MaxRetryDelay"/>.</summary>
-    private TimeSpan ComputeBackoff(int attempt)
-    {
-        if (options.BaseRetryDelay <= TimeSpan.Zero)
-        {
-            return TimeSpan.Zero;
-        }
+    private TimeSpan ComputeBackoff(int attempt) {
+        if (options.BaseRetryDelay <= TimeSpan.Zero) return TimeSpan.Zero;
 
         // Shift on ticks with a guarded exponent so a large attempt count can never overflow into a negative delay.
         var exponent = Math.Min(attempt - 1, 30);
         var scaled = options.BaseRetryDelay.Ticks * (1L << exponent);
         var capTicks = options.MaxRetryDelay.Ticks;
-        if (scaled <= 0 || scaled > capTicks)
-        {
-            return options.MaxRetryDelay;
-        }
+        if (scaled <= 0 || scaled > capTicks) return options.MaxRetryDelay;
 
         return TimeSpan.FromTicks(scaled);
     }
 
-    private async Task PurgeAsync(CancellationToken ct)
-    {
-        if (options.RetentionPeriod is not { } retention)
-        {
-            return;
-        }
+    private async Task PurgeAsync(CancellationToken ct) {
+        if (options.RetentionPeriod is not { } retention) return;
 
         await using var scope = scopeFactory.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IOutboxStore>();
         var purged = await store.PurgeProcessedAsync(timeProvider.GetUtcNow() - retention, ct).ConfigureAwait(false);
-        if (purged > 0)
-        {
-            logger.LogInformation("Outbox retention purge deleted {Count} processed message(s).", purged);
-        }
+        if (purged > 0) logger.LogInformation("Outbox retention purge deleted {Count} processed message(s).", purged);
     }
 
-    private static string Describe(Exception ex)
-    {
+    private static string Describe(Exception ex) {
         var text = $"{ex.GetType().FullName}: {ex.Message}";
         return text.Length <= 2048 ? text : text[..2048];
     }

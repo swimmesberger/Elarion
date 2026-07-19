@@ -17,16 +17,12 @@ public static class SqlWriteExtensions {
         CancellationToken cancellationToken = default)
         where T : ISqlRecord<T> {
         var wasClosed = connection.State == ConnectionState.Closed;
-        if (wasClosed) {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        }
+        if (wasClosed) await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         try {
             var command = connection.CreateCommand();
             await using (command.ConfigureAwait(false)) {
-                if (transaction is not null) {
-                    command.Transaction = transaction;
-                }
+                if (transaction is not null) command.Transaction = transaction;
 
                 command.CommandText = T.InsertCommandText;
                 T.SqlMapper.BindParameters(command, row);
@@ -34,9 +30,7 @@ public static class SqlWriteExtensions {
             }
         }
         finally {
-            if (wasClosed) {
-                await connection.CloseAsync().ConfigureAwait(false);
-            }
+            if (wasClosed) await connection.CloseAsync().ConfigureAwait(false);
         }
     }
 
@@ -46,7 +40,7 @@ public static class SqlWriteExtensions {
         where T : ISqlRecord<T> {
         var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using (connection.ConfigureAwait(false)) {
-            return await connection.InsertAsync(row, transaction: null, cancellationToken).ConfigureAwait(false);
+            return await connection.InsertAsync(row, null, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -64,13 +58,11 @@ public static class SqlWriteExtensions {
         var commandText = sqlSuffix is null ? T.InsertCommandText : T.InsertCommandText + sqlSuffix;
 
         var wasClosed = connection.State == ConnectionState.Closed;
-        if (wasClosed) {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        }
+        if (wasClosed) await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         var ownsTransaction = transaction is null;
         var tx = transaction
-            ?? await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+                 ?? await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try {
             var command = connection.CreateCommand();
             await using (command.ConfigureAwait(false)) {
@@ -83,28 +75,20 @@ public static class SqlWriteExtensions {
                     written += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 }
 
-                if (ownsTransaction) {
-                    await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
-                }
+                if (ownsTransaction) await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
 
                 return written;
             }
         }
         catch {
-            if (ownsTransaction) {
-                await tx.RollbackAsync(cancellationToken).ConfigureAwait(false);
-            }
+            if (ownsTransaction) await tx.RollbackAsync(cancellationToken).ConfigureAwait(false);
 
             throw;
         }
         finally {
-            if (ownsTransaction) {
-                await tx.DisposeAsync().ConfigureAwait(false);
-            }
+            if (ownsTransaction) await tx.DisposeAsync().ConfigureAwait(false);
 
-            if (wasClosed) {
-                await connection.CloseAsync().ConfigureAwait(false);
-            }
+            if (wasClosed) await connection.CloseAsync().ConfigureAwait(false);
         }
     }
 
@@ -115,7 +99,7 @@ public static class SqlWriteExtensions {
         where T : ISqlRecord<T> {
         var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using (connection.ConfigureAwait(false)) {
-            return await connection.InsertManyAsync(rows, sqlSuffix, transaction: null, cancellationToken)
+            return await connection.InsertManyAsync(rows, sqlSuffix, null, cancellationToken)
                 .ConfigureAwait(false);
         }
     }
@@ -135,6 +119,7 @@ public static class SqlWriteExtensions {
     /// <inheritdoc cref="ExecuteAsync(DbConnection, SqlStatement, DbTransaction, CancellationToken)"/>
     public static Task<int> ExecuteAsync(
         this DbConnection connection, SqlInterpolatedStringHandler sql, DbTransaction transaction,
-        CancellationToken cancellationToken = default) =>
-        connection.ExecuteAsync(new SqlStatement(sql), transaction, cancellationToken);
+        CancellationToken cancellationToken = default) {
+        return connection.ExecuteAsync(new SqlStatement(sql), transaction, cancellationToken);
+    }
 }

@@ -13,4 +13,7 @@ namespace Elarion.Messaging.InMemory;
 /// span stays parented to the publishing operation.
 /// </remarks>
 internal readonly record struct EventEnvelope(
-    object Event, Type EventType, IEventContext Context, ActivityContext TraceParent = default);
+    object Event,
+    Type EventType,
+    IEventContext Context,
+    ActivityContext TraceParent = default);

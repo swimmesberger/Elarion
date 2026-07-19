@@ -14,20 +14,19 @@ public sealed class DefaultVariantServiceProvider<TService>(
     IServiceProvider services
 ) : IVariantServiceProvider<TService> where TService : class {
     /// <inheritdoc />
-    public async ValueTask<TService> GetAsync(CancellationToken ct = default) =>
-        await GetOrDefaultAsync(ct).ConfigureAwait(false)
-        ?? throw new InvalidOperationException(
-            $"No variant implementation could be resolved for feature '{binding.Feature}' (service "
-            + $"'{typeof(TService)}') and no default implementation is registered.");
+    public async ValueTask<TService> GetAsync(CancellationToken ct = default) {
+        return await GetOrDefaultAsync(ct).ConfigureAwait(false)
+               ?? throw new InvalidOperationException(
+                   $"No variant implementation could be resolved for feature '{binding.Feature}' (service "
+                   + $"'{typeof(TService)}') and no default implementation is registered.");
+    }
 
     /// <inheritdoc />
     public async ValueTask<TService?> GetOrDefaultAsync(CancellationToken ct = default) {
         var variant = await variants.GetVariantAsync(binding.Feature, ct).ConfigureAwait(false);
 
         var selected = variant is not null ? services.GetKeyedService<TService>(variant) : null;
-        if (selected is not null) {
-            return selected;
-        }
+        if (selected is not null) return selected;
 
         return binding.DefaultKey is { } defaultKey ? services.GetKeyedService<TService>(defaultKey) : null;
     }

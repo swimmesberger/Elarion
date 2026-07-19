@@ -51,8 +51,8 @@ public sealed class ElarionFileJsonConverterTests {
     public void Deserialize_SkipsUnknownProperties() {
         var json = Resolve();
         var wire = $$"""
-            {"contentType":"text/plain","future":{"nested":[1,2]},"data":"{{Convert.ToBase64String([1])}}"}
-            """;
+                     {"contentType":"text/plain","future":{"nested":[1,2]},"data":"{{Convert.ToBase64String([1])}}"}
+                     """;
 
         var file = JsonSerializer.Deserialize(wire, json.GetTypeInfo<ElarionFile>())!;
 

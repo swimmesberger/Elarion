@@ -19,11 +19,11 @@ public sealed class SqlStatementSplitterTests {
     [Fact]
     public void IgnoresSemicolonsInStringsCommentsAndQuotedIdentifiers() {
         var sql = """
-            INSERT INTO t (a, b) VALUES ('x;y', E'a\';b');
-            -- a comment; with a semicolon
-            /* block; comment /* nested; */ still; */
-            UPDATE "wei;rd" SET a = 'it''s;fine';
-            """;
+                  INSERT INTO t (a, b) VALUES ('x;y', E'a\';b');
+                  -- a comment; with a semicolon
+                  /* block; comment /* nested; */ still; */
+                  UPDATE "wei;rd" SET a = 'it''s;fine';
+                  """;
         var statements = SqlStatementSplitter.Split(sql);
         statements.Should().HaveCount(2);
         statements[0].Should().StartWith("INSERT INTO t");
@@ -33,14 +33,14 @@ public sealed class SqlStatementSplitterTests {
     [Fact]
     public void IgnoresSemicolonsInDollarQuotedBodies() {
         var sql = """
-            CREATE FUNCTION f() RETURNS void AS $body$
-            BEGIN
-                PERFORM 1;
-                PERFORM 2;
-            END;
-            $body$ LANGUAGE plpgsql;
-            SELECT f();
-            """;
+                  CREATE FUNCTION f() RETURNS void AS $body$
+                  BEGIN
+                      PERFORM 1;
+                      PERFORM 2;
+                  END;
+                  $body$ LANGUAGE plpgsql;
+                  SELECT f();
+                  """;
         var statements = SqlStatementSplitter.Split(sql);
         statements.Should().HaveCount(2);
         statements[0].Should().Contain("PERFORM 2;");
@@ -50,11 +50,11 @@ public sealed class SqlStatementSplitterTests {
     [Fact]
     public void SkipsCommentOnlyAndEmptyChunks() {
         var sql = """
-            -- leading comment
-            SELECT 1;
-            ;
-            -- trailing comment only
-            """;
+                  -- leading comment
+                  SELECT 1;
+                  ;
+                  -- trailing comment only
+                  """;
         SqlStatementSplitter.Split(sql).Should().HaveCount(1);
     }
 

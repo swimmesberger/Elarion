@@ -32,22 +32,22 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
         // A collection property has no stable key formatting: int[] would format as object.ToString() (a
         // per-instance reference), colliding every value into one key — a cross-request cache leak.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record TagQuery(int[] Tags) : IQuery;
-                public sealed record TagResponse(string Name);
+                                  public sealed record TagQuery(int[] Tags) : IQuery;
+                                  public sealed record TagResponse(string Name);
 
-                [Cacheable("sample:tags", DurationSeconds = 60)]
-                public sealed class TagHandler : IHandler<TagQuery, Result<TagResponse>> {
-                    public ValueTask<Result<TagResponse>> HandleAsync(TagQuery request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<TagResponse>.Success(new TagResponse("x")));
-                }
-            }
-            """;
+                                  [Cacheable("sample:tags", DurationSeconds = 60)]
+                                  public sealed class TagHandler : IHandler<TagQuery, Result<TagResponse>> {
+                                      public ValueTask<Result<TagResponse>> HandleAsync(TagQuery request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<TagResponse>.Success(new TagResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
 
@@ -60,25 +60,25 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
     public void CacheKey_SupportedScalarTypes_AreEmitted() {
         // The sound whitelist (Guid, enum, Nullable<int>, DateTime, string) all participate in the key.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public enum Kind { A, B }
+                                  public enum Kind { A, B }
 
-                public sealed record ScalarQuery(
-                    Guid Id, Kind Kind, int? Count, DateTime When, string Name) : IQuery;
-                public sealed record ScalarResponse(string Name);
+                                  public sealed record ScalarQuery(
+                                      Guid Id, Kind Kind, int? Count, DateTime When, string Name) : IQuery;
+                                  public sealed record ScalarResponse(string Name);
 
-                [Cacheable("sample:scalars", DurationSeconds = 60)]
-                public sealed class ScalarHandler : IHandler<ScalarQuery, Result<ScalarResponse>> {
-                    public ValueTask<Result<ScalarResponse>> HandleAsync(ScalarQuery request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ScalarResponse>.Success(new ScalarResponse("x")));
-                }
-            }
-            """;
+                                  [Cacheable("sample:scalars", DurationSeconds = 60)]
+                                  public sealed class ScalarHandler : IHandler<ScalarQuery, Result<ScalarResponse>> {
+                                      public ValueTask<Result<ScalarResponse>> HandleAsync(ScalarQuery request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<ScalarResponse>.Success(new ScalarResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
 
@@ -94,22 +94,22 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
     public void CacheKey_KeyPropertiesNameNotFound_ReportsElcache007() {
         // A KeyProperties name that matches no request property would be silently dropped from the key.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record ReadQuery(int Id) : IQuery;
-                public sealed record ReadResponse(string Name);
+                                  public sealed record ReadQuery(int Id) : IQuery;
+                                  public sealed record ReadResponse(string Name);
 
-                [Cacheable("sample:read", DurationSeconds = 60, KeyProperties = new[] { "Missing" })]
-                public sealed class ReadHandler : IHandler<ReadQuery, Result<ReadResponse>> {
-                    public ValueTask<Result<ReadResponse>> HandleAsync(ReadQuery request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ReadResponse>.Success(new ReadResponse("x")));
-                }
-            }
-            """;
+                                  [Cacheable("sample:read", DurationSeconds = 60, KeyProperties = new[] { "Missing" })]
+                                  public sealed class ReadHandler : IHandler<ReadQuery, Result<ReadResponse>> {
+                                      public ValueTask<Result<ReadResponse>> HandleAsync(ReadQuery request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<ReadResponse>.Success(new ReadResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
 
@@ -121,21 +121,21 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
         // A fan-out event consumer must not be cacheable: a cached Result<Unit> would skip the side effect on a
         // legitimate re-delivery (H18).
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record ThingHappened(int Id) : IIntegrationEvent;
+                                  public sealed record ThingHappened(int Id) : IIntegrationEvent;
 
-                [Cacheable("sample:things", DurationSeconds = 60)]
-                public sealed class ThingConsumer : IHandler<ThingHappened> {
-                    public ValueTask<Result> HandleAsync(ThingHappened request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result.Success());
-                }
-            }
-            """;
+                                  [Cacheable("sample:things", DurationSeconds = 60)]
+                                  public sealed class ThingConsumer : IHandler<ThingHappened> {
+                                      public ValueTask<Result> HandleAsync(ThingHappened request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result.Success());
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
 
@@ -148,21 +148,21 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
         // A domain-event consumer runs inline in the publisher's transaction, so a Polly retry would re-apply
         // tracked mutations. [Resilient] must be rejected (H17).
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record OrderPlaced(int Id) : IDomainEvent;
+                                  public sealed record OrderPlaced(int Id) : IDomainEvent;
 
-                [Resilient("retry-3x")]
-                public sealed class OrderPlacedConsumer : IHandler<OrderPlaced> {
-                    public ValueTask<Result> HandleAsync(OrderPlaced request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result.Success());
-                }
-            }
-            """;
+                                  [Resilient("retry-3x")]
+                                  public sealed class OrderPlacedConsumer : IHandler<OrderPlaced> {
+                                      public ValueTask<Result> HandleAsync(OrderPlaced request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result.Success());
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
 
@@ -174,21 +174,21 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
     public void Resilient_OnIntegrationEventConsumer_IsAttached() {
         // Integration-event consumers run on a fresh post-commit scope, so [Resilient] is legitimate.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record OrderShipped(int Id) : IIntegrationEvent;
+                                  public sealed record OrderShipped(int Id) : IIntegrationEvent;
 
-                [Resilient("retry-3x")]
-                public sealed class OrderShippedConsumer : IHandler<OrderShipped> {
-                    public ValueTask<Result> HandleAsync(OrderShipped request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result.Success());
-                }
-            }
-            """;
+                                  [Resilient("retry-3x")]
+                                  public sealed class OrderShippedConsumer : IHandler<OrderShipped> {
+                                      public ValueTask<Result> HandleAsync(OrderShipped request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result.Success());
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
 
@@ -203,22 +203,22 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
         // retry fires (TimeoutRejectedException is not an OCE), and the command executes and commits twice.
         // Without [Idempotent] the retry re-executes instead of replaying — warn.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record ShipCommand(int Id) : ICommand;
-                public sealed record ShipResponse(string Name);
+                                  public sealed record ShipCommand(int Id) : ICommand;
+                                  public sealed record ShipResponse(string Name);
 
-                [Resilient("retry-3x")]
-                public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
-                    public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
-                }
-            }
-            """;
+                                  [Resilient("retry-3x")]
+                                  public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
+                                      public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (_, diagnostics) = Run(source);
 
@@ -229,23 +229,23 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
     public void Resilient_CommandWithIdempotent_DoesNotReportElpipe004() {
         // [Idempotent] closes the double-execution window: the retry replays the first committed outcome.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record ShipCommand(int Id) : ICommand;
-                public sealed record ShipResponse(string Name);
+                                  public sealed record ShipCommand(int Id) : ICommand;
+                                  public sealed record ShipResponse(string Name);
 
-                [Resilient("retry-3x")]
-                [Idempotent]
-                public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
-                    public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
-                }
-            }
-            """;
+                                  [Resilient("retry-3x")]
+                                  [Idempotent]
+                                  public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
+                                      public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (_, diagnostics) = Run(source);
 
@@ -257,22 +257,22 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
         // A query opens no transaction (TransactionDecorator.AppliesTo matches only commands/integration
         // events), so a retried query cannot double-commit.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record ReadQuery(int Id) : IQuery;
-                public sealed record ReadResponse(string Name);
+                                  public sealed record ReadQuery(int Id) : IQuery;
+                                  public sealed record ReadResponse(string Name);
 
-                [Resilient("retry-3x")]
-                public sealed class ReadHandler : IHandler<ReadQuery, Result<ReadResponse>> {
-                    public ValueTask<Result<ReadResponse>> HandleAsync(ReadQuery request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ReadResponse>.Success(new ReadResponse("x")));
-                }
-            }
-            """;
+                                  [Resilient("retry-3x")]
+                                  public sealed class ReadHandler : IHandler<ReadQuery, Result<ReadResponse>> {
+                                      public ValueTask<Result<ReadResponse>> HandleAsync(ReadQuery request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<ReadResponse>.Success(new ReadResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (_, diagnostics) = Run(source);
 
@@ -284,25 +284,25 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
         // A timeout-only policy declared in the same compilation provably never retries, so the single attempt
         // can commit at most once — no [Idempotent] required.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                [ResiliencePolicy("timeout-only", Timeout = "30s")]
-                public static partial class TimeoutOnlyPolicy;
+                                  [ResiliencePolicy("timeout-only", Timeout = "30s")]
+                                  public static partial class TimeoutOnlyPolicy;
 
-                public sealed record ShipCommand(int Id) : ICommand;
-                public sealed record ShipResponse(string Name);
+                                  public sealed record ShipCommand(int Id) : ICommand;
+                                  public sealed record ShipResponse(string Name);
 
-                [Resilient("timeout-only")]
-                public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
-                    public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
-                }
-            }
-            """;
+                                  [Resilient("timeout-only")]
+                                  public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
+                                      public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (_, diagnostics) = Run(source);
 
@@ -313,25 +313,25 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
     public void Resilient_CommandWithDeclaredRetryingPolicy_ReportsElpipe004() {
         // The policy is declared in the same compilation WITH retry configured — statically known to retry.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                [ResiliencePolicy("retrying", MaxRetryAttempts = 2, Timeout = "30s")]
-                public static partial class RetryingPolicy;
+                                  [ResiliencePolicy("retrying", MaxRetryAttempts = 2, Timeout = "30s")]
+                                  public static partial class RetryingPolicy;
 
-                public sealed record ShipCommand(int Id) : ICommand;
-                public sealed record ShipResponse(string Name);
+                                  public sealed record ShipCommand(int Id) : ICommand;
+                                  public sealed record ShipResponse(string Name);
 
-                [Resilient("retrying")]
-                public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
-                    public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
-                }
-            }
-            """;
+                                  [Resilient("retrying")]
+                                  public sealed class ShipHandler : IHandler<ShipCommand, Result<ShipResponse>> {
+                                      public ValueTask<Result<ShipResponse>> HandleAsync(ShipCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<ShipResponse>.Success(new ShipResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (_, diagnostics) = Run(source);
 
@@ -343,22 +343,22 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
         // The default [CacheInvalidate] scope is Global (=1): the mutating caller is usually not the user whose
         // cached read must be evicted, so over-invalidation is the safe default (H16).
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record EditCommand(int Id) : ICommand;
-                public sealed record EditResponse(string Name);
+                                  public sealed record EditCommand(int Id) : ICommand;
+                                  public sealed record EditResponse(string Name);
 
-                [CacheInvalidate("sample:read")]
-                public sealed class EditHandler : IHandler<EditCommand, Result<EditResponse>> {
-                    public ValueTask<Result<EditResponse>> HandleAsync(EditCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<EditResponse>.Success(new EditResponse("x")));
-                }
-            }
-            """;
+                                  [CacheInvalidate("sample:read")]
+                                  public sealed class EditHandler : IHandler<EditCommand, Result<EditResponse>> {
+                                      public ValueTask<Result<EditResponse>> HandleAsync(EditCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<EditResponse>.Success(new EditResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_EditHandler.g.cs");
@@ -381,11 +381,12 @@ public sealed class HandlerPipelineSoundnessGeneratorTests {
         return (result, result.Diagnostics);
     }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static void AssertCompiles(string source, string generated) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);

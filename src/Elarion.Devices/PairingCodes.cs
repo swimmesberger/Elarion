@@ -9,8 +9,9 @@ namespace Elarion.Devices;
 /// </summary>
 internal static class PairingCodes {
     /// <summary>Generates a code by unbiased CSPRNG sampling of the alphabet.</summary>
-    public static string Generate(string alphabet, int length) =>
-        new(RandomNumberGenerator.GetItems<char>(alphabet, length));
+    public static string Generate(string alphabet, int length) {
+        return new string(RandomNumberGenerator.GetItems<char>(alphabet, length));
+    }
 
     /// <summary>
     /// Normalizes a code as a human may have relayed it: uppercased, with separators (dashes,
@@ -19,9 +20,7 @@ internal static class PairingCodes {
     public static string Normalize(string code) {
         var builder = new StringBuilder(code.Length);
         foreach (var ch in code) {
-            if (ch is '-' or '.' || char.IsWhiteSpace(ch)) {
-                continue;
-            }
+            if (ch is '-' or '.' || char.IsWhiteSpace(ch)) continue;
 
             builder.Append(char.ToUpperInvariant(ch));
         }
@@ -30,6 +29,7 @@ internal static class PairingCodes {
     }
 
     /// <summary>SHA-256 hex of a normalized code — the only form a store ever sees.</summary>
-    public static string Hash(string normalizedCode) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedCode)));
+    public static string Hash(string normalizedCode) {
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedCode)));
+    }
 }

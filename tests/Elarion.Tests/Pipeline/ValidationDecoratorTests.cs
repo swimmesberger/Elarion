@@ -3,8 +3,8 @@ using Elarion.Abstractions;
 using Elarion.Abstractions.Pipeline;
 using Elarion.Abstractions.Validation;
 using Xunit;
-
 using Elarion.Pipeline;
+
 namespace Elarion.Tests.Pipeline;
 
 public sealed class ValidationDecoratorTests {
@@ -28,8 +28,8 @@ public sealed class ValidationDecoratorTests {
         var errors = new RequestValidationErrors {
             FieldErrors = new Dictionary<string, string[]> {
                 ["name"] = ["Name is too short"],
-                ["address.street"] = ["Street is required", "Street is invalid"],
-            },
+                ["address.street"] = ["Street is required", "Street is invalid"]
+            }
         };
         var decorator = new ValidationDecorator<TestCommand, Result<string>>(inner, new StubValidator(errors));
 
@@ -47,8 +47,8 @@ public sealed class ValidationDecoratorTests {
         var errors = new RequestValidationErrors {
             FieldErrors = new Dictionary<string, string[]> {
                 ["name"] = ["Name is too short"],
-                ["address.street"] = ["Street is required", "Street is invalid"],
-            },
+                ["address.street"] = ["Street is required", "Street is invalid"]
+            }
         };
         var decorator = new ValidationDecorator<TestCommand, Result<string>>(
             new RecordingHandler(Result<string>.Success("never")), new StubValidator(errors));
@@ -88,7 +88,8 @@ public sealed class ValidationDecoratorTests {
         public Type? SeenType { get; private set; }
         public object? SeenRequest { get; private set; }
 
-        public ValueTask<RequestValidationErrors?> ValidateAsync(Type requestType, object request, CancellationToken cancellationToken) {
+        public ValueTask<RequestValidationErrors?> ValidateAsync(Type requestType, object request,
+            CancellationToken cancellationToken) {
             SeenType = requestType;
             SeenRequest = request;
             return ValueTask.FromResult(errors);

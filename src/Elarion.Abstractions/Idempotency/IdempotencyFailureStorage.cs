@@ -18,5 +18,5 @@ public enum IdempotencyFailureStorage {
     /// a savepoint that discards the handler's business writes while keeping the key row — a single
     /// transaction, no atomicity loss.
     /// </summary>
-    Definitive = 1,
+    Definitive = 1
 }

@@ -108,7 +108,7 @@ public sealed class SqlTests {
 
     [Fact]
     public void SqlTypedValue_SplicesAsFragmentViaTypedOverload() {
-        SqlStatement orderBy = SqlStatement.Verbatim("ORDER BY created_at DESC");
+        var orderBy = SqlStatement.Verbatim("ORDER BY created_at DESC");
 
         var sql = new SqlStatement($"SELECT * FROM orders {orderBy}");
 

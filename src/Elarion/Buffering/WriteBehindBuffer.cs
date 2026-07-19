@@ -61,9 +61,8 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
         ArgumentNullException.ThrowIfNull(flush);
         options ??= new WriteBehindBufferOptions();
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxItems, 1, nameof(options));
-        if (options.FlushInterval != Timeout.InfiniteTimeSpan) {
+        if (options.FlushInterval != Timeout.InfiniteTimeSpan)
             ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.FlushInterval, TimeSpan.Zero, nameof(options));
-        }
 
         var capacity = options.Capacity ?? (int)Math.Min(options.MaxItems * 4L, int.MaxValue);
         ArgumentOutOfRangeException.ThrowIfLessThan(capacity, options.MaxItems, nameof(options));
@@ -73,11 +72,10 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
         _maxItems = options.MaxItems;
         _capacity = capacity;
         _flushInterval = options.FlushInterval;
-        if (_flushInterval != Timeout.InfiniteTimeSpan) {
+        if (_flushInterval != Timeout.InfiniteTimeSpan)
             _timer = options.TimeProvider.CreateTimer(
                 static state => ((WriteBehindBuffer<T>)state!).OnIntervalElapsed(),
                 this, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-        }
     }
 
     /// <summary>Currently buffered (unflushed) items.</summary>
@@ -110,9 +108,7 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
         var queueFlush = false;
         var armTimer = false;
         lock (_lock) {
-            if (_disposed) {
-                return;
-            }
+            if (_disposed) return;
 
             _items.Enqueue(item);
             if (_items.Count > _capacity) {
@@ -132,16 +128,13 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
             }
         }
 
-        if (armTimer) {
+        if (armTimer)
             // May race DisposeAsync's timer disposal: ITimer.Change after Dispose returns false rather
             // than throwing (system provider and FakeTimeProvider alike), keeping a racing producer
             // crash-free per the dropped-after-dispose contract.
             _timer!.Change(_flushInterval, Timeout.InfiniteTimeSpan);
-        }
 
-        if (queueFlush) {
-            _ = FlushInBackgroundAsync();
-        }
+        if (queueFlush) _ = FlushInBackgroundAsync();
     }
 
     /// <summary>
@@ -152,7 +145,7 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
     /// </summary>
     public Task FlushAsync(CancellationToken cancellationToken = default) {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return DrainAsync(rethrow: true, cancellationToken);
+        return DrainAsync(true, cancellationToken);
     }
 
     /// <summary>
@@ -162,23 +155,19 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
     /// </summary>
     public async ValueTask DisposeAsync() {
         lock (_lock) {
-            if (_disposed) {
-                return;
-            }
+            if (_disposed) return;
 
             _disposed = true;
         }
 
         _timer?.Dispose();
-        await DrainAsync(rethrow: false, CancellationToken.None).ConfigureAwait(false);
+        await DrainAsync(false, CancellationToken.None).ConfigureAwait(false);
     }
 
     private void OnIntervalElapsed() {
         lock (_lock) {
             _timerArmed = false;
-            if (_disposed || _items.Count == 0 || _flushQueued) {
-                return;
-            }
+            if (_disposed || _items.Count == 0 || _flushQueued) return;
 
             _flushQueued = true;
         }
@@ -191,7 +180,7 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
     private async Task FlushInBackgroundAsync() {
         // Off the producer's thread before touching the gate/delegate — Add never blocks on the flush target.
         await Task.Yield();
-        await DrainAsync(rethrow: false, CancellationToken.None).ConfigureAwait(false);
+        await DrainAsync(false, CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task DrainAsync(bool rethrow, CancellationToken cancellationToken) {
@@ -201,9 +190,7 @@ public sealed class WriteBehindBuffer<T> : IAsyncDisposable {
                 T[] batch;
                 lock (_lock) {
                     _flushQueued = false;
-                    if (_items.Count == 0) {
-                        return;
-                    }
+                    if (_items.Count == 0) return;
 
                     batch = [.. _items];
                     _items.Clear();

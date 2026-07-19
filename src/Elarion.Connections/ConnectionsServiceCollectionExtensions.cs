@@ -26,48 +26,38 @@ public static class ConnectionsServiceCollectionExtensions {
         // descriptor fails loud instead of being silently shadowed by a fresh default.
         var descriptor = services.LastOrDefault(candidate =>
             candidate.ServiceType == typeof(ElarionConnectionsOptions) && !candidate.IsKeyedService);
-        if (descriptor is not null && descriptor.ImplementationInstance is not ElarionConnectionsOptions) {
+        if (descriptor is not null && descriptor.ImplementationInstance is not ElarionConnectionsOptions)
             throw new InvalidOperationException(
                 "ElarionConnectionsOptions is already registered with a factory or implementation type. "
                 + "Configure connections via AddElarionConnections(options => …) instead of registering the options yourself.");
-        }
 
         var existing = descriptor?.ImplementationInstance as ElarionConnectionsOptions;
         var options = existing ?? new ElarionConnectionsOptions();
         configure?.Invoke(options);
         if (options.DefaultInvokeTimeout is { } timeout
-            && timeout <= TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan) {
+            && timeout <= TimeSpan.Zero && timeout != Timeout.InfiniteTimeSpan)
             throw new ArgumentException(
                 "DefaultInvokeTimeout must be positive, Timeout.InfiniteTimeSpan, or null.", nameof(configure));
-        }
 
-        if (options.MaxIdentityMetadataEntries < 0) {
+        if (options.MaxIdentityMetadataEntries < 0)
             throw new ArgumentException("MaxIdentityMetadataEntries must be non-negative.", nameof(configure));
-        }
 
-        if (options.MaxIdentityMetadataKeyLength <= 0) {
+        if (options.MaxIdentityMetadataKeyLength <= 0)
             throw new ArgumentException("MaxIdentityMetadataKeyLength must be positive.", nameof(configure));
-        }
 
-        if (options.MaxIdentityMetadataValueLength < 0) {
+        if (options.MaxIdentityMetadataValueLength < 0)
             throw new ArgumentException("MaxIdentityMetadataValueLength must be non-negative.", nameof(configure));
-        }
 
-        if (options.MaxPrincipalIdentities <= 0) {
+        if (options.MaxPrincipalIdentities <= 0)
             throw new ArgumentException("MaxPrincipalIdentities must be positive.", nameof(configure));
-        }
 
-        if (options.MaxPrincipalClaims < 0) {
+        if (options.MaxPrincipalClaims < 0)
             throw new ArgumentException("MaxPrincipalClaims must be non-negative.", nameof(configure));
-        }
 
-        if (options.MaxPrincipalActorDepth < 0) {
+        if (options.MaxPrincipalActorDepth < 0)
             throw new ArgumentException("MaxPrincipalActorDepth must be non-negative.", nameof(configure));
-        }
 
-        if (existing is null) {
-            services.AddSingleton(options);
-        }
+        if (existing is null) services.AddSingleton(options);
 
         services.TryAddSingleton<IClientConnectionRegistry, ClientConnectionRegistry>();
         services.TryAddSingleton<ClientConnectionEventBridge>();
@@ -82,16 +72,20 @@ public static class ConnectionsServiceCollectionExtensions {
 /// itself) so <c>TryAddEnumerable</c> can deduplicate by implementation type and the observer resolves the
 /// same instance adapters use for <see cref="ClientConnectionEventBridge.SubscribeAsync"/>.
 /// </summary>
-internal sealed class ClientConnectionEventBridgeObserver(ClientConnectionEventBridge bridge) : IClientConnectionObserver {
-    public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) =>
-        bridge.OnConnectedAsync(connection, ct);
+internal sealed class ClientConnectionEventBridgeObserver(ClientConnectionEventBridge bridge)
+    : IClientConnectionObserver {
+    public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) {
+        return bridge.OnConnectedAsync(connection, ct);
+    }
 
-    public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) =>
-        bridge.OnDisconnectedAsync(connection, ct);
+    public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) {
+        return bridge.OnDisconnectedAsync(connection, ct);
+    }
 
     public ValueTask OnIdentityPromotedAsync(
         ClientConnection previous,
         ClientConnection current,
-        CancellationToken ct = default) =>
-        bridge.OnIdentityPromotedAsync(previous, current, ct);
+        CancellationToken ct = default) {
+        return bridge.OnIdentityPromotedAsync(previous, current, ct);
+    }
 }

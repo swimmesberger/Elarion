@@ -9,8 +9,7 @@ namespace Elarion.Abstractions;
 /// The generated registration uses <see cref="Scope"/> to choose the DI lifetime.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-public sealed class ServiceAttribute(params Type[] serviceTypes) : Attribute
-{
+public sealed class ServiceAttribute(params Type[] serviceTypes) : Attribute {
     /// <summary>
     /// Explicit service types to register.
     /// </summary>

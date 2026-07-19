@@ -6,11 +6,9 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class ModuleApiGeneratorTests
-{
+public sealed class ModuleApiGeneratorTests {
     [Fact]
-    public void DefaultFacade_EmitsMethodPerHandlerForwarderAndRegistration()
-    {
+    public void DefaultFacade_EmitsMethodPerHandlerForwarderAndRegistration() {
         var source = CreateSource(
             """
             namespace Sample.Things {
@@ -38,7 +36,8 @@ public sealed class ModuleApiGeneratorTests
         generated.Should().Contain("public partial interface IThingsApi");
         generated.Should().Contain(
             "global::System.Threading.Tasks.ValueTask<global::Sample.Things.GetThingResult> GetThing(global::Sample.Things.GetThingQuery request, global::System.Threading.CancellationToken ct = default)");
-        generated.Should().Contain("internal sealed class IThingsApiForwarder(global::System.IServiceProvider services)");
+        generated.Should()
+            .Contain("internal sealed class IThingsApiForwarder(global::System.IServiceProvider services)");
         generated.Should().Contain(
             "GetRequiredService<global::Elarion.Abstractions.IHandler<global::Sample.Things.GetThingQuery, global::Sample.Things.GetThingResult>>(services).HandleAsync(request, ct);");
         generated.Should().Contain("public static class ThingsModuleApiExtensions");
@@ -51,8 +50,7 @@ public sealed class ModuleApiGeneratorTests
     }
 
     [Fact]
-    public void Exclude_OmitsHandlerFromDefaultFacade()
-    {
+    public void Exclude_OmitsHandlerFromDefaultFacade() {
         var source = CreateSource(
             """
             namespace Sample.Things {
@@ -91,8 +89,7 @@ public sealed class ModuleApiGeneratorTests
     }
 
     [Fact]
-    public void ScopedFacade_IncludesOnlyTaggedHandlers()
-    {
+    public void ScopedFacade_IncludesOnlyTaggedHandlers() {
         var source = CreateSource(
             """
             namespace Sample.Things {
@@ -131,8 +128,7 @@ public sealed class ModuleApiGeneratorTests
     }
 
     [Fact]
-    public void NonPartialInterface_EmitsDiagnostic()
-    {
+    public void NonPartialInterface_EmitsDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Things {
@@ -144,15 +140,14 @@ public sealed class ModuleApiGeneratorTests
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false, allowedDiagnosticIds: ["ELAPI001"]);
+        var result = Generate(source, false, ["ELAPI001"]);
 
         result.Diagnostics.Any(d => d.Id == "ELAPI001" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
     }
 
     [Fact]
-    public void FacadeNotInModule_EmitsWarning()
-    {
+    public void FacadeNotInModule_EmitsWarning() {
         var source = CreateSource(
             """
             namespace Sample.Modules {
@@ -174,8 +169,7 @@ public sealed class ModuleApiGeneratorTests
     }
 
     [Fact]
-    public void HandlerInDifferentModule_IsNotIncluded()
-    {
+    public void HandlerInDifferentModule_IsNotIncluded() {
         var source = CreateSource(
             """
             namespace Sample.Things {
@@ -210,8 +204,7 @@ public sealed class ModuleApiGeneratorTests
     }
 
     [Fact]
-    public void ModuleApi_IrrelevantEdit_ReusesPipeline()
-    {
+    public void ModuleApi_IrrelevantEdit_ReusesPipeline() {
         var source = CreateSource(
             """
             namespace Sample.Things {
@@ -244,34 +237,33 @@ public sealed class ModuleApiGeneratorTests
     private static string CreateSource(
         string testSource,
         string assemblyTrigger = "[assembly: Elarion.Abstractions.UseElarion]",
-        bool wrapInModule = true)
-    {
+        bool wrapInModule = true) {
         var moduleDeclaration = wrapInModule && !testSource.Contains("AppModule(")
             ? """
-            namespace Sample.Things {
-                [Elarion.Abstractions.Modules.AppModule("Sample")]
-                public static class GeneratedTestModule { }
-            }
-            """
+              namespace Sample.Things {
+                  [Elarion.Abstractions.Modules.AppModule("Sample")]
+                  public static class GeneratedTestModule { }
+              }
+              """
             : "";
 
         return $"""
-        {assemblyTrigger}
+                {assemblyTrigger}
 
-        {moduleDeclaration}
+                {moduleDeclaration}
 
-        {testSource}
-        """;
+                {testSource}
+                """;
     }
 
-    private static string AllGenerated(GeneratorDriverRunResult result) =>
-        string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
+    private static string AllGenerated(GeneratorDriverRunResult result) {
+        return string.Concat(result.GeneratedTrees.Select(tree => tree.GetText().ToString()));
+    }
 
     private static GeneratorDriverRunResult Generate(
         string source,
         bool assertGeneratedOutputCompiles = true,
-        string[]? allowedDiagnosticIds = null)
-    {
+        string[]? allowedDiagnosticIds = null) {
         var allowedIds = new HashSet<string>(allowedDiagnosticIds ?? []);
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var syntaxTree = CSharpSyntaxTree.ParseText(source, parseOptions);
@@ -285,7 +277,7 @@ public sealed class ModuleApiGeneratorTests
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
-        GeneratorDriver driver = CSharpGeneratorDriver
+        var driver = CSharpGeneratorDriver
             .Create(new ModuleApiGenerator(), new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
@@ -299,17 +291,14 @@ public sealed class ModuleApiGeneratorTests
             .Should().BeEmpty();
 
         if (assertGeneratedOutputCompiles)
-        {
             outputCompilation.GetDiagnostics()
                 .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
                 .Should().BeEmpty();
-        }
 
         return result;
     }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
 

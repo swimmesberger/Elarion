@@ -22,9 +22,8 @@ public static class TcpConnectionServiceCollectionExtensions {
         ArgumentNullException.ThrowIfNull(configure);
         var options = new ElarionTcpListenerOptions();
         configure(options);
-        if (options.ListenEndPoint is null) {
+        if (options.ListenEndPoint is null)
             throw new ArgumentException("ListenEndPoint is required.", nameof(configure));
-        }
 
         ValidateShared(options);
         services.AddSingleton<IHostedService>(sp => new TcpConnectionListenerService<THandler>(options, sp));
@@ -43,13 +42,10 @@ public static class TcpConnectionServiceCollectionExtensions {
         ArgumentNullException.ThrowIfNull(configure);
         var options = new ElarionTcpDialerOptions();
         configure(options);
-        if (string.IsNullOrEmpty(options.Host)) {
-            throw new ArgumentException("Host is required.", nameof(configure));
-        }
+        if (string.IsNullOrEmpty(options.Host)) throw new ArgumentException("Host is required.", nameof(configure));
 
-        if (options.Port is <= 0 or > 65535) {
+        if (options.Port is <= 0 or > 65535)
             throw new ArgumentException("Port must be a valid TCP port.", nameof(configure));
-        }
 
         ValidateShared(options);
         services.AddSingleton<IHostedService>(sp => new TcpConnectionDialerService<THandler>(options, sp));
@@ -72,11 +68,10 @@ public static class TcpConnectionServiceCollectionExtensions {
     }
 
     internal static void ValidateShared(ElarionTcpConnectionOptions options) {
-        if (options.Framer is null) {
+        if (options.Framer is null)
             throw new ArgumentException(
                 "Framer is required — TCP has no message boundaries; pick LengthPrefixedTcpFramer, DelimitedTcpFramer, or a custom framer.",
                 nameof(options));
-        }
 
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxInboundFrameBytes, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxOutboundFrameBytes, 0);
@@ -84,39 +79,32 @@ public static class TcpConnectionServiceCollectionExtensions {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.InitialSendBufferBytes, 0);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(options.MaxPendingSends, 0);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.ShutdownGracePeriod, TimeSpan.Zero);
-        if (options.InitialReadBufferBytes > options.MaxInboundFrameBytes) {
+        if (options.InitialReadBufferBytes > options.MaxInboundFrameBytes)
             throw new ArgumentOutOfRangeException(nameof(options.InitialReadBufferBytes),
                 "InitialReadBufferBytes cannot exceed MaxInboundFrameBytes.");
-        }
 
-        if (options.InitialSendBufferBytes > options.MaxOutboundFrameBytes) {
+        if (options.InitialSendBufferBytes > options.MaxOutboundFrameBytes)
             throw new ArgumentOutOfRangeException(nameof(options.InitialSendBufferBytes),
                 "InitialSendBufferBytes cannot exceed MaxOutboundFrameBytes.");
-        }
 
         if (options.Tls is { HandshakeTimeout: var tlsTimeout }
-            && tlsTimeout <= TimeSpan.Zero && tlsTimeout != Timeout.InfiniteTimeSpan) {
+            && tlsTimeout <= TimeSpan.Zero && tlsTimeout != Timeout.InfiniteTimeSpan)
             throw new ArgumentException(
                 "TLS HandshakeTimeout must be positive or Timeout.InfiniteTimeSpan.", nameof(options));
-        }
 
-        if (options is ElarionTcpListenerOptions { Tls: not null and not TcpServerTlsOptions }) {
+        if (options is ElarionTcpListenerOptions { Tls: not null and not TcpServerTlsOptions })
             throw new ArgumentException("Listener endpoints require TcpServerTlsOptions.", nameof(options));
-        }
 
-        if (options is ElarionTcpDialerOptions { Tls: not null and not TcpClientTlsOptions }) {
+        if (options is ElarionTcpDialerOptions { Tls: not null and not TcpClientTlsOptions })
             throw new ArgumentException("Dialer endpoints require TcpClientTlsOptions.", nameof(options));
-        }
 
-        if (options.GetType() == typeof(ElarionTcpConnectionOptions) && options.Tls is not null) {
+        if (options.GetType() == typeof(ElarionTcpConnectionOptions) && options.Tls is not null)
             throw new ArgumentException(
                 "TLS requires a listener or dialer endpoint so the adapter can select server or client mode.",
                 nameof(options));
-        }
 
-        if (options is ElarionTcpListenerOptions { MaxConcurrentConnections: <= 0 }) {
+        if (options is ElarionTcpListenerOptions { MaxConcurrentConnections: <= 0 })
             throw new ArgumentException("MaxConcurrentConnections must be positive when set.", nameof(options));
-        }
     }
 }
 
@@ -126,9 +114,11 @@ public static class TcpConnectionServiceCollectionExtensions {
 /// the same one apps resolve to apply endpoints.
 /// </summary>
 internal sealed class TcpConnectionEndpointsLifetime(TcpConnectionEndpoints endpoints) : IHostedService {
-    public Task StartAsync(CancellationToken cancellationToken) =>
-        ((IHostedService)endpoints).StartAsync(cancellationToken);
+    public Task StartAsync(CancellationToken cancellationToken) {
+        return ((IHostedService)endpoints).StartAsync(cancellationToken);
+    }
 
-    public Task StopAsync(CancellationToken cancellationToken) =>
-        ((IHostedService)endpoints).StopAsync(cancellationToken);
+    public Task StopAsync(CancellationToken cancellationToken) {
+        return ((IHostedService)endpoints).StopAsync(cancellationToken);
+    }
 }

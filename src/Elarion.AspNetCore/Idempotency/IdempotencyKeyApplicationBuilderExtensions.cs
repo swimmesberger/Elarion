@@ -8,6 +8,7 @@ public static class IdempotencyKeyApplicationBuilderExtensions {
     /// Captures the <c>Idempotency-Key</c> (or legacy <c>X-Idempotency-Key</c>) HTTP header into the request
     /// scope for <c>[HttpEndpoint]</c> handlers. Place after authentication and <c>UseElarionCurrentUser()</c>.
     /// </summary>
-    public static IApplicationBuilder UseElarionIdempotencyKey(this IApplicationBuilder app) =>
-        app.UseMiddleware<IdempotencyKeyMiddleware>();
+    public static IApplicationBuilder UseElarionIdempotencyKey(this IApplicationBuilder app) {
+        return app.UseMiddleware<IdempotencyKeyMiddleware>();
+    }
 }

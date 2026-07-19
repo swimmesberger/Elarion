@@ -21,9 +21,7 @@ internal sealed class GrantResourceAuthorizer(IResourceGrantSource grants) : IRe
         ArgumentNullException.ThrowIfNull(context);
 
         var user = context.User;
-        if (!user.IsAuthenticated || context.ResourceId is null) {
-            return false;
-        }
+        if (!user.IsAuthenticated || context.ResourceId is null) return false;
 
         var resourceType = context.ResourceTypeName;
         var resourceId = context.ResourceId.ToString();
@@ -34,10 +32,10 @@ internal sealed class GrantResourceAuthorizer(IResourceGrantSource grants) : IRe
         return await grants.Grants
             .AnyAsync(
                 grant => grant.ResourceType == resourceType
-                    && grant.ResourceId == resourceId
-                    && grant.Operation == operation
-                    && ((grant.PrincipalKind == "user" && grant.PrincipalId == userId)
-                        || (grant.PrincipalKind == "role" && roles.Contains(grant.PrincipalId))),
+                         && grant.ResourceId == resourceId
+                         && grant.Operation == operation
+                         && ((grant.PrincipalKind == "user" && grant.PrincipalId == userId)
+                             || (grant.PrincipalKind == "role" && roles.Contains(grant.PrincipalId))),
                 ct)
             .ConfigureAwait(false);
     }

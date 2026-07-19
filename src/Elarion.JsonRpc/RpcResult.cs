@@ -29,27 +29,35 @@ public readonly struct RpcResult<T> {
     public bool IsSuccess => _error is null;
 
     /// <summary>The success value. Only valid when <see cref="IsSuccess"/> is <see langword="true"/>.</summary>
-    public T Value => IsSuccess ? _value! : throw new InvalidOperationException("Cannot access Value on a failed result.");
+    public T Value =>
+        IsSuccess ? _value! : throw new InvalidOperationException("Cannot access Value on a failed result.");
 
     /// <summary>The error. Only valid when <see cref="IsSuccess"/> is <see langword="false"/>.</summary>
-    public RpcError Error => _error ?? throw new InvalidOperationException("Cannot access Error on a successful result.");
+    public RpcError Error =>
+        _error ?? throw new InvalidOperationException("Cannot access Error on a successful result.");
 
     /// <summary>Creates a successful result with the given value.</summary>
-    public static RpcResult<T> Success(T value) => new(value, null);
+    public static RpcResult<T> Success(T value) {
+        return new RpcResult<T>(value, null);
+    }
 
     /// <summary>Creates a failed result with the given error.</summary>
-    public static RpcResult<T> Failure(RpcError error) => new(default, error ?? throw new ArgumentNullException(nameof(error)));
+    public static RpcResult<T> Failure(RpcError error) {
+        return new RpcResult<T>(default, error ?? throw new ArgumentNullException(nameof(error)));
+    }
 
     /// <summary>Creates a failed result with the given code, message, and optional data.</summary>
-    public static RpcResult<T> Failure(int code, string message, object? data = null) =>
-        new(default, new RpcError { Code = code, Message = message, Data = data });
+    public static RpcResult<T> Failure(int code, string message, object? data = null) {
+        return new RpcResult<T>(default, new RpcError { Code = code, Message = message, Data = data });
+    }
 
     /// <summary>
     /// Converts this typed result to the type-erased <see cref="RpcResult"/> used internally
     /// by the dispatcher pipeline. The success value is boxed to <see langword="object"/>.
     /// </summary>
-    internal RpcResult ToUntyped() =>
-        IsSuccess ? RpcResult.Success(_value) : RpcResult.Failure(Error);
+    internal RpcResult ToUntyped() {
+        return IsSuccess ? RpcResult.Success(_value) : RpcResult.Failure(Error);
+    }
 }
 
 /// <summary>
@@ -72,15 +80,21 @@ internal readonly struct RpcResult {
     public object? Value => _value;
 
     /// <summary>The error. Only valid when <see cref="IsSuccess"/> is <see langword="false"/>.</summary>
-    public RpcError Error => _error ?? throw new InvalidOperationException("Cannot access Error on a successful result.");
+    public RpcError Error =>
+        _error ?? throw new InvalidOperationException("Cannot access Error on a successful result.");
 
     /// <summary>Creates a successful result with the given value.</summary>
-    public static RpcResult Success(object? value = null) => new(value, null);
+    public static RpcResult Success(object? value = null) {
+        return new RpcResult(value, null);
+    }
 
     /// <summary>Creates a failed result with the given error.</summary>
-    public static RpcResult Failure(RpcError error) => new(null, error ?? throw new ArgumentNullException(nameof(error)));
+    public static RpcResult Failure(RpcError error) {
+        return new RpcResult(null, error ?? throw new ArgumentNullException(nameof(error)));
+    }
 
     /// <summary>Creates a failed result with the given code, message, and optional data.</summary>
-    public static RpcResult Failure(int code, string message, object? data = null) =>
-        new(null, new RpcError { Code = code, Message = message, Data = data });
+    public static RpcResult Failure(int code, string message, object? data = null) {
+        return new RpcResult(null, new RpcError { Code = code, Message = message, Data = data });
+    }
 }

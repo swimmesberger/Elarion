@@ -5,8 +5,7 @@ namespace Elarion.Messaging.Outbox;
 /// <summary>
 /// Configures the EF Core model used by the transactional outbox.
 /// </summary>
-public static class OutboxModelBuilderExtensions
-{
+public static class OutboxModelBuilderExtensions {
     /// <summary>
     /// Adds the <see cref="OutboxMessage"/> table to the EF Core model. Call from <c>OnModelCreating</c> on the context
     /// that owns the business entities so the outbox row commits in the same transaction — or annotate the context with
@@ -24,15 +23,13 @@ public static class OutboxModelBuilderExtensions
         this ModelBuilder modelBuilder,
         string? tableName = null,
         string? schema = null,
-        bool snakeCase = true)
-    {
+        bool snakeCase = true) {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
         var table = tableName ?? (snakeCase ? "elarion_outbox_messages" : "ElarionOutboxMessages");
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
 
-        modelBuilder.Entity<OutboxMessage>(builder =>
-        {
+        modelBuilder.Entity<OutboxMessage>(builder => {
             builder.ToTable(table, schema);
             builder.HasKey(message => message.Id);
             builder.HasIndex(message => message.ProcessedOnUtc)

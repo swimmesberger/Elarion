@@ -15,7 +15,7 @@ internal enum SqlSegmentKind : byte {
     Expansion,
 
     /// <summary>A nested <see cref="SqlStatement"/> fragment, spliced with its parameters renumbered.</summary>
-    Fragment,
+    Fragment
 }
 
 /// <summary>One piece of an interpolated SQL statement, kept so fragments can compose losslessly.</summary>
@@ -24,8 +24,19 @@ internal readonly struct SqlSegment(SqlSegmentKind kind, string? literal, object
     internal string? Literal { get; } = literal;
     internal object? Value { get; } = value;
 
-    internal static SqlSegment OfLiteral(string text) => new(SqlSegmentKind.Literal, text, null);
-    internal static SqlSegment OfValue(object? value) => new(SqlSegmentKind.Value, null, value);
-    internal static SqlSegment OfExpansion(object value) => new(SqlSegmentKind.Expansion, null, value);
-    internal static SqlSegment OfFragment(SqlStatement fragment) => new(SqlSegmentKind.Fragment, null, fragment);
+    internal static SqlSegment OfLiteral(string text) {
+        return new SqlSegment(SqlSegmentKind.Literal, text, null);
+    }
+
+    internal static SqlSegment OfValue(object? value) {
+        return new SqlSegment(SqlSegmentKind.Value, null, value);
+    }
+
+    internal static SqlSegment OfExpansion(object value) {
+        return new SqlSegment(SqlSegmentKind.Expansion, null, value);
+    }
+
+    internal static SqlSegment OfFragment(SqlStatement fragment) {
+        return new SqlSegment(SqlSegmentKind.Fragment, null, fragment);
+    }
 }

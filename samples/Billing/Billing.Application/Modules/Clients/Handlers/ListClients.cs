@@ -18,7 +18,9 @@ namespace Billing.Application.Modules.Clients.Handlers;
 public sealed class ListClients(BillingDbContext db, ICurrentUser user)
     : IHandler<ListClients.Query, Result<ListClients.Response>> {
     public sealed record Query : IQuery;
+
     public sealed record Item(Guid Id, string Number, string Name, string Email);
+
     public sealed record Response(IReadOnlyList<Item> Clients);
 
     public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {

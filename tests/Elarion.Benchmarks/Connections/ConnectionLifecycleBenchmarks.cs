@@ -27,23 +27,25 @@ public class ConnectionLifecycleBenchmarks {
         _provider = new ServiceCollection().AddElarionConnections().BuildServiceProvider();
         _registry = _provider.GetRequiredService<IClientConnectionRegistry>();
         _authenticated = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim("sub", "bench-device")], authenticationType: "bench"));
+            [new Claim("sub", "bench-device")], "bench"));
         _anonymous = new ClaimsPrincipal(new ClaimsIdentity());
         // Promotion inputs are cloned by the registry per call, so one template instance is reusable.
         _promotion = new ClientConnectionIdentity {
             Principal = _authenticated,
-            PrincipalId = "bench-device",
+            PrincipalId = "bench-device"
         };
     }
 
     [GlobalCleanup]
-    public async Task Cleanup() => await _provider.DisposeAsync();
+    public async Task Cleanup() {
+        await _provider.DisposeAsync();
+    }
 
     [Benchmark(Baseline = true)]
     public async Task RegisterUnregister_ConnectTimeAuth() {
         var connectionId = NextConnectionId();
         await _registry.RegisterAsync(new SimulatedClientConnection(
-            principalId: "bench-device", connectionId: connectionId, principal: _authenticated));
+            "bench-device", connectionId: connectionId, principal: _authenticated));
         await _registry.UnregisterAsync(connectionId);
     }
 
@@ -56,5 +58,7 @@ public class ConnectionLifecycleBenchmarks {
         await _registry.UnregisterAsync(connectionId);
     }
 
-    private string NextConnectionId() => "bench-" + Interlocked.Increment(ref _sequence);
+    private string NextConnectionId() {
+        return "bench-" + Interlocked.Increment(ref _sequence);
+    }
 }

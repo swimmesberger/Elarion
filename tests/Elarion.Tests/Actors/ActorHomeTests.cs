@@ -125,13 +125,14 @@ public sealed class ActorHomeTests {
         return services.BuildServiceProvider();
     }
 
-    private static void AddPingerActor(IServiceCollection services, ActorPlacementMode placement) =>
+    private static void AddPingerActor(IServiceCollection services, ActorPlacementMode placement) {
         services.AddElarionActor(new ActorRegistration<PingerActor, string, IPinger> {
             Name = "Pinger",
             Options = new ActorOptions { Placement = placement },
             Activator = static (_, _) => new PingerActor(),
             Facade = static handle => new PingerFacade(handle)
         });
+    }
 
     private sealed class FakeHomeLease : IActorHomeLease {
         public string Role => "actors";
@@ -150,10 +151,11 @@ public sealed class ActorHomeTests {
     }
 
     private sealed class FakePlacementResolver : IActorPlacementResolver {
-        public ActorPlacementResolution Resolve(string actorName, string key) =>
-            key == "a"
-                ? new(true, "node-a", "http://node-a", "actors:partition-0")
-                : new(false, "node-a", "http://node-a", "actors:partition-1");
+        public ActorPlacementResolution Resolve(string actorName, string key) {
+            return key == "a"
+                ? new ActorPlacementResolution(true, "node-a", "http://node-a", "actors:partition-0")
+                : new ActorPlacementResolution(false, "node-a", "http://node-a", "actors:partition-1");
+        }
     }
 
     public interface IPinger : IActorFacade<string> {
@@ -171,28 +173,34 @@ public sealed class ActorHomeTests {
     public sealed class PingerActor {
         private int _count;
 
-        public Task<int> Ping() => Task.FromResult(++_count);
+        public Task<int> Ping() {
+            return Task.FromResult(++_count);
+        }
     }
 
     private sealed class PingerFacade(ActorHandle<PingerActor> handle) : IPinger {
-        public ValueTask<int> Ping(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new PingItem(), cancellationToken);
+        public ValueTask<int> Ping(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new PingItem(), cancellationToken);
+        }
     }
 
     private sealed class FreeRunnerFacade(ActorHandle<PingerActor> handle) : IFreeRunner {
-        public ValueTask<int> Ping(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new PingItem(), cancellationToken);
+        public ValueTask<int> Ping(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new PingItem(), cancellationToken);
+        }
     }
 
     private sealed class ShardedPingerFacade(ActorHandle<PingerActor> handle) : IShardedPinger {
-        public ValueTask<int> Ping(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new PingItem(), cancellationToken);
+        public ValueTask<int> Ping(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new PingItem(), cancellationToken);
+        }
     }
 
     private sealed class PingItem : ActorWorkItem<PingerActor, int> {
         public override string MethodName => "Ping";
 
-        protected override async ValueTask<int> InvokeAsync(PingerActor actor, CancellationToken cancellationToken) =>
-            await actor.Ping().ConfigureAwait(false);
+        protected override async ValueTask<int> InvokeAsync(PingerActor actor, CancellationToken cancellationToken) {
+            return await actor.Ping().ConfigureAwait(false);
+        }
     }
 }

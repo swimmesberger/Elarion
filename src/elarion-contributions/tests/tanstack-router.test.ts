@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import type { CapabilityReader } from "../src/index.js"
-import { createRouteGuards, redirectUnless } from "../src/tanstack-router.js"
+import {describe, expect, it} from "vitest"
+import type {CapabilityReader} from "../src/index.js"
+import {createRouteGuards, redirectUnless} from "../src/tanstack-router.js"
 
 function capabilities(granted: boolean): CapabilityReader {
   return {
@@ -13,15 +13,15 @@ function capabilities(granted: boolean): CapabilityReader {
 
 describe("redirectUnless", () => {
   it("passes when the clause holds", () => {
-    const guard = redirectUnless({ module: "A", permission: "a.read" }, "/")
-    expect(() => guard({ context: { caps: capabilities(true) } })).not.toThrow()
+    const guard = redirectUnless({module: "A", permission: "a.read"}, "/")
+    expect(() => guard({context: {caps: capabilities(true)}})).not.toThrow()
   })
 
   it("throws a TanStack redirect to the given target when the clause fails", () => {
-    const guard = redirectUnless({ module: "A" }, "/home")
+    const guard = redirectUnless({module: "A"}, "/home")
     let thrown: unknown
     try {
-      guard({ context: { caps: capabilities(false) } })
+      guard({context: {caps: capabilities(false)}})
     } catch (error) {
       thrown = error
     }
@@ -31,13 +31,13 @@ describe("redirectUnless", () => {
   })
 
   it("is exposed identically through the vocabulary-bound factory", () => {
-    const { redirectUnless: bound } = createRouteGuards<{
+    const {redirectUnless: bound} = createRouteGuards<{
       module: "A" | "B"
       permission: string
       flag: string
       role: string
     }>()
-    const guard = bound({ module: "A" }, "/")
-    expect(() => guard({ context: { caps: capabilities(true) } })).not.toThrow()
+    const guard = bound({module: "A"}, "/")
+    expect(() => guard({context: {caps: capabilities(true)}})).not.toThrow()
   })
 })

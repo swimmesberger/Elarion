@@ -29,7 +29,9 @@ public sealed class ActorKeyAttribute : Attribute {
     /// The name of a property on the consumed event whose type is assignable to the actor's key type.
     /// Use <c>nameof</c> so a rename stays a compile error.
     /// </param>
-    public ActorKeyAttribute(string propertyName) => PropertyName = propertyName;
+    public ActorKeyAttribute(string propertyName) {
+        PropertyName = propertyName;
+    }
 
     /// <summary>The event property that supplies the actor key.</summary>
     public string PropertyName { get; }

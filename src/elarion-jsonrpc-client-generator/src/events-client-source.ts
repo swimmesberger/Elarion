@@ -1,4 +1,4 @@
-import { moduleSpecifier } from './rpc-client-source.js'
+import {moduleSpecifier} from './rpc-client-source.js'
 
 interface GenerateEventsClientSourceOptions {
   generatedBy: string
@@ -310,7 +310,7 @@ function buildTopicTree(topics: readonly string[]): TopicTreeNode {
 }
 
 function createTopicTreeNode(): TopicTreeNode {
-  return { children: new Map() }
+  return {children: new Map()}
 }
 
 function emitProperties(node: TopicTreeNode, indent: number): string[] {

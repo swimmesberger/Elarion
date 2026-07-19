@@ -26,60 +26,63 @@ internal sealed class ActorSystem : IActorSystem {
             homeLease,
             placementResolver);
         foreach (var registration in registrations) {
-            if (registration.Options.Placement == ActorPlacementMode.SingleHome && homeLease is null) {
+            if (registration.Options.Placement == ActorPlacementMode.SingleHome && homeLease is null)
                 // Declared intent without enforcement (single-instance / local dev) is legal but
                 // worth one loud line: on a multi-instance deployment this is the misconfiguration.
                 loggerFactory.CreateLogger("Elarion.Actors." + registration.Name).LogWarning(
                     "Actor {Actor} is configured for SingleHome placement but no IActorHomeLease is registered; "
                     + "single-homing is not enforced on this instance.",
                     registration.Name);
-            }
 
             if (registration.Options.Placement == ActorPlacementMode.VirtualShards &&
-                placementResolver is null) {
+                placementResolver is null)
                 loggerFactory.CreateLogger("Elarion.Actors." + registration.Name).LogWarning(
                     "Actor {Actor} is configured for virtual-shard placement but no "
                     + "IActorPlacementResolver is registered; placement is not enforced on this instance.",
                     registration.Name);
-            }
 
             var host = registration.CreateHost(runtime);
-            if (!_hostsByFacade.TryAdd(host.FacadeType, host)) {
+            if (!_hostsByFacade.TryAdd(host.FacadeType, host))
                 throw new InvalidOperationException(
                     $"Duplicate actor registration for facade '{host.FacadeType}' (actor '{registration.Name}').");
-            }
         }
     }
 
-    public TFacade Get<TFacade>() where TFacade : class, IActorFacade =>
-        CreateFacade<TFacade>(ActorSingletonKey.Value);
+    public TFacade Get<TFacade>() where TFacade : class, IActorFacade {
+        return CreateFacade<TFacade>(ActorSingletonKey.Value);
+    }
 
-    public TFacade Get<TFacade>(string key) where TFacade : class, IActorFacade<string> =>
-        CreateFacade<TFacade>(key);
+    public TFacade Get<TFacade>(string key) where TFacade : class, IActorFacade<string> {
+        return CreateFacade<TFacade>(key);
+    }
 
-    public TFacade Get<TFacade>(Guid key) where TFacade : class, IActorFacade<Guid> =>
-        CreateFacade<TFacade>(key);
+    public TFacade Get<TFacade>(Guid key) where TFacade : class, IActorFacade<Guid> {
+        return CreateFacade<TFacade>(key);
+    }
 
-    public TFacade Get<TFacade>(long key) where TFacade : class, IActorFacade<long> =>
-        CreateFacade<TFacade>(key);
+    public TFacade Get<TFacade>(long key) where TFacade : class, IActorFacade<long> {
+        return CreateFacade<TFacade>(key);
+    }
 
-    public TFacade Get<TFacade>(int key) where TFacade : class, IActorFacade<int> =>
-        CreateFacade<TFacade>(key);
+    public TFacade Get<TFacade>(int key) where TFacade : class, IActorFacade<int> {
+        return CreateFacade<TFacade>(key);
+    }
 
     public TFacade GetByKey<TFacade, TKey>(TKey key)
         where TFacade : class, IActorFacade<TKey>
-        where TKey : notnull =>
-        CreateFacade<TFacade>(key);
+        where TKey : notnull {
+        return CreateFacade<TFacade>(key);
+    }
 
-    internal Task StopAsync(CancellationToken cancellationToken) =>
-        Task.WhenAll(_hostsByFacade.Values.Select(host => host.StopAsync(cancellationToken)));
+    internal Task StopAsync(CancellationToken cancellationToken) {
+        return Task.WhenAll(_hostsByFacade.Values.Select(host => host.StopAsync(cancellationToken)));
+    }
 
     private TFacade CreateFacade<TFacade>(object key) where TFacade : class {
-        if (!_hostsByFacade.TryGetValue(typeof(TFacade), out var host)) {
+        if (!_hostsByFacade.TryGetValue(typeof(TFacade), out var host))
             throw new InvalidOperationException(
                 $"No actor is registered for facade '{typeof(TFacade)}'. Check that the owning module is " +
                 "enabled and its generated actor registration (Add{Module}Actors) ran.");
-        }
 
         return (TFacade)host.CreateFacade(key);
     }
@@ -90,7 +93,11 @@ internal sealed class ActorSystem : IActorSystem {
 /// <see cref="IActorLifecycle.OnDeactivateAsync"/> per live activation.
 /// </summary>
 internal sealed class ActorSystemLifecycleHost(ActorSystem system) : IHostedService {
-    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StartAsync(CancellationToken cancellationToken) {
+        return Task.CompletedTask;
+    }
 
-    public Task StopAsync(CancellationToken cancellationToken) => system.StopAsync(cancellationToken);
+    public Task StopAsync(CancellationToken cancellationToken) {
+        return system.StopAsync(cancellationToken);
+    }
 }

@@ -21,9 +21,7 @@ internal sealed class ElarionFileResponseOperationTransformer : IOpenApiOperatio
         var isFileResponse = context.Description.ActionDescriptor.EndpointMetadata
             .OfType<ElarionFileEndpointMetadata>()
             .Any();
-        if (!isFileResponse) {
-            return Task.CompletedTask;
-        }
+        if (!isFileResponse) return Task.CompletedTask;
 
         operation.Responses ??= [];
         if (!operation.Responses.TryGetValue("200", out var existing) || existing is not OpenApiResponse response) {
@@ -33,7 +31,7 @@ internal sealed class ElarionFileResponseOperationTransformer : IOpenApiOperatio
 
         response.Content ??= new Dictionary<string, OpenApiMediaType>(StringComparer.Ordinal);
         response.Content[BinaryContentType] = new OpenApiMediaType {
-            Schema = new OpenApiSchema { Type = JsonSchemaType.String, Format = "binary" },
+            Schema = new OpenApiSchema { Type = JsonSchemaType.String, Format = "binary" }
         };
 
         return Task.CompletedTask;

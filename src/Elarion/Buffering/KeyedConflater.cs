@@ -63,9 +63,7 @@ public sealed class KeyedConflater<TKey, TValue> : IAsyncDisposable where TKey :
     /// Never blocks on the publish target. Dropped silently after <see cref="DisposeAsync"/>.
     /// </summary>
     public void Post(TKey key, TValue value) {
-        if (_disposed) {
-            return;
-        }
+        if (_disposed) return;
 
         while (true) {
             var state = _states.GetOrAdd(key, static _ => new KeyState());
@@ -73,16 +71,13 @@ public sealed class KeyedConflater<TKey, TValue> : IAsyncDisposable where TKey :
                 // Re-checked under the state lock: dispose sets the flag before draining, so a post that
                 // passed the lock-free check above cannot start an emission after the drain completed.
                 if (_disposed) {
-                    if (!state.Publishing && !state.HasPending) {
+                    if (!state.Publishing && !state.HasPending)
                         RemoveLocked(key, state); // don't strand an idle state this racing post inserted
-                    }
 
                     return;
                 }
 
-                if (state.Removed) {
-                    continue; // retired concurrently as idle — retry against a fresh state
-                }
+                if (state.Removed) continue; // retired concurrently as idle — retry against a fresh state
 
                 if (state.Publishing || state.WindowOpen) {
                     state.Pending = value;
@@ -105,9 +100,7 @@ public sealed class KeyedConflater<TKey, TValue> : IAsyncDisposable where TKey :
     /// </summary>
     public async ValueTask DisposeAsync() {
         lock (_disposeLock) {
-            if (_disposed) {
-                return;
-            }
+            if (_disposed) return;
 
             _disposed = true;
         }
@@ -116,11 +109,9 @@ public sealed class KeyedConflater<TKey, TValue> : IAsyncDisposable where TKey :
         // pending values, so re-snapshot until nothing is in flight anymore.
         while (true) {
             List<Task> inFlight = [];
-            foreach (var (key, state) in _states) {
+            foreach (var (key, state) in _states)
                 lock (state.Lock) {
-                    if (state.Removed) {
-                        continue;
-                    }
+                    if (state.Removed) continue;
 
                     if (!state.Publishing && state.HasPending) {
                         var value = state.Pending!;
@@ -129,24 +120,18 @@ public sealed class KeyedConflater<TKey, TValue> : IAsyncDisposable where TKey :
                         StartEmitLocked(key, state, value);
                     }
 
-                    if (state.InFlight is { } task) {
-                        inFlight.Add(task);
-                    }
+                    if (state.InFlight is { } task) inFlight.Add(task);
                 }
-            }
 
-            if (inFlight.Count == 0) {
-                break;
-            }
+            if (inFlight.Count == 0) break;
 
             await Task.WhenAll(inFlight).ConfigureAwait(false);
         }
 
-        foreach (var (key, state) in _states) {
+        foreach (var (key, state) in _states)
             lock (state.Lock) {
                 RemoveLocked(key, state);
             }
-        }
     }
 
     private void StartEmitLocked(TKey key, KeyState state, TValue value) {
@@ -199,9 +184,7 @@ public sealed class KeyedConflater<TKey, TValue> : IAsyncDisposable where TKey :
     private void OnWindowElapsed(TKey key, KeyState state) {
         lock (state.Lock) {
             state.WindowOpen = false;
-            if (state.Publishing) {
-                return; // completion emits the pending latest or retires the key
-            }
+            if (state.Publishing) return; // completion emits the pending latest or retires the key
 
             if (state.HasPending) {
                 var value = state.Pending!;

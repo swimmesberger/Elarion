@@ -10,8 +10,7 @@ namespace Elarion.Generators;
 /// Generates DI registration for compile-time scheduled jobs and runtime-schedulable job types.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
-public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
-{
+public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator {
     private const string TriggerAttributeMetadataName =
         "Elarion.Abstractions.GenerateScheduledJobsAttribute";
 
@@ -37,64 +36,61 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         "System.Threading.Tasks.ValueTask";
 
     private static readonly DiagnosticDescriptor InvalidScheduledJobMethodSignature = new(
-        id: "ELSG004",
-        title: "Invalid scheduled job method signature",
-        messageFormat:
+        "ELSG004",
+        "Invalid scheduled job method signature",
         "Scheduled job method '{0}' must be accessible, non-generic, return Task or ValueTask, and accept only IScheduledJobContext and/or CancellationToken parameters",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor GenericScheduledJobType = new(
-        id: "ELSG005",
-        title: "Generic scheduled job type is not supported",
-        messageFormat: "Scheduled job type '{0}' is not supported because it is generic or nested in a generic type",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "ELSG005",
+        "Generic scheduled job type is not supported",
+        "Scheduled job type '{0}' is not supported because it is generic or nested in a generic type",
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor InvalidRuntimeScheduledJobType = new(
-        id: "ELSG006",
-        title: "Invalid runtime scheduled job type",
-        messageFormat: "Runtime scheduled job type '{0}' must implement exactly one IScheduledJob<TPayload> interface",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "ELSG006",
+        "Invalid runtime scheduled job type",
+        "Runtime scheduled job type '{0}' must implement exactly one IScheduledJob<TPayload> interface",
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor DuplicateScheduledJobName = new(
-        id: "ELSG007",
-        title: "Duplicate scheduled job name",
-        messageFormat: "Scheduled job name '{0}' is used more than once",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "ELSG007",
+        "Duplicate scheduled job name",
+        "Scheduled job name '{0}' is used more than once",
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor InvalidScheduleSpecification = new(
-        id: "ELSG008",
-        title: "Invalid schedule specification",
-        messageFormat:
+        "ELSG008",
+        "Invalid schedule specification",
         "Scheduled job '{0}' has an invalid schedule: methods must declare exactly one of FixedRate, FixedDelay, Cron, or InitialDelay-only one-time scheduling (classes at most one), and InitialDelay/RunOnStart cannot be combined with Cron",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor InvalidMaxConcurrentRuns = new(
-        id: "ELSG009",
-        title: "Invalid scheduled job concurrency",
-        messageFormat: "Scheduled job '{0}' has an invalid MaxConcurrentRuns value; it must be 0 or greater",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "ELSG009",
+        "Invalid scheduled job concurrency",
+        "Scheduled job '{0}' has an invalid MaxConcurrentRuns value; it must be 0 or greater",
+        "Elarion.Generators",
+        DiagnosticSeverity.Error,
+        true);
 
     private static readonly DiagnosticDescriptor JobNotInModule = new(
-        id: "ELSG010",
-        title: "Scheduled job is not in any module",
-        messageFormat:
+        "ELSG010",
+        "Scheduled job is not in any module",
         "Scheduled job '{0}' is annotated with [ScheduledJob] but its namespace is not under any [AppModule]; "
         + "under a module-bootstrapper host it will not be registered (only the flat Add{Assembly}ScheduledJobs method registers it)",
-        category: "Elarion.Generators",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        "Elarion.Generators",
+        DiagnosticSeverity.Warning,
+        true);
 
     private sealed record ScheduledJobInfo(
         string Name,
@@ -120,8 +116,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         string? Enabled,
         string? ResiliencePolicyName);
 
-    private enum MethodParameterKind
-    {
+    private enum MethodParameterKind {
         Context,
         CancellationToken
     }
@@ -129,15 +124,13 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
     /// <summary>A discovered job: either a registration model or the diagnostics that rejected it.</summary>
     private sealed record JobResult(ScheduledJobInfo? Job, EquatableArray<DiagnosticInfo> Diagnostics);
 
-    private static class TrackingNames
-    {
+    private static class TrackingNames {
         public const string Jobs = "ScheduledJobs";
         public const string Combined = "ScheduledJobsCombined";
     }
 
     /// <inheritdoc />
-    public void Initialize(IncrementalGeneratorInitializationContext context)
-    {
+    public void Initialize(IncrementalGeneratorInitializationContext context) {
         // [ScheduledJob] applies to both methods (compile-time jobs) and types (runtime jobs); a single
         // attribute-index pass discovers both, and the transform branches on the target symbol kind.
         var results = context.SyntaxProvider
@@ -158,38 +151,23 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             .WithTrackingName(TrackingNames.Combined);
 
         // Note 50: The scheduler generator is assembly opt-in, which keeps unrelated projects free of generated registrations.
-        context.RegisterSourceOutput(combined, static (spc, source) =>
-        {
+        context.RegisterSourceOutput(combined, static (spc, source) => {
             var (((results, modules), hasTrigger), assemblyName) = source;
-            if (!hasTrigger)
-            {
-                return;
-            }
+            if (!hasTrigger) return;
 
             foreach (var result in results)
-            {
-                foreach (var diagnostic in result.Diagnostics)
-                {
-                    spc.ReportDiagnostic(diagnostic.ToDiagnostic());
-                }
-            }
+            foreach (var diagnostic in result.Diagnostics)
+                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
             var jobs = new List<ScheduledJobInfo>();
             foreach (var result in results)
-            {
                 if (result.Job is not null)
-                {
                     jobs.Add(result.Job);
-                }
-            }
 
             jobs.Sort(static (left, right) => string.Compare(left.Name, right.Name, StringComparison.Ordinal));
 
             ReportDuplicateNames(jobs, spc);
-            if (jobs.Count == 0)
-            {
-                return;
-            }
+            if (jobs.Count == 0) return;
 
             // Jobs are registered per module via ConfigureDefaultServices; only the assembly-level typed job
             // references remain at the assembly scope.
@@ -200,27 +178,20 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         });
     }
 
-    private static JobResult? CreateJobResult(GeneratorAttributeSyntaxContext ctx, CancellationToken ct)
-    {
-        if (ctx.Attributes.Length == 0)
-        {
-            return null;
-        }
+    private static JobResult? CreateJobResult(GeneratorAttributeSyntaxContext ctx, CancellationToken ct) {
+        if (ctx.Attributes.Length == 0) return null;
 
         var attribute = ctx.Attributes[0];
         var compilation = ctx.SemanticModel.Compilation;
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
 
-        if (ctx.TargetSymbol is IMethodSymbol method)
-        {
+        if (ctx.TargetSymbol is IMethodSymbol method) {
             var contextType = compilation.GetTypeByMetadataName(ScheduledJobContextMetadataName);
             var cancellationTokenType = compilation.GetTypeByMetadataName(CancellationTokenMetadataName);
             var taskType = compilation.GetTypeByMetadataName(TaskMetadataName);
             var valueTaskType = compilation.GetTypeByMetadataName(ValueTaskMetadataName);
-            if (contextType is null || cancellationTokenType is null || taskType is null || valueTaskType is null)
-            {
-                return null;
-            }
+            if (contextType is null || cancellationTokenType is null || taskType is null ||
+                valueTaskType is null) return null;
 
             var location = (ctx.TargetNode as MethodDeclarationSyntax)?.Identifier.GetLocation();
             var job = TryCreateMethodJob(
@@ -228,13 +199,9 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             return new JobResult(job, diagnostics.ToImmutable());
         }
 
-        if (ctx.TargetSymbol is INamedTypeSymbol type)
-        {
+        if (ctx.TargetSymbol is INamedTypeSymbol type) {
             var scheduledJobInterface = compilation.GetTypeByMetadataName(ScheduledJobInterfaceMetadataName);
-            if (scheduledJobInterface is null)
-            {
-                return null;
-            }
+            if (scheduledJobInterface is null) return null;
 
             var location = (ctx.TargetNode as ClassDeclarationSyntax)?.Identifier.GetLocation();
             var job = TryCreateRuntimeJob(type, attribute, scheduledJobInterface, location, diagnostics);
@@ -247,27 +214,20 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
     private static void EmitPerModule(
         SourceProductionContext spc,
         IReadOnlyList<ModuleScanner.Module> modules,
-        IReadOnlyList<ScheduledJobInfo> jobs)
-    {
-        if (modules.Count == 0)
-        {
-            return;
-        }
+        IReadOnlyList<ScheduledJobInfo> jobs) {
+        if (modules.Count == 0) return;
 
         var byModule = new Dictionary<ModuleScanner.Module, List<ScheduledJobInfo>>();
-        foreach (var job in jobs)
-        {
+        foreach (var job in jobs) {
             var module = ModuleScanner.FindBest(job.Namespace, modules);
-            if (module is null)
-            {
+            if (module is null) {
                 // Modules exist (guarded above) but this job matches none: the per-module path is the
                 // only one a module-bootstrapper host calls, so warn that it would be silently dropped.
                 spc.ReportDiagnostic(Diagnostic.Create(JobNotInModule, Location.None, job.Name));
                 continue;
             }
 
-            if (!byModule.TryGetValue(module, out var list))
-            {
+            if (!byModule.TryGetValue(module, out var list)) {
                 list = [];
                 byModule[module] = list;
             }
@@ -275,8 +235,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             list.Add(job);
         }
 
-        foreach (var kvp in byModule.OrderBy(x => x.Key.Name, StringComparer.Ordinal))
-        {
+        foreach (var kvp in byModule.OrderBy(x => x.Key.Name, StringComparer.Ordinal)) {
             var module = kvp.Key;
             var className = $"{module.Name}ScheduledJobExtensions";
             var methodName = $"Add{module.Name}ScheduledJobs";
@@ -297,10 +256,11 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         }
     }
 
-    private static string GetNamespace(INamedTypeSymbol type) =>
-        type.ContainingNamespace is { IsGlobalNamespace: false } containing
+    private static string GetNamespace(INamedTypeSymbol type) {
+        return type.ContainingNamespace is { IsGlobalNamespace: false } containing
             ? containing.ToDisplayString()
             : string.Empty;
+    }
 
     private static ScheduledJobInfo? TryCreateMethodJob(
         IMethodSymbol method,
@@ -310,16 +270,14 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         INamedTypeSymbol taskType,
         INamedTypeSymbol valueTaskType,
         Location? location,
-        ImmutableArray<DiagnosticInfo>.Builder diagnostics)
-    {
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
         var type = method.ContainingType;
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
         if (method.TypeParameters.Length > 0 ||
             IsGenericOrNestedInGenericType(type) ||
             !IsAccessible(method.DeclaredAccessibility) ||
             !IsAccessible(type.DeclaredAccessibility) ||
-            !IsSupportedReturnType(method.ReturnType, taskType, valueTaskType))
-        {
+            !IsSupportedReturnType(method.ReturnType, taskType, valueTaskType)) {
             diagnostics.Add(DiagnosticInfo.Create(
                 InvalidScheduledJobMethodSignature,
                 location,
@@ -330,18 +288,16 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         var parameters = ImmutableArray.CreateBuilder<MethodParameterKind>();
         var seenContext = false;
         var seenCancellationToken = false;
-        foreach (var parameter in method.Parameters)
-        {
+        foreach (var parameter in method.Parameters) {
             // Note 52: Only framework-owned context and CancellationToken parameters are accepted so invocation stays source-generated.
-            if (SymbolEqualityComparer.Default.Equals(parameter.Type, contextType) && !seenContext)
-            {
+            if (SymbolEqualityComparer.Default.Equals(parameter.Type, contextType) && !seenContext) {
                 parameters.Add(MethodParameterKind.Context);
                 seenContext = true;
                 continue;
             }
 
-            if (SymbolEqualityComparer.Default.Equals(parameter.Type, cancellationTokenType) && !seenCancellationToken)
-            {
+            if (SymbolEqualityComparer.Default.Equals(parameter.Type, cancellationTokenType) &&
+                !seenCancellationToken) {
                 parameters.Add(MethodParameterKind.CancellationToken);
                 seenCancellationToken = true;
                 continue;
@@ -354,8 +310,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             return null;
         }
 
-        if (!TryGetScheduleSpec(attribute, scheduleRequired: true, out var scheduleKind, out var scheduleValue))
-        {
+        if (!TryGetScheduleSpec(attribute, true, out var scheduleKind, out var scheduleValue)) {
             diagnostics.Add(DiagnosticInfo.Create(
                 InvalidScheduleSpecification,
                 location,
@@ -364,8 +319,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         }
 
         var maxConcurrentRuns = GetIntNamedArgument(attribute, "MaxConcurrentRuns", 0);
-        if (maxConcurrentRuns < 0)
-        {
+        if (maxConcurrentRuns < 0) {
             diagnostics.Add(DiagnosticInfo.Create(
                 InvalidMaxConcurrentRuns,
                 location,
@@ -374,28 +328,28 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         }
 
         return new ScheduledJobInfo(
-            Name: GetRequiredName(attribute),
-            HintName: GetHintName(type) + "_" + method.Name,
-            Namespace: GetNamespace(type),
-            JobTypeFqn: null,
-            PayloadTypeFqn: null,
-            MethodContainingTypeFqn: type.ToDisplayString(fmt),
-            MethodName: method.Name,
-            IsStaticMethod: method.IsStatic,
-            ReturnKind: SymbolEqualityComparer.Default.Equals(method.ReturnType, taskType) ? "Task" : "ValueTask",
-            MethodParameters: parameters.ToImmutable(),
-            ScheduleKind: scheduleKind,
-            ScheduleValue: scheduleValue,
-            TimeZone: GetStringNamedArgument(attribute, "TimeZone"),
-            InitialDelay: GetStringNamedArgument(attribute, "InitialDelay"),
-            RunOnStart: GetBoolNamedArgument(attribute, "RunOnStart", true),
-            Group: GetStringNamedArgument(attribute, "Group"),
-            Overlap: GetOverlapNamedArgument(attribute),
-            MisfirePolicy: GetMisfirePolicyNamedArgument(attribute),
-            Placement: GetPlacementNamedArgument(attribute),
-            MaxConcurrentRuns: maxConcurrentRuns,
-            Enabled: GetStringNamedArgument(attribute, "Enabled"),
-            ResiliencePolicyName: GetResiliencePolicyName(method) ?? GetResiliencePolicyName(type));
+            GetRequiredName(attribute),
+            GetHintName(type) + "_" + method.Name,
+            GetNamespace(type),
+            null,
+            null,
+            type.ToDisplayString(fmt),
+            method.Name,
+            method.IsStatic,
+            SymbolEqualityComparer.Default.Equals(method.ReturnType, taskType) ? "Task" : "ValueTask",
+            parameters.ToImmutable(),
+            scheduleKind,
+            scheduleValue,
+            GetStringNamedArgument(attribute, "TimeZone"),
+            GetStringNamedArgument(attribute, "InitialDelay"),
+            GetBoolNamedArgument(attribute, "RunOnStart", true),
+            GetStringNamedArgument(attribute, "Group"),
+            GetOverlapNamedArgument(attribute),
+            GetMisfirePolicyNamedArgument(attribute),
+            GetPlacementNamedArgument(attribute),
+            maxConcurrentRuns,
+            GetStringNamedArgument(attribute, "Enabled"),
+            GetResiliencePolicyName(method) ?? GetResiliencePolicyName(type));
     }
 
     private static ScheduledJobInfo? TryCreateRuntimeJob(
@@ -403,11 +357,9 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         AttributeData attribute,
         INamedTypeSymbol scheduledJobInterface,
         Location? location,
-        ImmutableArray<DiagnosticInfo>.Builder diagnostics)
-    {
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
-        if (IsGenericOrNestedInGenericType(type))
-        {
+        if (IsGenericOrNestedInGenericType(type)) {
             diagnostics.Add(DiagnosticInfo.Create(
                 GenericScheduledJobType,
                 location,
@@ -415,8 +367,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             return null;
         }
 
-        if (!IsAccessible(type.DeclaredAccessibility))
-        {
+        if (!IsAccessible(type.DeclaredAccessibility)) {
             diagnostics.Add(DiagnosticInfo.Create(
                 InvalidRuntimeScheduledJobType,
                 location,
@@ -430,8 +381,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
                 scheduledJobInterface))
             .ToArray();
         // Note 53: Runtime-scheduled jobs still need exactly one typed payload so the generated delegate can cast safely.
-        if (matchingInterfaces.Length != 1 || matchingInterfaces[0].TypeArguments.Length != 1)
-        {
+        if (matchingInterfaces.Length != 1 || matchingInterfaces[0].TypeArguments.Length != 1) {
             diagnostics.Add(DiagnosticInfo.Create(
                 InvalidRuntimeScheduledJobType,
                 location,
@@ -439,8 +389,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             return null;
         }
 
-        if (!TryGetScheduleSpec(attribute, scheduleRequired: false, out var scheduleKind, out var scheduleValue))
-        {
+        if (!TryGetScheduleSpec(attribute, false, out var scheduleKind, out var scheduleValue)) {
             diagnostics.Add(DiagnosticInfo.Create(
                 InvalidScheduleSpecification,
                 location,
@@ -449,8 +398,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         }
 
         var maxConcurrentRuns = GetIntNamedArgument(attribute, "MaxConcurrentRuns", 0);
-        if (maxConcurrentRuns < 0)
-        {
+        if (maxConcurrentRuns < 0) {
             diagnostics.Add(DiagnosticInfo.Create(
                 InvalidMaxConcurrentRuns,
                 location,
@@ -459,28 +407,28 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         }
 
         return new ScheduledJobInfo(
-            Name: GetRequiredName(attribute),
-            HintName: GetHintName(type),
-            Namespace: GetNamespace(type),
-            JobTypeFqn: type.ToDisplayString(fmt),
-            PayloadTypeFqn: matchingInterfaces[0].TypeArguments[0].ToDisplayString(fmt),
-            MethodContainingTypeFqn: null,
-            MethodName: null,
-            IsStaticMethod: false,
-            ReturnKind: "ValueTask",
-            MethodParameters: ImmutableArray<MethodParameterKind>.Empty,
-            ScheduleKind: scheduleKind,
-            ScheduleValue: scheduleValue,
-            TimeZone: GetStringNamedArgument(attribute, "TimeZone"),
-            InitialDelay: GetStringNamedArgument(attribute, "InitialDelay"),
-            RunOnStart: GetBoolNamedArgument(attribute, "RunOnStart", true),
-            Group: GetStringNamedArgument(attribute, "Group"),
-            Overlap: GetOverlapNamedArgument(attribute),
-            MisfirePolicy: GetMisfirePolicyNamedArgument(attribute),
-            Placement: GetPlacementNamedArgument(attribute),
-            MaxConcurrentRuns: maxConcurrentRuns,
-            Enabled: GetStringNamedArgument(attribute, "Enabled"),
-            ResiliencePolicyName: GetResiliencePolicyName(type));
+            GetRequiredName(attribute),
+            GetHintName(type),
+            GetNamespace(type),
+            type.ToDisplayString(fmt),
+            matchingInterfaces[0].TypeArguments[0].ToDisplayString(fmt),
+            null,
+            null,
+            false,
+            "ValueTask",
+            ImmutableArray<MethodParameterKind>.Empty,
+            scheduleKind,
+            scheduleValue,
+            GetStringNamedArgument(attribute, "TimeZone"),
+            GetStringNamedArgument(attribute, "InitialDelay"),
+            GetBoolNamedArgument(attribute, "RunOnStart", true),
+            GetStringNamedArgument(attribute, "Group"),
+            GetOverlapNamedArgument(attribute),
+            GetMisfirePolicyNamedArgument(attribute),
+            GetPlacementNamedArgument(attribute),
+            maxConcurrentRuns,
+            GetStringNamedArgument(attribute, "Enabled"),
+            GetResiliencePolicyName(type));
     }
 
     /// <summary>
@@ -493,8 +441,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         AttributeData attribute,
         bool scheduleRequired,
         out string? scheduleKind,
-        out string? scheduleValue)
-    {
+        out string? scheduleValue) {
         scheduleKind = null;
         scheduleValue = null;
 
@@ -505,78 +452,55 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         var hasRunOnStart = HasNamedArgument(attribute, "RunOnStart");
 
         var specified = 0;
-        if (fixedRate is not null)
-        {
+        if (fixedRate is not null) {
             (scheduleKind, scheduleValue) = ("FixedRate", fixedRate);
             specified++;
         }
 
-        if (fixedDelay is not null)
-        {
+        if (fixedDelay is not null) {
             (scheduleKind, scheduleValue) = ("FixedDelay", fixedDelay);
             specified++;
         }
 
-        if (cron is not null)
-        {
+        if (cron is not null) {
             (scheduleKind, scheduleValue) = ("Cron", cron);
             specified++;
         }
 
-        if (specified > 1)
-        {
-            return false;
-        }
+        if (specified > 1) return false;
 
-        if (cron is not null && (initialDelay is not null || hasRunOnStart))
-        {
-            return false;
-        }
+        if (cron is not null && (initialDelay is not null || hasRunOnStart)) return false;
 
-        if (specified == 0 && initialDelay is not null)
-        {
-            if (hasRunOnStart)
-            {
-                return false;
-            }
+        if (specified == 0 && initialDelay is not null) {
+            if (hasRunOnStart) return false;
 
             (scheduleKind, scheduleValue) = ("OneTime", initialDelay);
             return true;
         }
 
-        if (specified == 0 && scheduleRequired)
-        {
-            return false;
-        }
+        if (specified == 0 && scheduleRequired) return false;
 
         return true;
     }
 
     private static void ReportDuplicateNames(
         IReadOnlyList<ScheduledJobInfo> jobs,
-        SourceProductionContext spc)
-    {
-        foreach (var group in jobs.GroupBy(job => job.Name, StringComparer.Ordinal))
-        {
-            if (group.Count() < 2)
-            {
-                continue;
-            }
+        SourceProductionContext spc) {
+        foreach (var group in jobs.GroupBy(job => job.Name, StringComparer.Ordinal)) {
+            if (group.Count() < 2) continue;
 
             spc.ReportDiagnostic(Diagnostic.Create(DuplicateScheduledJobName, Location.None, group.Key));
         }
     }
 
-    private static string GenerateReferences(string assemblyName, IReadOnlyList<ScheduledJobInfo> jobs)
-    {
+    private static string GenerateReferences(string assemblyName, IReadOnlyList<ScheduledJobInfo> jobs) {
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("// Source: Elarion.Generators.SchedulerRegistrationGenerator");
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
         var ns = TryGetNamespaceFromAssemblyName(assemblyName);
-        if (ns is not null)
-        {
+        if (ns is not null) {
             sb.AppendLine($"namespace {ns};");
             sb.AppendLine();
         }
@@ -589,8 +513,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         string? ns,
         string className,
         string methodName,
-        IReadOnlyList<ScheduledJobInfo> jobs)
-    {
+        IReadOnlyList<ScheduledJobInfo> jobs) {
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("// Source: Elarion.Generators.SchedulerRegistrationGenerator");
@@ -599,34 +522,25 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection.Extensions;");
         sb.AppendLine();
-        if (ns is not null)
-        {
+        if (ns is not null) {
             sb.AppendLine($"namespace {ns};");
             sb.AppendLine();
         }
 
         sb.AppendLine($"public static class {className}");
         sb.AppendLine("{");
-        sb.AppendLine($"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {methodName}(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+        sb.AppendLine(
+            $"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {methodName}(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("    {");
 
-        foreach (var job in jobs.OrderBy(job => job.HintName, StringComparer.Ordinal))
-        {
-            if (job.JobTypeFqn is not null)
-            {
-                sb.AppendLine($"        services.TryAddScoped<{job.JobTypeFqn}>();");
-            }
+        foreach (var job in jobs.OrderBy(job => job.HintName, StringComparer.Ordinal)) {
+            if (job.JobTypeFqn is not null) sb.AppendLine($"        services.TryAddScoped<{job.JobTypeFqn}>();");
 
             if (job.MethodContainingTypeFqn is not null && !job.IsStaticMethod)
-            {
                 sb.AppendLine($"        services.TryAddScoped<{job.MethodContainingTypeFqn}>();");
-            }
         }
 
-        foreach (var job in jobs)
-        {
-            AppendDescriptorRegistration(sb, job);
-        }
+        foreach (var job in jobs) AppendDescriptorRegistration(sb, job);
 
         sb.AppendLine("        return services;");
         sb.AppendLine("    }");
@@ -635,40 +549,30 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
-    private static void AppendDescriptorRegistration(StringBuilder sb, ScheduledJobInfo job)
-    {
+    private static void AppendDescriptorRegistration(StringBuilder sb, ScheduledJobInfo job) {
         sb.AppendLine();
-        sb.AppendLine("        services.AddSingleton(new global::Elarion.Abstractions.Scheduling.ScheduledJobDescriptor");
+        sb.AppendLine(
+            "        services.AddSingleton(new global::Elarion.Abstractions.Scheduling.ScheduledJobDescriptor");
         sb.AppendLine("        {");
         sb.AppendLine($"            Name = \"{EscapeString(job.Name)}\",");
-        if (job.JobTypeFqn is not null)
-        {
-            sb.AppendLine($"            JobType = typeof({job.JobTypeFqn}),");
-        }
+        if (job.JobTypeFqn is not null) sb.AppendLine($"            JobType = typeof({job.JobTypeFqn}),");
 
-        if (job.PayloadTypeFqn is not null)
-        {
-            sb.AppendLine($"            PayloadType = typeof({job.PayloadTypeFqn}),");
-        }
+        if (job.PayloadTypeFqn is not null) sb.AppendLine($"            PayloadType = typeof({job.PayloadTypeFqn}),");
 
-        if (job.ScheduleKind is null)
-        {
+        if (job.ScheduleKind is null) {
             sb.AppendLine("            Schedule = null,");
         }
-        else if (job.ScheduleKind == "Cron")
-        {
+        else if (job.ScheduleKind == "Cron") {
             var timeZone = job.TimeZone is null ? "null" : $"\"{EscapeString(job.TimeZone)}\"";
             // Note 54: The emitted descriptor stores metadata only; the runtime scheduler owns actual due-time calculation.
             sb.AppendLine(
                 $"            Schedule = global::Elarion.Abstractions.Scheduling.ScheduledJobSchedule.Cron(\"{EscapeString(job.ScheduleValue!)}\", {timeZone}),");
         }
-        else if (job.ScheduleKind == "OneTime")
-        {
+        else if (job.ScheduleKind == "OneTime") {
             sb.AppendLine(
                 $"            Schedule = global::Elarion.Abstractions.Scheduling.ScheduledJobSchedule.Once(\"{EscapeString(job.ScheduleValue!)}\"),");
         }
-        else
-        {
+        else {
             var initialDelay = job.InitialDelay is null ? "null" : $"\"{EscapeString(job.InitialDelay)}\"";
             sb.AppendLine(
                 $"            Schedule = global::Elarion.Abstractions.Scheduling.ScheduledJobSchedule.{job.ScheduleKind}(\"{EscapeString(job.ScheduleValue!)}\", {initialDelay}, {ToCSharpBool(job.RunOnStart)}),");
@@ -677,8 +581,10 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         sb.AppendLine(job.Group is null
             ? "            Group = null,"
             : $"            Group = \"{EscapeString(job.Group)}\",");
-        sb.AppendLine($"            Overlap = global::Elarion.Abstractions.Scheduling.ScheduledJobOverlap.{job.Overlap},");
-        sb.AppendLine($"            MisfirePolicy = global::Elarion.Abstractions.Scheduling.ScheduledJobMisfirePolicy.{job.MisfirePolicy},");
+        sb.AppendLine(
+            $"            Overlap = global::Elarion.Abstractions.Scheduling.ScheduledJobOverlap.{job.Overlap},");
+        sb.AppendLine(
+            $"            MisfirePolicy = global::Elarion.Abstractions.Scheduling.ScheduledJobMisfirePolicy.{job.MisfirePolicy},");
         sb.AppendLine($"            Placement = global::Elarion.Abstractions.Scheduling.JobPlacement.{job.Placement},");
         sb.AppendLine($"            MaxConcurrentRuns = {job.MaxConcurrentRuns},");
         sb.AppendLine(job.Enabled is null
@@ -691,10 +597,8 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         sb.AppendLine("        });");
     }
 
-    private static void AppendInvokeDelegate(StringBuilder sb, ScheduledJobInfo job)
-    {
-        if (job.JobTypeFqn is not null && job.PayloadTypeFqn is not null)
-        {
+    private static void AppendInvokeDelegate(StringBuilder sb, ScheduledJobInfo job) {
+        if (job.JobTypeFqn is not null && job.PayloadTypeFqn is not null) {
             sb.AppendLine("            InvokeAsync = static (serviceProvider, payload, context, ct) =>");
             sb.AppendLine("            {");
             // Note 55: Runtime payloads are typed at registration time, avoiding reflection when the scheduler invokes them.
@@ -708,8 +612,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         var receiver = job.IsStaticMethod
             ? job.MethodContainingTypeFqn!
             : "job";
-        var arguments = string.Join(", ", job.MethodParameters.Select(parameter => parameter switch
-        {
+        var arguments = string.Join(", ", job.MethodParameters.Select(parameter => parameter switch {
             MethodParameterKind.Context => "context",
             _ => "ct"
         }));
@@ -718,18 +621,13 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         sb.AppendLine("            InvokeAsync = static (serviceProvider, payload, context, ct) =>");
         sb.AppendLine("            {");
         if (!job.IsStaticMethod)
-        {
-            sb.AppendLine($"                var job = serviceProvider.GetRequiredService<{job.MethodContainingTypeFqn}>();");
-        }
+            sb.AppendLine(
+                $"                var job = serviceProvider.GetRequiredService<{job.MethodContainingTypeFqn}>();");
 
         if (job.ReturnKind == "Task")
-        {
             sb.AppendLine($"                return new global::System.Threading.Tasks.ValueTask({invocation});");
-        }
         else
-        {
             sb.AppendLine($"                return {invocation};");
-        }
 
         sb.AppendLine("            }");
     }
@@ -737,104 +635,73 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
     private static void AppendJobReferences(
         StringBuilder sb,
         string registrationType,
-        IReadOnlyList<ScheduledJobInfo> jobs)
-    {
+        IReadOnlyList<ScheduledJobInfo> jobs) {
         sb.AppendLine();
         sb.AppendLine($"public static class {registrationType}JobReferences");
         sb.AppendLine("{");
         foreach (var (propertyName, jobName) in CreateReferenceNames(jobs))
-        {
             sb.AppendLine(
                 $"    public static global::Elarion.Abstractions.Scheduling.ScheduledJobReference {propertyName} {{ get; }} = new() {{ Name = \"{EscapeString(jobName)}\" }};");
-        }
 
         sb.AppendLine("}");
     }
 
-    private static string? GetResiliencePolicyName(ISymbol symbol)
-    {
+    private static string? GetResiliencePolicyName(ISymbol symbol) {
         var attribute = symbol.GetAttributes()
             .FirstOrDefault(attribute => attribute.AttributeClass?.ToDisplayString() == ResilientAttributeMetadataName);
         if (attribute is null ||
             attribute.ConstructorArguments.Length == 0 ||
             attribute.ConstructorArguments[0].Value is not string policyName ||
             string.IsNullOrWhiteSpace(policyName))
-        {
             return null;
-        }
 
         return policyName;
     }
 
-    private static string GetRequiredName(AttributeData attribute) =>
-        attribute.ConstructorArguments.Length > 0 &&
-        attribute.ConstructorArguments[0].Value is string value
+    private static string GetRequiredName(AttributeData attribute) {
+        return attribute.ConstructorArguments.Length > 0 &&
+               attribute.ConstructorArguments[0].Value is string value
             ? value
             : string.Empty;
+    }
 
-    private static string? GetStringNamedArgument(AttributeData attribute, string name)
-    {
+    private static string? GetStringNamedArgument(AttributeData attribute, string name) {
         foreach (var argument in attribute.NamedArguments)
-        {
             if (argument.Key == name && argument.Value.Value is string value)
-            {
                 return value;
-            }
-        }
 
         return null;
     }
 
-    private static bool GetBoolNamedArgument(AttributeData attribute, string name, bool defaultValue)
-    {
+    private static bool GetBoolNamedArgument(AttributeData attribute, string name, bool defaultValue) {
         foreach (var argument in attribute.NamedArguments)
-        {
             if (argument.Key == name && argument.Value.Value is bool value)
-            {
                 return value;
-            }
-        }
 
         return defaultValue;
     }
 
-    private static int GetIntNamedArgument(AttributeData attribute, string name, int defaultValue)
-    {
+    private static int GetIntNamedArgument(AttributeData attribute, string name, int defaultValue) {
         foreach (var argument in attribute.NamedArguments)
-        {
             if (argument.Key == name && argument.Value.Value is int value)
-            {
                 return value;
-            }
-        }
 
         return defaultValue;
     }
 
-    private static bool HasNamedArgument(AttributeData attribute, string name)
-    {
+    private static bool HasNamedArgument(AttributeData attribute, string name) {
         foreach (var argument in attribute.NamedArguments)
-        {
             if (argument.Key == name)
-            {
                 return true;
-            }
-        }
 
         return false;
     }
 
-    private static string GetOverlapNamedArgument(AttributeData attribute)
-    {
-        foreach (var argument in attribute.NamedArguments)
-        {
-            if (argument.Key != "Overlap" || argument.Value.Value is not int value)
-            {
-                continue;
-            }
+    private static string GetOverlapNamedArgument(AttributeData attribute) {
+        foreach (var argument in attribute.NamedArguments) {
+            if (argument.Key != "Overlap" || argument.Value.Value is not int value) continue;
 
-            return value switch
-            {
+            return value switch {
                 1 => "Queue",
                 2 => "AllowConcurrent",
                 _ => "Skip"
@@ -844,18 +711,12 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         return "Skip";
     }
 
-    private static string GetMisfirePolicyNamedArgument(AttributeData attribute)
-    {
-        foreach (var argument in attribute.NamedArguments)
-        {
+    private static string GetMisfirePolicyNamedArgument(AttributeData attribute) {
+        foreach (var argument in attribute.NamedArguments) {
             // Note 56: Attribute enum values arrive from Roslyn as integers, so the generator maps them back to source names.
-            if (argument.Key != "MisfirePolicy" || argument.Value.Value is not int value)
-            {
-                continue;
-            }
+            if (argument.Key != "MisfirePolicy" || argument.Value.Value is not int value) continue;
 
-            return value switch
-            {
+            return value switch {
                 1 => "Skip",
                 2 => "CatchUp",
                 _ => "FireOnce"
@@ -865,17 +726,11 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         return "FireOnce";
     }
 
-    private static string GetPlacementNamedArgument(AttributeData attribute)
-    {
-        foreach (var argument in attribute.NamedArguments)
-        {
-            if (argument.Key != "Placement" || argument.Value.Value is not int value)
-            {
-                continue;
-            }
+    private static string GetPlacementNamedArgument(AttributeData attribute) {
+        foreach (var argument in attribute.NamedArguments) {
+            if (argument.Key != "Placement" || argument.Value.Value is not int value) continue;
 
-            return value switch
-            {
+            return value switch {
                 1 => "EveryNode",
                 _ => "Cluster"
             };
@@ -887,88 +742,74 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
     private static bool IsSupportedReturnType(
         ITypeSymbol returnType,
         INamedTypeSymbol taskType,
-        INamedTypeSymbol valueTaskType) =>
-        SymbolEqualityComparer.Default.Equals(returnType, taskType) ||
-        SymbolEqualityComparer.Default.Equals(returnType, valueTaskType);
+        INamedTypeSymbol valueTaskType) {
+        return SymbolEqualityComparer.Default.Equals(returnType, taskType) ||
+               SymbolEqualityComparer.Default.Equals(returnType, valueTaskType);
+    }
 
-    private static bool IsAccessible(Accessibility accessibility) =>
-        accessibility is Accessibility.Public or Accessibility.Internal;
+    private static bool IsAccessible(Accessibility accessibility) {
+        return accessibility is Accessibility.Public or Accessibility.Internal;
+    }
 
-    private static bool IsGenericOrNestedInGenericType(INamedTypeSymbol type)
-    {
-        for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
-        {
+    private static bool IsGenericOrNestedInGenericType(INamedTypeSymbol type) {
+        for (var current = type; current is not null; current = current.ContainingType)
             if (current.TypeParameters.Length > 0)
-            {
                 return true;
-            }
-        }
 
         return false;
     }
 
-    private static string GetHintName(INamedTypeSymbol type) =>
-        type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+    private static string GetHintName(INamedTypeSymbol type) {
+        return type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
             .Replace("global::", string.Empty)
             .Replace(".", "_")
             .Replace("<", "_")
             .Replace(">", "_")
             .Replace(",", "_")
             .Replace(" ", string.Empty);
+    }
 
-    private static string? TryGetNamespaceFromAssemblyName(string assemblyName)
-    {
+    private static string? TryGetNamespaceFromAssemblyName(string assemblyName) {
         var parts = assemblyName.Split('.');
-        if (parts.Length == 0 || parts.Any(part => !IsValidIdentifier(part)))
-        {
-            return null;
-        }
+        if (parts.Length == 0 || parts.Any(part => !IsValidIdentifier(part))) return null;
 
         return string.Join(".", parts);
     }
 
-    private static string SanitizeIdentifier(string value)
-    {
+    private static string SanitizeIdentifier(string value) {
         var sb = new StringBuilder(value.Length);
         foreach (var c in value)
-        {
             if (char.IsLetterOrDigit(c) || c == '_')
-            {
                 sb.Append(c);
-            }
-        }
 
-        if (sb.Length == 0 || !IsIdentifierStart(sb[0]))
-        {
-            sb.Insert(0, '_');
-        }
+        if (sb.Length == 0 || !IsIdentifierStart(sb[0])) sb.Insert(0, '_');
 
         return sb.ToString();
     }
 
-    private static bool IsValidIdentifier(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value) || !IsIdentifierStart(value[0]))
-        {
-            return false;
-        }
+    private static bool IsValidIdentifier(string value) {
+        if (string.IsNullOrWhiteSpace(value) || !IsIdentifierStart(value[0])) return false;
 
         return value.Skip(1).All(c => char.IsLetterOrDigit(c) || c == '_');
     }
 
-    private static bool IsIdentifierStart(char c) => char.IsLetter(c) || c == '_';
+    private static bool IsIdentifierStart(char c) {
+        return char.IsLetter(c) || c == '_';
+    }
 
-    private static string EscapeString(string value) =>
-        value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    private static string EscapeString(string value) {
+        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
 
-    private static string ToCSharpBool(bool value) => value ? "true" : "false";
+    private static string ToCSharpBool(bool value) {
+        return value ? "true" : "false";
+    }
 
-    private static IReadOnlyList<(string PropertyName, string JobName)> CreateReferenceNames(IReadOnlyList<ScheduledJobInfo> jobs)
-    {
+    private static IReadOnlyList<(string PropertyName, string JobName)> CreateReferenceNames(
+        IReadOnlyList<ScheduledJobInfo> jobs) {
         var used = new Dictionary<string, int>(StringComparer.Ordinal);
         var references = new List<(string PropertyName, string JobName)>(jobs.Count);
-        foreach (var job in jobs.OrderBy(job => job.Name, StringComparer.Ordinal))
-        {
+        foreach (var job in jobs.OrderBy(job => job.Name, StringComparer.Ordinal)) {
             var baseName = ToPascalIdentifier(job.Name);
             used.TryGetValue(baseName, out var count);
             used[baseName] = count + 1;
@@ -978,14 +819,11 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
         return references;
     }
 
-    private static string ToPascalIdentifier(string value)
-    {
+    private static string ToPascalIdentifier(string value) {
         var sb = new StringBuilder(value.Length);
         var upperNext = true;
-        foreach (var c in value)
-        {
-            if (!char.IsLetterOrDigit(c))
-            {
+        foreach (var c in value) {
+            if (!char.IsLetterOrDigit(c)) {
                 upperNext = true;
                 continue;
             }
@@ -994,15 +832,9 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator
             upperNext = false;
         }
 
-        if (sb.Length == 0)
-        {
-            return "_";
-        }
+        if (sb.Length == 0) return "_";
 
-        if (!IsIdentifierStart(sb[0]))
-        {
-            sb.Insert(0, '_');
-        }
+        if (!IsIdentifierStart(sb[0])) sb.Insert(0, '_');
 
         return sb.ToString();
     }

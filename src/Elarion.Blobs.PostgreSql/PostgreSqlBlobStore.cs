@@ -50,9 +50,8 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         // buffering. A non-seekable source streams without buffering too when the caller supplies a
         // ContentLength hint (verified against the actual bytes); otherwise it is buffered here only
         // to learn the length. We never dispose the caller's stream — they own it.
-        if (content.CanSeek) {
-            return await WriteAsync(request, content, content.Length - content.Position, hinted: null, cancellationToken);
-        }
+        if (content.CanSeek)
+            return await WriteAsync(request, content, content.Length - content.Position, null, cancellationToken);
 
         if (request.ContentLength is long hint) {
             ArgumentOutOfRangeException.ThrowIfNegative(hint, nameof(request));
@@ -64,7 +63,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         try {
             await content.CopyToAsync(bufferedStream, cancellationToken);
             bufferedStream.Position = 0;
-            return await WriteAsync(request, bufferedStream, bufferedStream.Length, hinted: null, cancellationToken);
+            return await WriteAsync(request, bufferedStream, bufferedStream.Length, null, cancellationToken);
         }
         finally {
             await bufferedStream.DisposeAsync();
@@ -82,9 +81,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             size,
             async id => {
                 await UpsertContentStreamAsync(id, writeStream, cancellationToken);
-                if (hinted is not null) {
-                    await VerifyHintAsync(hinted, size, cancellationToken);
-                }
+                if (hinted is not null) await VerifyHintAsync(hinted, size, cancellationToken);
             },
             cancellationToken);
 
@@ -98,12 +95,12 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         return new BlobRef { Value = blobId };
     }
 
-    private static async Task VerifyHintAsync(HintedLengthStream hinted, long hint, CancellationToken cancellationToken) {
-        if (hinted.BytesRead != hint || await hinted.HasUnreadInnerDataAsync(cancellationToken)) {
+    private static async Task
+        VerifyHintAsync(HintedLengthStream hinted, long hint, CancellationToken cancellationToken) {
+        if (hinted.BytesRead != hint || await hinted.HasUnreadInnerDataAsync(cancellationToken))
             throw new InvalidOperationException(
                 $"The actual content length did not match the declared " +
                 $"{nameof(BlobUploadRequest)}.{nameof(BlobUploadRequest.ContentLength)} hint of {hint} bytes.");
-        }
     }
 
     /// <inheritdoc />
@@ -114,16 +111,13 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             .AsNoTracking()
             .FirstOrDefaultAsync(blob => blob.Id == blobRef.Value, cancellationToken);
 
-        if (metadata is null) {
-            return null;
-        }
+        if (metadata is null) return null;
 
         // A read inside a caller-owned ambient transaction must share that transaction's connection to see
         // the caller's own uncommitted writes — and the scoped connection cannot host a reader that outlives
         // this call — so the transactional path stays buffered.
-        if (dbContext.Database.CurrentTransaction is not null) {
+        if (dbContext.Database.CurrentTransaction is not null)
             return await OpenBufferedReadAsync(metadata, blobRef, cancellationToken);
-        }
 
         // Streaming path: a dedicated connection whose lifetime is owned by the returned BlobDownload, so
         // the content flows straight from the wire without materializing the blob in memory.
@@ -138,9 +132,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
 
             reader = await command.ExecuteReaderAsync(
                 CommandBehavior.SequentialAccess | CommandBehavior.SingleRow, cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken)) {
-                return null;
-            }
+            if (!await reader.ReadAsync(cancellationToken)) return null;
 
             var content = reader.GetStream(0);
             var download = new BlobDownload(
@@ -151,13 +143,9 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         }
         finally {
             if (!transferred) {
-                if (reader is not null) {
-                    await reader.DisposeAsync();
-                }
+                if (reader is not null) await reader.DisposeAsync();
 
-                if (command is not null) {
-                    await command.DisposeAsync();
-                }
+                if (command is not null) await command.DisposeAsync();
 
                 await connection.DisposeAsync();
             }
@@ -175,12 +163,10 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         command.Parameters.Add(new NpgsqlParameter { Value = blobRef.Value });
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken)) {
-            return null;
-        }
+        if (!await reader.ReadAsync(cancellationToken)) return null;
 
         var data = (byte[])reader[0];
-        return new BlobDownload(ToMetadata(metadata), new MemoryStream(data, writable: false));
+        return new BlobDownload(ToMetadata(metadata), new MemoryStream(data, false));
     }
 
     /// <summary>
@@ -194,9 +180,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         private int _disposed;
 
         public async ValueTask DisposeAsync() {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0) {
-                return;
-            }
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
             await reader.DisposeAsync().ConfigureAwait(false);
             await command.DisposeAsync().ConfigureAwait(false);
@@ -222,9 +206,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var blob = await dbContext.Set<StoredBlob>()
             .FirstOrDefaultAsync(storedBlob => storedBlob.Id == blobRef.Value, cancellationToken);
 
-        if (blob is null) {
-            return false;
-        }
+        if (blob is null) return false;
 
         dbContext.Set<StoredBlob>().Remove(blob);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -254,9 +236,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         // Fetching one extra row tells us whether a next page exists without a trailing empty page.
         var entries = await QueryEntriesAsync(request, request.PageSize + 1, cancellationToken);
         var hasMore = entries.Count > request.PageSize;
-        if (hasMore) {
-            entries.RemoveAt(entries.Count - 1);
-        }
+        if (hasMore) entries.RemoveAt(entries.Count - 1);
 
         // Phase 2: hydrate metadata for the blob entries (an entry deleted between the two phases is
         // simply omitted). Prefix entries need no second query.
@@ -267,34 +247,31 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
                 .AsNoTracking()
                 .Where(b => b.Container == request.Container && blobNames.Contains(b.Name))
                 .ToListAsync(cancellationToken))
-                .ToDictionary(b => b.Name, StringComparer.Ordinal);
+            .ToDictionary(b => b.Name, StringComparer.Ordinal);
 
         var blobs = new List<BlobMetadata>(blobNames.Count);
         var prefixes = new List<string>();
-        foreach (var entry in entries) {
-            if (entry.IsPrefix) {
+        foreach (var entry in entries)
+            if (entry.IsPrefix)
                 prefixes.Add(entry.Entry);
-            }
-            else if (rowsByName.TryGetValue(entry.Entry, out var row)) {
-                blobs.Add(ToMetadata(row));
-            }
-        }
+            else if (rowsByName.TryGetValue(entry.Entry, out var row)) blobs.Add(ToMetadata(row));
 
         return new BlobListing {
             Blobs = blobs,
             Prefixes = prefixes,
-            ContinuationToken = hasMore && entries.Count > 0 ? EncodeListToken(entries[^1]) : null,
+            ContinuationToken = hasMore && entries.Count > 0 ? EncodeListToken(entries[^1]) : null
         };
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) =>
-        await dbContext.Set<StoredBlob>()
+    public async Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) {
+        return await dbContext.Set<StoredBlob>()
             .AsNoTracking()
             .Select(blob => blob.Container)
             .Distinct()
             .OrderBy(container => container)
             .ToListAsync(cancellationToken);
+    }
 
     private async Task<List<BlobListEntryRow>> QueryEntriesAsync(
         BlobListRequest request,
@@ -305,18 +282,20 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         // are ordinal-ordered and pagination is stable regardless of the database's default collation.
         // Not cached: listing is a browse/ops surface, not a hot path.
         var entityType = dbContext.Model.FindEntityType(typeof(StoredBlob))
-            ?? throw new InvalidOperationException(
-                "The blob entity is not mapped. Call modelBuilder.UseElarionBlobStorage() in OnModelCreating.");
+                         ?? throw new InvalidOperationException(
+                             "The blob entity is not mapped. Call modelBuilder.UseElarionBlobStorage() in OnModelCreating.");
         var sqlHelper = dbContext.GetService<ISqlGenerationHelper>();
         var tableName = entityType.GetTableName()
-            ?? throw new InvalidOperationException("The blob entity is not mapped to a table.");
+                        ?? throw new InvalidOperationException("The blob entity is not mapped to a table.");
         var storeObject = StoreObjectIdentifier.Table(tableName, entityType.GetSchema());
 
         string Column(string propertyName) {
             var property = entityType.FindProperty(propertyName)
-                ?? throw new InvalidOperationException($"The {nameof(StoredBlob)}.{propertyName} property is not mapped.");
+                           ?? throw new InvalidOperationException(
+                               $"The {nameof(StoredBlob)}.{propertyName} property is not mapped.");
             var columnName = property.GetColumnName(storeObject)
-                ?? throw new InvalidOperationException($"The {nameof(StoredBlob)}.{propertyName} property has no column.");
+                             ?? throw new InvalidOperationException(
+                                 $"The {nameof(StoredBlob)}.{propertyName} property has no column.");
             return sqlHelper.DelimitIdentifier(columnName);
         }
 
@@ -326,6 +305,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var state = Column(nameof(StoredBlob.State));
 
         var args = new List<object>();
+
         string P(object value) {
             args.Add(value);
             return "{" + (args.Count - 1) + "}";
@@ -336,9 +316,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var (afterEntry, afterIsPrefix) = DecodeListToken(request.ContinuationToken);
 
         var filter = $"{container} = {containerParam} AND substr({name}, 1, length({prefixParam})) = {prefixParam}";
-        if (request.State is { } stateFilter) {
-            filter += $" AND {state} = {P((int)stateFilter)}";
-        }
+        if (request.State is { } stateFilter) filter += $" AND {state} = {P((int)stateFilter)}";
 
         string sql;
         if (request.Delimiter is { Length: > 0 } delimiter) {
@@ -353,17 +331,14 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
                 $"THEN substr({name}, 1, length({prefixParam}) + {position} + length({delimiterParam}) - 1) " +
                 $"ELSE {name} END AS \"Entry\", {position} > 0 AS \"IsPrefix\" " +
                 $"FROM {table} WHERE {filter}) AS e";
-            if (afterEntry is not null) {
+            if (afterEntry is not null)
                 sql += $" WHERE (e.\"Entry\" COLLATE \"C\", e.\"IsPrefix\") > ({P(afterEntry)}, {P(afterIsPrefix)})";
-            }
 
             sql += $" ORDER BY e.\"Entry\" COLLATE \"C\", e.\"IsPrefix\" LIMIT {P(limit)}";
         }
         else {
             sql = $"SELECT {name} AS \"Entry\", false AS \"IsPrefix\" FROM {table} WHERE {filter}";
-            if (afterEntry is not null) {
-                sql += $" AND {name} COLLATE \"C\" > {P(afterEntry)}";
-            }
+            if (afterEntry is not null) sql += $" AND {name} COLLATE \"C\" > {P(afterEntry)}";
 
             sql += $" ORDER BY {name} COLLATE \"C\" LIMIT {P(limit)}";
         }
@@ -373,17 +348,15 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             .ToListAsync(cancellationToken);
     }
 
-    private static string EncodeListToken(BlobListEntryRow entry) =>
-        (entry.IsPrefix ? "p|" : "b|") + entry.Entry;
+    private static string EncodeListToken(BlobListEntryRow entry) {
+        return (entry.IsPrefix ? "p|" : "b|") + entry.Entry;
+    }
 
     private static (string? Entry, bool IsPrefix) DecodeListToken(string? token) {
-        if (token is null) {
-            return (null, false);
-        }
+        if (token is null) return (null, false);
 
-        if (token.Length < 2 || token[1] != '|' || token[0] is not ('b' or 'p')) {
+        if (token.Length < 2 || token[1] != '|' || token[0] is not ('b' or 'p'))
             throw new ArgumentException("The continuation token is not from this store.", nameof(token));
-        }
 
         return (token[2..], token[0] == 'p');
     }
@@ -395,13 +368,9 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var blob = await dbContext.Set<StoredBlob>()
             .FirstOrDefaultAsync(storedBlob => storedBlob.Id == blobRef.Value, cancellationToken);
 
-        if (blob is null) {
-            return false;
-        }
+        if (blob is null) return false;
 
-        if (blob.State == BlobLifecycleState.Committed) {
-            return true;
-        }
+        if (blob.State == BlobLifecycleState.Committed) return true;
 
         logger.LogDebug("Committing blob {BlobId}", blobRef.Value);
 
@@ -451,27 +420,23 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var ids = await dbContext.Set<StoredBlob>()
             .AsNoTracking()
             .Where(blob => blob.State == BlobLifecycleState.Pending
-                && blob.ExpiresAt != null
-                && blob.ExpiresAt < olderThanUtc)
+                           && blob.ExpiresAt != null
+                           && blob.ExpiresAt < olderThanUtc)
             .OrderBy(blob => blob.ExpiresAt)
             .Take(batchSize)
             .Select(blob => blob.Id)
             .ToListAsync(cancellationToken);
 
-        if (ids.Count == 0) {
-            return 0;
-        }
+        if (ids.Count == 0) return 0;
 
         var deleted = await dbContext.Set<StoredBlob>()
             .Where(blob => ids.Contains(blob.Id)
-                && blob.State == BlobLifecycleState.Pending
-                && blob.ExpiresAt != null
-                && blob.ExpiresAt < olderThanUtc)
+                           && blob.State == BlobLifecycleState.Pending
+                           && blob.ExpiresAt != null
+                           && blob.ExpiresAt < olderThanUtc)
             .ExecuteDeleteAsync(cancellationToken);
 
-        if (deleted > 0) {
-            logger.LogInformation("Garbage collected {Count} expired pending blob(s).", deleted);
-        }
+        if (deleted > 0) logger.LogInformation("Garbage collected {Count} expired pending blob(s).", deleted);
 
         return deleted;
     }
@@ -489,9 +454,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var blobId = await UpsertMetadataAsync(request, size, cancellationToken);
         await saveContent(blobId);
 
-        if (transaction is not null) {
-            await transaction.CommitAsync(cancellationToken);
-        }
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
 
         return blobId;
     }
@@ -516,11 +479,10 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             // A committed blob is already referenced by application data; silently re-saving it as
             // pending (with an expiry) would make it eligible for garbage collection out from under
             // that reference. Fail loud instead — a pre-upload transport must stage under a fresh name.
-            if (existing.State == BlobLifecycleState.Committed && state == BlobLifecycleState.Pending) {
+            if (existing.State == BlobLifecycleState.Committed && state == BlobLifecycleState.Pending)
                 throw new InvalidOperationException(
                     $"Blob '{existing.Id}' ({request.Container}/{request.Name}) is committed; re-saving it " +
                     "as pending would make it eligible for garbage collection.");
-            }
 
             existing.ContentType = request.ContentType;
             existing.Size = size;
@@ -549,7 +511,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             CreatedAt = createdAt,
             State = state,
             ExpiresAt = expiresAt,
-            OwnerId = request.OwnerId,
+            OwnerId = request.OwnerId
         });
 
         logger.LogDebug("Creating new blob {BlobId} ({Container}/{Name})", blobId, request.Container, request.Name);
@@ -579,25 +541,28 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
 
     internal sealed record ContentSql(string Select, string Upsert);
 
-    internal static ContentSql GetContentSql(DbContext context) =>
-        ContentSqlCache.GetOrAdd(context.Model, static (_, ctx) => BuildContentSql(ctx), context);
+    internal static ContentSql GetContentSql(DbContext context) {
+        return ContentSqlCache.GetOrAdd(context.Model, static (_, ctx) => BuildContentSql(ctx), context);
+    }
 
     private static ContentSql BuildContentSql(DbContext context) {
         var entityType = context.Model.FindEntityType(typeof(BlobContentRow))
-            ?? throw new InvalidOperationException(
-                "The blob content entity is not mapped. Call modelBuilder.UseElarionBlobStorage() in OnModelCreating.");
+                         ?? throw new InvalidOperationException(
+                             "The blob content entity is not mapped. Call modelBuilder.UseElarionBlobStorage() in OnModelCreating.");
         var sqlHelper = context.GetService<ISqlGenerationHelper>();
 
         var tableName = entityType.GetTableName()
-            ?? throw new InvalidOperationException("The blob content entity is not mapped to a table.");
+                        ?? throw new InvalidOperationException("The blob content entity is not mapped to a table.");
         var schema = entityType.GetSchema();
         var storeObject = StoreObjectIdentifier.Table(tableName, schema);
 
         string Column(string propertyName) {
             var property = entityType.FindProperty(propertyName)
-                ?? throw new InvalidOperationException($"The {nameof(BlobContentRow)}.{propertyName} property is not mapped.");
+                           ?? throw new InvalidOperationException(
+                               $"The {nameof(BlobContentRow)}.{propertyName} property is not mapped.");
             var columnName = property.GetColumnName(storeObject)
-                ?? throw new InvalidOperationException($"The {nameof(BlobContentRow)}.{propertyName} property has no column.");
+                             ?? throw new InvalidOperationException(
+                                 $"The {nameof(BlobContentRow)}.{propertyName} property has no column.");
             return sqlHelper.DelimitIdentifier(columnName);
         }
 
@@ -606,9 +571,9 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var data = Column(nameof(BlobContentRow.Data));
 
         return new ContentSql(
-            Select: $"SELECT {data} FROM {table} WHERE {blobId} = $1",
-            Upsert: $"INSERT INTO {table} ({blobId}, {data}) VALUES ($1, $2) " +
-                $"ON CONFLICT ({blobId}) DO UPDATE SET {data} = EXCLUDED.{data}");
+            $"SELECT {data} FROM {table} WHERE {blobId} = $1",
+            $"INSERT INTO {table} ({blobId}, {data}) VALUES ($1, $2) " +
+            $"ON CONFLICT ({blobId}) DO UPDATE SET {data} = EXCLUDED.{data}");
     }
 
     /// <summary>
@@ -639,31 +604,27 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
     private async Task<NpgsqlConnection> GetOpenNpgsqlConnectionAsync(CancellationToken cancellationToken) {
         var dbConnection = dbContext.Database.GetDbConnection();
         var connection = dbConnection as NpgsqlConnection
-            ?? throw new InvalidOperationException(
-                $"Expected {nameof(NpgsqlConnection)} but got {dbConnection.GetType().Name}. " +
-                $"{nameof(PostgreSqlBlobStore<TDbContext>)} requires a PostgreSQL database.");
+                         ?? throw new InvalidOperationException(
+                             $"Expected {nameof(NpgsqlConnection)} but got {dbConnection.GetType().Name}. " +
+                             $"{nameof(PostgreSqlBlobStore<TDbContext>)} requires a PostgreSQL database.");
 
-        if (connection.State != ConnectionState.Open) {
-            await connection.OpenAsync(cancellationToken);
-        }
+        if (connection.State != ConnectionState.Open) await connection.OpenAsync(cancellationToken);
 
         return connection;
     }
 
     private NpgsqlTransaction? GetCurrentNpgsqlTransaction() {
         var transaction = dbContext.Database.CurrentTransaction?.GetDbTransaction();
-        if (transaction is null) {
-            return null;
-        }
+        if (transaction is null) return null;
 
         return transaction as NpgsqlTransaction
-            ?? throw new InvalidOperationException(
-                $"Expected {nameof(NpgsqlTransaction)} but got {transaction.GetType().Name}. " +
-                $"{nameof(PostgreSqlBlobStore<TDbContext>)} requires a PostgreSQL database.");
+               ?? throw new InvalidOperationException(
+                   $"Expected {nameof(NpgsqlTransaction)} but got {transaction.GetType().Name}. " +
+                   $"{nameof(PostgreSqlBlobStore<TDbContext>)} requires a PostgreSQL database.");
     }
 
-    private static BlobMetadata ToMetadata(StoredBlob blob) =>
-        new() {
+    private static BlobMetadata ToMetadata(StoredBlob blob) {
+        return new BlobMetadata {
             Id = blob.Id,
             Container = blob.Container,
             Name = blob.Name,
@@ -673,6 +634,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             State = blob.State,
             OwnerId = blob.OwnerId
         };
+    }
 
     private static void ValidateUploadRequest(BlobUploadRequest request) {
         ArgumentNullException.ThrowIfNull(request);

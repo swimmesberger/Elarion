@@ -34,16 +34,16 @@ public static class SchedulerTelemetry {
     public static readonly Histogram<double> JobRunDuration =
         MeterInstance.CreateHistogram<double>(
             "scheduler.job.run.duration",
-            unit: "s",
-            description: "Duration of scheduled job runs",
+            "s",
+            "Duration of scheduled job runs",
             advice: DurationAdvice);
 
     /// <summary>Records scheduling lag in seconds.</summary>
     public static readonly Histogram<double> JobRunLag =
         MeterInstance.CreateHistogram<double>(
             "scheduler.job.run.lag",
-            unit: "s",
-            description: "Delay between due time and actual start time",
+            "s",
+            "Delay between due time and actual start time",
             advice: DurationAdvice);
 
     /// <summary>Tracks the number of currently executing scheduled jobs.</summary>
@@ -62,8 +62,8 @@ public static class SchedulerTelemetry {
     public static readonly Histogram<double> OperationDuration =
         MeterInstance.CreateHistogram<double>(
             "scheduler.operation.duration",
-            unit: "s",
-            description: "Duration of scheduler control-plane operations",
+            "s",
+            "Duration of scheduler control-plane operations",
             advice: DurationAdvice);
 
     /// <summary>Records a scheduler control-plane operation metric.</summary>

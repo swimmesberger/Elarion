@@ -27,22 +27,23 @@ public sealed class DispatchScopeContext {
     public DispatchScopeContext() {
     }
 
-    private DispatchScopeContext(bool isReadOnly) => _isReadOnly = isReadOnly;
+    private DispatchScopeContext(bool isReadOnly) {
+        _isReadOnly = isReadOnly;
+    }
 
     /// <summary>
     /// A shared, empty, read-only context used when a dispatch site has nothing to carry.
     /// Calling <see cref="Set{T}"/> on it throws — it is one instance shared across every call,
     /// so a value stored here would leak per-request state globally.
     /// </summary>
-    public static DispatchScopeContext Empty { get; } = new(isReadOnly: true);
+    public static DispatchScopeContext Empty { get; } = new(true);
 
     /// <summary>Stores <paramref name="value"/> keyed by <typeparamref name="T"/>, replacing any existing entry.</summary>
     /// <exception cref="InvalidOperationException">This is the shared <see cref="Empty"/> context.</exception>
     public void Set<T>(T value) {
-        if (_isReadOnly) {
+        if (_isReadOnly)
             throw new InvalidOperationException(
                 "DispatchScopeContext.Empty is a shared read-only instance; create a new DispatchScopeContext for per-call state.");
-        }
 
         _items[typeof(T)] = value;
     }

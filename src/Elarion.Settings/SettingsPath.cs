@@ -17,13 +17,9 @@ public static class SettingsPath {
     /// </summary>
     public static bool IsUnderPrefix(string key, string? prefix) {
         ArgumentNullException.ThrowIfNull(key);
-        if (string.IsNullOrEmpty(prefix)) {
-            return true;
-        }
+        if (string.IsNullOrEmpty(prefix)) return true;
 
-        if (!key.StartsWith(prefix, StringComparison.Ordinal)) {
-            return false;
-        }
+        if (!key.StartsWith(prefix, StringComparison.Ordinal)) return false;
 
         return key.Length == prefix.Length || key[prefix.Length] == Separator;
     }

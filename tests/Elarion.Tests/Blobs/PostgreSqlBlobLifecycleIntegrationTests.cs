@@ -196,7 +196,7 @@ public sealed class PostgreSqlBlobLifecycleIntegrationTests(PostgreSqlBlobStoreF
         await SaveCommitted(request, ct);
         var downgrade = request with {
             InitialState = BlobLifecycleState.Pending,
-            ExpiresAt = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            ExpiresAt = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero)
         };
 
         await using (var context = fixture.CreateContext()) {
@@ -239,40 +239,44 @@ public sealed class PostgreSqlBlobLifecycleIntegrationTests(PostgreSqlBlobStoreF
         return await CreateStore(context).SaveAsync(request, new MemoryStream(Bytes(256)), ct);
     }
 
-    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) =>
-        new(context, NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) {
+        return new PostgreSqlBlobStore<IntegrationBlobDbContext>(context,
+            NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    }
 
     private static Task<StoredBlob?> Row(
         IntegrationBlobDbContext context,
         BlobUploadRequest request,
-        CancellationToken ct) =>
-        context.Set<StoredBlob>()
+        CancellationToken ct) {
+        return context.Set<StoredBlob>()
             .AsNoTracking()
             .FirstOrDefaultAsync(blob => blob.Container == request.Container && blob.Name == request.Name, ct);
+    }
 
     private static async Task<long> ContentRowCount(
         IntegrationBlobDbContext context,
         BlobRef blobRef,
-        CancellationToken ct) =>
-        await context.Database
+        CancellationToken ct) {
+        return await context.Database
             .SqlQueryRaw<long>("SELECT COUNT(*) AS \"Value\" FROM blob_contents WHERE blob_id = {0}", blobRef.Value)
             .SingleAsync(ct);
+    }
 
-    private static BlobUploadRequest NewPendingRequest(DateTimeOffset expiresAt) =>
-        NewCommittedRequest() with { InitialState = BlobLifecycleState.Pending, ExpiresAt = expiresAt };
+    private static BlobUploadRequest NewPendingRequest(DateTimeOffset expiresAt) {
+        return NewCommittedRequest() with { InitialState = BlobLifecycleState.Pending, ExpiresAt = expiresAt };
+    }
 
-    private static BlobUploadRequest NewCommittedRequest() =>
-        new() {
+    private static BlobUploadRequest NewCommittedRequest() {
+        return new BlobUploadRequest {
             Container = $"c-{Guid.NewGuid():N}",
             Name = "blob.bin",
             ContentType = "application/octet-stream"
         };
+    }
 
     private static byte[] Bytes(int count) {
         var bytes = new byte[count];
-        for (var i = 0; i < count; i++) {
-            bytes[i] = (byte)(i % 251);
-        }
+        for (var i = 0; i < count; i++) bytes[i] = (byte)(i % 251);
 
         return bytes;
     }

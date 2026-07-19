@@ -4,8 +4,8 @@
 // module in app.tsx, the grain of a backend host's ProjectReference) so TanStack's Link/loader/param
 // inference stays intact. Routes compose through TanStack Router's own API — Elarion adds no routing
 // machinery (an ADR-0032 non-goal).
-import type { AnyRoute } from "@tanstack/react-router"
-import type { AppManifest } from "@/platform/contributions"
+import type {AnyRoute} from "@tanstack/react-router"
+import type {AppManifest} from "@/platform/contributions"
 
 export interface AppModule {
   readonly manifest: AppManifest

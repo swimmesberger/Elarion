@@ -1,12 +1,12 @@
 import path from "node:path"
 import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
-import { defineConfig } from "vite"
+import {defineConfig} from "vite"
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },
+    alias: {"@": path.resolve(__dirname, "./src")},
     // Hook-using libraries must resolve to this app's single React instance. This matters beyond the
     // symlinked file: install used here — Vite's dep optimizer has pre-bundled a second React for
     // published installs of @swimmesberger/elarion-contributions too, which surfaces as "Invalid hook

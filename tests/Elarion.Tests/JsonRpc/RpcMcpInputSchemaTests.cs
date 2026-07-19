@@ -22,7 +22,7 @@ public sealed class RpcMcpInputSchemaTests {
     }
 
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
     };
 
     [Fact]

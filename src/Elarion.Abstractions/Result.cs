@@ -46,17 +46,25 @@ public readonly struct Result<T> : IResultLike, IResultError, IResultFailureFact
     }
 
     /// <summary>Creates a successful result wrapping <paramref name="value"/>.</summary>
-    public static Result<T> Success(T value) => new(value);
+    public static Result<T> Success(T value) {
+        return new Result<T>(value);
+    }
 
     /// <summary>Creates a failed result wrapping <paramref name="error"/>.</summary>
-    public static Result<T> Failure(AppError error) => new(error);
+    public static Result<T> Failure(AppError error) {
+        return new Result<T>(error);
+    }
 
     /// <summary>Implicit conversion from <typeparamref name="T"/> to a success result.</summary>
-    public static implicit operator Result<T>(T value) => Success(value);
+    public static implicit operator Result<T>(T value) {
+        return Success(value);
+    }
 
     /// <summary>Implicit conversion from <see cref="AppError"/> to a failure result.</summary>
     // Note 4: The implicit operators are what let handlers return either a response or an AppError directly.
-    public static implicit operator Result<T>(AppError error) => Failure(error);
+    public static implicit operator Result<T>(AppError error) {
+        return Failure(error);
+    }
 }
 
 /// <summary>Shared sentinels for the result structs.</summary>
@@ -68,6 +76,7 @@ internal static class ResultDefaults {
     /// </summary>
     public static readonly AppError UninitializedError = new() {
         Kind = ErrorKind.Internal,
-        Message = "Uninitialized result: the result was default-initialized instead of being created via Success(...) or Failure(...).",
+        Message =
+            "Uninitialized result: the result was default-initialized instead of being created via Success(...) or Failure(...)."
     };
 }

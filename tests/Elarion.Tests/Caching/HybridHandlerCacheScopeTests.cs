@@ -25,7 +25,10 @@ public sealed class HybridHandlerCacheScopeTests {
         var factoryCalls = 0;
 
         user.UserId = "user-a";
-        var first = await GetOrCreateAsync(cache, () => { factoryCalls++; return "fresh-a"; });
+        var first = await GetOrCreateAsync(cache, () => {
+            factoryCalls++;
+            return "fresh-a";
+        });
         first.Should().Be("fresh-a");
         factoryCalls.Should().Be(1);
 
@@ -34,7 +37,10 @@ public sealed class HybridHandlerCacheScopeTests {
         await cache.InvalidateAsync(new InvalidationPolicy(HandlerCacheScope.Global), Ct);
 
         user.UserId = "user-a";
-        await GetOrCreateAsync(cache, () => { factoryCalls++; return "fresh-a-2"; });
+        await GetOrCreateAsync(cache, () => {
+            factoryCalls++;
+            return "fresh-a-2";
+        });
         factoryCalls.Should().Be(2, "the global invalidation must evict user A's user-scoped entry");
     }
 
@@ -45,10 +51,16 @@ public sealed class HybridHandlerCacheScopeTests {
         var factoryCalls = 0;
 
         user.UserId = "user-a";
-        var forA = await GetOrCreateAsync(cache, () => { factoryCalls++; return "for-a"; });
+        var forA = await GetOrCreateAsync(cache, () => {
+            factoryCalls++;
+            return "for-a";
+        });
 
         user.UserId = "user-b";
-        var forB = await GetOrCreateAsync(cache, () => { factoryCalls++; return "for-b"; });
+        var forB = await GetOrCreateAsync(cache, () => {
+            factoryCalls++;
+            return "for-b";
+        });
 
         forA.Should().Be("for-a");
         forB.Should().Be("for-b", "user B must never observe user A's cached entry");
@@ -62,20 +74,32 @@ public sealed class HybridHandlerCacheScopeTests {
         var factoryCalls = 0;
 
         user.UserId = "user-a";
-        await GetOrCreateAsync(cache, () => { factoryCalls++; return "for-a"; });
+        await GetOrCreateAsync(cache, () => {
+            factoryCalls++;
+            return "for-a";
+        });
         user.UserId = "user-b";
-        await GetOrCreateAsync(cache, () => { factoryCalls++; return "for-b"; });
+        await GetOrCreateAsync(cache, () => {
+            factoryCalls++;
+            return "for-b";
+        });
         factoryCalls.Should().Be(2);
 
         // User B invalidates with an explicit CurrentUser scope: only B's namespace is cleared.
         await cache.InvalidateAsync(new InvalidationPolicy(HandlerCacheScope.CurrentUser), Ct);
 
-        var forB = await GetOrCreateAsync(cache, () => { factoryCalls++; return "for-b-2"; });
+        var forB = await GetOrCreateAsync(cache, () => {
+            factoryCalls++;
+            return "for-b-2";
+        });
         forB.Should().Be("for-b-2");
         factoryCalls.Should().Be(3);
 
         user.UserId = "user-a";
-        var forA = await GetOrCreateAsync(cache, () => { factoryCalls++; return "unused"; });
+        var forA = await GetOrCreateAsync(cache, () => {
+            factoryCalls++;
+            return "unused";
+        });
         forA.Should().Be("for-a", "user A's entry must survive user B's CurrentUser-scoped invalidation");
         factoryCalls.Should().Be(3);
     }
@@ -87,11 +111,17 @@ public sealed class HybridHandlerCacheScopeTests {
         var factoryCalls = 0;
 
         user.UserId = "user-a";
-        await GetOrCreateAsync(cache, () => { factoryCalls++; return "shared"; }, HandlerCacheScope.Global);
+        await GetOrCreateAsync(cache, () => {
+            factoryCalls++;
+            return "shared";
+        }, HandlerCacheScope.Global);
 
         await cache.InvalidateAsync(new InvalidationPolicy(HandlerCacheScope.CurrentUser), Ct);
 
-        var again = await GetOrCreateAsync(cache, () => { factoryCalls++; return "unused"; }, HandlerCacheScope.Global);
+        var again = await GetOrCreateAsync(cache, () => {
+            factoryCalls++;
+            return "unused";
+        }, HandlerCacheScope.Global);
         again.Should().Be("shared");
         factoryCalls.Should().Be(1);
     }
@@ -106,17 +136,24 @@ public sealed class HybridHandlerCacheScopeTests {
         var first = await cache.GetOrCreateAsync(
             policy,
             new Request { Id = 1 },
-            _ => { factoryCalls++; return ValueTask.FromResult(Result<string>.Failure(AppError.NotFound("missing"))); },
+            _ => {
+                factoryCalls++;
+                return ValueTask.FromResult(Result<string>.Failure(AppError.NotFound("missing")));
+            },
             Ct);
         var second = await cache.GetOrCreateAsync(
             policy,
             new Request { Id = 1 },
-            _ => { factoryCalls++; return ValueTask.FromResult(Result<string>.Failure(AppError.NotFound("still missing"))); },
+            _ => {
+                factoryCalls++;
+                return ValueTask.FromResult(Result<string>.Failure(AppError.NotFound("still missing")));
+            },
             Ct);
 
         first.IsSuccess.Should().BeFalse();
         second.IsSuccess.Should().BeFalse();
-        second.Error.Message.Should().Be("still missing", "the second call must re-execute the factory, not replay a cached failure");
+        second.Error.Message.Should().Be("still missing",
+            "the second call must re-execute the factory, not replay a cached failure");
         factoryCalls.Should().Be(2);
     }
 
@@ -130,17 +167,26 @@ public sealed class HybridHandlerCacheScopeTests {
         var failed = await cache.GetOrCreateAsync(
             policy,
             new Request { Id = 1 },
-            _ => { factoryCalls++; return ValueTask.FromResult(Result<string>.Failure(AppError.BusinessRule("no"))); },
+            _ => {
+                factoryCalls++;
+                return ValueTask.FromResult(Result<string>.Failure(AppError.BusinessRule("no")));
+            },
             Ct);
         var succeeded = await cache.GetOrCreateAsync(
             policy,
             new Request { Id = 1 },
-            _ => { factoryCalls++; return ValueTask.FromResult(Result<string>.Success("ok")); },
+            _ => {
+                factoryCalls++;
+                return ValueTask.FromResult(Result<string>.Success("ok"));
+            },
             Ct);
         var replayed = await cache.GetOrCreateAsync(
             policy,
             new Request { Id = 1 },
-            _ => { factoryCalls++; return ValueTask.FromResult(Result<string>.Success("unused")); },
+            _ => {
+                factoryCalls++;
+                return ValueTask.FromResult(Result<string>.Success("unused"));
+            },
             Ct);
 
         failed.IsSuccess.Should().BeFalse();
@@ -152,12 +198,13 @@ public sealed class HybridHandlerCacheScopeTests {
     private static async Task<string> GetOrCreateAsync(
         IHandlerCache cache,
         Func<string> factory,
-        HandlerCacheScope scope = HandlerCacheScope.CurrentUser) =>
-        await cache.GetOrCreateAsync(
+        HandlerCacheScope scope = HandlerCacheScope.CurrentUser) {
+        return await cache.GetOrCreateAsync(
             new Policy(scope),
             new Request { Id = 1 },
             _ => ValueTask.FromResult(factory()),
             Ct);
+    }
 
     private static ServiceProvider CreateProvider(out MutableCurrentUser user) {
         user = new MutableCurrentUser();
@@ -176,7 +223,10 @@ public sealed class HybridHandlerCacheScopeTests {
         public TimeSpan Expiration => TimeSpan.FromMinutes(1);
         public HandlerCacheScope Scope => scope;
         public IReadOnlyList<string> Tags { get; } = ["clients"];
-        public string CreateKey(Request request) => request.Id.ToString();
+
+        public string CreateKey(Request request) {
+            return request.Id.ToString();
+        }
     }
 
     private sealed class PayloadPolicy : IHandlerCachePayloadPolicy<Request, Result<string>> {
@@ -184,12 +234,18 @@ public sealed class HybridHandlerCacheScopeTests {
         public TimeSpan Expiration => TimeSpan.FromMinutes(1);
         public HandlerCacheScope Scope => HandlerCacheScope.Global;
         public IReadOnlyList<string> Tags { get; } = ["clients"];
-        public string CreateKey(Request request) => request.Id.ToString();
 
-        public string Serialize(Result<string> response, JsonSerializerOptions options) => response.Value;
+        public string CreateKey(Request request) {
+            return request.Id.ToString();
+        }
 
-        public Result<string> Deserialize(string payload, JsonSerializerOptions options) =>
-            Result<string>.Success(payload);
+        public string Serialize(Result<string> response, JsonSerializerOptions options) {
+            return response.Value;
+        }
+
+        public Result<string> Deserialize(string payload, JsonSerializerOptions options) {
+            return Result<string>.Success(payload);
+        }
     }
 
     private sealed class InvalidationPolicy(HandlerCacheScope scope) : IHandlerCacheInvalidationPolicy {
@@ -202,6 +258,9 @@ public sealed class HybridHandlerCacheScopeTests {
         public string? Email => null;
         public IReadOnlyList<string> Roles => [];
         public bool IsAuthenticated => true;
-        public bool IsInRole(string role) => false;
+
+        public bool IsInRole(string role) {
+            return false;
+        }
     }
 }

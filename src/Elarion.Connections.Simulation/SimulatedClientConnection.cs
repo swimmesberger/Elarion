@@ -37,10 +37,10 @@ public sealed class SimulatedClientConnection : IClientConnectionSink {
         ConnectionState = new ClientConnectionState(new ClientConnection {
             ConnectionId = connectionId ?? Guid.CreateVersion7().ToString("N"),
             Transport = transport,
-            Principal = principal ?? new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "test")),
+            Principal = principal ?? new ClaimsPrincipal(new ClaimsIdentity("test")),
             PrincipalId = principalId,
             ConnectedAt = DateTimeOffset.UtcNow,
-            Metadata = metadata ?? ReadOnlyDictionary<string, string>.Empty,
+            Metadata = metadata ?? ReadOnlyDictionary<string, string>.Empty
         });
     }
 
@@ -75,9 +75,7 @@ public sealed class SimulatedClientConnection : IClientConnectionSink {
     /// <summary>Simulates the connection ending: further sends/invokes fault, <see cref="Sent"/> completes.
     /// Unregistering from the registry (so observers fire) stays the test's explicit step.</summary>
     public void Close() {
-        if (Interlocked.Exchange(ref _closed, 1) == 0) {
-            _sent.Writer.TryComplete();
-        }
+        if (Interlocked.Exchange(ref _closed, 1) == 0) _sent.Writer.TryComplete();
     }
 
     /// <inheritdoc />
@@ -99,10 +97,9 @@ public sealed class SimulatedClientConnection : IClientConnectionSink {
         ArgumentNullException.ThrowIfNull(request);
         var connection = Connection;
         ThrowIfClosed(connection);
-        if (InvokeResponder is not { } responder) {
+        if (InvokeResponder is not { } responder)
             throw new NotSupportedException(
                 "Set SimulatedClientConnection.InvokeResponder to answer InvokeAsync in this test.");
-        }
 
         // The same timeout layering real adapters apply: per-call wins, else the default bounds the wait,
         // else the caller's token is the only bound.
@@ -115,9 +112,7 @@ public sealed class SimulatedClientConnection : IClientConnectionSink {
     }
 
     private void ThrowIfClosed(ClientConnection connection) {
-        if (IsClosed) {
-            throw new ClientConnectionClosedException(connection.ConnectionId);
-        }
+        if (IsClosed) throw new ClientConnectionClosedException(connection.ConnectionId);
     }
 
     /// <summary>One captured outbound send.</summary>

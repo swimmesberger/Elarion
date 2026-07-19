@@ -3,8 +3,8 @@
 // backend actually enforces (ADR-0032): `when: { permission: "invocies.read" }` is a type error here, not
 // a silently hidden item. Modules import defineModule/defineExtensionPoint/contribute from this file,
 // never from the package directly.
-import type { FlagName, ModuleName, PermissionName, RoleName } from "@/generated/session-client"
-import { createContributionKit, type ModuleManifest } from "@swimmesberger/elarion-contributions"
+import type {FlagName, ModuleName, PermissionName, RoleName} from "@/generated/session-client"
+import {createContributionKit, type ModuleManifest} from "@swimmesberger/elarion-contributions"
 
 export interface AppVocabulary {
   module: ModuleName
@@ -15,4 +15,4 @@ export interface AppVocabulary {
 
 export type AppManifest = ModuleManifest<AppVocabulary>
 
-export const { defineModule, defineExtensionPoint, contribute } = createContributionKit<AppVocabulary>()
+export const {defineModule, defineExtensionPoint, contribute} = createContributionKit<AppVocabulary>()

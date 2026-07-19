@@ -31,53 +31,45 @@ public sealed class ClientEventSubscriptionResolver(ClientEventTopicCatalog cata
         ArgumentNullException.ThrowIfNull(requests);
 
         var currentUser = services.GetService<ICurrentUser>();
-        if (currentUser is null || !currentUser.IsAuthenticated) {
+        if (currentUser is null || !currentUser.IsAuthenticated)
             return ClientEventSubscriptionResolution.Unauthenticated;
-        }
 
-        if (requests.Count == 0) {
-            return ClientEventSubscriptionResolution.InvalidRequest;
-        }
+        if (requests.Count == 0) return ClientEventSubscriptionResolution.InvalidRequest;
 
         var resolved = new List<ClientEventSubscription>(requests.Count + 1);
         var authorizedTopics = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var request in requests) {
-            if (string.IsNullOrEmpty(request.Topic)) {
-                return ClientEventSubscriptionResolution.InvalidRequest;
-            }
+            if (string.IsNullOrEmpty(request.Topic)) return ClientEventSubscriptionResolution.InvalidRequest;
 
             // Unknown, disabled, and denied topics are indistinguishable from the outside: not found.
             var topic = catalog.FindByName(request.Topic);
-            if (topic is null) {
-                return ClientEventSubscriptionResolution.NotFound;
-            }
+            if (topic is null) return ClientEventSubscriptionResolution.NotFound;
 
-            if (authorizedTopics.Add(topic.Name) && !await AuthorizeTopicAsync(topic.Requirements, ct)) {
+            if (authorizedTopics.Add(topic.Name) && !await AuthorizeTopicAsync(topic.Requirements, ct))
                 return ClientEventSubscriptionResolution.NotFound;
-            }
 
             if (request.Resource is null) {
                 resolved.Add(new ClientEventSubscription { Topic = topic.Name, Scope = ClientEventScope.Global });
-                if (currentUser.UserId is { Length: > 0 } userId) {
-                    resolved.Add(new ClientEventSubscription { Topic = topic.Name, Scope = ClientEventScope.User(userId) });
-                }
+                if (currentUser.UserId is { Length: > 0 } userId)
+                    resolved.Add(new ClientEventSubscription
+                        { Topic = topic.Name, Scope = ClientEventScope.User(userId) });
                 continue;
             }
 
             var subscription = new ClientEventSubscription {
                 Topic = topic.Name,
-                Scope = ClientEventScope.Resource(request.Resource),
+                Scope = ClientEventScope.Resource(request.Resource)
             };
             // Resource scopes are fail-closed: no registered authorizer denies, and denial reads as not
             // found. A topic declaring AllowAnyResource has said "the resource is a routing key, not an
             // entitlement" — its requirements already passed above, so the seam is skipped.
             if (!topic.AllowAnyResource) {
                 var authorizer = services.GetService<IClientEventSubscriptionAuthorizer>();
-                if (authorizer is null || !await authorizer.AuthorizeAsync(subscription, ct)) {
+                if (authorizer is null || !await authorizer.AuthorizeAsync(subscription, ct))
                     return ClientEventSubscriptionResolution.NotFound;
-                }
             }
+
             resolved.Add(subscription);
         }
 
@@ -88,16 +80,14 @@ public sealed class ClientEventSubscriptionResolver(ClientEventTopicCatalog cata
         // "Authenticated" is already established for the whole resolution; only richer requirements need the
         // IAuthorizer. Requirements with no evaluator fail closed.
         var beyondAuthenticated = requirements.Permissions.Count > 0 || requirements.Roles.Count > 0
-            || requirements.Claims.Count > 0 || requirements.Policies.Count > 0 || requirements.Resources.Count > 0;
-        if (!beyondAuthenticated) {
-            return true;
-        }
+                                                                     || requirements.Claims.Count > 0 ||
+                                                                     requirements.Policies.Count > 0 ||
+                                                                     requirements.Resources.Count > 0;
+        if (!beyondAuthenticated) return true;
 
         var authorizer = services.GetService<IAuthorizer>();
-        if (authorizer is null) {
-            return false;
-        }
+        if (authorizer is null) return false;
 
-        return await authorizer.AuthorizeAsync(requirements, resource: null, ct) is null;
+        return await authorizer.AuthorizeAsync(requirements, null, ct) is null;
     }
 }

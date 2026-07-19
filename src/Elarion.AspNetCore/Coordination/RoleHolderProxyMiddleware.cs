@@ -19,6 +19,7 @@ internal sealed class RoleHolderProxyMiddleware {
     private readonly PathString[] _pathPrefixes;
     private readonly HttpMessageInvoker _client;
     private readonly ILogger _logger;
+
     /// <summary>Marks a forwarded request so a mid-failover receiver answers 503 instead of re-forwarding.</summary>
     public const string ProxiedHeaderName = "Elarion-Role-Proxied";
 
@@ -50,7 +51,8 @@ internal sealed class RoleHolderProxyMiddleware {
             pathPrefixes,
             client,
             logger,
-            responseHeadersTimeout) { }
+            responseHeadersTimeout) {
+    }
 
     public RoleHolderProxyMiddleware(
         Func<HttpContext, RoleHolderTarget?> resolveTarget,
@@ -75,12 +77,11 @@ internal sealed class RoleHolderProxyMiddleware {
     public async Task InvokeAsync(HttpContext context, RequestDelegate next) {
         var path = context.Request.Path;
         var matches = false;
-        foreach (var prefix in _pathPrefixes) {
+        foreach (var prefix in _pathPrefixes)
             if (path.StartsWithSegments(prefix)) {
                 matches = true;
                 break;
             }
-        }
 
         if (!matches) {
             await next(context);
@@ -127,19 +128,16 @@ internal sealed class RoleHolderProxyMiddleware {
             UriKind.Absolute);
 
         using var upstreamRequest = new HttpRequestMessage(new HttpMethod(request.Method), targetUri);
-        if (request.ContentLength > 0 || request.Headers.ContainsKey("Transfer-Encoding")) {
+        if (request.ContentLength > 0 || request.Headers.ContainsKey("Transfer-Encoding"))
             upstreamRequest.Content = new StreamContent(request.Body);
-        }
 
         var requestNominated = NominatedConnectionHeaders(request.Headers.Connection);
         foreach (var header in request.Headers) {
-            if (IsHopByHop(header.Key, requestNominated)) {
-                continue;
-            }
+            if (IsHopByHop(header.Key, requestNominated)) continue;
 
-            if (!upstreamRequest.Headers.TryAddWithoutValidation(header.Key, (IEnumerable<string?>)header.Value)) {
-                upstreamRequest.Content?.Headers.TryAddWithoutValidation(header.Key, (IEnumerable<string?>)header.Value);
-            }
+            if (!upstreamRequest.Headers.TryAddWithoutValidation(header.Key, (IEnumerable<string?>)header.Value))
+                upstreamRequest.Content?.Headers.TryAddWithoutValidation(header.Key,
+                    (IEnumerable<string?>)header.Value);
         }
 
         upstreamRequest.Headers.TryAddWithoutValidation(ProxiedHeaderName, role);
@@ -185,11 +183,9 @@ internal sealed class RoleHolderProxyMiddleware {
             var responseNominated = upstreamResponse.Headers.TryGetValues("Connection", out var connectionValues)
                 ? NominatedConnectionHeaders(connectionValues)
                 : null;
-            foreach (var header in upstreamResponse.Headers.Concat(upstreamResponse.Content.Headers)) {
-                if (!IsHopByHop(header.Key, responseNominated)) {
+            foreach (var header in upstreamResponse.Headers.Concat(upstreamResponse.Content.Headers))
+                if (!IsHopByHop(header.Key, responseNominated))
                     context.Response.Headers[header.Key] = header.Value.ToArray();
-                }
-            }
 
             // Copy with a flush per read so streaming responses (SSE) flow through instead of pooling
             // in buffers. Only the proxy path pays this; the holder serves directly.
@@ -208,18 +204,17 @@ internal sealed class RoleHolderProxyMiddleware {
         }
     }
 
-    private static bool IsHopByHop(string name, HashSet<string>? nominated) =>
-        HopByHopHeaders.Contains(name, StringComparer.OrdinalIgnoreCase)
-        || nominated?.Contains(name) == true;
+    private static bool IsHopByHop(string name, HashSet<string>? nominated) {
+        return HopByHopHeaders.Contains(name, StringComparer.OrdinalIgnoreCase)
+               || nominated?.Contains(name) == true;
+    }
 
     // RFC 9110 §7.6.1: the Connection header nominates additional per-message hop-by-hop headers; an
     // intermediary must strip the nominated headers along with Connection itself.
     private static HashSet<string>? NominatedConnectionHeaders(IEnumerable<string?> connectionValues) {
         HashSet<string>? nominated = null;
         foreach (var value in connectionValues) {
-            if (string.IsNullOrEmpty(value)) {
-                continue;
-            }
+            if (string.IsNullOrEmpty(value)) continue;
 
             foreach (var token in value.Split(',')) {
                 var name = token.Trim();

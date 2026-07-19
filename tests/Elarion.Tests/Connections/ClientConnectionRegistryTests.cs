@@ -35,10 +35,10 @@ public sealed class ClientConnectionRegistryTests {
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
         await registry.RegisterAsync(Sink("conn-1", "user-1"), ct);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, "user-2")], authenticationType: "test"));
+            [new Claim(ClaimTypes.NameIdentifier, "user-2")], "test"));
         var metadata = new Dictionary<string, string> { ["source"] = "original" };
         var rejected = new SimulatedClientConnection(
-            principalId: "user-2", connectionId: "conn-1", principal: principal, metadata: metadata);
+            "user-2", connectionId: "conn-1", principal: principal, metadata: metadata);
         var original = rejected.Connection;
 
         var register = async () => await registry.RegisterAsync(rejected, ct);
@@ -150,7 +150,8 @@ public sealed class ClientConnectionRegistryTests {
         var outcomes = await Task.WhenAll(first, second);
 
         outcomes.Count(static outcome => outcome == ClientConnectionPromotionStatus.Promoted).Should().Be(1);
-        outcomes.Count(static outcome => outcome == ClientConnectionPromotionStatus.AlreadyAuthenticated).Should().Be(1);
+        outcomes.Count(static outcome => outcome == ClientConnectionPromotionStatus.AlreadyAuthenticated).Should()
+            .Be(1);
         sink.Connection.IdentityRevision.Should().Be(1);
     }
 
@@ -172,7 +173,7 @@ public sealed class ClientConnectionRegistryTests {
             .Should().Be(ClientConnectionPromotionStatus.AlreadyAuthenticated);
         (await registry.PromoteAsync("anonymous", new ClientConnectionIdentity {
             Principal = new ClaimsPrincipal(new ClaimsIdentity()),
-            PrincipalId = "user-3",
+            PrincipalId = "user-3"
         }, ct)).Should().Be(ClientConnectionPromotionStatus.AlreadyAuthenticated);
     }
 
@@ -189,7 +190,7 @@ public sealed class ClientConnectionRegistryTests {
 
         var invalid = async () => await registry.PromoteAsync("conn-1", new ClientConnectionIdentity {
             Principal = new ClaimsPrincipal(new ClaimsIdentity()),
-            PrincipalId = "user-1",
+            PrincipalId = "user-1"
         }, ct);
         await invalid.Should().ThrowAsync<ArgumentException>();
         sink.Connection.Should().BeSameAs(beforeInvalid);
@@ -197,7 +198,7 @@ public sealed class ClientConnectionRegistryTests {
         (await registry.PromoteAsync("conn-1", new ClientConnectionIdentity {
             Principal = new ClaimsPrincipal(inputIdentity),
             PrincipalId = "user-1",
-            Metadata = inputMetadata,
+            Metadata = inputMetadata
         }, ct)).Should().Be(ClientConnectionPromotionStatus.Promoted);
         inputIdentity.AddClaim(new Claim(ClaimTypes.Role, "administrator"));
         inputMetadata["method"] = "mutated";
@@ -213,9 +214,9 @@ public sealed class ClientConnectionRegistryTests {
         await using var provider = BuildProvider();
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
         var bootstrap = new byte[] { 1, 2, 3 };
-        var identity = new ClaimsIdentity(authenticationType: "test") { BootstrapContext = bootstrap };
+        var identity = new ClaimsIdentity("test") { BootstrapContext = bootstrap };
         var sink = new SimulatedClientConnection(
-            principalId: "user-1", connectionId: "bootstrap", principal: new ClaimsPrincipal(identity));
+            "user-1", connectionId: "bootstrap", principal: new ClaimsPrincipal(identity));
 
         await registry.RegisterAsync(sink, ct);
         bootstrap[0] = 9;
@@ -241,9 +242,9 @@ public sealed class ClientConnectionRegistryTests {
         var before = sink.Connection;
 
         var promote = async () => await registry.PromoteAsync("conn-1", new ClientConnectionIdentity {
-            Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "test")),
+            Principal = new ClaimsPrincipal(new ClaimsIdentity("test")),
             PrincipalId = "user-1",
-            Metadata = new Dictionary<string, string> { ["method"] = "token" },
+            Metadata = new Dictionary<string, string> { ["method"] = "token" }
         }, ct);
 
         await promote.Should().ThrowAsync<ArgumentException>();
@@ -310,27 +311,27 @@ public sealed class ClientConnectionRegistryTests {
         });
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
         var tooManyIdentities = new SimulatedClientConnection(
-            principalId: "multi",
+            "multi",
             connectionId: "multi",
             principal: new ClaimsPrincipal([
-                new ClaimsIdentity(authenticationType: "first"),
-                new ClaimsIdentity(authenticationType: "second"),
+                new ClaimsIdentity("first"),
+                new ClaimsIdentity("second")
             ]));
         var tooManyClaims = new SimulatedClientConnection(
-            principalId: "claims",
+            "claims",
             connectionId: "claims",
             principal: new ClaimsPrincipal(new ClaimsIdentity([
                 new Claim("a", "1"),
-                new Claim("b", "2"),
+                new Claim("b", "2")
             ], "test")));
-        var actor = new ClaimsIdentity(authenticationType: "actor");
-        var root = new ClaimsIdentity(authenticationType: "test") { Actor = actor };
+        var actor = new ClaimsIdentity("actor");
+        var root = new ClaimsIdentity("test") { Actor = actor };
         var tooDeep = new SimulatedClientConnection(
-            principalId: "depth", connectionId: "depth", principal: new ClaimsPrincipal(root));
+            "depth", connectionId: "depth", principal: new ClaimsPrincipal(root));
 
-        Func<Task> registerIdentities = async () => await registry.RegisterAsync(tooManyIdentities, ct);
-        Func<Task> registerClaims = async () => await registry.RegisterAsync(tooManyClaims, ct);
-        Func<Task> registerDepth = async () => await registry.RegisterAsync(tooDeep, ct);
+        var registerIdentities = async () => await registry.RegisterAsync(tooManyIdentities, ct);
+        var registerClaims = async () => await registry.RegisterAsync(tooManyClaims, ct);
+        var registerDepth = async () => await registry.RegisterAsync(tooDeep, ct);
         await registerIdentities.Should().ThrowAsync<ArgumentException>().WithMessage("*identities*");
         await registerClaims.Should().ThrowAsync<ArgumentException>().WithMessage("*claims*");
         await registerDepth.Should().ThrowAsync<ArgumentException>().WithMessage("*depth*");
@@ -377,34 +378,39 @@ public sealed class ClientConnectionRegistryTests {
         byInstrument["connection.active"].Sum().Should().Be(0);
     }
 
-    private static ServiceProvider BuildProvider(params IClientConnectionObserver[] observers) =>
-        BuildProvider(configure: null, observers);
+    private static ServiceProvider BuildProvider(params IClientConnectionObserver[] observers) {
+        return BuildProvider(null, observers);
+    }
 
-    private static ServiceProvider BuildProvider(Action<ElarionConnectionsOptions> configure) =>
-        BuildProvider(configure, []);
+    private static ServiceProvider BuildProvider(Action<ElarionConnectionsOptions> configure) {
+        return BuildProvider(configure, []);
+    }
 
     private static ServiceProvider BuildProvider(
         Action<ElarionConnectionsOptions>? configure,
         params IClientConnectionObserver[] observers) {
         var services = new ServiceCollection();
         services.AddElarionConnections(configure);
-        foreach (var observer in observers) {
-            services.AddSingleton(observer);
-        }
+        foreach (var observer in observers) services.AddSingleton(observer);
         return services.BuildServiceProvider();
     }
 
-    internal static SimulatedClientConnection Sink(string connectionId, string principalId) =>
-        new(principalId: principalId, connectionId: connectionId);
+    internal static SimulatedClientConnection Sink(string connectionId, string principalId) {
+        return new SimulatedClientConnection(principalId, connectionId: connectionId);
+    }
 
-    internal static SimulatedClientConnection AnonymousSink(string connectionId) =>
-        new(connectionId: connectionId, principal: new ClaimsPrincipal(new ClaimsIdentity()));
+    internal static SimulatedClientConnection AnonymousSink(string connectionId) {
+        return new SimulatedClientConnection(connectionId: connectionId,
+            principal: new ClaimsPrincipal(new ClaimsIdentity()));
+    }
 
-    private static ClientConnectionIdentity AuthenticatedIdentity(string principalId) => new() {
-        Principal = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, principalId)], authenticationType: "test")),
-        PrincipalId = principalId,
-    };
+    private static ClientConnectionIdentity AuthenticatedIdentity(string principalId) {
+        return new ClientConnectionIdentity {
+            Principal = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, principalId)], "test")),
+            PrincipalId = principalId
+        };
+    }
 
     private sealed class RecordingObserver : IClientConnectionObserver {
         public List<ClientConnection> Connected { get; } = [];
@@ -423,8 +429,9 @@ public sealed class ClientConnectionRegistryTests {
         public ValueTask OnIdentityPromotedAsync(
             ClientConnection previous,
             ClientConnection current,
-            CancellationToken ct = default) =>
-            ValueTask.CompletedTask;
+            CancellationToken ct = default) {
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class LookupProbingObserver : IClientConnectionObserver {
@@ -433,7 +440,9 @@ public sealed class ClientConnectionRegistryTests {
         public bool? VisibleOnConnect { get; private set; }
         public bool? VisibleOnDisconnect { get; private set; }
 
-        public void Attach(IClientConnectionRegistry registry) => _registry = registry;
+        public void Attach(IClientConnectionRegistry registry) {
+            _registry = registry;
+        }
 
         public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) {
             VisibleOnConnect = _registry!.TryGet(connection.Connection.ConnectionId, out _);
@@ -448,53 +457,64 @@ public sealed class ClientConnectionRegistryTests {
         public ValueTask OnIdentityPromotedAsync(
             ClientConnection previous,
             ClientConnection current,
-            CancellationToken ct = default) =>
-            ValueTask.CompletedTask;
+            CancellationToken ct = default) {
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class ThrowingObserver : IClientConnectionObserver {
-        public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) =>
+        public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) {
             throw new InvalidOperationException("observer failure");
+        }
 
-        public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) =>
+        public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) {
             throw new InvalidOperationException("observer failure");
+        }
 
         public ValueTask OnIdentityPromotedAsync(
             ClientConnection previous,
             ClientConnection current,
-            CancellationToken ct = default) =>
+            CancellationToken ct = default) {
             throw new InvalidOperationException("observer failure");
+        }
     }
 
     private sealed class PromotionThrowingObserver : IClientConnectionObserver {
-        public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) =>
-            ValueTask.CompletedTask;
+        public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) {
+            return ValueTask.CompletedTask;
+        }
 
-        public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) =>
-            ValueTask.CompletedTask;
+        public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) {
+            return ValueTask.CompletedTask;
+        }
 
         public ValueTask OnIdentityPromotedAsync(
             ClientConnection previous,
             ClientConnection current,
-            CancellationToken ct = default) =>
+            CancellationToken ct = default) {
             throw new InvalidOperationException("observer failure");
+        }
     }
 
     private sealed class OrderedLifecycleObserver : IClientConnectionObserver {
         public TaskCompletionSource PromotionEntered { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public TaskCompletionSource AllowPromotion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public List<string> Edges { get; } = [];
 
-        public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) =>
-            ValueTask.CompletedTask;
+        public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) {
+            return ValueTask.CompletedTask;
+        }
 
         public ValueTask OnIdentityPromotedAsync(
             ClientConnection previous,
             ClientConnection current,
-            CancellationToken ct = default) =>
-            new(ObservePromotionAsync());
+            CancellationToken ct = default) {
+            return new ValueTask(ObservePromotionAsync());
+        }
 
         public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) {
             Edges.Add("disconnected");
@@ -511,11 +531,13 @@ public sealed class ClientConnectionRegistryTests {
     private sealed class PromotionRecordingObserver : IClientConnectionObserver {
         public List<(ClientConnection Previous, ClientConnection Current)> Promoted { get; } = [];
 
-        public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) =>
-            ValueTask.CompletedTask;
+        public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) {
+            return ValueTask.CompletedTask;
+        }
 
-        public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) =>
-            ValueTask.CompletedTask;
+        public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) {
+            return ValueTask.CompletedTask;
+        }
 
         public ValueTask OnIdentityPromotedAsync(
             ClientConnection previous,

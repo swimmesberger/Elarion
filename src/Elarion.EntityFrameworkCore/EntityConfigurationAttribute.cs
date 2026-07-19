@@ -30,8 +30,7 @@ namespace Elarion.EntityFrameworkCore;
 /// </code>
 /// </example>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-public sealed class EntityConfigurationAttribute : Attribute
-{
+public sealed class EntityConfigurationAttribute : Attribute {
     /// <summary>
     /// Initializes a new instance of the <see cref="EntityConfigurationAttribute"/> class.
     /// </summary>
@@ -39,8 +38,7 @@ public sealed class EntityConfigurationAttribute : Attribute
     /// Optional context scopes every entity this configuration configures belongs to. Omit scopes to
     /// participate only in unscoped/global generated contexts.
     /// </param>
-    public EntityConfigurationAttribute(params string[] scopes)
-    {
+    public EntityConfigurationAttribute(params string[] scopes) {
         Scopes = scopes;
     }
 

@@ -25,33 +25,34 @@ public sealed class AuditSaveChangesInterceptor(
     /// <inheritdoc />
     public override InterceptionResult<int> SavingChanges(
         DbContextEventData eventData, InterceptionResult<int> result) {
-        Capture(eventData, saved: false);
+        Capture(eventData, false);
         return result;
     }
 
     /// <inheritdoc />
     public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
         DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default) {
-        Capture(eventData, saved: false);
+        Capture(eventData, false);
         return ValueTask.FromResult(result);
     }
 
     /// <inheritdoc />
     public override int SavedChanges(SaveChangesCompletedEventData eventData, int result) {
-        Capture(eventData, saved: true);
+        Capture(eventData, true);
         return result;
     }
 
     /// <inheritdoc />
     public override ValueTask<int> SavedChangesAsync(
         SaveChangesCompletedEventData eventData, int result, CancellationToken cancellationToken = default) {
-        Capture(eventData, saved: true);
+        Capture(eventData, true);
         return ValueTask.FromResult(result);
     }
 
     /// <summary>Promotes the pending success record to durably recorded — the transaction just committed.</summary>
-    void IDbTransactionInterceptor.TransactionCommitted(DbTransaction transaction, TransactionEndEventData eventData) =>
+    void IDbTransactionInterceptor.TransactionCommitted(DbTransaction transaction, TransactionEndEventData eventData) {
         PromotePendingRecord();
+    }
 
     /// <inheritdoc cref="IDbTransactionInterceptor.TransactionCommitted" />
     Task IDbTransactionInterceptor.TransactionCommittedAsync(
@@ -70,12 +71,10 @@ public sealed class AuditSaveChangesInterceptor(
             return;
 
         var captureContext = new AuditCaptureContext { DbContext = context, Scope = scope };
-        foreach (var contributor in contributors) {
-            if (saved) {
+        foreach (var contributor in contributors)
+            if (saved)
                 contributor.OnSavedChanges(captureContext);
-            } else {
+            else
                 contributor.OnSavingChanges(captureContext);
-            }
-        }
     }
 }

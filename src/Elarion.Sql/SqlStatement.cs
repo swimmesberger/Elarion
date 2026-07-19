@@ -60,7 +60,9 @@ public sealed class SqlStatement {
     /// interpolation (<c>{SqlStatement.Verbatim(orderByColumn)}</c>). Never pass user input: verbatim text is
     /// spliced into the command exactly, so it is an injection vector if it carries untrusted data.
     /// </summary>
-    public static SqlStatement Verbatim(string trustedSql) => new([SqlSegment.OfLiteral(trustedSql)], trustedSql.Length, 0);
+    public static SqlStatement Verbatim(string trustedSql) {
+        return new SqlStatement([SqlSegment.OfLiteral(trustedSql)], trustedSql.Length, 0);
+    }
 
     /// <summary>The empty statement — renders to <c>""</c> with no parameters. Composes as a no-op.</summary>
     public static readonly SqlStatement Empty = new([], 0, 0);
@@ -112,7 +114,9 @@ public sealed class SqlStatement {
         return command;
     }
 
-    public override string ToString() => Text;
+    public override string ToString() {
+        return Text;
+    }
 
     // A pure-literal statement (Verbatim, a generated Table/Select, or an interpolation with no holes) —
     // when spliced as a fragment it inlines as a literal segment, so it costs no more than raw text.
@@ -133,20 +137,16 @@ public sealed class SqlStatement {
 
     // Appends this statement to a segment list, inlining a pure literal to avoid a fragment walk.
     internal void AddAsSegmentTo(List<SqlSegment> segments) {
-        if (TryGetLiteral(out var literal)) {
+        if (TryGetLiteral(out var literal))
             segments.Add(SqlSegment.OfLiteral(literal));
-        }
-        else {
+        else
             segments.Add(SqlSegment.OfFragment(this));
-        }
     }
 
     private static readonly List<object?> NoValues = [];
 
     private void Materialize() {
-        if (_text is not null) {
-            return;
-        }
+        if (_text is not null) return;
 
         // Fast path: a pure literal (Verbatim, or an interpolation with no holes) IS its text.
         if (TryGetLiteral(out var literal)) {
@@ -164,7 +164,7 @@ public sealed class SqlStatement {
     }
 
     internal void AppendTo(StringBuilder builder, List<object?> values) {
-        foreach (var segment in _segments) {
+        foreach (var segment in _segments)
             switch (segment.Kind) {
                 case SqlSegmentKind.Literal:
                     builder.Append(segment.Literal);
@@ -179,7 +179,6 @@ public sealed class SqlStatement {
                     ((SqlStatement)segment.Value!).AppendTo(builder, values);
                     break;
             }
-        }
     }
 
     private static void AppendParameter(StringBuilder builder, List<object?> values, object? value) {
@@ -195,14 +194,13 @@ public sealed class SqlStatement {
             AppendParameter(builder, values, item);
         }
 
-        if (first) {
+        if (first)
             // No expansion is both type-correct and semantics-preserving for an empty set: "(NULL)"
             // silently flips NOT IN to match nothing, and an untyped never-matching subquery fails
             // PostgreSQL's type inference. Fail loud instead of returning silently wrong rows.
             throw new InvalidOperationException(
                 "An empty collection cannot be expanded into a SQL IN list — guard the query before "
                 + "building it (an empty IN matches nothing; an empty NOT IN matches everything).");
-        }
 
         builder.Append(')');
     }
@@ -210,6 +208,7 @@ public sealed class SqlStatement {
     // "p0".."p31" precomputed: parameter names are on every execution's hot path.
     private static readonly string[] CachedNames = [.. Enumerable.Range(0, 32).Select(i => "p" + i)];
 
-    internal static string ParameterName(int index) =>
-        index < CachedNames.Length ? CachedNames[index] : "p" + index.ToString(CultureInfo.InvariantCulture);
+    internal static string ParameterName(int index) {
+        return index < CachedNames.Length ? CachedNames[index] : "p" + index.ToString(CultureInfo.InvariantCulture);
+    }
 }

@@ -48,9 +48,7 @@ public static class AuditingEntityFrameworkCoreServiceCollectionExtensions {
         services.TryAddEnumerable(
             ServiceDescriptor.Scoped<IAuditChangeContributor, ChangeTrackerAuditChangeContributor>());
 
-        if (options.RetainFor is not null) {
-            services.AddHostedService<AuditRetentionService<TDbContext>>();
-        }
+        if (options.RetainFor is not null) services.AddHostedService<AuditRetentionService<TDbContext>>();
 
         return services;
     }

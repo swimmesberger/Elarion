@@ -23,8 +23,7 @@ namespace Elarion.Abstractions.Modules;
 /// </para>
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-public sealed class ModuleApiAttribute(params string[] scopes) : Attribute
-{
+public sealed class ModuleApiAttribute(params string[] scopes) : Attribute {
     /// <summary>
     /// The named scopes this handler is tagged into. Empty means the handler participates only in the
     /// module's default (unscoped) facade.

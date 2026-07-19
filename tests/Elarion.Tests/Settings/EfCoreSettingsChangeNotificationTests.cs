@@ -20,7 +20,9 @@ public sealed class EfCoreSettingsChangeNotificationTests(PostgreSqlSettingsStor
     : IClassFixture<PostgreSqlSettingsStoreFixture> {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static string UniqueKey(string segment) => $"app:{segment}:{Guid.NewGuid():N}";
+    private static string UniqueKey(string segment) {
+        return $"app:{segment}:{Guid.NewGuid():N}";
+    }
 
     [Fact]
     public async Task TransactionalWrite_AnnouncedOnlyAfterCommit() {

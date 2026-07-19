@@ -21,5 +21,5 @@ public enum IdempotencyScope {
     /// consumers, so each consumer's claim must be namespaced from its siblings' or the first claim would make
     /// every other consumer skip its own distinct work.
     /// </summary>
-    Consumer = 2,
+    Consumer = 2
 }

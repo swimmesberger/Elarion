@@ -54,7 +54,9 @@ public sealed class StockQuoteActor(
     private long _lastPublishTimestamp;
     private bool _hasValue;
 
-    public ValueTask OnActivateAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    public ValueTask OnActivateAsync(CancellationToken cancellationToken) {
+        return ValueTask.CompletedTask;
+    }
 
     // The stream-lifetime rule: a hub dies with its activation, so completing it here lets consumers
     // observe the end and re-subscribe (which re-activates the actor) instead of starving silently.
@@ -70,9 +72,7 @@ public sealed class StockQuoteActor(
     /// sequence number preserves the feed's order.
     /// </summary>
     public async Task Apply(QuoteTick tick, CancellationToken cancellationToken) {
-        if (tick.Seq <= _seq) {
-            return;
-        }
+        if (tick.Seq <= _seq) return;
 
         _seq = tick.Seq;
         _price = tick.Price;
@@ -90,29 +90,28 @@ public sealed class StockQuoteActor(
         // because the subscription observer greets every new watcher with the current value — a skipped
         // publish is never a missed one. (The pull check is the simple form; the observer's
         // OnInterestChangedAsync transitions are for producers that must start/stop real work.)
-        if (!interest.HasSubscribers(QuoteChanged.Topic, ClientEventScope.Resource(context.Key))) {
-            return;
-        }
+        if (!interest.HasSubscribers(QuoteChanged.Topic, ClientEventScope.Resource(context.Key))) return;
 
         // Conflate: always keep the current value, push at most every PublishInterval.
         var now = timeProvider.GetTimestamp();
         if (_lastPublishTimestamp != 0 &&
-            timeProvider.GetElapsedTime(_lastPublishTimestamp, now) < PublishInterval) {
+            timeProvider.GetElapsedTime(_lastPublishTimestamp, now) < PublishInterval)
             return;
-        }
 
         _lastPublishTimestamp = now;
         // The ephemeral publish tier: the payload carries the value (nothing to re-query), scoped to
         // this symbol so only its watchers receive it.
-        await clientEvents.PublishAsync(ToQuoteChanged(tick.At), ClientEventScope.Resource(context.Key), cancellationToken);
+        await clientEvents.PublishAsync(ToQuoteChanged(tick.At), ClientEventScope.Resource(context.Key),
+            cancellationToken);
     }
 
     /// <summary>The current value: the query path (<c>GET /quotes</c>) and the subscription observer's
     /// greeting both read it through this turn.</summary>
-    public Task<Quote?> GetQuote() =>
-        Task.FromResult(_hasValue
+    public Task<Quote?> GetQuote() {
+        return Task.FromResult(_hasValue
             ? new Quote(context.Key, _price, ChangePercent, _seq, timeProvider.GetUtcNow())
             : null);
+    }
 
     /// <summary>
     /// The ordered stream (<c>GET /quotes/{symbol}/stream</c>): greets with the latest tick (or resumes
@@ -120,19 +119,24 @@ public sealed class StockQuoteActor(
     /// no conflation, no interest gate. The attach runs as a mailbox turn; enumeration never holds the
     /// mailbox. Contrast with the conflated <c>market.quoteChanged</c> hints on <c>/events</c>.
     /// </summary>
-    public IAsyncEnumerable<StreamItem<Quote>> Watch(long? resumeAfter) =>
-        _stream.SubscribeSequenced(new StreamSubscribeOptions { ResumeAfterSequence = resumeAfter });
+    public IAsyncEnumerable<StreamItem<Quote>> Watch(long? resumeAfter) {
+        return _stream.SubscribeSequenced(new StreamSubscribeOptions { ResumeAfterSequence = resumeAfter });
+    }
 
     private decimal ChangePercent =>
         _sessionOpen == 0 ? 0 : Math.Round((_price - _sessionOpen) / _sessionOpen * 100m, 2);
 
-    private Quote ToQuote(DateTimeOffset at) => new(context.Key, _price, ChangePercent, _seq, at);
+    private Quote ToQuote(DateTimeOffset at) {
+        return new Quote(context.Key, _price, ChangePercent, _seq, at);
+    }
 
-    private QuoteChanged ToQuoteChanged(DateTimeOffset at) => new() {
-        Symbol = context.Key,
-        Price = _price,
-        ChangePercent = ChangePercent,
-        Seq = _seq,
-        At = at
-    };
+    private QuoteChanged ToQuoteChanged(DateTimeOffset at) {
+        return new QuoteChanged {
+            Symbol = context.Key,
+            Price = _price,
+            ChangePercent = ChangePercent,
+            Seq = _seq,
+            At = at
+        };
+    }
 }

@@ -12,5 +12,5 @@ public enum ClientEventScopeKind {
     /// Subscribers of an application-defined resource key (e.g. <c>"customer:42"</c>); subscribing requires an
     /// <see cref="IClientEventSubscriptionAuthorizer"/> and is denied without one (fail-closed).
     /// </summary>
-    Resource = 2,
+    Resource = 2
 }

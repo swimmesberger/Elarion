@@ -6,8 +6,7 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class RequireResourceGeneratorTests
-{
+public sealed class RequireResourceGeneratorTests {
     private const string Source =
         """
         using Elarion.Abstractions;
@@ -34,8 +33,7 @@ public sealed class RequireResourceGeneratorTests
         """;
 
     [Fact]
-    public void RequireResource_EmitsTypedBindingAndPassesToDecorator()
-    {
+    public void RequireResource_EmitsTypedBindingAndPassesToDecorator() {
         var result = Run(Source);
 
         result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
@@ -49,8 +47,7 @@ public sealed class RequireResourceGeneratorTests
     }
 
     [Fact]
-    public void RequireResource_EmitsExplicitResourceTypeNameOverride()
-    {
+    public void RequireResource_EmitsExplicitResourceTypeNameOverride() {
         var overridden = Source.Replace(
             "[RequireResource(typeof(Contact), Operation = \"read\", Id = nameof(GetContact.Query.Id))]",
             "[RequireResource(typeof(Contact), Operation = \"read\", Id = nameof(GetContact.Query.Id), ResourceTypeName = \"Crm.Contact\")]");
@@ -64,16 +61,14 @@ public sealed class RequireResourceGeneratorTests
     }
 
     [Fact]
-    public void RequireResource_UnresolvablePath_ReportsElauth002()
-    {
+    public void RequireResource_UnresolvablePath_ReportsElauth002() {
         var result = Run(Source.Replace("Id = nameof(GetContact.Query.Id)", "Id = \"Missing\""));
 
         result.Diagnostics.Should().Contain(d => d.Id == "ELAUTH002");
     }
 
     [Fact]
-    public void RequireResource_PrivateGetter_ReportsElauth002()
-    {
+    public void RequireResource_PrivateGetter_ReportsElauth002() {
         var privateGetter = Source.Replace(
             "public System.Guid Id { get; init; }",
             "public System.Guid Id { private get; init; }");
@@ -81,8 +76,7 @@ public sealed class RequireResourceGeneratorTests
         Run(privateGetter).Diagnostics.Should().Contain(diagnostic => diagnostic.Id == "ELAUTH002");
     }
 
-    private static GeneratorDriverRunResult Run(string source)
-    {
+    private static GeneratorDriverRunResult Run(string source) {
         var compilation = CSharpCompilation.Create(
             "RequireResourceGeneratorTests",
             [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview))],
@@ -93,14 +87,14 @@ public sealed class RequireResourceGeneratorTests
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
         return trustedPlatformAssemblies!

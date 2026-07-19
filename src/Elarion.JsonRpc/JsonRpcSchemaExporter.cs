@@ -43,16 +43,16 @@ public static class JsonRpcSchemaExporter {
         IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent)> methods;
         try {
             methods = dispatcher.GetRegisteredMethods();
-        } catch (InvalidOperationException ex) {
+        }
+        catch (InvalidOperationException ex) {
             throw new InvalidOperationException(
                 "Cannot export the JSON-RPC schema because the dispatcher is not frozen. Call Freeze() after registering all JSON-RPC methods.",
                 ex);
         }
 
-        if (methods.Count == 0) {
+        if (methods.Count == 0)
             throw new InvalidOperationException(
                 "Cannot export the JSON-RPC schema because the dispatcher has no registered methods.");
-        }
 
         var methodsObj = new JsonObject();
         foreach (var (methodName, requestType, responseType, idempotent) in methods) {
@@ -61,12 +61,10 @@ public static class JsonRpcSchemaExporter {
 
             var method = new JsonObject {
                 ["params"] = requestSchema,
-                ["result"] = responseSchema,
+                ["result"] = responseSchema
             };
             // Only emit the flag when set, so the schema stays byte-identical for non-idempotent methods.
-            if (idempotent) {
-                method["idempotent"] = true;
-            }
+            if (idempotent) method["idempotent"] = true;
 
             methodsObj[methodName] = method;
         }
@@ -74,18 +72,14 @@ public static class JsonRpcSchemaExporter {
         var schema = new JsonObject {
             ["$schema"] = "https://json-schema.org/draft/2020-12/schema",
             ["title"] = "JSON-RPC 2.0 Schema",
-            ["methods"] = methodsObj,
+            ["methods"] = methodsObj
         };
 
         var capabilities = BuildCapabilitiesNode(exportOptions);
-        if (capabilities is not null) {
-            schema["capabilities"] = capabilities;
-        }
+        if (capabilities is not null) schema["capabilities"] = capabilities;
 
         var events = BuildEventsNode(exportOptions, options);
-        if (events is not null) {
-            schema["events"] = events;
-        }
+        if (events is not null) schema["events"] = events;
 
         return schema.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
@@ -99,16 +93,13 @@ public static class JsonRpcSchemaExporter {
     [RequiresDynamicCode(SchemaReflectionMessage)]
     private static JsonObject? BuildEventsNode(
         JsonRpcSchemaExportOptions? exportOptions, JsonSerializerOptions options) {
-        if (exportOptions?.ClientEventTopics is not { Topics.Count: > 0 } manifest) {
-            return null;
-        }
+        if (exportOptions?.ClientEventTopics is not { Topics.Count: > 0 } manifest) return null;
 
         var events = new JsonObject();
-        foreach (var topic in manifest.Topics.OrderBy(static t => t.Name, StringComparer.Ordinal)) {
+        foreach (var topic in manifest.Topics.OrderBy(static t => t.Name, StringComparer.Ordinal))
             events[topic.Name] = new JsonObject {
-                ["payload"] = BuildSchemaNode(topic.EventType, options, InjectReflectedAnnotations),
+                ["payload"] = BuildSchemaNode(topic.EventType, options, InjectReflectedAnnotations)
             };
-        }
 
         return events;
     }
@@ -120,9 +111,7 @@ public static class JsonRpcSchemaExporter {
     /// collections are emitted in a deterministic ordinal order.
     /// </summary>
     private static JsonObject? BuildCapabilitiesNode(JsonRpcSchemaExportOptions? exportOptions) {
-        if (exportOptions is null) {
-            return null;
-        }
+        if (exportOptions is null) return null;
 
         var capabilities = new JsonObject();
 
@@ -132,16 +121,13 @@ public static class JsonRpcSchemaExporter {
                          .Where(static m => m.Enabled)
                          .OrderBy(static m => m.Name, StringComparer.Ordinal)) {
                 var features = new JsonArray();
-                foreach (var feature in module.Features.OrderBy(static f => f, StringComparer.Ordinal)) {
+                foreach (var feature in module.Features.OrderBy(static f => f, StringComparer.Ordinal))
                     features.Add((JsonNode?)JsonValue.Create(feature));
-                }
 
                 modules[module.Name] = new JsonObject { ["features"] = features };
             }
 
-            if (modules.Count > 0) {
-                capabilities["modules"] = modules;
-            }
+            if (modules.Count > 0) capabilities["modules"] = modules;
         }
 
         if (exportOptions.PermissionCatalog is { } catalog) {
@@ -152,24 +138,20 @@ public static class JsonRpcSchemaExporter {
                 foreach (var entry in catalog.Modules
                              .SelectMany(static m => m.Permissions)
                              .DistinctBy(static e => e.Permission)
-                             .OrderBy(static e => e.Permission, StringComparer.Ordinal)) {
+                             .OrderBy(static e => e.Permission, StringComparer.Ordinal))
                     permissions.Add((JsonNode)new JsonObject {
                         ["permission"] = entry.Permission,
                         ["resource"] = entry.Resource,
-                        ["verb"] = entry.Verb,
+                        ["verb"] = entry.Verb
                     });
-                }
 
-                if (permissions.Count > 0) {
-                    capabilities["permissions"] = permissions;
-                }
+                if (permissions.Count > 0) capabilities["permissions"] = permissions;
             }
 
             if (catalog.Roles.Count > 0) {
                 var roles = new JsonArray();
-                foreach (var role in catalog.Roles.OrderBy(static r => r, StringComparer.Ordinal)) {
+                foreach (var role in catalog.Roles.OrderBy(static r => r, StringComparer.Ordinal))
                     roles.Add((JsonNode?)JsonValue.Create(role));
-                }
 
                 capabilities["roles"] = roles;
             }
@@ -200,7 +182,7 @@ public static class JsonRpcSchemaExporter {
             TreatNullObliviousAsNonNullable = true,
             TransformSchemaNode = extraTransform is null
                 ? static (ctx, schema) => NormalizeNumericType(ctx, MapFilePayload(ctx, schema))
-                : (ctx, schema) => extraTransform(ctx, NormalizeNumericType(ctx, MapFilePayload(ctx, schema))),
+                : (ctx, schema) => extraTransform(ctx, NormalizeNumericType(ctx, MapFilePayload(ctx, schema)))
         };
 
         return options.GetJsonSchemaAsNode(type, exporterOptions);
@@ -215,9 +197,7 @@ public static class JsonRpcSchemaExporter {
     /// of a plain envelope interface.
     /// </summary>
     private static JsonNode MapFilePayload(JsonSchemaExporterContext ctx, JsonNode schema) {
-        if (ctx.TypeInfo.Type != typeof(Abstractions.ElarionFile)) {
-            return schema;
-        }
+        if (ctx.TypeInfo.Type != typeof(Abstractions.ElarionFile)) return schema;
 
         return new JsonObject {
             ["type"] = "object",
@@ -226,9 +206,9 @@ public static class JsonRpcSchemaExporter {
             ["properties"] = new JsonObject {
                 ["contentType"] = new JsonObject { ["type"] = "string" },
                 ["fileName"] = new JsonObject { ["type"] = "string" },
-                ["data"] = new JsonObject { ["type"] = "string", ["format"] = "byte" },
+                ["data"] = new JsonObject { ["type"] = "string", ["format"] = "byte" }
             },
-            ["required"] = new JsonArray("contentType", "data"),
+            ["required"] = new JsonArray("contentType", "data")
         };
     }
 
@@ -236,8 +216,9 @@ public static class JsonRpcSchemaExporter {
     /// Composes the reflective per-property transforms applied to the full schema export: the
     /// <see cref="DescriptionAttribute"/> description plus the DataAnnotations constraint keywords.
     /// </summary>
-    private static JsonNode InjectReflectedAnnotations(JsonSchemaExporterContext ctx, JsonNode schema) =>
-        InjectReflectedConstraints(ctx, InjectReflectedDescription(ctx, schema));
+    private static JsonNode InjectReflectedAnnotations(JsonSchemaExporterContext ctx, JsonNode schema) {
+        return InjectReflectedConstraints(ctx, InjectReflectedDescription(ctx, schema));
+    }
 
     /// <summary>
     /// Injects a <c>"description"</c> from a property's <see cref="DescriptionAttribute"/> into its schema node.
@@ -246,11 +227,10 @@ public static class JsonRpcSchemaExporter {
     /// </summary>
     private static JsonNode InjectReflectedDescription(JsonSchemaExporterContext ctx, JsonNode schema) {
         if (ctx.PropertyInfo?.AttributeProvider is { } provider &&
-            provider.GetCustomAttributes(typeof(DescriptionAttribute), inherit: false)
+            provider.GetCustomAttributes(typeof(DescriptionAttribute), false)
                 is [DescriptionAttribute { Description.Length: > 0 } description, ..] &&
-            schema is JsonObject obj) {
+            schema is JsonObject obj)
             obj["description"] = description.Description;
-        }
 
         return schema;
     }
@@ -266,13 +246,11 @@ public static class JsonRpcSchemaExporter {
     /// reflectively — appropriate for this build-time exporter.
     /// </summary>
     internal static JsonNode InjectReflectedConstraints(JsonSchemaExporterContext ctx, JsonNode schema) {
-        if (ctx.PropertyInfo?.AttributeProvider is not { } provider || schema is not JsonObject obj) {
-            return schema;
-        }
+        if (ctx.PropertyInfo?.AttributeProvider is not { } provider || schema is not JsonObject obj) return schema;
 
         // Type patterns intentionally match subclasses: a reusable custom constraint deriving a mapped
         // attribute (e.g. a [Slug] : RegularExpressionAttribute) reaches every schema surface for free.
-        foreach (var attribute in provider.GetCustomAttributes(inherit: false)) {
+        foreach (var attribute in provider.GetCustomAttributes(false))
             switch (attribute) {
                 case RangeAttribute range:
                     ApplyRange(obj, range);
@@ -290,9 +268,7 @@ public static class JsonRpcSchemaExporter {
                     break;
                 }
                 case StringLengthAttribute stringLength:
-                    if (stringLength.MinimumLength > 0) {
-                        obj["minLength"] = stringLength.MinimumLength;
-                    }
+                    if (stringLength.MinimumLength > 0) obj["minLength"] = stringLength.MinimumLength;
 
                     obj["maxLength"] = stringLength.MaximumLength;
                     break;
@@ -312,7 +288,6 @@ public static class JsonRpcSchemaExporter {
                     obj["enum"] = CreateEnumArray(allowedValues.Values);
                     break;
             }
-        }
 
         return schema;
     }
@@ -340,7 +315,7 @@ public static class JsonRpcSchemaExporter {
                 float number => JsonValue.Create(number),
                 decimal number => JsonValue.Create(number),
                 char character => JsonValue.Create(character.ToString()),
-                _ => JsonValue.Create(Convert.ToString(value, CultureInfo.InvariantCulture)),
+                _ => JsonValue.Create(Convert.ToString(value, CultureInfo.InvariantCulture))
             };
             array.Add(node);
         }
@@ -349,13 +324,11 @@ public static class JsonRpcSchemaExporter {
     }
 
     private static void ApplyRange(JsonObject schema, RangeAttribute range) {
-        if (TryConvertRangeOperand(range.Minimum, out var minimum)) {
+        if (TryConvertRangeOperand(range.Minimum, out var minimum))
             schema[range.MinimumIsExclusive ? "exclusiveMinimum" : "minimum"] = minimum;
-        }
 
-        if (TryConvertRangeOperand(range.Maximum, out var maximum)) {
+        if (TryConvertRangeOperand(range.Maximum, out var maximum))
             schema[range.MaximumIsExclusive ? "exclusiveMaximum" : "maximum"] = maximum;
-        }
     }
 
     /// <summary>
@@ -387,20 +360,20 @@ public static class JsonRpcSchemaExporter {
     /// Whether a schema node's <c>type</c> is (or, for a nullable union like <c>["array","null"]</c>, contains)
     /// <c>"array"</c> — the switch between <c>minLength</c>/<c>maxLength</c> and <c>minItems</c>/<c>maxItems</c>.
     /// </summary>
-    private static bool IsArraySchema(JsonObject schema) =>
-        schema["type"] switch {
+    private static bool IsArraySchema(JsonObject schema) {
+        return schema["type"] switch {
             JsonValue single => single.TryGetValue<string>(out var type) && type == "array",
             JsonArray union => union.Any(static node =>
                 node is JsonValue value && value.TryGetValue<string>(out var type) && type == "array"),
-            _ => false,
+            _ => false
         };
+    }
 
     internal static JsonNode NormalizeNumericType(JsonSchemaExporterContext ctx, JsonNode schema) {
         if (schema is not JsonObject obj ||
             obj["type"] is not JsonArray typeArr ||
-            !obj.ContainsKey("pattern")) {
+            !obj.ContainsKey("pattern"))
             return schema;
-        }
 
         var types = typeArr
             .Select(t => t?.GetValue<string>())
@@ -408,9 +381,7 @@ public static class JsonRpcSchemaExporter {
             .ToList()!;
 
         var numericType = types.FirstOrDefault(t => t is "number" or "integer");
-        if (numericType is null || !types.Contains("string")) {
-            return schema;
-        }
+        if (numericType is null || !types.Contains("string")) return schema;
 
         obj.Remove("pattern");
         var remaining = types.Where(t => t != "string").ToList();
@@ -427,13 +398,12 @@ public static class JsonRpcSchemaExporter {
         var options = jsonOptions is null
             ? new JsonSerializerOptions {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                Converters = { new JsonStringEnumConverter() },
+                Converters = { new JsonStringEnumConverter() }
             }
             : new JsonSerializerOptions(jsonOptions);
 
-        if (options.TypeInfoResolver is null && options.TypeInfoResolverChain.Count == 0) {
+        if (options.TypeInfoResolver is null && options.TypeInfoResolverChain.Count == 0)
             options.TypeInfoResolver = new DefaultJsonTypeInfoResolver();
-        }
 
         return options;
     }

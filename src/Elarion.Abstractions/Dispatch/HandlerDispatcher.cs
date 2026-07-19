@@ -27,13 +27,11 @@ public sealed class HandlerDispatcher {
     public HandlerDispatcher Map<TRequest, TResponse>(
         string name, HandlerTransports transports = HandlerTransports.All, bool idempotent = false)
         where TRequest : class {
-        if (_frozen is not null) {
+        if (_frozen is not null)
             throw new InvalidOperationException("Cannot register handlers after Freeze() has been called.");
-        }
-        if (_building.ContainsKey(name)) {
+        if (_building.ContainsKey(name))
             throw new InvalidOperationException(
                 $"An operation named '{name}' is already registered; operation names must be unique across the bus.");
-        }
 
         _building[name] = new HandlerRoute(
             name,
@@ -63,13 +61,11 @@ public sealed class HandlerDispatcher {
         HandlerTransports transports = HandlerTransports.All,
         bool idempotent = false)
         where TRequest : class {
-        if (_frozen is not null) {
+        if (_frozen is not null)
             throw new InvalidOperationException("Cannot register handlers after Freeze() has been called.");
-        }
-        if (_building.ContainsKey(name)) {
+        if (_building.ContainsKey(name))
             throw new InvalidOperationException(
                 $"An operation named '{name}' is already registered; operation names must be unique across the bus.");
-        }
 
         _building[name] = new HandlerRoute(
             name,
@@ -97,17 +93,16 @@ public sealed class HandlerDispatcher {
     }
 
     /// <summary>Looks up the route registered under <paramref name="name"/> (case-insensitive).</summary>
-    public bool TryGetRoute(string name, out HandlerRoute route) =>
-        Routes.TryGetValue(name, out route!);
+    public bool TryGetRoute(string name, out HandlerRoute route) {
+        return Routes.TryGetValue(name, out route!);
+    }
 
     /// <summary>
     /// Looks up the route registered under <paramref name="name"/> only when it is exposed on
     /// <paramref name="transport"/> — so a JSON-RPC call to an MCP-only operation reports "not found".
     /// </summary>
     public bool TryGetRoute(string name, HandlerTransports transport, out HandlerRoute route) {
-        if (Routes.TryGetValue(name, out route!) && (route.Transports & transport) != 0) {
-            return true;
-        }
+        if (Routes.TryGetValue(name, out route!) && (route.Transports & transport) != 0) return true;
 
         route = null!;
         return false;
@@ -117,8 +112,9 @@ public sealed class HandlerDispatcher {
     public IReadOnlyCollection<HandlerRoute> AllRoutes => Routes.Values;
 
     /// <summary>The routes exposed on <paramref name="transport"/> (the subset a given transport adapter serves).</summary>
-    public IEnumerable<HandlerRoute> RoutesFor(HandlerTransports transport) =>
-        Routes.Values.Where(route => (route.Transports & transport) != 0);
+    public IEnumerable<HandlerRoute> RoutesFor(HandlerTransports transport) {
+        return Routes.Values.Where(route => (route.Transports & transport) != 0);
+    }
 
     /// <summary>
     /// Dispatches <paramref name="request"/> to the handler registered under <paramref name="name"/>, in the
@@ -128,10 +124,9 @@ public sealed class HandlerDispatcher {
     /// </summary>
     public ValueTask<Result<object>> DispatchAsync(
         string name, object request, IServiceProvider scope, CancellationToken ct) {
-        if (!Routes.TryGetValue(name, out var route)) {
+        if (!Routes.TryGetValue(name, out var route))
             return ValueTask.FromResult(
                 Result<object>.Failure(AppError.NotFound($"No handler is registered for '{name}'.")));
-        }
 
         return route.InvokeAsync(request, scope, ct);
     }

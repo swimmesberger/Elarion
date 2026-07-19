@@ -4,9 +4,9 @@ using Elarion.Abstractions;
 using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Pipeline;
 using Xunit;
-
 using Elarion.Pipeline;
 using Elarion.Diagnostics;
+
 namespace Elarion.Tests.Services;
 
 // The tracing + execution-metric half of the merged ObservabilityDecorator (ADR-0059). The context-enrichment
@@ -18,8 +18,9 @@ public sealed class ObservabilityDecoratorTests {
     private static readonly IHandlerContextEnricher[] NoEnrichers = [];
 
     private static ObservabilityDecorator<Request, Result<int>> Decorate(
-        IHandler<Request, Result<int>> inner, string name, HandlerMetadata? metadata = null) =>
-        new(inner, name, metadata ?? Metadata, NoEnrichers, loggerFactory: null);
+        IHandler<Request, Result<int>> inner, string name, HandlerMetadata? metadata = null) {
+        return new ObservabilityDecorator<Request, Result<int>>(inner, name, metadata ?? Metadata, NoEnrichers, null);
+    }
 
     [Fact]
     public async Task HandleAsync_SuccessResult_EmitsSpanAndMetricWithOkOutcome() {
@@ -103,12 +104,16 @@ public sealed class ObservabilityDecoratorTests {
         // must carry its OWN pipeline, not whichever handler rendered first.
         var metadataA = new HandlerMetadata(
             typeof(SuccessHandler), typeof(Request), typeof(Result<int>),
-            () => [new PipelineStep(typeof(ObservabilityDecorator<,>), Conditional: false),
-                new PipelineStep(typeof(AuthorizationDecorator<,>), Conditional: false)]);
+            () => [
+                new PipelineStep(typeof(ObservabilityDecorator<,>), false),
+                new PipelineStep(typeof(AuthorizationDecorator<,>), false)
+            ]);
         var metadataB = new HandlerMetadata(
             typeof(FailureHandler), typeof(Request), typeof(Result<int>),
-            () => [new PipelineStep(typeof(ObservabilityDecorator<,>), Conditional: false),
-                new PipelineStep(typeof(TransactionDecorator<,>), Conditional: true)]);
+            () => [
+                new PipelineStep(typeof(ObservabilityDecorator<,>), false),
+                new PipelineStep(typeof(TransactionDecorator<,>), true)
+            ]);
         var decoratorA = Decorate(new SuccessHandler(), "HandlerA", metadataA);
         var decoratorB = Decorate(new SuccessHandler(), "HandlerB", metadataB);
 
@@ -126,17 +131,20 @@ public sealed class ObservabilityDecoratorTests {
     private sealed record Request;
 
     private sealed class SuccessHandler : IHandler<Request, Result<int>> {
-        public ValueTask<Result<int>> HandleAsync(Request request, CancellationToken ct) =>
-            ValueTask.FromResult(Result<int>.Success(7));
+        public ValueTask<Result<int>> HandleAsync(Request request, CancellationToken ct) {
+            return ValueTask.FromResult(Result<int>.Success(7));
+        }
     }
 
     private sealed class FailureHandler : IHandler<Request, Result<int>> {
-        public ValueTask<Result<int>> HandleAsync(Request request, CancellationToken ct) =>
-            ValueTask.FromResult(Result<int>.Failure(AppError.NotFound("missing")));
+        public ValueTask<Result<int>> HandleAsync(Request request, CancellationToken ct) {
+            return ValueTask.FromResult(Result<int>.Failure(AppError.NotFound("missing")));
+        }
     }
 
     private sealed class ThrowingHandler : IHandler<Request, Result<int>> {
-        public ValueTask<Result<int>> HandleAsync(Request request, CancellationToken ct) =>
+        public ValueTask<Result<int>> HandleAsync(Request request, CancellationToken ct) {
             throw new InvalidOperationException("boom");
+        }
     }
 }

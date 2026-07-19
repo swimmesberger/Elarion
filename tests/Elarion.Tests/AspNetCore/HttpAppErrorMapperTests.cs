@@ -15,6 +15,7 @@ public sealed class HttpAppErrorMapperTests {
     [InlineData(ErrorKind.Unauthorized, 401)]
     [InlineData(ErrorKind.BusinessRule, 422)]
     [InlineData(ErrorKind.Internal, 500)]
-    public void MapToStatusCode_MapsEachKind(ErrorKind kind, int expected) =>
+    public void MapToStatusCode_MapsEachKind(ErrorKind kind, int expected) {
         HttpAppErrorMapper.MapToStatusCode(kind).Should().Be(expected);
+    }
 }

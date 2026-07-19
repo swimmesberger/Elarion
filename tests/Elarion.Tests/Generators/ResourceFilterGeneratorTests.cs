@@ -6,11 +6,9 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class ResourceFilterGeneratorTests
-{
+public sealed class ResourceFilterGeneratorTests {
     [Fact]
-    public void ResourceFilter_OwnerOnly_GuidKey_EmitsAuthorizerAndOwnerPredicate()
-    {
+    public void ResourceFilter_OwnerOnly_GuidKey_EmitsAuthorizerAndOwnerPredicate() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -36,8 +34,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_OwnerAndTenant_ComposesScopeAndGrant()
-    {
+    public void ResourceFilter_OwnerAndTenant_ComposesScopeAndGrant() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -63,8 +60,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_StringOwner_ReadsUserIdDirectly()
-    {
+    public void ResourceFilter_StringOwner_ReadsUserIdDirectly() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -87,8 +83,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_IntOwner_UsesInt32TryParse()
-    {
+    public void ResourceFilter_IntOwner_UsesInt32TryParse() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -109,8 +104,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_CustomTenantClaim_IsHonored()
-    {
+    public void ResourceFilter_CustomTenantClaim_IsHonored() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -135,8 +129,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_UnknownProperty_ReportsErrorAndGeneratesNothing()
-    {
+    public void ResourceFilter_UnknownProperty_ReportsErrorAndGeneratesNothing() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -154,8 +147,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_UnsupportedPropertyType_ReportsError()
-    {
+    public void ResourceFilter_UnsupportedPropertyType_ReportsError() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -174,8 +166,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_NullableProperty_ReportsUnsupported()
-    {
+    public void ResourceFilter_NullableProperty_ReportsUnsupported() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -194,8 +185,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_NonPartialClass_ReportsError()
-    {
+    public void ResourceFilter_NonPartialClass_ReportsError() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -214,8 +204,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_NoRules_ReportsError()
-    {
+    public void ResourceFilter_NoRules_ReportsError() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -233,8 +222,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_Shared_EmitsScopedAuthorizerWithGrantExists()
-    {
+    public void ResourceFilter_Shared_EmitsScopedAuthorizerWithGrantExists() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -252,26 +240,36 @@ public sealed class ResourceFilterGeneratorTests
         var source = GetGeneratedSource(result, "Sample_Domain_ContactAccess.ResourceFilter.g.cs");
 
         // Scoped service taking the grant source, plus a DI registration helper.
-        source.Should().Contain("private readonly global::Elarion.Authorization.EntityFrameworkCore.IResourceGrantSource __grants;");
-        source.Should().Contain("public ContactAccess(global::Elarion.Authorization.EntityFrameworkCore.IResourceGrantSource grants) => __grants = grants;");
-        source.Should().Contain("public static void Register(global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+        source.Should()
+            .Contain(
+                "private readonly global::Elarion.Authorization.EntityFrameworkCore.IResourceGrantSource __grants;");
+        source.Should()
+            .Contain(
+                "public ContactAccess(global::Elarion.Authorization.EntityFrameworkCore.IResourceGrantSource grants) => __grants = grants;");
+        source.Should()
+            .Contain(
+                "public static void Register(global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         source.Should().NotContain("public static ContactAccess Specification");
 
         // The owner grant is OR-combined with a correlated EXISTS over the grants table for the caller's
         // user id OR any of their roles (a small IN over Roles), matched on the resource type, id, and operation.
         source.Should().Contain("var __ok0 = global::System.Guid.TryParse(user.UserId, out var __key0);");
         source.Should().Contain("var __roles = user.Roles;");
-        source.Should().Contain("global::System.Linq.Queryable.Any(__grantsQuery, __g => __g.ResourceType == \"Contact\"");
+        source.Should()
+            .Contain("global::System.Linq.Queryable.Any(__grantsQuery, __g => __g.ResourceType == \"Contact\"");
         source.Should().Contain("__g.ResourceId == __e.Id.ToString()");
         source.Should().Contain("__g.Operation == __op");
         source.Should().Contain("(__g.PrincipalKind == \"user\" && __g.PrincipalId == __uid)");
-        source.Should().Contain("(__g.PrincipalKind == \"role\" && global::System.Linq.Enumerable.Contains(__roles, __g.PrincipalId))");
-        source.Should().Contain("return __e => (__ok0 && __e.OwnerId == __key0) || global::System.Linq.Queryable.Any(__grantsQuery,");
+        source.Should()
+            .Contain(
+                "(__g.PrincipalKind == \"role\" && global::System.Linq.Enumerable.Contains(__roles, __g.PrincipalId))");
+        source.Should()
+            .Contain(
+                "return __e => (__ok0 && __e.OwnerId == __key0) || global::System.Linq.Queryable.Any(__grantsQuery,");
     }
 
     [Fact]
-    public void ResourceFilter_SharedWithoutResourceType_ReportsElres005()
-    {
+    public void ResourceFilter_SharedWithoutResourceType_ReportsElres005() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -289,8 +287,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_SharedGeneratedSource_CompilesAgainstRuntime()
-    {
+    public void ResourceFilter_SharedGeneratedSource_CompilesAgainstRuntime() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -323,8 +320,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_GeneratedSource_CompilesAgainstRuntime()
-    {
+    public void ResourceFilter_GeneratedSource_CompilesAgainstRuntime() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -357,8 +353,7 @@ public sealed class ResourceFilterGeneratorTests
     }
 
     [Fact]
-    public void ResourceFilter_ReusesOutputsAfterIrrelevantEdit()
-    {
+    public void ResourceFilter_ReusesOutputsAfterIrrelevantEdit() {
         var source =
             """
             namespace Elarion.Paging {
@@ -390,65 +385,68 @@ public sealed class ResourceFilterGeneratorTests
             "ResourceFilterTargets");
     }
 
-    private static GeneratorDriverRunResult Generate(string testSource)
-    {
+    private static GeneratorDriverRunResult Generate(string testSource) {
         var source =
             $$"""
-            namespace Elarion.Paging {
-                [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-                public sealed class ResourceFilterAttribute<TEntity> : System.Attribute where TEntity : class {
-                    public string? OwnerProperty { get; set; }
-                    public string? TenantProperty { get; set; }
-                    public string TenantClaimType { get; set; } = "tenant";
-                    public bool Shared { get; set; }
-                    public string? ResourceTypeName { get; set; }
-                    public string IdProperty { get; set; } = "Id";
-                }
-            }
+              namespace Elarion.Paging {
+                  [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+                  public sealed class ResourceFilterAttribute<TEntity> : System.Attribute where TEntity : class {
+                      public string? OwnerProperty { get; set; }
+                      public string? TenantProperty { get; set; }
+                      public string TenantClaimType { get; set; } = "tenant";
+                      public bool Shared { get; set; }
+                      public string? ResourceTypeName { get; set; }
+                      public string IdProperty { get; set; } = "Id";
+                  }
+              }
 
-            {{testSource}}
-            """;
+              {{testSource}}
+              """;
 
         var syntaxTree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview));
         var compilation = CSharpCompilation.Create(
             "ResourceFilterGeneratorTests",
             [syntaxTree],
             PlatformReferences(),
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new ResourceFilterGenerator());
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
-    private static IReadOnlyList<Diagnostic> CompileErrors(params string[] sources)
-        => CompileErrors(RuntimeReferences(), sources);
+    private static IReadOnlyList<Diagnostic> CompileErrors(params string[] sources) {
+        return CompileErrors(RuntimeReferences(), sources);
+    }
 
-    private static IReadOnlyList<Diagnostic> CompileErrors(IReadOnlyList<MetadataReference> references, params string[] sources)
-    {
+    private static IReadOnlyList<Diagnostic> CompileErrors(IReadOnlyList<MetadataReference> references,
+        params string[] sources) {
         var compilation = CSharpCompilation.Create(
             "ResourceFilterCompileCheck",
             sources.Select(s => CSharpSyntaxTree.ParseText(s, new CSharpParseOptions(LanguageVersion.Preview))),
             references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
 
         return compilation.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
     }
 
-    private static void NoErrors(GeneratorDriverRunResult result) =>
+    private static void NoErrors(GeneratorDriverRunResult result) {
         result.Diagnostics
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
+    }
 
-    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static IReadOnlyList<MetadataReference> PlatformReferences()
-    {
+    private static IReadOnlyList<MetadataReference> PlatformReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
 
@@ -458,8 +456,7 @@ public sealed class ResourceFilterGeneratorTests
             .ToArray();
     }
 
-    private static IReadOnlyList<MetadataReference> RuntimeReferences()
-    {
+    private static IReadOnlyList<MetadataReference> RuntimeReferences() {
         var references = PlatformReferences().ToList();
         references.Add(MetadataReference.CreateFromFile(
             typeof(Elarion.Abstractions.Authorization.IQueryAuthorizer<>).Assembly.Location));

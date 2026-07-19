@@ -156,7 +156,7 @@ public sealed class AzureStagedUploadStoreIntegrationTests(AzuriteFixture fixtur
         var ct = TestContext.Current.CancellationToken;
         var (store, blobStore) = CreateStores();
 
-        var created = await store.CreateAsync(NewCreation(length: null), ct);
+        var created = await store.CreateAsync(NewCreation(null), ct);
         created.Length.Should().BeNull();
 
         await store.AppendAsync(created.Id, 0, new MemoryStream([1, 2, 3]), ct);
@@ -213,7 +213,7 @@ public sealed class AzureStagedUploadStoreIntegrationTests(AzuriteFixture fixtur
         var ct = TestContext.Current.CancellationToken;
         var staging = $"staging-{Guid.NewGuid():N}";
         var (store, _) = CreateStores(staging);
-        var created = await store.CreateAsync(NewCreation(length: null), ct);
+        var created = await store.CreateAsync(NewCreation(null), ct);
         await store.AppendAsync(created.Id, 0, new MemoryStream([1, 2, 3]), ct);
 
         var interceptedStore = CreateInterceptedStore(
@@ -239,7 +239,7 @@ public sealed class AzureStagedUploadStoreIntegrationTests(AzuriteFixture fixtur
         var ct = TestContext.Current.CancellationToken;
         var staging = $"staging-{Guid.NewGuid():N}";
         var (store, _) = CreateStores(staging);
-        var created = await store.CreateAsync(NewCreation(length: null), ct);
+        var created = await store.CreateAsync(NewCreation(null), ct);
         await store.AppendAsync(created.Id, 0, new MemoryStream([1, 2, 3]), ct);
 
         var interceptedStore = CreateInterceptedStore(
@@ -290,51 +290,52 @@ public sealed class AzureStagedUploadStoreIntegrationTests(AzuriteFixture fixtur
             NullLogger<AzureStagedUploadStore>.Instance);
     }
 
-    private async Task AppendRawByteAsync(string stagingContainer, string uploadId, CancellationToken ct) =>
+    private async Task AppendRawByteAsync(string stagingContainer, string uploadId, CancellationToken ct) {
         await fixture.Client.GetBlobContainerClient(stagingContainer)
             .GetAppendBlobClient(uploadId)
             .AppendBlockAsync(new MemoryStream([7]), cancellationToken: ct);
+    }
 
     /// <summary>Runs a one-shot side effect after the first response matching the trigger, so a test can
     /// deterministically interleave a concurrent mutation inside a multi-request operation.</summary>
-    private sealed class MutateAfterResponsePolicy(Func<Request, bool> trigger, Func<Task> mutation) : HttpPipelinePolicy {
+    private sealed class MutateAfterResponsePolicy(Func<Request, bool> trigger, Func<Task> mutation)
+        : HttpPipelinePolicy {
         private int _fired;
 
         public override async ValueTask ProcessAsync(HttpMessage message, ReadOnlyMemory<HttpPipelinePolicy> pipeline) {
             await ProcessNextAsync(message, pipeline);
-            if (trigger(message.Request) && Interlocked.Exchange(ref _fired, 1) == 0) {
-                await mutation();
-            }
+            if (trigger(message.Request) && Interlocked.Exchange(ref _fired, 1) == 0) await mutation();
         }
 
-        public override void Process(HttpMessage message, ReadOnlyMemory<HttpPipelinePolicy> pipeline) =>
+        public override void Process(HttpMessage message, ReadOnlyMemory<HttpPipelinePolicy> pipeline) {
             ProcessNext(message, pipeline);
+        }
     }
 
     private (AzureStagedUploadStore Store, AzureBlobStore BlobStore) CreateStores(string? stagingContainer = null) {
         var options = new AzureStagedUploadOptions();
-        if (stagingContainer is not null) {
-            options.StagingContainer = stagingContainer;
-        }
+        if (stagingContainer is not null) options.StagingContainer = stagingContainer;
 
         var store = new AzureStagedUploadStore(fixture.Client, options, NullLogger<AzureStagedUploadStore>.Instance);
         var blobStore = new AzureBlobStore(fixture.Client, NullLogger<AzureBlobStore>.Instance);
         return (store, blobStore);
     }
 
-    private static StagedUploadCreation NewCreation(long? length) =>
-        new() {
+    private static StagedUploadCreation NewCreation(long? length) {
+        return new StagedUploadCreation {
             Container = $"c{Guid.NewGuid():N}",
             Name = $"user-1/{Guid.NewGuid():N}/file.bin",
             Length = length,
             ContentType = "application/octet-stream",
             OwnerId = "user-1",
-            ExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(24),
+            ExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(24)
         };
+    }
 
-    private static StagedUploadCompletion NewCompletion() =>
-        new() {
+    private static StagedUploadCompletion NewCompletion() {
+        return new StagedUploadCompletion {
             SessionExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(1),
-            BlobExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(30),
+            BlobExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(30)
         };
+    }
 }

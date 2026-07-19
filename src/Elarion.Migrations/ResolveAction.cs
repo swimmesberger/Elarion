@@ -13,5 +13,5 @@ public enum ResolveAction {
     /// Declare the version applied — the schema change was completed by hand — turning the failed row
     /// into an applied one, re-checksummed against the current script content.
     /// </summary>
-    MarkApplied,
+    MarkApplied
 }

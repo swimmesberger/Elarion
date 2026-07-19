@@ -6,11 +6,9 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class ModuleServiceRegistrationGeneratorTests
-{
+public sealed class ModuleServiceRegistrationGeneratorTests {
     [Fact]
-    public void GenerateServices_ImplicitContracts_EmitsServiceAndModuleMethods()
-    {
+    public void GenerateServices_ImplicitContracts_EmitsServiceAndModuleMethods() {
         var source = CreateSource(
             """
             namespace Sample.Modules.Billing {
@@ -43,8 +41,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateServices_UseElarion_EmitsServiceAndModuleMethods()
-    {
+    public void GenerateServices_UseElarion_EmitsServiceAndModuleMethods() {
         var source = CreateSource(
             """
             namespace Sample.Modules.Billing {
@@ -73,8 +70,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateServices_ExplicitContract_OverridesImplicitContracts()
-    {
+    public void GenerateServices_ExplicitContract_OverridesImplicitContracts() {
         var source = CreateSource(
             """
             namespace Sample.Modules.Billing {
@@ -106,8 +102,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateServices_HostedSingleton_RegistersHostedServiceLookup()
-    {
+    public void GenerateServices_HostedSingleton_RegistersHostedServiceLookup() {
         var source = CreateSource(
             """
             namespace Sample.Modules.Billing {
@@ -140,8 +135,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateServices_HostedScoped_EmitsScopeDiagnostic()
-    {
+    public void GenerateServices_HostedScoped_EmitsScopeDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Modules.Billing {
@@ -169,8 +163,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateServices_InvalidExplicitContract_EmitsContractDiagnostic()
-    {
+    public void GenerateServices_InvalidExplicitContract_EmitsContractDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Modules.Billing {
@@ -199,8 +192,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateServices_NoInterfaces_FallsBackToSelfRegistration()
-    {
+    public void GenerateServices_NoInterfaces_FallsBackToSelfRegistration() {
         var source = CreateSource(
             """
             namespace Sample.Modules.Billing {
@@ -226,8 +218,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateServices_PartialDeclarations_DeduplicatesModulesAndServices()
-    {
+    public void GenerateServices_PartialDeclarations_DeduplicatesModulesAndServices() {
         var source = CreateSource(
             """
             namespace Sample.Modules.Billing {
@@ -253,11 +244,10 @@ public sealed class ModuleServiceRegistrationGeneratorTests
             """);
 
         var result = Generate(source);
-        var generatedFileCount = result.GeneratedTrees.Count(
-            tree => string.Equals(
-                Path.GetFileName(tree.FilePath),
-                "Sample_Modules_Billing_Services_InvoiceNumberGenerator.g.cs",
-                StringComparison.Ordinal));
+        var generatedFileCount = result.GeneratedTrees.Count(tree => string.Equals(
+            Path.GetFileName(tree.FilePath),
+            "Sample_Modules_Billing_Services_InvoiceNumberGenerator.g.cs",
+            StringComparison.Ordinal));
         var moduleRegistrationSource = GetGeneratedSource(result, "BillingServiceExtensions.g.cs");
 
         generatedFileCount.Should().Be(1);
@@ -266,8 +256,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateServices_GenericImplementation_EmitsUnsupportedDiagnostic()
-    {
+    public void GenerateServices_GenericImplementation_EmitsUnsupportedDiagnostic() {
         var source = CreateSource(
             """
             namespace Sample.Modules.Billing {
@@ -286,15 +275,14 @@ public sealed class ModuleServiceRegistrationGeneratorTests
             }
             """);
 
-        var result = Generate(source, assertGeneratedOutputCompiles: false);
+        var result = Generate(source, false);
 
         result.Diagnostics.Any(d => d.Id == "ELSG003" && d.Severity == DiagnosticSeverity.Error)
             .Should().BeTrue();
     }
 
     [Fact]
-    public void GenerateServices_NestedServices_UseUniqueRegistrationIdentifiers()
-    {
+    public void GenerateServices_NestedServices_UseUniqueRegistrationIdentifiers() {
         var source = CreateSource(
             """
             namespace Sample.Modules.Billing {
@@ -344,8 +332,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateServices_ServiceSuffixSiblings_KeepUniqueRegistrationIdentifiers()
-    {
+    public void GenerateServices_ServiceSuffixSiblings_KeepUniqueRegistrationIdentifiers() {
         var source = CreateSource(
             """
             namespace Sample.Modules.Billing {
@@ -381,8 +368,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
     }
 
     [Fact]
-    public void GenerateServices_GlobalNamespaceModule_EmitsCompilableRegistration()
-    {
+    public void GenerateServices_GlobalNamespaceModule_EmitsCompilableRegistration() {
         var source = CreateSource(
             """
             [Elarion.Abstractions.Modules.AppModule("Root")]
@@ -409,46 +395,47 @@ public sealed class ModuleServiceRegistrationGeneratorTests
 
     private static string CreateSource(
         string testSource,
-        string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateModuleServices]") =>
-        $$"""
-        {{assemblyTrigger}}
+        string assemblyTrigger = "[assembly: Elarion.Abstractions.GenerateModuleServices]") {
+        return $$"""
+                 {{assemblyTrigger}}
 
-        namespace Elarion.Abstractions {
-            public enum ServiceScope {
-                Scoped = 0,
-                Singleton = 1,
-                Transient = 2
-            }
+                 namespace Elarion.Abstractions {
+                     public enum ServiceScope {
+                         Scoped = 0,
+                         Singleton = 1,
+                         Transient = 2
+                     }
 
-            [System.AttributeUsage(System.AttributeTargets.Assembly)]
-            public sealed class GenerateModuleServicesAttribute : System.Attribute;
+                     [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                     public sealed class GenerateModuleServicesAttribute : System.Attribute;
 
-            [System.AttributeUsage(System.AttributeTargets.Assembly)]
-            public sealed class UseElarionAttribute : System.Attribute;
+                     [System.AttributeUsage(System.AttributeTargets.Assembly)]
+                     public sealed class UseElarionAttribute : System.Attribute;
 
-            [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-            public sealed class ServiceAttribute : System.Attribute {
-                public ServiceAttribute(params System.Type[] serviceTypes) {
-                }
+                     [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+                     public sealed class ServiceAttribute : System.Attribute {
+                         public ServiceAttribute(params System.Type[] serviceTypes) {
+                         }
 
-                public ServiceScope Scope { get; init; } = ServiceScope.Scoped;
-            }
-        }
+                         public ServiceScope Scope { get; init; } = ServiceScope.Scoped;
+                     }
+                 }
 
-        namespace Elarion.Abstractions.Modules {
-            [System.AttributeUsage(System.AttributeTargets.Class)]
-            public sealed class AppModuleAttribute : System.Attribute {
-                public AppModuleAttribute(string name) {
-                    Name = name;
-                }
+                 namespace Elarion.Abstractions.Modules {
+                     [System.AttributeUsage(System.AttributeTargets.Class)]
+                     public sealed class AppModuleAttribute : System.Attribute {
+                         public AppModuleAttribute(string name) {
+                             Name = name;
+                         }
 
-                public string Name { get; }
-                public string? DependsOn { get; init; }
-            }
-        }
+                         public string Name { get; }
+                         public string? DependsOn { get; init; }
+                     }
+                 }
 
-        {{testSource}}
-        """;
+                 {{testSource}}
+                 """;
+    }
 
     [Fact]
     public void GenerateModuleServices_IrrelevantEdit_ReusesPipeline() {
@@ -474,8 +461,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
 
     private static GeneratorDriverRunResult Generate(
         string source,
-        bool assertGeneratedOutputCompiles = true)
-    {
+        bool assertGeneratedOutputCompiles = true) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var syntaxTree = CSharpSyntaxTree.ParseText(source, parseOptions);
         var compilation = CSharpCompilation.Create(
@@ -490,7 +476,7 @@ public sealed class ModuleServiceRegistrationGeneratorTests
 
         // The ConfigureDefaultServices skeleton ships in the same generator assembly and supplies the partial-method
         // declarations the service generator's filler implements, so it must run alongside here.
-        GeneratorDriver driver = CSharpGeneratorDriver
+        var driver = CSharpGeneratorDriver
             .Create(new ModuleServiceRegistrationGenerator(), new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
@@ -505,23 +491,21 @@ public sealed class ModuleServiceRegistrationGeneratorTests
         nonGeneratorDiagnostics.Should().BeEmpty();
 
         if (assertGeneratedOutputCompiles)
-        {
             outputCompilation.GetDiagnostics()
                 .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
                 .Should().BeEmpty();
-        }
 
         return result;
     }
 
-    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences()
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
 

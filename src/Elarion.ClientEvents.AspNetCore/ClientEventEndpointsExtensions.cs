@@ -56,15 +56,11 @@ public static class ClientEventEndpointsExtensions {
         // Pre-checked here (the resolver checks too) so an unauthenticated caller with a malformed
         // subscriptions parameter still gets 401, not 400 — response precedence is part of the contract.
         var currentUser = services.GetService<ICurrentUser>();
-        if (currentUser is null || !currentUser.IsAuthenticated) {
-            return Results.Unauthorized();
-        }
+        if (currentUser is null || !currentUser.IsAuthenticated) return Results.Unauthorized();
 
         // Bodyless 400s: response bodies would go through the host's HTTP JSON options, which this endpoint
         // must not require (the repo default runs with reflection-based serialization off).
-        if (string.IsNullOrEmpty(subscriptions)) {
-            return Results.BadRequest();
-        }
+        if (string.IsNullOrEmpty(subscriptions)) return Results.BadRequest();
 
         ClientEventSubscriptionRequest[]? requests;
         try {
@@ -75,9 +71,7 @@ public static class ClientEventEndpointsExtensions {
             return Results.BadRequest();
         }
 
-        if (requests is null) {
-            return Results.BadRequest();
-        }
+        if (requests is null) return Results.BadRequest();
 
         // The subscribe pipeline (catalog lookup, fail-closed authorization, scope expansion) is the shared
         // transport-neutral resolver, so this endpoint and connection adapters can never drift apart.
@@ -112,19 +106,16 @@ public static class ClientEventEndpointsExtensions {
         while (!ct.IsCancellationRequested) {
             StreamSignal signal;
             (signal, pendingRead) = await WaitForNextAsync(reader, pendingRead, ct);
-            if (signal == StreamSignal.Completed) {
-                yield break;
-            }
+            if (signal == StreamSignal.Completed) yield break;
             if (signal == StreamSignal.KeepAlive) {
                 yield return new SseItem<string>(string.Empty, KeepAliveEventType);
                 continue;
             }
 
-            while (reader.TryRead(out var envelope)) {
+            while (reader.TryRead(out var envelope))
                 yield return new SseItem<string>(envelope.Payload, envelope.Topic) {
-                    EventId = envelope.Id.ToString(),
+                    EventId = envelope.Id.ToString()
                 };
-            }
         }
     }
 
@@ -137,9 +128,7 @@ public static class ClientEventEndpointsExtensions {
             pendingRead ??= reader.WaitToReadAsync(ct).AsTask();
             using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var winner = await Task.WhenAny(pendingRead, Task.Delay(KeepAliveInterval, delayCts.Token));
-            if (winner != pendingRead) {
-                return (StreamSignal.KeepAlive, pendingRead);
-            }
+            if (winner != pendingRead) return (StreamSignal.KeepAlive, pendingRead);
             delayCts.Cancel();
             return (await pendingRead ? StreamSignal.Event : StreamSignal.Completed, null);
         }
@@ -152,6 +141,6 @@ public static class ClientEventEndpointsExtensions {
     private enum StreamSignal {
         Event,
         KeepAlive,
-        Completed,
+        Completed
     }
 }

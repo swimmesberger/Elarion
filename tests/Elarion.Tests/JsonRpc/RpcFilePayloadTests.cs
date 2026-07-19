@@ -19,9 +19,10 @@ public sealed class RpcFilePayloadTests {
     }
 
     private sealed class DownloadHandler : IHandler<DownloadQuery, Result<ElarionFile>> {
-        public ValueTask<Result<ElarionFile>> HandleAsync(DownloadQuery request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<ElarionFile>>(
+        public ValueTask<Result<ElarionFile>> HandleAsync(DownloadQuery request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<ElarionFile>>(
                 new ElarionFile("id;name"u8.ToArray(), "text/csv") { FileName = $"{request.Name}.csv" });
+        }
     }
 
     private sealed record UploadCommand {
@@ -32,13 +33,14 @@ public sealed class RpcFilePayloadTests {
     private sealed record UploadReceipt(string Container, string ContentType, int Size);
 
     private sealed class UploadHandler : IHandler<UploadCommand, Result<UploadReceipt>> {
-        public ValueTask<Result<UploadReceipt>> HandleAsync(UploadCommand request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<UploadReceipt>>(new UploadReceipt(
+        public ValueTask<Result<UploadReceipt>> HandleAsync(UploadCommand request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<UploadReceipt>>(new UploadReceipt(
                 request.Container, request.File.ContentType, request.File.Bytes.Length));
+        }
     }
 
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
     };
 
     private static (JsonRpcDispatcher Dispatcher, IServiceProvider Services) Build() {
@@ -64,7 +66,7 @@ public sealed class RpcFilePayloadTests {
             Jsonrpc = "2.0",
             Method = "files.download",
             Params = JsonSerializer.SerializeToElement(new { name = "clients" }, Options),
-            Id = "1",
+            Id = "1"
         };
 
         var response = await dispatcher.DispatchAsync(
@@ -88,13 +90,13 @@ public sealed class RpcFilePayloadTests {
         // Built the way a client would send it: the file property is the converter's base64 envelope.
         var upload = new {
             container = "invoices",
-            file = new ElarionFile("hello upload"u8.ToArray(), "text/plain") { FileName = "note.txt" },
+            file = new ElarionFile("hello upload"u8.ToArray(), "text/plain") { FileName = "note.txt" }
         };
         var request = new JsonRpcRequest {
             Jsonrpc = "2.0",
             Method = "files.upload",
             Params = JsonSerializer.SerializeToElement(upload, Options),
-            Id = "1",
+            Id = "1"
         };
 
         var response = await dispatcher.DispatchAsync(
@@ -118,7 +120,7 @@ public sealed class RpcFilePayloadTests {
             Method = "files.upload",
             Params = JsonDocument.Parse(
                 """{"container":"invoices","file":{"contentType":"text/plain","data":"not base64!!!"}}""").RootElement,
-            Id = "1",
+            Id = "1"
         };
 
         var response = await dispatcher.DispatchAsync(

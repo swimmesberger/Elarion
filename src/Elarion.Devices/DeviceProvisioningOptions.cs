@@ -24,35 +24,27 @@ public sealed class DeviceProvisioningOptions {
     public int KeySizeBytes { get; set; } = 32;
 
     internal void Validate() {
-        if (string.IsNullOrEmpty(CodeAlphabet) || CodeAlphabet.Length < 10) {
+        if (string.IsNullOrEmpty(CodeAlphabet) || CodeAlphabet.Length < 10)
             throw new ArgumentException("CodeAlphabet must contain at least 10 characters.", nameof(CodeAlphabet));
-        }
 
         // Duplicates would silently bias generation (GetItems samples the string uniformly,
         // duplicates included), collapsing the real entropy below what the length suggests.
-        if (CodeAlphabet.Distinct().Count() != CodeAlphabet.Length) {
+        if (CodeAlphabet.Distinct().Count() != CodeAlphabet.Length)
             throw new ArgumentException("CodeAlphabet must not contain duplicate characters.", nameof(CodeAlphabet));
-        }
 
         // Redeem normalizes input (uppercase, separators stripped) before hashing, so every
         // alphabet character must survive normalization unchanged — otherwise issued codes could
         // never be redeemed (issue and redeem would hash different strings).
-        if (PairingCodes.Normalize(CodeAlphabet) != CodeAlphabet) {
+        if (PairingCodes.Normalize(CodeAlphabet) != CodeAlphabet)
             throw new ArgumentException(
                 "CodeAlphabet must be normalization-stable: uppercase characters only, no separators ('-', '.') or whitespace.",
                 nameof(CodeAlphabet));
-        }
 
-        if (CodeLength < 6) {
-            throw new ArgumentException("CodeLength must be at least 6.", nameof(CodeLength));
-        }
+        if (CodeLength < 6) throw new ArgumentException("CodeLength must be at least 6.", nameof(CodeLength));
 
-        if (CodeTimeToLive <= TimeSpan.Zero) {
+        if (CodeTimeToLive <= TimeSpan.Zero)
             throw new ArgumentException("CodeTimeToLive must be positive.", nameof(CodeTimeToLive));
-        }
 
-        if (KeySizeBytes < 16) {
-            throw new ArgumentException("KeySizeBytes must be at least 16.", nameof(KeySizeBytes));
-        }
+        if (KeySizeBytes < 16) throw new ArgumentException("KeySizeBytes must be at least 16.", nameof(KeySizeBytes));
     }
 }

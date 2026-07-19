@@ -14,8 +14,8 @@ public sealed partial class HandlerRegistrationGenerator {
             return null;
 
         return FindDecoratorListFromPipelineAttributes(classSymbol.GetAttributes(), decoratorListMeta)
-            ?? FindModuleDecoratorList(classSymbol, moduleDecoratorLists)
-            ?? FindDecoratorListFromPipelineAttributes(compilation.Assembly.GetAttributes(), decoratorListMeta);
+               ?? FindModuleDecoratorList(classSymbol, moduleDecoratorLists)
+               ?? FindDecoratorListFromPipelineAttributes(compilation.Assembly.GetAttributes(), decoratorListMeta);
     }
 
     /// <summary>
@@ -28,9 +28,9 @@ public sealed partial class HandlerRegistrationGenerator {
     private static (List<(string Namespace, AttributeData DecoratorList)> DecoratorLists,
         List<(string Namespace, bool RequireAuthenticated)> AuthDefaults,
         List<string> AuditDefaultNamespaces) BuildModuleMaps(
-        Compilation compilation,
-        EquatableArray<ModuleScanner.Module> modules,
-        CancellationToken ct) {
+            Compilation compilation,
+            EquatableArray<ModuleScanner.Module> modules,
+            CancellationToken ct) {
         var decoratorLists = new List<(string, AttributeData)>();
         var authDefaults = new List<(string, bool)>();
         var auditDefaults = new List<string>();
@@ -63,9 +63,8 @@ public sealed partial class HandlerRegistrationGenerator {
             }
 
             if (auditDefaultsAttr is not null &&
-                attributes.Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, auditDefaultsAttr))) {
+                attributes.Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, auditDefaultsAttr)))
                 auditDefaults.Add(module.Namespace);
-            }
         }
 
         return (decoratorLists, authDefaults, auditDefaults);
@@ -80,9 +79,8 @@ public sealed partial class HandlerRegistrationGenerator {
 
         foreach (var (moduleNamespace, decoratorList) in moduleDecoratorLists) {
             if (!IsNamespaceInScope(handlerNamespace, moduleNamespace) ||
-                moduleNamespace.Length <= bestNamespaceLength) {
+                moduleNamespace.Length <= bestNamespaceLength)
                 continue;
-            }
 
             bestDecoratorList = decoratorList;
             bestNamespaceLength = moduleNamespace.Length;
@@ -98,10 +96,9 @@ public sealed partial class HandlerRegistrationGenerator {
             if (attr.AttributeClass is null)
                 continue;
 
-            foreach (var metaAttr in attr.AttributeClass.GetAttributes()) {
+            foreach (var metaAttr in attr.AttributeClass.GetAttributes())
                 if (SymbolEqualityComparer.Default.Equals(metaAttr.AttributeClass, decoratorListMeta))
                     return metaAttr;
-            }
         }
 
         return null;
@@ -114,7 +111,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "'public static bool AppliesTo({1} handler)' so the generated registration can call it",
         "Elarion.Generators",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     internal static readonly DiagnosticDescriptor UnsupportedAppliesToSignature = new(
         "ELPIPE002",
@@ -124,7 +121,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "(use handler.RequestType for request-based checks)",
         "Elarion.Generators",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static ImmutableArray<DecoratorInfo> ParseDecorators(
         AttributeData decoratorListAttr,
@@ -197,9 +194,8 @@ public sealed partial class HandlerRegistrationGenerator {
 
         foreach (var param in constructors[0].Parameters) {
             if (param.Type is INamedTypeSymbol paramType &&
-                paramType.OriginalDefinition.ToDisplayString() == "Elarion.Abstractions.IHandler<TRequest, TResponse>") {
+                paramType.OriginalDefinition.ToDisplayString() == "Elarion.Abstractions.IHandler<TRequest, TResponse>")
                 continue;
-            }
 
             // A HandlerMetadata parameter is supplied by the generator (with the concrete handler type),
             // not resolved from DI — this is what makes attribute-driven decorators position-independent.
@@ -212,13 +208,14 @@ public sealed partial class HandlerRegistrationGenerator {
 
     // A decorator is `Decorator<TRequest, TResponse>`; it applies to a handler only if the handler's request
     // (TRequest) and response (TResponse) satisfy the decorator's type-parameter constraints.
-    private static bool SatisfiesConstraints(INamedTypeSymbol definition, ITypeSymbol requestType, ITypeSymbol responseType) {
+    private static bool SatisfiesConstraints(INamedTypeSymbol definition, ITypeSymbol requestType,
+        ITypeSymbol responseType) {
         var typeParameters = definition.TypeParameters;
         if (typeParameters.Length != 2)
             return true; // Not the expected shape; stay permissive rather than drop the decorator.
 
         return SatisfiesParameter(typeParameters[0], requestType)
-            && SatisfiesParameter(typeParameters[1], responseType);
+               && SatisfiesParameter(typeParameters[1], responseType);
     }
 
     private static bool SatisfiesParameter(ITypeParameterSymbol parameter, ITypeSymbol argument) {
@@ -249,9 +246,8 @@ public sealed partial class HandlerRegistrationGenerator {
         ITypeSymbol constraint,
         ITypeParameterSymbol self,
         ITypeSymbol argument) {
-        if (constraint is ITypeParameterSymbol) {
+        if (constraint is ITypeParameterSymbol)
             return SymbolEqualityComparer.Default.Equals(constraint, self) ? argument : null;
-        }
 
         if (constraint is INamedTypeSymbol { IsGenericType: true } named) {
             var resolvedArgs = new ITypeSymbol[named.TypeArguments.Length];
@@ -272,23 +268,22 @@ public sealed partial class HandlerRegistrationGenerator {
         if (constraint.TypeKind == TypeKind.Interface) {
             if (SymbolEqualityComparer.Default.Equals(argument, constraint))
                 return true;
-            foreach (var iface in argument.AllInterfaces) {
+            foreach (var iface in argument.AllInterfaces)
                 if (SymbolEqualityComparer.Default.Equals(iface, constraint))
                     return true;
-            }
 
             return false;
         }
 
-        for (ITypeSymbol? current = argument; current is not null; current = current.BaseType) {
+        for (var current = argument; current is not null; current = current.BaseType)
             if (SymbolEqualityComparer.Default.Equals(current, constraint))
                 return true;
-        }
 
         return false;
     }
 
-    private static bool IsNamespaceInScope(string candidateNamespace, string scopeNamespace) =>
-        candidateNamespace == scopeNamespace ||
-        candidateNamespace.StartsWith(scopeNamespace + ".", StringComparison.Ordinal);
+    private static bool IsNamespaceInScope(string candidateNamespace, string scopeNamespace) {
+        return candidateNamespace == scopeNamespace ||
+               candidateNamespace.StartsWith(scopeNamespace + ".", StringComparison.Ordinal);
+    }
 }

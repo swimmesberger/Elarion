@@ -9,5 +9,7 @@ public readonly record struct ActorSingletonKey {
     public static ActorSingletonKey Value => default;
 
     /// <inheritdoc />
-    public override string ToString() => "singleton";
+    public override string ToString() {
+        return "singleton";
+    }
 }

@@ -46,15 +46,12 @@ public sealed class VariantConfigurationValidator(
         ValidateConfiguredValues(findings);
         ValidatePlatformRegistrations(findings);
 
-        if (findings.Count > 0 && options.Strict) {
+        if (findings.Count > 0 && options.Strict)
             throw new InvalidOperationException(
                 "Variant registry validation failed:" + Environment.NewLine
-                + string.Join(Environment.NewLine, findings));
-        }
+                                                      + string.Join(Environment.NewLine, findings));
 
-        foreach (var finding in findings) {
-            logger.LogWarning("{VariantValidationFinding}", finding);
-        }
+        foreach (var finding in findings) logger.LogWarning("{VariantValidationFinding}", finding);
 
         return base.StartAsync(cancellationToken);
     }
@@ -67,9 +64,7 @@ public sealed class VariantConfigurationValidator(
                 // and always logs — a runtime settings write must never take the host down.
                 var findings = new List<string>();
                 ValidateConfiguredValues(findings);
-                foreach (var finding in findings) {
-                    logger.LogWarning("{VariantValidationFinding}", finding);
-                }
+                foreach (var finding in findings) logger.LogWarning("{VariantValidationFinding}", finding);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) {
@@ -86,19 +81,13 @@ public sealed class VariantConfigurationValidator(
 
     private void ValidateConfiguredValues(List<string> findings) {
         foreach (var descriptor in catalog.All) {
-            if (descriptor.Axis != VariantAxis.Configuration) {
-                continue;
-            }
+            if (descriptor.Axis != VariantAxis.Configuration) continue;
 
             var value = configuration[descriptor.Key];
-            if (string.IsNullOrWhiteSpace(value)) {
-                continue;
-            }
+            if (string.IsNullOrWhiteSpace(value)) continue;
 
             // Registry values are lower-cased, matching the runtime's case-insensitive keyed lookup.
-            if (descriptor.Values.Contains(value.ToLowerInvariant(), StringComparer.Ordinal)) {
-                continue;
-            }
+            if (descriptor.Values.Contains(value.ToLowerInvariant(), StringComparer.Ordinal)) continue;
 
             findings.Add(descriptor.HasDefault
                 ? $"Configuration key '{descriptor.Key}' is '{value}', which no variant of "
@@ -112,18 +101,12 @@ public sealed class VariantConfigurationValidator(
     private void ValidatePlatformRegistrations(List<string> findings) {
         // IServiceProviderIsService answers "is it registered?" without constructing anything; a non-default
         // container that does not implement it skips the check.
-        if (serviceProvider.GetService<IServiceProviderIsService>() is not { } isService) {
-            return;
-        }
+        if (serviceProvider.GetService<IServiceProviderIsService>() is not { } isService) return;
 
         foreach (var descriptor in catalog.All) {
-            if (descriptor.Module is not null || descriptor.Contract is null) {
-                continue;
-            }
+            if (descriptor.Module is not null || descriptor.Contract is null) continue;
 
-            if (isService.IsService(descriptor.Contract)) {
-                continue;
-            }
+            if (isService.IsService(descriptor.Contract)) continue;
 
             findings.Add(
                 $"Platform variant contract '{descriptor.ContractName}' (switch '{descriptor.Key}') has no DI "

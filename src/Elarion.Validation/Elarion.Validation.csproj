@@ -11,14 +11,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj"/>
   </ItemGroup>
 
   <ItemGroup>
     <!-- Runtime base only: Microsoft's bundled ValidationsGenerator never runs (Elarion's resolver generator
          supplies the validation metadata instead, ADR-0027). -->
-    <PackageReference Include="Microsoft.Extensions.Validation" ExcludeAssets="analyzers" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Validation" ExcludeAssets="analyzers"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
   </ItemGroup>
 
 </Project>

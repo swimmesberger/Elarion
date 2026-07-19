@@ -4,10 +4,12 @@ namespace Elarion.Abstractions.Auditing;
 public enum AuditChangeKind {
     /// <summary>The entity was created.</summary>
     Added,
+
     /// <summary>One property of an existing entity changed value.</summary>
     Modified,
+
     /// <summary>The entity was deleted.</summary>
-    Deleted,
+    Deleted
 }
 
 /// <summary>

@@ -31,10 +31,12 @@ public sealed class StreamObservabilityDecorator<TRequest, TItem>(
             }
 
             return Result<IAsyncEnumerable<TItem>>.Success(new ObservedStream(observation, started.Value!));
-        } catch (Exception exception) {
+        }
+        catch (Exception exception) {
             observation.Complete("exception", exception);
             throw;
-        } finally {
+        }
+        finally {
             // StartActivity made this activity ambient for startup. The logical execution remains active in the
             // observation, but it must not escape from this eager call into an unrelated lazy continuation.
             Activity.Current = parent;
@@ -56,13 +58,16 @@ public sealed class StreamObservabilityDecorator<TRequest, TItem>(
         public IAsyncEnumerator<TItem> GetAsyncEnumerator(CancellationToken cancellationToken = default) {
             try {
                 return new Enumerator(observation, source.GetAsyncEnumerator(cancellationToken), cancellationToken);
-            } catch (Exception exception) {
+            }
+            catch (Exception exception) {
                 observation.Complete("exception", exception);
                 throw;
             }
         }
 
-        public void Abandon() => observation.Complete("abandoned");
+        public void Abandon() {
+            observation.Complete("abandoned");
+        }
     }
 
     private sealed class Enumerator(
@@ -82,15 +87,15 @@ public sealed class StreamObservabilityDecorator<TRequest, TItem>(
                 using (observation.Enter()) {
                     using (observation.BeginEnrichmentScope()) {
                         moved = await inner.MoveNextAsync().ConfigureAwait(false);
-                        if (!moved) {
-                            await DisposeInnerAsync().ConfigureAwait(false);
-                        }
+                        if (!moved) await DisposeInnerAsync().ConfigureAwait(false);
                     }
                 }
+
                 if (!moved)
                     Complete("ok");
                 return moved;
-            } catch (Exception exception) {
+            }
+            catch (Exception exception) {
                 await CompleteFaultedMoveAsync(exception).ConfigureAwait(false);
                 throw new UnreachableException();
             }
@@ -120,19 +125,19 @@ public sealed class StreamObservabilityDecorator<TRequest, TItem>(
                 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(cleanupFailure).Throw();
             }
 
-            if (failure is OperationCanceledException && enumerationCancellationToken.IsCancellationRequested) {
+            if (failure is OperationCanceledException && enumerationCancellationToken.IsCancellationRequested)
                 Complete("cancelled");
-            } else {
+            else
                 Complete("exception", failure);
-            }
 
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         }
 
-        private ValueTask DisposeInnerAsync() =>
-            Interlocked.Exchange(ref _innerDisposed, 1) == 0
+        private ValueTask DisposeInnerAsync() {
+            return Interlocked.Exchange(ref _innerDisposed, 1) == 0
                 ? inner.DisposeAsync()
                 : ValueTask.CompletedTask;
+        }
 
         private async ValueTask<Exception?> DisposeInnerObservedAsync() {
             if (Interlocked.Exchange(ref _innerDisposed, 1) != 0)
@@ -143,39 +148,45 @@ public sealed class StreamObservabilityDecorator<TRequest, TItem>(
             IDisposable? scope = null;
             try {
                 context = observation.Enter();
-            } catch (Exception exception) {
+            }
+            catch (Exception exception) {
                 failure = Combine(failure, exception);
             }
 
             try {
                 scope = observation.BeginEnrichmentScope();
-            } catch (Exception exception) {
+            }
+            catch (Exception exception) {
                 failure = Combine(failure, exception);
             }
 
             try {
                 await inner.DisposeAsync().ConfigureAwait(false);
-            } catch (Exception exception) {
+            }
+            catch (Exception exception) {
                 failure = Combine(failure, exception);
             }
 
             try {
                 scope?.Dispose();
-            } catch (Exception exception) {
+            }
+            catch (Exception exception) {
                 failure = Combine(failure, exception);
             }
 
             try {
                 context?.Dispose();
-            } catch (Exception exception) {
+            }
+            catch (Exception exception) {
                 failure = Combine(failure, exception);
             }
 
             return failure;
         }
 
-        private static Exception Combine(Exception? current, Exception next) =>
-            current is null ? next : new AggregateException(current, next);
+        private static Exception Combine(Exception? current, Exception next) {
+            return current is null ? next : new AggregateException(current, next);
+        }
 
         private void Complete(string outcome, Exception? exception = null) {
             if (Interlocked.Exchange(ref _completed, 1) == 0)
@@ -191,7 +202,9 @@ public sealed class StreamObservabilityDecorator<TRequest, TItem>(
         private readonly long _started = Stopwatch.GetTimestamp();
         private int _completed;
 
-        public IDisposable Enter() => new AmbientActivity(activity);
+        public IDisposable Enter() {
+            return new AmbientActivity(activity);
+        }
 
         public IDisposable? BeginEnrichmentScope() {
             var context = new HandlerEnrichmentContext();
@@ -200,12 +213,14 @@ public sealed class StreamObservabilityDecorator<TRequest, TItem>(
                 enricher.Enrich(context);
                 any = true;
             }
+
             if (any && context.Tags.Count > 0 && Activity.Current is { } current)
                 foreach (var tag in context.Tags)
                     current.SetTag(tag.Key, tag.Value);
             return context.ScopeItems.Count == 0
                 ? null
-                : loggerFactory?.CreateLogger("Elarion.Diagnostics.HandlerContextEnrichment").BeginScope(context.ScopeItems);
+                : loggerFactory?.CreateLogger("Elarion.Diagnostics.HandlerContextEnrichment")
+                    .BeginScope(context.ScopeItems);
         }
 
         public void Complete(string outcome, Exception? exception = null) {
@@ -215,16 +230,16 @@ public sealed class StreamObservabilityDecorator<TRequest, TItem>(
                 var previous = Activity.Current;
                 Activity.Current = activity;
                 activity.SetTag("elarion.handler.outcome", outcome);
-                if (exception is not null) {
+                if (exception is not null)
                     activity.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
                         { "exception.type", exception.GetType().FullName }, { "exception.message", exception.Message }
                     }));
-                }
                 if (outcome is "error" or "exception")
                     activity.SetStatus(ActivityStatusCode.Error, exception?.Message);
                 activity.Stop();
                 Activity.Current = previous;
             }
+
             HandlerTelemetry.RecordExecution(handlerName, outcome, Stopwatch.GetElapsedTime(_started));
         }
 
@@ -237,7 +252,9 @@ public sealed class StreamObservabilityDecorator<TRequest, TItem>(
                     Activity.Current = activity;
             }
 
-            public void Dispose() => Activity.Current = _previous;
+            public void Dispose() {
+                Activity.Current = _previous;
+            }
         }
     }
 }

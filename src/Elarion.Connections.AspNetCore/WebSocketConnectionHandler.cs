@@ -29,8 +29,9 @@ public abstract class WebSocketConnectionHandler {
     /// <param name="context">The upgrade request (route values, query, headers, user).</param>
     /// <param name="ct">Aborted when the client disconnects first.</param>
     public virtual ValueTask<WebSocketConnectionSettings?> ConfigureConnectionAsync(
-        Microsoft.AspNetCore.Http.HttpContext context, CancellationToken ct) =>
-        ValueTask.FromResult<WebSocketConnectionSettings?>(null);
+        Microsoft.AspNetCore.Http.HttpContext context, CancellationToken ct) {
+        return ValueTask.FromResult<WebSocketConnectionSettings?>(null);
+    }
 
     /// <summary>Authenticates a new socket; <see langword="null"/> rejects it.</summary>
     /// <param name="handshake">The HTTP context plus pre-registration frame IO for in-socket challenges.</param>

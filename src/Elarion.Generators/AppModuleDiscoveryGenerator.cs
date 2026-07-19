@@ -38,8 +38,7 @@ namespace Elarion.Generators;
 /// </para>
 /// </summary>
 [Generator(LanguageNames.CSharp)]
-public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
-{
+public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
     private const string TriggerAttributeMetadataName =
         "Elarion.AspNetCore.GenerateModuleBootstrapperAttribute";
 
@@ -50,24 +49,22 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private const string UnmatchedModuleName = "<Unmatched>";
 
     private static readonly DiagnosticDescriptor SharedModuleNamespace = new(
-        id: "ELMOD001",
-        title: "Multiple app modules share a namespace",
-        messageFormat:
+        "ELMOD001",
+        "Multiple app modules share a namespace",
         "Modules '{0}' and '{1}' share namespace '{2}'; generated transport handlers in that namespace are "
         + "associated with the alphabetically first matching module",
-        category: "Elarion.Modules",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        "Elarion.Modules",
+        DiagnosticSeverity.Warning,
+        true);
 
     private static readonly DiagnosticDescriptor ModuleEndpointsUnknownModule = new(
-        id: "ELMOD004",
-        title: "[ModuleEndpoints] names an unknown module",
-        messageFormat:
+        "ELMOD004",
+        "[ModuleEndpoints] names an unknown module",
         "Class '{0}' is annotated with [ModuleEndpoints(\"{1}\")] but no discovered [AppModule] is named '{1}'; "
         + "its endpoint hooks are not mapped",
-        category: "Elarion.Modules",
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        "Elarion.Modules",
+        DiagnosticSeverity.Warning,
+        true);
 
     private sealed record ClassTarget(string? Namespace, string ClassName);
 
@@ -106,8 +103,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         IReadOnlyList<RpcMethodEmission.Model> UnmatchedRpc,
         IReadOnlyDictionary<string, List<ElarionManifest.ResourceFilter>> ResourceFiltersByModule,
         IReadOnlyList<ElarionManifest.ResourceFilter> UnmatchedResourceFilters
-    )
-    {
+    ) {
         public bool HasHttp => HttpByModule.Count > 0 || UnmatchedHttp.Count > 0;
 
         public bool HasResourceFilters => ResourceFiltersByModule.Count > 0 || UnmatchedResourceFilters.Count > 0;
@@ -119,22 +115,15 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         /// <summary>Any <c>[Handler]</c> at all (every handler is on at least one transport) — drives the shared registry.</summary>
         public bool HasHandlers => RpcByModule.Count > 0 || UnmatchedRpc.Count > 0;
 
-        private bool HasRpcSurface(Func<RpcMethodEmission.Model, bool> predicate)
-        {
+        private bool HasRpcSurface(Func<RpcMethodEmission.Model, bool> predicate) {
             foreach (var list in RpcByModule.Values)
-            {
-                foreach (var method in list)
-                {
-                    if (predicate(method))
-                        return true;
-                }
-            }
-
-            foreach (var method in UnmatchedRpc)
-            {
+            foreach (var method in list)
                 if (predicate(method))
                     return true;
-            }
+
+            foreach (var method in UnmatchedRpc)
+                if (predicate(method))
+                    return true;
 
             return false;
         }
@@ -148,8 +137,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private sealed record BootstrapperOutput(string? Source, EquatableArray<DiagnosticInfo> Diagnostics);
 
     /// <inheritdoc/>
-    public void Initialize(IncrementalGeneratorInitializationContext context)
-    {
+    public void Initialize(IncrementalGeneratorInitializationContext context) {
         var manifestProvider = context.MetadataReferencesProvider
             .Select(static (reference, ct) => ElarionManifestReader.Read(reference, ct))
             .Collect();
@@ -205,7 +193,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataName(
                 HttpEndpointEmission.HttpEndpointAttributeMetadataName,
                 static (node, _) => node is ClassDeclarationSyntax,
-                static (ctx, ct) => HttpEndpointEmission.CreateModel(ctx, report: null, ct))
+                static (ctx, ct) => HttpEndpointEmission.CreateModel(ctx, null, ct))
             .Where(static model => model is not null)
             .Select(static (model, _) => model!)
             .Collect()
@@ -219,7 +207,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             .ForAttributeWithMetadataName(
                 RpcMethodEmission.HandlerAttributeMetadataName,
                 static (node, _) => node is ClassDeclarationSyntax,
-                static (ctx, ct) => RpcMethodEmission.CreateModel(ctx, report: null, ct))
+                static (ctx, ct) => RpcMethodEmission.CreateModel(ctx, null, ct))
             .Where(static model => model is not null)
             .Select(static (model, _) => model!)
             .Collect()
@@ -261,17 +249,16 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             .Combine(referencedSiblings)
             .Combine(trigger)
             .Combine(rootNamespace)
-            .Select(static (source, ct) =>
-            {
-                var ((((((((manifests, modules), moduleEndpoints), httpEndpoints), rpcMethods), resourceFilters), siblings), hasTrigger), rootNs) = source;
+            .Select(static (source, ct) => {
+                var ((((((((manifests, modules), moduleEndpoints), httpEndpoints), rpcMethods), resourceFilters),
+                    siblings), hasTrigger), rootNs) = source;
                 return BuildBootstrapperOutput(
                     manifests, modules, moduleEndpoints, httpEndpoints, rpcMethods, resourceFilters,
                     siblings, hasTrigger, rootNs, ct);
             })
             .WithTrackingName("Bootstrapper");
 
-        context.RegisterSourceOutput(model, static (spc, output) =>
-        {
+        context.RegisterSourceOutput(model, static (spc, output) => {
             foreach (var diagnostic in output.Diagnostics)
                 spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
@@ -290,17 +277,14 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         EquatableArray<string> referencedSiblings,
         bool hasTrigger,
         string rootNs,
-        CancellationToken ct)
-    {
+        CancellationToken ct) {
         if (!hasTrigger)
             return new BootstrapperOutput(null, EquatableArray<DiagnosticInfo>.Empty);
 
         var diagnostics = new List<DiagnosticInfo>();
         foreach (var result in manifests)
-        {
             if (result.Diagnostic is { } manifestDiagnostic)
                 diagnostics.Add(manifestDiagnostic);
-        }
 
         var manifest = ElarionManifest.Data.Combine(manifests.Select(static r => r.Data));
         var siblingSet = new HashSet<string>(referencedSiblings.AsImmutableArray, StringComparer.Ordinal);
@@ -327,8 +311,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         EquatableArray<ModuleEndpointsEntry> currentEntries,
         IReadOnlyList<ElarionManifest.ModuleEndpoints> manifestEntries,
         List<ModuleEntry> modules,
-        List<DiagnosticInfo> diagnostics)
-    {
+        List<DiagnosticInfo> diagnostics) {
         var knownModules = new HashSet<string>(StringComparer.Ordinal);
         foreach (var module in modules)
             knownModules.Add(module.ModuleName);
@@ -337,20 +320,16 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         foreach (var entry in currentEntries)
             merged.Add(entry);
         foreach (var hooks in manifestEntries)
-        {
             merged.Add(new ModuleEndpointsEntry(
                 hooks.ModuleName, hooks.TypeFqn, hooks.HasMapEndpoints, hooks.HasConfigureEndpointGroup, default));
-        }
 
         var byModule = new Dictionary<string, List<ModuleEndpointsEntry>>(StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var entry in merged)
-        {
+        foreach (var entry in merged) {
             if (!seen.Add(string.Join("\u001f", entry.ModuleName, entry.TypeFqn)))
                 continue;
 
-            if (!knownModules.Contains(entry.ModuleName))
-            {
+            if (!knownModules.Contains(entry.ModuleName)) {
                 diagnostics.Add(DiagnosticInfo.Create(
                     ModuleEndpointsUnknownModule, entry.Location, DisplayTypeName(entry.TypeFqn), entry.ModuleName));
                 continue;
@@ -366,22 +345,18 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return byModule;
     }
 
-    private static string DisplayTypeName(string typeFqn) =>
-        typeFqn.StartsWith("global::", StringComparison.Ordinal) ? typeFqn.Substring(8) : typeFqn;
+    private static string DisplayTypeName(string typeFqn) {
+        return typeFqn.StartsWith("global::", StringComparison.Ordinal) ? typeFqn.Substring(8) : typeFqn;
+    }
 
     private static EquatableArray<string> ProbeReferencedSiblings(
         ImmutableArray<ManifestReadResult> manifests,
-        Compilation compilation)
-    {
+        Compilation compilation) {
         var existing = new List<string>();
         foreach (var result in manifests)
-        {
-            foreach (var module in result.Data.Modules)
-            {
-                if (SiblingExists(compilation, module.TypeFqn))
-                    existing.Add(module.TypeFqn);
-            }
-        }
+        foreach (var module in result.Data.Modules)
+            if (SiblingExists(compilation, module.TypeFqn))
+                existing.Add(module.TypeFqn);
 
         return existing
             .Distinct(StringComparer.Ordinal)
@@ -389,13 +364,10 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             .ToEquatableArray();
     }
 
-    private static bool HasBootstrapperTrigger(Compilation compilation)
-    {
+    private static bool HasBootstrapperTrigger(Compilation compilation) {
         foreach (var attribute in compilation.Assembly.GetAttributes())
-        {
             if (attribute.AttributeClass?.ToDisplayString() == TriggerAttributeMetadataName)
                 return true;
-        }
 
         return false;
     }
@@ -406,16 +378,14 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         EquatableArray<RpcMethodEmission.Model> currentRpcMethods,
         EquatableArray<ElarionManifest.ResourceFilter> currentResourceFilters,
         List<ModuleEntry> modules,
-        List<DiagnosticInfo> diagnostics)
-    {
+        List<DiagnosticInfo> diagnostics) {
         // Current-compilation entries first (mirrors CollectModuleEntries): a handler that somehow also appears
         // in a referenced manifest deduplicates to the local entry.
         var httpByModule = new Dictionary<string, List<HttpEndpointEmission.Model>>(StringComparer.Ordinal);
         var unmatchedHttp = new List<HttpEndpointEmission.Model>();
         var httpEntries = currentHttpEndpoints.AsImmutableArray.Concat(manifest.HttpEndpoints).ToList();
         httpEntries = DeduplicateHttpEndpoints(httpEntries);
-        httpEntries.Sort(static (a, b) =>
-        {
+        httpEntries.Sort(static (a, b) => {
             var byVerb = string.Compare(a.Verb, b.Verb, StringComparison.Ordinal);
             if (byVerb != 0)
                 return byVerb;
@@ -423,11 +393,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             return byRoute != 0 ? byRoute : string.Compare(a.EndpointName, b.EndpointName, StringComparison.Ordinal);
         });
         HttpEndpointEmission.ReportDuplicateRoutes(httpEntries, diagnostics);
-        foreach (var entry in httpEntries)
-        {
+        foreach (var entry in httpEntries) {
             var module = FindBestModule(entry.HandlerNamespace, modules);
-            if (module is null)
-            {
+            if (module is null) {
                 unmatchedHttp.Add(entry);
                 diagnostics.Add(DiagnosticInfo.Create(
                     HttpEndpointEmission.UnmatchedModule, (Location?)null, entry.EndpointName));
@@ -442,14 +410,12 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         var rpcEntries = currentRpcMethods.AsImmutableArray.Concat(manifest.RpcMethods).ToList();
         rpcEntries = DeduplicateRpcMethods(rpcEntries);
         rpcEntries.Sort(static (a, b) => string.Compare(a.MethodName, b.MethodName, StringComparison.Ordinal));
-        foreach (var entry in rpcEntries)
-        {
+        foreach (var entry in rpcEntries) {
             var module = FindBestModule(entry.HandlerNamespace, modules);
             // Resolve an inferred operation into its final, module-qualified name now that the owning module is
             // known, so the registry route and the MCP metadata table agree on one name.
             var resolved = ResolveOperationName(entry, module?.ModuleName);
-            if (module is null)
-            {
+            if (module is null) {
                 unmatchedRpc.Add(resolved);
                 diagnostics.Add(DiagnosticInfo.Create(
                     RpcMethodEmission.UnmatchedModule, (Location?)null, resolved.MethodName));
@@ -468,15 +434,15 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         // with an explicit one) would silently drop a handler at runtime — report it at compile time instead.
         ReportDuplicateOperationNames(rpcByModule, unmatchedRpc, diagnostics);
 
-        var resourceFiltersByModule = new Dictionary<string, List<ElarionManifest.ResourceFilter>>(StringComparer.Ordinal);
+        var resourceFiltersByModule =
+            new Dictionary<string, List<ElarionManifest.ResourceFilter>>(StringComparer.Ordinal);
         var unmatchedResourceFilters = new List<ElarionManifest.ResourceFilter>();
         var resourceFilterEntries = currentResourceFilters.AsImmutableArray
             .Concat(manifest.ResourceFilters)
             .Distinct()
             .ToList();
         resourceFilterEntries.Sort(static (a, b) => string.Compare(a.SpecFqn, b.SpecFqn, StringComparison.Ordinal));
-        foreach (var entry in resourceFilterEntries)
-        {
+        foreach (var entry in resourceFilterEntries) {
             var module = FindBestModule(entry.Namespace, modules);
             // A filter under no module is registered ungated rather than silently dropped (mirrors transports).
             if (module is null)
@@ -492,20 +458,16 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private static void ReportDuplicateOperationNames(
         Dictionary<string, List<RpcMethodEmission.Model>> rpcByModule,
         List<RpcMethodEmission.Model> unmatchedRpc,
-        List<DiagnosticInfo> diagnostics)
-    {
+        List<DiagnosticInfo> diagnostics) {
         // The bus keys names case-insensitively, so detect collisions the same way.
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var reported = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        void Scan(List<RpcMethodEmission.Model> entries)
-        {
+        void Scan(List<RpcMethodEmission.Model> entries) {
             foreach (var entry in entries)
-            {
                 if (!seen.Add(entry.MethodName) && reported.Add(entry.MethodName))
                     diagnostics.Add(DiagnosticInfo.Create(
                         RpcMethodEmission.DuplicateOperationName, (Location?)null, entry.MethodName));
-            }
         }
 
         foreach (var list in rpcByModule.Values)
@@ -513,16 +475,14 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         Scan(unmatchedRpc);
     }
 
-    private static int RpcMethodOrder(RpcMethodEmission.Model a, RpcMethodEmission.Model b)
-    {
+    private static int RpcMethodOrder(RpcMethodEmission.Model a, RpcMethodEmission.Model b) {
         var byName = string.Compare(a.MethodName, b.MethodName, StringComparison.Ordinal);
         return byName != 0 ? byName : string.Compare(a.RequestTypeFqn, b.RequestTypeFqn, StringComparison.Ordinal);
     }
 
     // An inferred name becomes "{module}.{operation}" (module camel-cased); an explicit name is used verbatim.
     // Unmatched inferred handlers keep the bare operation (no module to qualify with).
-    private static RpcMethodEmission.Model ResolveOperationName(RpcMethodEmission.Model entry, string? moduleName)
-    {
+    private static RpcMethodEmission.Model ResolveOperationName(RpcMethodEmission.Model entry, string? moduleName) {
         if (!entry.IsNameInferred)
             return entry;
 
@@ -532,10 +492,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return entry with { MethodName = name, IsNameInferred = false };
     }
 
-    private static List<T> Bucket<T>(Dictionary<string, List<T>> map, string key)
-    {
-        if (!map.TryGetValue(key, out var list))
-        {
+    private static List<T> Bucket<T>(Dictionary<string, List<T>> map, string key) {
+        if (!map.TryGetValue(key, out var list)) {
             list = [];
             map[key] = list;
         }
@@ -543,11 +501,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return list;
     }
 
-    private static ModuleEntry? FindBestModule(string handlerNamespace, List<ModuleEntry> modules)
-    {
+    private static ModuleEntry? FindBestModule(string handlerNamespace, List<ModuleEntry> modules) {
         ModuleEntry? best = null;
-        foreach (var module in modules)
-        {
+        foreach (var module in modules) {
             if (!IsNamespaceInScope(handlerNamespace, module.Namespace))
                 continue;
             if (best is null || module.Namespace.Length > best.Namespace.Length)
@@ -557,21 +513,19 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return best;
     }
 
-    private static bool IsNamespaceInScope(string handlerNamespace, string moduleNamespace)
-    {
+    private static bool IsNamespaceInScope(string handlerNamespace, string moduleNamespace) {
         if (moduleNamespace.Length == 0)
             return true;
 
         return handlerNamespace == moduleNamespace
-            || handlerNamespace.StartsWith(moduleNamespace + ".", StringComparison.Ordinal);
+               || handlerNamespace.StartsWith(moduleNamespace + ".", StringComparison.Ordinal);
     }
 
     private static List<ModuleEntry> CollectModuleEntries(
         EquatableArray<ModuleEntry> currentModules,
         IReadOnlyList<ElarionManifest.Module> manifestModules,
         HashSet<string> referencedSiblings,
-        List<DiagnosticInfo> diagnostics)
-    {
+        List<DiagnosticInfo> diagnostics) {
         // Current-compilation modules first: when the same module appears in the manifest too, deduplication
         // keeps the first entry, so the current-compilation one (EmitDefaultServices: true) wins.
         var entries = new List<ModuleEntry>();
@@ -598,8 +552,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return entries;
     }
 
-    private static ModuleEntry ToModuleEntry(ElarionManifest.Module module, bool emitDefaultServices) =>
-        new(
+    private static ModuleEntry ToModuleEntry(ElarionManifest.Module module, bool emitDefaultServices) {
+        return new ModuleEntry(
             module.ModuleName,
             module.Namespace,
             module.TypeFqn,
@@ -611,26 +565,24 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             module.HasConfigureEndpointGroup,
             emitDefaultServices,
             module.ClientFeatures);
+    }
 
     /// <summary>
     /// Whether the module's generated <c>ConfigureDefaultServices</c> sibling exists for a referenced module.
     /// Current-compilation modules always emit it (the skeleton runs in the same pass); for referenced modules
     /// the public sibling type is visible in metadata only when that assembly was built with the skeleton generator.
     /// </summary>
-    private static bool SiblingExists(Compilation compilation, string typeFqn)
-    {
+    private static bool SiblingExists(Compilation compilation, string typeFqn) {
         var metadataName =
             (typeFqn.StartsWith("global::", StringComparison.Ordinal) ? typeFqn.Substring(8) : typeFqn)
             + ModuleDefaultsEmitter.ClassSuffix;
         return compilation.GetTypeByMetadataName(metadataName) is not null;
     }
 
-    private static List<ModuleEntry> DeduplicateModules(IEnumerable<ModuleEntry> entries)
-    {
+    private static List<ModuleEntry> DeduplicateModules(IEnumerable<ModuleEntry> entries) {
         var result = new List<ModuleEntry>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var entry in entries)
-        {
+        foreach (var entry in entries) {
             var key = string.Join("\u001f", entry.ModuleName, entry.TypeFqn);
             if (seen.Add(key))
                 result.Add(entry);
@@ -639,12 +591,11 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return result;
     }
 
-    private static List<HttpEndpointEmission.Model> DeduplicateHttpEndpoints(IEnumerable<HttpEndpointEmission.Model> entries)
-    {
+    private static List<HttpEndpointEmission.Model> DeduplicateHttpEndpoints(
+        IEnumerable<HttpEndpointEmission.Model> entries) {
         var result = new List<HttpEndpointEmission.Model>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var entry in entries)
-        {
+        foreach (var entry in entries) {
             var key = string.Join(
                 "\u001f",
                 entry.EndpointName,
@@ -659,12 +610,10 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return result;
     }
 
-    private static List<RpcMethodEmission.Model> DeduplicateRpcMethods(IEnumerable<RpcMethodEmission.Model> entries)
-    {
+    private static List<RpcMethodEmission.Model> DeduplicateRpcMethods(IEnumerable<RpcMethodEmission.Model> entries) {
         var result = new List<RpcMethodEmission.Model>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var entry in entries)
-        {
+        foreach (var entry in entries) {
             var key = string.Join(
                 "\u001f",
                 entry.MethodName,
@@ -677,29 +626,22 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return result;
     }
 
-    private static void ReportSharedModuleNamespaces(IEnumerable<ModuleEntry> entries, List<DiagnosticInfo> diagnostics)
-    {
+    private static void
+        ReportSharedModuleNamespaces(IEnumerable<ModuleEntry> entries, List<DiagnosticInfo> diagnostics) {
         var byNamespace = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var entry in entries)
-        {
             if (byNamespace.TryGetValue(entry.Namespace, out var existing))
-            {
                 diagnostics.Add(DiagnosticInfo.Create(
                     SharedModuleNamespace, (Location?)null, existing, entry.ModuleName, entry.Namespace));
-            }
             else
-            {
                 byNamespace[entry.Namespace] = entry.ModuleName;
-            }
-        }
     }
 
     // The per-node [AppModule] transform (cached per tree), sharing the full-fidelity read with the manifest
     // generator via AppModuleDiscovery. Top-level types only, matching the old walk over namespace type members;
     // everything read lives on the module type itself, so a stale cache entry is impossible without editing the
     // module's file.
-    private static ModuleEntry? CreateModuleEntry(GeneratorAttributeSyntaxContext ctx)
-    {
+    private static ModuleEntry? CreateModuleEntry(GeneratorAttributeSyntaxContext ctx) {
         if (ctx.TargetSymbol is not INamedTypeSymbol { ContainingType: null })
             return null;
 
@@ -708,14 +650,13 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             return null;
 
         // Current-compilation modules: the ConfigureDefaultServices skeleton is generated in the same pass.
-        return ToModuleEntry(module, emitDefaultServices: true);
+        return ToModuleEntry(module, true);
     }
 
     // The per-node [ModuleEndpoints] transform (cached per tree), sharing the read with the manifest generator.
     // A class with no usable hook is dropped silently; the manifest generator (which always runs alongside this
     // one) reports it as ELMOD005.
-    private static ModuleEndpointsEntry? CreateModuleEndpointsEntry(GeneratorAttributeSyntaxContext ctx)
-    {
+    private static ModuleEndpointsEntry? CreateModuleEndpointsEntry(GeneratorAttributeSyntaxContext ctx) {
         var hooks = AppModuleDiscovery.CreateModuleEndpoints(ctx);
         if (hooks is null || (!hooks.HasMapEndpoints && !hooks.HasConfigureEndpointGroup))
             return null;
@@ -732,8 +673,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     /// Topologically sorts modules by their <c>DependsOn</c> declarations.
     /// Falls back to alphabetical order for modules with no dependencies.
     /// </summary>
-    private static List<ModuleEntry> TopologicalSort(List<ModuleEntry> entries)
-    {
+    private static List<ModuleEntry> TopologicalSort(List<ModuleEntry> entries) {
         if (entries.Count == 0)
             return entries;
 
@@ -741,8 +681,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         var graph = new Dictionary<string, List<string>>();
         var inDegree = new Dictionary<string, int>();
 
-        foreach (var entry in entries)
-        {
+        foreach (var entry in entries) {
             byName[entry.ModuleName] = entry;
             if (!graph.ContainsKey(entry.ModuleName))
                 graph[entry.ModuleName] = new List<string>();
@@ -750,13 +689,11 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
                 inDegree[entry.ModuleName] = 0;
         }
 
-        foreach (var entry in entries)
-        {
+        foreach (var entry in entries) {
             if (entry.DependsOn is null)
                 continue;
 
-            foreach (var dep in entry.DependsOn.Split(','))
-            {
+            foreach (var dep in entry.DependsOn.Split(',')) {
                 var trimmed = dep.Trim();
                 if (trimmed.Length == 0)
                     continue;
@@ -778,8 +715,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
                 InsertReadyModule(ready, kv.Key, byName);
 
         var sorted = new List<ModuleEntry>();
-        while (ready.Count > 0)
-        {
+        while (ready.Count > 0) {
             var current = ready[0];
             ready.RemoveAt(0);
             if (byName.TryGetValue(current, out var entry))
@@ -788,8 +724,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             if (!graph.TryGetValue(current, out var neighbors))
                 continue;
 
-            foreach (var neighbor in neighbors)
-            {
+            foreach (var neighbor in neighbors) {
                 inDegree[neighbor]--;
                 if (inDegree[neighbor] == 0)
                     InsertReadyModule(ready, neighbor, byName);
@@ -808,8 +743,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private static void InsertReadyModule(
         List<string> ready,
         string moduleName,
-        Dictionary<string, ModuleEntry> byName)
-    {
+        Dictionary<string, ModuleEntry> byName) {
         var insertAt = ready.BinarySearch(
             moduleName,
             Comparer<string>.Create((left, right) => CompareReadyModules(left, right, byName)));
@@ -822,8 +756,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     private static int CompareReadyModules(
         string left,
         string right,
-        Dictionary<string, ModuleEntry> byName)
-    {
+        Dictionary<string, ModuleEntry> byName) {
         var leftKind = byName.TryGetValue(left, out var leftEntry) && leftEntry.IsCore ? 0 : 1;
         var rightKind = byName.TryGetValue(right, out var rightEntry) && rightEntry.IsCore ? 0 : 1;
         var kindComparison = leftKind.CompareTo(rightKind);
@@ -837,8 +770,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         ClassTarget target,
         List<ModuleEntry> entries,
         TransportMaps transport,
-        Dictionary<string, List<ModuleEndpointsEntry>> contributorsByModule)
-    {
+        Dictionary<string, List<ModuleEndpointsEntry>> contributorsByModule) {
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("// Source: Elarion.Generators.AppModuleDiscoveryGenerator");
@@ -848,16 +780,14 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         // Usings are added only for HTTP mapping, so hosts without [HttpEndpoint] handlers get the exact same
         // output as before. The handler registry and MCP metadata are emitted fully-qualified (no using needed).
-        if (transport.HasHttp)
-        {
+        if (transport.HasHttp) {
             sb.AppendLine("using Elarion.AspNetCore;");
             sb.AppendLine("using Microsoft.AspNetCore.Builder;");
             sb.AppendLine("using Microsoft.AspNetCore.Http;");
             sb.AppendLine();
         }
 
-        if (target.Namespace is not null)
-        {
+        if (target.Namespace is not null) {
             sb.AppendLine($"namespace {target.Namespace};");
             sb.AppendLine();
         }
@@ -866,22 +796,24 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("{");
 
         // --- AddElarion ---
-        sb.AppendLine("    /// <summary>Registers default services and calls ConfigureServices on all enabled modules.</summary>");
+        sb.AppendLine(
+            "    /// <summary>Registers default services and calls ConfigureServices on all enabled modules.</summary>");
         sb.AppendLine("    public static void AddElarion(");
         sb.AppendLine("        this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services,");
         sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
         // The typed in-process mediator send, available wherever handlers are. Idempotent (TryAddScoped).
-        sb.AppendLine("        global::Elarion.HandlerSenderServiceCollectionExtensions.AddElarionHandlerSender(services);");
+        sb.AppendLine(
+            "        global::Elarion.HandlerSenderServiceCollectionExtensions.AddElarionHandlerSender(services);");
         // Contribute every enabled module's source-generated JSON context to the canonical serializer options, so
         // every subsystem (JSON-RPC, MCP, idempotency, caching, outbox, settings) reads one shared configuration.
-        sb.AppendLine("        global::Elarion.Abstractions.Serialization.ElarionJsonServiceCollectionExtensions.ConfigureElarionJson(services, o =>");
+        sb.AppendLine(
+            "        global::Elarion.Abstractions.Serialization.ElarionJsonServiceCollectionExtensions.ConfigureElarionJson(services, o =>");
         sb.AppendLine("        {");
         sb.AppendLine("            foreach (var resolver in GetAllJsonTypeInfoResolvers(configuration))");
         sb.AppendLine("                o.TypeInfoResolvers.Add(resolver);");
         sb.AppendLine("        });");
-        foreach (var entry in entries)
-        {
+        foreach (var entry in entries) {
             // Generated defaults (handlers, services, validators, scheduled jobs, event consumers) first,
             // then the module's optional hand-written ConfigureServices for custom registrations. Both gated.
             // The sibling is skipped for referenced modules whose assembly predates the skeleton generator.
@@ -900,13 +832,10 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
         // Data-level authorization filters ([ResourceFilter]) are registered as IQueryAuthorizer<T>, gated per module.
         // Discovered from each assembly's Elarion manifest, so a referenced module library's filters register here too.
-        if (transport.HasResourceFilters)
-        {
+        if (transport.HasResourceFilters) {
             foreach (var entry in entries)
-            {
                 if (transport.ResourceFiltersByModule.ContainsKey(entry.ModuleName))
                     EmitModuleCall(sb, entry, $"{ResourceFiltersMethodName(entry.ModuleName)}(services);");
-            }
 
             if (transport.UnmatchedResourceFilters.Count > 0)
                 sb.AppendLine($"        {ResourceFiltersMethodName(UnmatchedModuleName)}(services);");
@@ -916,19 +845,18 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine();
 
         // --- MapElarionEndpoints (module MapEndpoints + [ModuleEndpoints] contributors + generated [HttpEndpoint] mapping, all gated) ---
-        sb.AppendLine("    /// <summary>Calls MapEndpoints (module-declared and [ModuleEndpoints] contributors) and maps generated [HttpEndpoint] handlers on all enabled modules.</summary>");
+        sb.AppendLine(
+            "    /// <summary>Calls MapEndpoints (module-declared and [ModuleEndpoints] contributors) and maps generated [HttpEndpoint] handlers on all enabled modules.</summary>");
         sb.AppendLine("    public static void MapElarionEndpoints(");
         sb.AppendLine("        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints,");
         sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
         foreach (var entry in entries)
-        {
             EmitModuleEndpointMapping(
                 sb,
                 entry,
                 transport.HttpByModule.ContainsKey(entry.ModuleName),
                 contributorsByModule.TryGetValue(entry.ModuleName, out var contributors) ? contributors : []);
-        }
 
         if (transport.UnmatchedHttp.Count > 0)
             sb.AppendLine($"        {HttpMethodName(UnmatchedModuleName)}(endpoints);");
@@ -937,18 +865,17 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine();
 
         // --- RegisterHandlers (generated [Handler] registration onto the neutral bus, gated) — only when handlers exist ---
-        if (transport.HasHandlers)
-        {
-            sb.AppendLine("    /// <summary>Registers all [Handler] operations for all enabled modules onto the shared handler dispatcher (the named bus).</summary>");
-            sb.AppendLine("    public static global::Elarion.Abstractions.Dispatch.HandlerDispatcher RegisterHandlers(");
+        if (transport.HasHandlers) {
+            sb.AppendLine(
+                "    /// <summary>Registers all [Handler] operations for all enabled modules onto the shared handler dispatcher (the named bus).</summary>");
+            sb.AppendLine(
+                "    public static global::Elarion.Abstractions.Dispatch.HandlerDispatcher RegisterHandlers(");
             sb.AppendLine("        this global::Elarion.Abstractions.Dispatch.HandlerDispatcher dispatcher,");
             sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
             sb.AppendLine("    {");
             foreach (var entry in entries)
-            {
                 if (ModuleHasHandlers(transport, entry.ModuleName))
                     EmitModuleCall(sb, entry, $"{HandlersMethodName(entry.ModuleName)}(dispatcher);");
-            }
 
             if (transport.UnmatchedRpc.Count > 0)
                 sb.AppendLine($"        {HandlersMethodName(UnmatchedModuleName)}(dispatcher);");
@@ -959,8 +886,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         }
 
         // --- GetMcpMetadata (generated MCP tool table, gated) — only when MCP handlers exist ---
-        if (transport.HasMcp)
-        {
+        if (transport.HasMcp) {
             sb.AppendLine("    /// <summary>Collects MCP tool metadata for all enabled modules.</summary>");
             sb.AppendLine($"    public static {McpMetadataEmission.Ns}.IRpcMcpMetadataSource GetMcpMetadata(");
             sb.AppendLine("        this global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
@@ -968,10 +894,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             sb.AppendLine(
                 $"        var methods = new global::System.Collections.Generic.List<{McpMetadataEmission.Ns}.RpcMcpMethodMetadata>();");
             foreach (var entry in entries)
-            {
                 if (ModuleHasMcp(transport, entry.ModuleName))
                     EmitModuleCall(sb, entry, $"methods.AddRange({McpMetadataMethodName(entry.ModuleName)}());");
-            }
 
             if (McpMetadataEmission.AnyMcp(transport.UnmatchedRpc))
                 sb.AppendLine($"        methods.AddRange({McpMetadataMethodName(UnmatchedModuleName)}());");
@@ -989,8 +913,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    {");
         sb.AppendLine(
             "        var resolvers = new global::System.Collections.Generic.List<global::System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver>();");
-        foreach (var entry in entries)
-        {
+        foreach (var entry in entries) {
             if (!entry.HasGetJsonTypeInfoResolver)
                 continue;
 
@@ -1005,7 +928,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine();
 
         // --- IsModuleEnabled ---
-        sb.AppendLine("    /// <summary>Returns whether a module is enabled by generated module metadata and configuration.</summary>");
+        sb.AppendLine(
+            "    /// <summary>Returns whether a module is enabled by generated module metadata and configuration.</summary>");
         sb.AppendLine("    public static bool IsModuleEnabled(");
         sb.AppendLine("        this global::Microsoft.Extensions.Configuration.IConfiguration configuration,");
         sb.AppendLine("        string moduleName)");
@@ -1013,17 +937,12 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        return moduleName switch");
         sb.AppendLine("        {");
         foreach (var entry in entries)
-        {
             if (entry.IsCore)
-            {
                 sb.AppendLine($"            {SourceString(entry.ModuleName)} => true,");
-            }
             else
-            {
                 sb.AppendLine(
                     $"            {SourceString(entry.ModuleName)} => ReadModuleEnabled(configuration, \"Modules:{entry.ModuleName}:Enabled\"),");
-            }
-        }
+
         sb.AppendLine("            _ => ReadModuleEnabled(configuration, $\"Modules:{moduleName}:Enabled\"),");
         sb.AppendLine("        };");
         sb.AppendLine("    }");
@@ -1033,15 +952,12 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    /// <summary>Returns all discovered module names (for diagnostics).</summary>");
         sb.AppendLine("    public static string[] GetAllModuleNames()");
         sb.AppendLine("    {");
-        if (entries.Count == 0)
-        {
+        if (entries.Count == 0) {
             sb.AppendLine("        return global::System.Array.Empty<string>();");
         }
-        else
-        {
+        else {
             sb.Append("        return new string[] { ");
-            for (var i = 0; i < entries.Count; i++)
-            {
+            for (var i = 0; i < entries.Count; i++) {
                 if (i > 0) sb.Append(", ");
                 sb.Append(SourceString(entries[i].ModuleName));
             }
@@ -1064,7 +980,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         // ConfigurationBinder.GetValue<bool> (which is annotated [RequiresUnreferencedCode]/[RequiresDynamicCode]
         // for its general TypeConverter path). bool needs none of that, so the manual parse stays trim/AOT-clean
         // with no suppression. Absent/blank value defaults to enabled; a non-boolean value fails loud.
-        sb.AppendLine("    private static bool ReadModuleEnabled(global::Microsoft.Extensions.Configuration.IConfiguration configuration, string key)");
+        sb.AppendLine(
+            "    private static bool ReadModuleEnabled(global::Microsoft.Extensions.Configuration.IConfiguration configuration, string key)");
         sb.AppendLine("    {");
         sb.AppendLine("        var value = configuration[key];");
         sb.AppendLine("        if (string.IsNullOrWhiteSpace(value))");
@@ -1077,7 +994,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("            return parsed;");
         sb.AppendLine("        }");
         sb.AppendLine();
-        sb.AppendLine("        throw new global::System.InvalidOperationException($\"Configuration value '{key}' must be a boolean.\");");
+        sb.AppendLine(
+            "        throw new global::System.InvalidOperationException($\"Configuration value '{key}' must be a boolean.\");");
         sb.AppendLine("    }");
 
         sb.AppendLine("}");
@@ -1092,13 +1010,13 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
     /// compiles for every host — a host with no <c>[ClientFeatures]</c> still gets a modules-only manifest, which the
     /// session bootstrap projects into per-user module enablement (an empty manifest would drop that entirely).
     /// </summary>
-    private static void AppendClientCapabilityManifest(StringBuilder sb, List<ModuleEntry> entries)
-    {
+    private static void AppendClientCapabilityManifest(StringBuilder sb, List<ModuleEntry> entries) {
         const string ManifestFqn = "global::Elarion.Abstractions.Modules.ClientCapabilityManifest";
         const string ModuleManifestFqn = "global::Elarion.Abstractions.Modules.ClientModuleManifest";
 
         sb.AppendLine();
-        sb.AppendLine("    /// <summary>Builds the deployment-resolved client-capability manifest (modules + exposed feature names) the session bootstrap evaluates per user.</summary>");
+        sb.AppendLine(
+            "    /// <summary>Builds the deployment-resolved client-capability manifest (modules + exposed feature names) the session bootstrap evaluates per user.</summary>");
         sb.AppendLine($"    public static {ManifestFqn} GetClientCapabilityManifest(");
         sb.AppendLine("        this global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
@@ -1106,8 +1024,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        {");
         sb.AppendLine($"            Modules = new {ModuleManifestFqn}[]");
         sb.AppendLine("            {");
-        foreach (var entry in entries)
-        {
+        foreach (var entry in entries) {
             var features = entry.ClientFeatures.IsEmpty
                 ? "global::System.Array.Empty<string>()"
                 : $"new string[] {{ {string.Join(", ", entry.ClientFeatures.Select(SourceString))} }}";
@@ -1121,51 +1038,43 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
     }
 
-    private static void AppendResourceFilterMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport)
-    {
+    private static void AppendResourceFilterMethods(StringBuilder sb, List<ModuleEntry> entries,
+        TransportMaps transport) {
         foreach (var entry in entries)
-        {
             if (transport.ResourceFiltersByModule.TryGetValue(entry.ModuleName, out var filters) && filters.Count > 0)
                 AppendResourceFilterMethod(sb, entry.ModuleName, filters);
-        }
 
         if (transport.UnmatchedResourceFilters.Count > 0)
             AppendResourceFilterMethod(sb, UnmatchedModuleName, transport.UnmatchedResourceFilters);
     }
 
     private static void AppendResourceFilterMethod(
-        StringBuilder sb, string moduleName, IReadOnlyList<ElarionManifest.ResourceFilter> filters)
-    {
+        StringBuilder sb, string moduleName, IReadOnlyList<ElarionManifest.ResourceFilter> filters) {
         sb.AppendLine();
-        sb.AppendLine($"    /// <summary>Registers the [ResourceFilter] data-level authorizers in the '{moduleName}' module as IQueryAuthorizer&lt;T&gt;.</summary>");
-        sb.AppendLine($"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {ResourceFiltersMethodName(moduleName)}(");
+        sb.AppendLine(
+            $"    /// <summary>Registers the [ResourceFilter] data-level authorizers in the '{moduleName}' module as IQueryAuthorizer&lt;T&gt;.</summary>");
+        sb.AppendLine(
+            $"    public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection {ResourceFiltersMethodName(moduleName)}(");
         sb.AppendLine("        this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("    {");
-        foreach (var filter in filters)
-        {
+        foreach (var filter in filters) {
             var serviceType = $"{ElarionGeneratorConventions.QueryAuthorizerTypeFqn}<{filter.EntityFqn}>";
             if (filter.IsShared)
-            {
                 // A shared filter consults the grants set (an EXISTS), so it is a scoped service.
                 sb.AppendLine(
                     $"        global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<{serviceType}, {filter.SpecFqn}>(services);");
-            }
             else
-            {
                 // A field-only filter is a stateless singleton exposed as the static Specification.
                 sb.AppendLine(
                     $"        global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<{serviceType}>(services, {filter.SpecFqn}.{ElarionGeneratorConventions.ResourceFilterSpecificationMember});");
-            }
         }
 
         sb.AppendLine("        return services;");
         sb.AppendLine("    }");
     }
 
-    private static void AppendHttpMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport)
-    {
-        foreach (var entry in entries)
-        {
+    private static void AppendHttpMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport) {
+        foreach (var entry in entries) {
             if (!transport.HttpByModule.TryGetValue(entry.ModuleName, out var endpoints))
                 continue;
 
@@ -1176,11 +1085,13 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
             AppendHttpMethod(sb, UnmatchedModuleName, transport.UnmatchedHttp);
     }
 
-    private static void AppendHttpMethod(StringBuilder sb, string moduleName, IReadOnlyList<HttpEndpointEmission.Model> endpoints)
-    {
+    private static void AppendHttpMethod(StringBuilder sb, string moduleName,
+        IReadOnlyList<HttpEndpointEmission.Model> endpoints) {
         sb.AppendLine();
-        sb.AppendLine($"    /// <summary>Maps the [HttpEndpoint] handlers in the '{moduleName}' module onto <paramref name=\"app\"/>.</summary>");
-        sb.AppendLine($"    public static global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder {HttpMethodName(moduleName)}(");
+        sb.AppendLine(
+            $"    /// <summary>Maps the [HttpEndpoint] handlers in the '{moduleName}' module onto <paramref name=\"app\"/>.</summary>");
+        sb.AppendLine(
+            $"    public static global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder {HttpMethodName(moduleName)}(");
         sb.AppendLine("        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app)");
         sb.AppendLine("    {");
         // Tag each operation with its owning module so OpenAPI groups them; unmatched endpoints carry no tag.
@@ -1191,23 +1102,22 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
     }
 
-    private static void AppendHandlersMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport)
-    {
+    private static void AppendHandlersMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport) {
         foreach (var entry in entries)
-        {
             if (ModuleHasHandlers(transport, entry.ModuleName))
                 AppendHandlersMethod(sb, entry.ModuleName, transport.RpcByModule[entry.ModuleName]);
-        }
 
         if (transport.UnmatchedRpc.Count > 0)
             AppendHandlersMethod(sb, UnmatchedModuleName, transport.UnmatchedRpc);
     }
 
-    private static void AppendHandlersMethod(StringBuilder sb, string moduleName, IReadOnlyList<RpcMethodEmission.Model> methods)
-    {
+    private static void AppendHandlersMethod(StringBuilder sb, string moduleName,
+        IReadOnlyList<RpcMethodEmission.Model> methods) {
         sb.AppendLine();
-        sb.AppendLine($"    /// <summary>Registers the [Handler] operations in the '{moduleName}' module onto <paramref name=\"dispatcher\"/> (with each operation's transport flags).</summary>");
-        sb.AppendLine($"    public static global::Elarion.Abstractions.Dispatch.HandlerDispatcher {HandlersMethodName(moduleName)}(");
+        sb.AppendLine(
+            $"    /// <summary>Registers the [Handler] operations in the '{moduleName}' module onto <paramref name=\"dispatcher\"/> (with each operation's transport flags).</summary>");
+        sb.AppendLine(
+            $"    public static global::Elarion.Abstractions.Dispatch.HandlerDispatcher {HandlersMethodName(moduleName)}(");
         sb.AppendLine("        this global::Elarion.Abstractions.Dispatch.HandlerDispatcher dispatcher)");
         sb.AppendLine("    {");
         foreach (var method in methods)
@@ -1217,23 +1127,21 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
     }
 
-    private static void AppendMcpMetadataMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport)
-    {
+    private static void AppendMcpMetadataMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport) {
         foreach (var entry in entries)
-        {
             if (ModuleHasMcp(transport, entry.ModuleName))
                 AppendMcpMetadataMethod(sb, entry.ModuleName, transport.RpcByModule[entry.ModuleName]);
-        }
 
         if (McpMetadataEmission.AnyMcp(transport.UnmatchedRpc))
             AppendMcpMetadataMethod(sb, UnmatchedModuleName, transport.UnmatchedRpc);
     }
 
-    private static void AppendMcpMetadataMethod(StringBuilder sb, string moduleName, IReadOnlyList<RpcMethodEmission.Model> methods)
-    {
+    private static void AppendMcpMetadataMethod(StringBuilder sb, string moduleName,
+        IReadOnlyList<RpcMethodEmission.Model> methods) {
         sb.AppendLine();
         sb.AppendLine($"    /// <summary>Returns the MCP tool metadata for the '{moduleName}' module.</summary>");
-        sb.AppendLine($"    public static {McpMetadataEmission.Ns}.RpcMcpMethodMetadata[] {McpMetadataMethodName(moduleName)}()");
+        sb.AppendLine(
+            $"    public static {McpMetadataEmission.Ns}.RpcMcpMethodMetadata[] {McpMetadataMethodName(moduleName)}()");
         sb.AppendLine("    {");
         sb.AppendLine($"        return new {McpMetadataEmission.Ns}.RpcMcpMethodMetadata[]");
         sb.AppendLine("        {");
@@ -1242,36 +1150,41 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
     }
 
-    private static bool ModuleHasHandlers(TransportMaps transport, string moduleName) =>
-        transport.RpcByModule.TryGetValue(moduleName, out var methods) && methods.Count > 0;
+    private static bool ModuleHasHandlers(TransportMaps transport, string moduleName) {
+        return transport.RpcByModule.TryGetValue(moduleName, out var methods) && methods.Count > 0;
+    }
 
-    private static bool ModuleHasMcp(TransportMaps transport, string moduleName) =>
-        transport.RpcByModule.TryGetValue(moduleName, out var methods) && McpMetadataEmission.AnyMcp(methods);
+    private static bool ModuleHasMcp(TransportMaps transport, string moduleName) {
+        return transport.RpcByModule.TryGetValue(moduleName, out var methods) && McpMetadataEmission.AnyMcp(methods);
+    }
 
-    private static string HttpMethodName(string moduleName) => $"Map{ModuleMethodNamePart(moduleName)}Http";
+    private static string HttpMethodName(string moduleName) {
+        return $"Map{ModuleMethodNamePart(moduleName)}Http";
+    }
 
-    private static string HandlersMethodName(string moduleName) => $"Add{ModuleMethodNamePart(moduleName)}Handlers";
+    private static string HandlersMethodName(string moduleName) {
+        return $"Add{ModuleMethodNamePart(moduleName)}Handlers";
+    }
 
-    private static string McpMetadataMethodName(string moduleName) => $"Get{ModuleMethodNamePart(moduleName)}McpMetadata";
+    private static string McpMetadataMethodName(string moduleName) {
+        return $"Get{ModuleMethodNamePart(moduleName)}McpMetadata";
+    }
 
-    private static string ResourceFiltersMethodName(string moduleName) => $"Add{ModuleMethodNamePart(moduleName)}ResourceFilters";
+    private static string ResourceFiltersMethodName(string moduleName) {
+        return $"Add{ModuleMethodNamePart(moduleName)}ResourceFilters";
+    }
 
-    private static string ModuleMethodNamePart(string moduleName)
-    {
+    private static string ModuleMethodNamePart(string moduleName) {
         var sb = new StringBuilder(moduleName.Length);
         var changed = moduleName.Length == 0;
         foreach (var ch in moduleName)
-        {
-            if (SyntaxFacts.IsIdentifierPartCharacter(ch))
-            {
+            if (SyntaxFacts.IsIdentifierPartCharacter(ch)) {
                 sb.Append(ch);
             }
-            else
-            {
+            else {
                 sb.Append('_');
                 changed = true;
             }
-        }
 
         if (!changed)
             return moduleName;
@@ -1279,11 +1192,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return $"{sb}_{StableHash(moduleName)}";
     }
 
-    private static string StableHash(string value)
-    {
+    private static string StableHash(string value) {
         var hash = 2166136261u;
-        foreach (var ch in value)
-        {
+        foreach (var ch in value) {
             hash ^= ch;
             hash *= 16777619u;
         }
@@ -1291,10 +1202,8 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         return hash.ToString("X8");
     }
 
-    private static void EmitModuleCall(StringBuilder sb, ModuleEntry entry, string statement)
-    {
-        if (entry.IsCore)
-        {
+    private static void EmitModuleCall(StringBuilder sb, ModuleEntry entry, string statement) {
+        if (entry.IsCore) {
             sb.AppendLine($"        {statement}");
             return;
         }
@@ -1316,8 +1225,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         StringBuilder sb,
         ModuleEntry entry,
         bool hasHttp,
-        IReadOnlyList<ModuleEndpointsEntry> contributors)
-    {
+        IReadOnlyList<ModuleEndpointsEntry> contributors) {
         if (!entry.HasMapEndpoints && !hasHttp && contributors.Count == 0)
             return;
 
@@ -1326,16 +1234,13 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         if (entry.HasConfigureEndpointGroup)
             groupHooks.Add(entry.TypeFqn);
         foreach (var contributor in contributors)
-        {
             if (contributor.HasConfigureEndpointGroup)
                 groupHooks.Add(contributor.TypeFqn);
-        }
 
         var useGroup = groupHooks.Count > 0;
         var target = "endpoints";
         var statements = new List<string>();
-        if (useGroup)
-        {
+        if (useGroup) {
             target = $"{ModuleMethodNamePart(entry.ModuleName)}Endpoints";
             statements.Add($"var {target} = {groupHooks[0]}.ConfigureEndpointGroup(endpoints);");
             for (var i = 1; i < groupHooks.Count; i++)
@@ -1345,26 +1250,21 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
         if (entry.HasMapEndpoints)
             statements.Add($"{entry.TypeFqn}.MapEndpoints({target});");
         foreach (var contributor in contributors)
-        {
             if (contributor.HasMapEndpoints)
                 statements.Add($"{contributor.TypeFqn}.MapEndpoints({target});");
-        }
 
         if (hasHttp)
             statements.Add($"{HttpMethodName(entry.ModuleName)}({target});");
 
-        if (entry.IsCore)
-        {
+        if (entry.IsCore) {
             // Core modules with a group hook need a block to scope the local; otherwise emit flat.
-            if (useGroup)
-            {
+            if (useGroup) {
                 sb.AppendLine("        {");
                 foreach (var statement in statements)
                     sb.AppendLine($"            {statement}");
                 sb.AppendLine("        }");
             }
-            else
-            {
+            else {
                 foreach (var statement in statements)
                     sb.AppendLine($"        {statement}");
             }
@@ -1381,6 +1281,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator
 
     // Compiler-grade string-literal escaping (quotes, backslashes, control characters) — the hand-rolled
     // two-character escape produced uncompilable output for e.g. a newline in a module name.
-    private static string SourceString(string value) =>
-        SymbolDisplay.FormatLiteral(value, quote: true);
+    private static string SourceString(string value) {
+        return SymbolDisplay.FormatLiteral(value, true);
+    }
 }

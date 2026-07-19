@@ -159,9 +159,7 @@ public sealed class ActorSystemTests {
         // Every call arms the default call timeout on a pooled source and returns it via TryReset;
         // 500 sequential calls hammer the recycle path. A stale timeout or a contaminated recycled
         // source would surface as a spurious TimeoutException or cancellation here.
-        for (var i = 0; i < 500; i++) {
-            await counter.Increment(TestToken);
-        }
+        for (var i = 0; i < 500; i++) await counter.Increment(TestToken);
 
         (await counter.Current(TestToken)).Should().Be(500);
     }
@@ -358,7 +356,8 @@ public sealed class ActorSystemTests {
             services.AddElarionActor(new ActorRegistration<CounterActor, string, ICounter> {
                 Name = "Counter",
                 Options = new ActorOptions(),
-                Activator = static (sp, context) => new CounterActor(context, sp.GetRequiredService<LifecycleRecorder>()),
+                Activator = static (sp, context) =>
+                    new CounterActor(context, sp.GetRequiredService<LifecycleRecorder>()),
                 Facade = static handle => new CounterFacade(handle)
             });
             await using var provider = services.BuildServiceProvider();
@@ -462,9 +461,8 @@ public sealed class ActorSystemTests {
     private static async Task AdvanceUntilAsync(FakeTimeProvider time, TimeSpan step, Func<bool> condition) {
         var stopwatch = Stopwatch.StartNew();
         while (!condition()) {
-            if (stopwatch.Elapsed > WaitTimeout) {
+            if (stopwatch.Elapsed > WaitTimeout)
                 throw new TimeoutException("The expected actor state was not reached in time.");
-            }
 
             time.Advance(step);
             await Task.Delay(10, TestToken);
@@ -483,9 +481,17 @@ public sealed class ActorSystemTests {
         // can assert every queued call ran exactly once even as activations come and go.
         public int Executions => Volatile.Read(ref _executions);
 
-        public void RecordActivation() => Interlocked.Increment(ref _activations);
-        public void RecordDeactivation() => Interlocked.Increment(ref _deactivations);
-        public void RecordExecution() => Interlocked.Increment(ref _executions);
+        public void RecordActivation() {
+            Interlocked.Increment(ref _activations);
+        }
+
+        public void RecordDeactivation() {
+            Interlocked.Increment(ref _deactivations);
+        }
+
+        public void RecordExecution() {
+            Interlocked.Increment(ref _executions);
+        }
     }
 
     public sealed class GateService {
@@ -497,7 +503,9 @@ public sealed class ActorSystemTests {
 
         public Task Gate => _gate.Task;
 
-        public void Release() => _gate.TrySetResult();
+        public void Release() {
+            _gate.TrySetResult();
+        }
     }
 
     public sealed class ScopedProbeDependency {
@@ -535,28 +543,36 @@ public sealed class ActorSystemTests {
             return _count;
         }
 
-        public Task<int> Current(CancellationToken cancellationToken) => Task.FromResult(_count);
+        public Task<int> Current(CancellationToken cancellationToken) {
+            return Task.FromResult(_count);
+        }
     }
 
     private sealed class CounterFacade(ActorHandle<CounterActor> handle) : ICounter {
-        public ValueTask<int> Increment(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new IncrementItem(), cancellationToken);
+        public ValueTask<int> Increment(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new IncrementItem(), cancellationToken);
+        }
 
-        public ValueTask<int> Current(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new CurrentItem(), cancellationToken);
+        public ValueTask<int> Current(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new CurrentItem(), cancellationToken);
+        }
 
         private sealed class IncrementItem : ActorWorkItem<CounterActor, int> {
             public override string MethodName => "Increment";
 
-            protected override async ValueTask<int> InvokeAsync(CounterActor actor, CancellationToken cancellationToken) =>
-                await actor.Increment(cancellationToken).ConfigureAwait(false);
+            protected override async ValueTask<int>
+                InvokeAsync(CounterActor actor, CancellationToken cancellationToken) {
+                return await actor.Increment(cancellationToken).ConfigureAwait(false);
+            }
         }
 
         private sealed class CurrentItem : ActorWorkItem<CounterActor, int> {
             public override string MethodName => "Current";
 
-            protected override async ValueTask<int> InvokeAsync(CounterActor actor, CancellationToken cancellationToken) =>
-                await actor.Current(cancellationToken).ConfigureAwait(false);
+            protected override async ValueTask<int>
+                InvokeAsync(CounterActor actor, CancellationToken cancellationToken) {
+                return await actor.Current(cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
@@ -574,8 +590,9 @@ public sealed class ActorSystemTests {
     }
 
     private sealed class PooledEchoFacade(ActorHandle<PooledEchoActor> handle) : IPooledEcho {
-        public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(PooledEchoItem.Rent(value), cancellationToken);
+        public ValueTask<int> Echo(int value, CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(PooledEchoItem.Rent(value), cancellationToken);
+        }
     }
 
     // Mirrors what a pooling generator would emit: rented per call, self-returned via the Recycle hook.
@@ -586,18 +603,20 @@ public sealed class ActorSystemTests {
         public override string MethodName => "Echo";
 
         public static PooledEchoItem Rent(int value) {
-            if (!Pool.TryDequeue(out var item)) {
-                item = new PooledEchoItem();
-            }
+            if (!Pool.TryDequeue(out var item)) item = new PooledEchoItem();
 
             item._value = value;
             return item;
         }
 
-        protected override void Recycle() => Pool.Enqueue(this);
+        protected override void Recycle() {
+            Pool.Enqueue(this);
+        }
 
-        protected override async ValueTask<int> InvokeAsync(PooledEchoActor actor, CancellationToken cancellationToken) =>
-            await actor.Echo(_value).ConfigureAwait(false);
+        protected override async ValueTask<int>
+            InvokeAsync(PooledEchoActor actor, CancellationToken cancellationToken) {
+            return await actor.Echo(_value).ConfigureAwait(false);
+        }
     }
 
     // --- Greeter (singleton) ---
@@ -615,20 +634,25 @@ public sealed class ActorSystemTests {
             return Task.CompletedTask;
         }
 
-        public Task<string> Greet(string name) => Task.FromResult($"{_greeting} {name}");
+        public Task<string> Greet(string name) {
+            return Task.FromResult($"{_greeting} {name}");
+        }
     }
 
     private sealed class GreeterFacade(ActorHandle<GreeterActor> handle) : IGreeter {
-        public ValueTask SetGreeting(string greeting, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new SetGreetingItem(greeting), cancellationToken);
+        public ValueTask SetGreeting(string greeting, CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new SetGreetingItem(greeting), cancellationToken);
+        }
 
-        public ValueTask<string> Greet(string name, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new GreetItem(name), cancellationToken);
+        public ValueTask<string> Greet(string name, CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new GreetItem(name), cancellationToken);
+        }
 
         private sealed class SetGreetingItem(string greeting) : ActorWorkItem<GreeterActor, Unit> {
             public override string MethodName => "SetGreeting";
 
-            protected override async ValueTask<Unit> InvokeAsync(GreeterActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(GreeterActor actor,
+                CancellationToken cancellationToken) {
                 await actor.SetGreeting(greeting).ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -637,8 +661,10 @@ public sealed class ActorSystemTests {
         private sealed class GreetItem(string name) : ActorWorkItem<GreeterActor, string> {
             public override string MethodName => "Greet";
 
-            protected override async ValueTask<string> InvokeAsync(GreeterActor actor, CancellationToken cancellationToken) =>
-                await actor.Greet(name).ConfigureAwait(false);
+            protected override async ValueTask<string> InvokeAsync(GreeterActor actor,
+                CancellationToken cancellationToken) {
+                return await actor.Greet(name).ConfigureAwait(false);
+            }
         }
     }
 
@@ -657,20 +683,25 @@ public sealed class ActorSystemTests {
             _values.Add(value);
         }
 
-        public Task<int[]> Recorded() => Task.FromResult(_values.ToArray());
+        public Task<int[]> Recorded() {
+            return Task.FromResult(_values.ToArray());
+        }
     }
 
     private sealed class RecorderFacade(ActorHandle<RecorderActor> handle) : IRecorder {
-        public ValueTask Record(int value, CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new RecordItem(value), cancellationToken);
+        public ValueTask Record(int value, CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new RecordItem(value), cancellationToken);
+        }
 
-        public ValueTask<int[]> Recorded(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new RecordedItem(), cancellationToken);
+        public ValueTask<int[]> Recorded(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new RecordedItem(), cancellationToken);
+        }
 
         private sealed class RecordItem(int value) : ActorWorkItem<RecorderActor, Unit> {
             public override string MethodName => "Record";
 
-            protected override async ValueTask<Unit> InvokeAsync(RecorderActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(RecorderActor actor,
+                CancellationToken cancellationToken) {
                 await actor.Record(value).ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -679,8 +710,10 @@ public sealed class ActorSystemTests {
         private sealed class RecordedItem : ActorWorkItem<RecorderActor, int[]> {
             public override string MethodName => "Recorded";
 
-            protected override async ValueTask<int[]> InvokeAsync(RecorderActor actor, CancellationToken cancellationToken) =>
-                await actor.Recorded().ConfigureAwait(false);
+            protected override async ValueTask<int[]> InvokeAsync(RecorderActor actor,
+                CancellationToken cancellationToken) {
+                return await actor.Recorded().ConfigureAwait(false);
+            }
         }
     }
 
@@ -708,16 +741,19 @@ public sealed class ActorSystemTests {
     }
 
     private sealed class ThrowerFacade(ActorHandle<ThrowerActor> handle) : IThrower {
-        public ValueTask Boom(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new BoomItem(), cancellationToken);
+        public ValueTask Boom(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new BoomItem(), cancellationToken);
+        }
 
-        public ValueTask BoomWithForeignCancellation(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new BoomWithForeignCancellationItem(), cancellationToken);
+        public ValueTask BoomWithForeignCancellation(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new BoomWithForeignCancellationItem(), cancellationToken);
+        }
 
         private sealed class BoomItem : ActorWorkItem<ThrowerActor, Unit> {
             public override string MethodName => "Boom";
 
-            protected override async ValueTask<Unit> InvokeAsync(ThrowerActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(ThrowerActor actor,
+                CancellationToken cancellationToken) {
                 await actor.Boom().ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -726,7 +762,8 @@ public sealed class ActorSystemTests {
         private sealed class BoomWithForeignCancellationItem : ActorWorkItem<ThrowerActor, Unit> {
             public override string MethodName => "BoomWithForeignCancellation";
 
-            protected override async ValueTask<Unit> InvokeAsync(ThrowerActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(ThrowerActor actor,
+                CancellationToken cancellationToken) {
                 await actor.BoomWithForeignCancellation().ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -742,22 +779,29 @@ public sealed class ActorSystemTests {
     public sealed class RecycleProbeActor {
         private int _count;
 
-        public Task<int> Increment() => Task.FromResult(++_count);
+        public Task<int> Increment() {
+            return Task.FromResult(++_count);
+        }
     }
 
     private sealed class RecycleProbeFacade(ActorHandle<RecycleProbeActor> handle) : IRecycleProbe {
-        public ValueTask<int> Increment(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new ThrowingRecycleItem(), cancellationToken);
+        public ValueTask<int> Increment(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new ThrowingRecycleItem(), cancellationToken);
+        }
 
         // A buggy pooling subclass: the runtime must swallow the Recycle failure (the item is
         // simply not pooled) instead of letting it escape into the cell's pump loop.
         private sealed class ThrowingRecycleItem : ActorWorkItem<RecycleProbeActor, int> {
             public override string MethodName => "Increment";
 
-            protected override void Recycle() => throw new InvalidOperationException("recycle boom");
+            protected override void Recycle() {
+                throw new InvalidOperationException("recycle boom");
+            }
 
-            protected override async ValueTask<int> InvokeAsync(RecycleProbeActor actor, CancellationToken cancellationToken) =>
-                await actor.Increment().ConfigureAwait(false);
+            protected override async ValueTask<int> InvokeAsync(RecycleProbeActor actor,
+                CancellationToken cancellationToken) {
+                return await actor.Increment().ConfigureAwait(false);
+            }
         }
     }
 
@@ -782,23 +826,29 @@ public sealed class ActorSystemTests {
             return Task.CompletedTask;
         }
 
-        public Task<int> Executions() => Task.FromResult(_executions);
+        public Task<int> Executions() {
+            return Task.FromResult(_executions);
+        }
     }
 
     private sealed class BlockingFacade(ActorHandle<BlockingActor> handle) : IBlocking {
-        public ValueTask WaitForGate(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new WaitForGateItem(), cancellationToken);
+        public ValueTask WaitForGate(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new WaitForGateItem(), cancellationToken);
+        }
 
-        public ValueTask Count(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new CountItem(), cancellationToken);
+        public ValueTask Count(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new CountItem(), cancellationToken);
+        }
 
-        public ValueTask<int> Executions(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new ExecutionsItem(), cancellationToken);
+        public ValueTask<int> Executions(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new ExecutionsItem(), cancellationToken);
+        }
 
         private sealed class WaitForGateItem : ActorWorkItem<BlockingActor, Unit> {
             public override string MethodName => "WaitForGate";
 
-            protected override async ValueTask<Unit> InvokeAsync(BlockingActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(BlockingActor actor,
+                CancellationToken cancellationToken) {
                 await actor.WaitForGate().ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -807,7 +857,8 @@ public sealed class ActorSystemTests {
         private sealed class CountItem : ActorWorkItem<BlockingActor, Unit> {
             public override string MethodName => "Count";
 
-            protected override async ValueTask<Unit> InvokeAsync(BlockingActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(BlockingActor actor,
+                CancellationToken cancellationToken) {
                 await actor.Count().ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -816,8 +867,10 @@ public sealed class ActorSystemTests {
         private sealed class ExecutionsItem : ActorWorkItem<BlockingActor, int> {
             public override string MethodName => "Executions";
 
-            protected override async ValueTask<int> InvokeAsync(BlockingActor actor, CancellationToken cancellationToken) =>
-                await actor.Executions().ConfigureAwait(false);
+            protected override async ValueTask<int> InvokeAsync(BlockingActor actor,
+                CancellationToken cancellationToken) {
+                return await actor.Executions().ConfigureAwait(false);
+            }
         }
     }
 
@@ -844,23 +897,29 @@ public sealed class ActorSystemTests {
             return Task.CompletedTask;
         }
 
-        public Task<string[]> Events() => Task.FromResult(_events.ToArray());
+        public Task<string[]> Events() {
+            return Task.FromResult(_events.ToArray());
+        }
     }
 
     private sealed class ReentrantProbeFacade(ActorHandle<ReentrantProbeActor> handle) : IReentrantProbe {
-        public ValueTask Slow(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new SlowItem(), cancellationToken);
+        public ValueTask Slow(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new SlowItem(), cancellationToken);
+        }
 
-        public ValueTask Fast(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new FastItem(), cancellationToken);
+        public ValueTask Fast(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new FastItem(), cancellationToken);
+        }
 
-        public ValueTask<string[]> Events(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new EventsItem(), cancellationToken);
+        public ValueTask<string[]> Events(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new EventsItem(), cancellationToken);
+        }
 
         private sealed class SlowItem : ActorWorkItem<ReentrantProbeActor, Unit> {
             public override string MethodName => "Slow";
 
-            protected override async ValueTask<Unit> InvokeAsync(ReentrantProbeActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(ReentrantProbeActor actor,
+                CancellationToken cancellationToken) {
                 await actor.Slow().ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -869,7 +928,8 @@ public sealed class ActorSystemTests {
         private sealed class FastItem : ActorWorkItem<ReentrantProbeActor, Unit> {
             public override string MethodName => "Fast";
 
-            protected override async ValueTask<Unit> InvokeAsync(ReentrantProbeActor actor, CancellationToken cancellationToken) {
+            protected override async ValueTask<Unit> InvokeAsync(ReentrantProbeActor actor,
+                CancellationToken cancellationToken) {
                 await actor.Fast().ConfigureAwait(false);
                 return Unit.Value;
             }
@@ -878,8 +938,10 @@ public sealed class ActorSystemTests {
         private sealed class EventsItem : ActorWorkItem<ReentrantProbeActor, string[]> {
             public override string MethodName => "Events";
 
-            protected override async ValueTask<string[]> InvokeAsync(ReentrantProbeActor actor, CancellationToken cancellationToken) =>
-                await actor.Events().ConfigureAwait(false);
+            protected override async ValueTask<string[]> InvokeAsync(ReentrantProbeActor actor,
+                CancellationToken cancellationToken) {
+                return await actor.Events().ConfigureAwait(false);
+            }
         }
     }
 
@@ -890,18 +952,23 @@ public sealed class ActorSystemTests {
     }
 
     public sealed class ScopeProbeActor(ScopedProbeDependency dependency) {
-        public Task<Guid> ScopeId() => Task.FromResult(dependency.Id);
+        public Task<Guid> ScopeId() {
+            return Task.FromResult(dependency.Id);
+        }
     }
 
     private sealed class ScopeProbeFacade(ActorHandle<ScopeProbeActor> handle) : IScopeProbe {
-        public ValueTask<Guid> ScopeId(CancellationToken cancellationToken = default) =>
-            handle.InvokeAsync(new ScopeIdItem(), cancellationToken);
+        public ValueTask<Guid> ScopeId(CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new ScopeIdItem(), cancellationToken);
+        }
 
         private sealed class ScopeIdItem : ActorWorkItem<ScopeProbeActor, Guid> {
             public override string MethodName => "ScopeId";
 
-            protected override async ValueTask<Guid> InvokeAsync(ScopeProbeActor actor, CancellationToken cancellationToken) =>
-                await actor.ScopeId().ConfigureAwait(false);
+            protected override async ValueTask<Guid> InvokeAsync(ScopeProbeActor actor,
+                CancellationToken cancellationToken) {
+                return await actor.ScopeId().ConfigureAwait(false);
+            }
         }
     }
 }

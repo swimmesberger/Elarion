@@ -1,1 +1,2 @@
-ALTER TABLE mig_customers ADD COLUMN email TEXT;
+ALTER TABLE mig_customers
+  ADD COLUMN email TEXT;

@@ -16,16 +16,14 @@ public sealed class ClientEventTopicCatalog {
         _byName = new Dictionary<string, ClientEventTopic>(StringComparer.Ordinal);
         _byType = [];
         foreach (var topic in topics) {
-            if (!_byName.TryAdd(topic.Name, topic)) {
+            if (!_byName.TryAdd(topic.Name, topic))
                 throw new InvalidOperationException(
                     $"Client-event topic '{topic.Name}' is declared more than once. Topic names must be unique; " +
                     "use the '{module}.{event}' shape to avoid collisions.");
-            }
-            if (!_byType.TryAdd(topic.EventType, topic)) {
+            if (!_byType.TryAdd(topic.EventType, topic))
                 throw new InvalidOperationException(
                     $"Client-event type '{topic.EventType}' is declared for more than one topic " +
                     $"('{_byType[topic.EventType].Name}' and '{topic.Name}'). A contract type is the schema of exactly one topic.");
-            }
         }
     }
 
@@ -33,14 +31,16 @@ public sealed class ClientEventTopicCatalog {
     public IReadOnlyCollection<ClientEventTopic> Topics => _byName.Values;
 
     /// <summary>The topic named <paramref name="name"/>, or <see langword="null"/> when not registered.</summary>
-    public ClientEventTopic? FindByName(string name) =>
-        _byName.TryGetValue(name, out var topic) ? topic : null;
+    public ClientEventTopic? FindByName(string name) {
+        return _byName.TryGetValue(name, out var topic) ? topic : null;
+    }
 
-    internal ClientEventTopic GetByType(Type eventType) =>
-        _byType.TryGetValue(eventType, out var topic)
+    internal ClientEventTopic GetByType(Type eventType) {
+        return _byType.TryGetValue(eventType, out var topic)
             ? topic
             : throw new InvalidOperationException(
                 $"'{eventType}' is not registered as a client-event topic. Declare it via " +
                 "AddElarionClientEvents(events => events.AddTopic<" + eventType.Name + ">(\"{module}.{event}\")) — " +
                 "nothing reaches the wire without an explicit topic declaration.");
+    }
 }

@@ -19,9 +19,8 @@ internal sealed class ElarionEmailFormatSchemaTransformer : IOpenApiSchemaTransf
         OpenApiSchemaTransformerContext context,
         CancellationToken cancellationToken) {
         if (context.JsonPropertyInfo?.AttributeProvider is { } provider &&
-            provider.GetCustomAttributes(typeof(EmailAddressAttribute), inherit: false) is { Length: > 0 }) {
+            provider.GetCustomAttributes(typeof(EmailAddressAttribute), false) is { Length: > 0 })
             schema.Format = "email";
-        }
 
         return Task.CompletedTask;
     }

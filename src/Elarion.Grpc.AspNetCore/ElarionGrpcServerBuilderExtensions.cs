@@ -5,8 +5,7 @@ using Grpc.Core;
 namespace Elarion.Grpc.AspNetCore;
 
 /// <summary>Composes Elarion's handler transports with an ASP.NET Core grpc-dotnet server.</summary>
-public static class ElarionGrpcServerBuilderExtensions
-{
+public static class ElarionGrpcServerBuilderExtensions {
     /// <summary>
     /// Adds Elarion's unary and request-driven server-streaming transports to a server registered with
     /// <c>AddGrpc()</c>. The authenticated
@@ -15,8 +14,7 @@ public static class ElarionGrpcServerBuilderExtensions
     /// </summary>
     /// <param name="builder">The grpc-dotnet server builder.</param>
     /// <returns>The same builder for further grpc-dotnet configuration.</returns>
-    public static IGrpcServerBuilder AddElarion(this IGrpcServerBuilder builder)
-    {
+    public static IGrpcServerBuilder AddElarion(this IGrpcServerBuilder builder) {
         ArgumentNullException.ThrowIfNull(builder);
 
         builder.Services.AddElarionGrpcTransport(static context => context.GetHttpContext().User);

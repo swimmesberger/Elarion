@@ -6,8 +6,7 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class ValidationResolverGeneratorTests
-{
+public sealed class ValidationResolverGeneratorTests {
     private const string Preamble =
         """
         using System.Collections.Generic;
@@ -22,31 +21,30 @@ public sealed class ValidationResolverGeneratorTests
         """;
 
     [Fact]
-    public void AnnotatedRequest_EmitsResolverWithConstantConstructedAttributes()
-    {
+    public void AnnotatedRequest_EmitsResolverWithConstantConstructedAttributes() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record CreateThingCommand : ICommand {
-                    [StringLength(100, MinimumLength = 3)]
-                    public required string Name { get; init; }
+                                  public sealed record CreateThingCommand : ICommand {
+                                      [StringLength(100, MinimumLength = 3)]
+                                      public required string Name { get; init; }
 
-                    [Range(1, 10)]
-                    public int Count { get; init; }
-                }
+                                      [Range(1, 10)]
+                                      public int Count { get; init; }
+                                  }
 
-                public sealed record CreateThingResponse(string Name);
+                                  public sealed record CreateThingResponse(string Name);
 
-                public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<CreateThingResponse>> {
-                    public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<CreateThingResponse>.Success(new CreateThingResponse("x")));
-                }
-            }
-            """;
+                                  public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<CreateThingResponse>> {
+                                      public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<CreateThingResponse>.Success(new CreateThingResponse("x")));
+                                  }
+                              }
+                              """;
 
         var result = Run(source);
         var generated = GetGenerated(result, "AppValidatableInfoResolver.g.cs");
@@ -72,26 +70,25 @@ public sealed class ValidationResolverGeneratorTests
     }
 
     [Fact]
-    public void AllowedValuesRequest_EmitsConstantConstructedEnumAttribute()
-    {
+    public void AllowedValuesRequest_EmitsConstantConstructedEnumAttribute() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record SetBackendCommand : ICommand {
-                    [AllowedValues("smtp", "office365")]
-                    public required string Backend { get; init; }
-                }
+                                  public sealed record SetBackendCommand : ICommand {
+                                      [AllowedValues("smtp", "office365")]
+                                      public required string Backend { get; init; }
+                                  }
 
-                public sealed class SetBackendHandler : IHandler<SetBackendCommand, Result<string>> {
-                    public ValueTask<Result<string>> HandleAsync(SetBackendCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<string>.Success("ok"));
-                }
-            }
-            """;
+                                  public sealed class SetBackendHandler : IHandler<SetBackendCommand, Result<string>> {
+                                      public ValueTask<Result<string>> HandleAsync(SetBackendCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<string>.Success("ok"));
+                                  }
+                              }
+                              """;
 
         var result = Run(source);
         var generated = GetGenerated(result, "AppValidatableInfoResolver.g.cs");
@@ -107,35 +104,34 @@ public sealed class ValidationResolverGeneratorTests
     }
 
     [Fact]
-    public void NestedAnnotatedType_RegistersCarrierAndNestedType()
-    {
+    public void NestedAnnotatedType_RegistersCarrierAndNestedType() {
         // The request itself carries no attribute; only the nested type does. The runtime walker recurses into
         // a nested value only when its type resolves through TryGetValidatableTypeInfo, so BOTH the carrier
         // request and the annotated nested type must be registered — and the carrier member must be emitted.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record RegisterCustomerCommand : ICommand {
-                    public required CustomerAddress Address { get; init; }
+                                  public sealed record RegisterCustomerCommand : ICommand {
+                                      public required CustomerAddress Address { get; init; }
 
-                    public required IReadOnlyList<CustomerAddress> PreviousAddresses { get; init; }
-                }
+                                      public required IReadOnlyList<CustomerAddress> PreviousAddresses { get; init; }
+                                  }
 
-                public sealed record CustomerAddress {
-                    [StringLength(64)]
-                    public required string Street { get; init; }
-                }
+                                  public sealed record CustomerAddress {
+                                      [StringLength(64)]
+                                      public required string Street { get; init; }
+                                  }
 
-                public sealed class RegisterCustomerHandler : IHandler<RegisterCustomerCommand, Result<Unit>> {
-                    public ValueTask<Result<Unit>> HandleAsync(RegisterCustomerCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<Unit>.Success(default));
-                }
-            }
-            """;
+                                  public sealed class RegisterCustomerHandler : IHandler<RegisterCustomerCommand, Result<Unit>> {
+                                      public ValueTask<Result<Unit>> HandleAsync(RegisterCustomerCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<Unit>.Success(default));
+                                  }
+                              }
+                              """;
 
         var result = Run(source);
         var generated = GetGenerated(result, "AppValidatableInfoResolver.g.cs");
@@ -153,25 +149,24 @@ public sealed class ValidationResolverGeneratorTests
     }
 
     [Fact]
-    public void PositionalRecordParameterAttributes_AreDiscovered()
-    {
+    public void PositionalRecordParameterAttributes_AreDiscovered() {
         // A positional record's `[StringLength(50)] string Name` lands on the primary-constructor parameter,
         // not the synthesized property — the walker must find it there, like the runtime record handling.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record RenameThingCommand([StringLength(50)] string Name) : ICommand;
+                                  public sealed record RenameThingCommand([StringLength(50)] string Name) : ICommand;
 
-                public sealed class RenameThingHandler : IHandler<RenameThingCommand, Result<Unit>> {
-                    public ValueTask<Result<Unit>> HandleAsync(RenameThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<Unit>.Success(default));
-                }
-            }
-            """;
+                                  public sealed class RenameThingHandler : IHandler<RenameThingCommand, Result<Unit>> {
+                                      public ValueTask<Result<Unit>> HandleAsync(RenameThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<Unit>.Success(default));
+                                  }
+                              }
+                              """;
 
         var result = Run(source);
         var generated = GetGenerated(result, "AppValidatableInfoResolver.g.cs");
@@ -184,24 +179,23 @@ public sealed class ValidationResolverGeneratorTests
     }
 
     [Fact]
-    public void UnannotatedRequest_EmitsNothing()
-    {
+    public void UnannotatedRequest_EmitsNothing() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record ReadThingQuery(int Id) : IQuery;
-                public sealed record ReadThingResponse(string Name);
+                                  public sealed record ReadThingQuery(int Id) : IQuery;
+                                  public sealed record ReadThingResponse(string Name);
 
-                public sealed class ReadThingHandler : IHandler<ReadThingQuery, Result<ReadThingResponse>> {
-                    public ValueTask<Result<ReadThingResponse>> HandleAsync(ReadThingQuery request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ReadThingResponse>.Success(new ReadThingResponse("x")));
-                }
-            }
-            """;
+                                  public sealed class ReadThingHandler : IHandler<ReadThingQuery, Result<ReadThingResponse>> {
+                                      public ValueTask<Result<ReadThingResponse>> HandleAsync(ReadThingQuery request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<ReadThingResponse>.Success(new ReadThingResponse("x")));
+                                  }
+                              }
+                              """;
 
         var result = Run(source);
 
@@ -210,86 +204,83 @@ public sealed class ValidationResolverGeneratorTests
     }
 
     [Fact]
-    public void StreamOnlyAnnotatedRequest_EmitsResolverAndWarnsWithoutValidationPackage()
-    {
+    public void StreamOnlyAnnotatedRequest_EmitsResolverAndWarnsWithoutValidationPackage() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record ExportRequest([StringLength(8)] string Name);
-                public sealed class ExportHandler : IStreamHandler<ExportRequest, string> {
-                    public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(ExportRequest request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
-                    private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
-                }
-            }
-            """;
+                                  public sealed record ExportRequest([StringLength(8)] string Name);
+                                  public sealed class ExportHandler : IStreamHandler<ExportRequest, string> {
+                                      public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(ExportRequest request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+                                      private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
+                                  }
+                              }
+                              """;
 
         GetGenerated(Run(source), "AppValidatableInfoResolver.g.cs")
             .Should().Contain("typeof(global::Sample.App.ExportRequest)");
-        Run(source, excludeElarionValidationReference: true).Diagnostics
+        Run(source, true).Diagnostics
             .Should().Contain(diagnostic => diagnostic.Id == "ELVAL002");
         AssertGeneratedOutputCompiles(source);
     }
 
     [Fact]
-    public void DualShapeHandler_EmitsBothDistinctValidatableRequestRoots_AndWarnsForBothWithoutValidation()
-    {
+    public void DualShapeHandler_EmitsBothDistinctValidatableRequestRoots_AndWarnsForBothWithoutValidation() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
-                public sealed record UnaryRequest([StringLength(8)] string Name);
-                public sealed record StreamRequest([Range(1, 9)] int Page);
-                public sealed class DualHandler : IHandler<UnaryRequest, Result<string>>, IStreamHandler<StreamRequest, string> {
-                    public ValueTask<Result<string>> HandleAsync(UnaryRequest request, CancellationToken ct) => ValueTask.FromResult(Result<string>.Success("ok"));
-                    public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(StreamRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
-                    private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
-                }
-            }
-            """;
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+                                  public sealed record UnaryRequest([StringLength(8)] string Name);
+                                  public sealed record StreamRequest([Range(1, 9)] int Page);
+                                  public sealed class DualHandler : IHandler<UnaryRequest, Result<string>>, IStreamHandler<StreamRequest, string> {
+                                      public ValueTask<Result<string>> HandleAsync(UnaryRequest request, CancellationToken ct) => ValueTask.FromResult(Result<string>.Success("ok"));
+                                      public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(StreamRequest request, CancellationToken ct) => ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+                                      private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
+                                  }
+                              }
+                              """;
 
         var generated = GetGenerated(Run(source), "AppValidatableInfoResolver.g.cs");
         generated.Should().Contain("typeof(global::Sample.App.UnaryRequest)")
             .And.Contain("typeof(global::Sample.App.StreamRequest)");
-        Run(source, excludeElarionValidationReference: true).Diagnostics
+        Run(source, true).Diagnostics
             .Count(diagnostic => diagnostic.Id == "ELVAL002").Should().Be(2);
         AssertGeneratedOutputCompiles(source);
     }
 
     [Fact]
-    public void PrefixSiblingNamespace_IsNotAssignedToModule()
-    {
+    public void PrefixSiblingNamespace_IsNotAssignedToModule() {
         // Regression guard mirroring the module-scoping conventions: 'Sample.Modules.BillingPlus' must not
         // match module 'Sample.Modules.Billing', so its validatable request contributes no resolver entry.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.Modules.Billing {
-                [AppModule("Billing")]
-                public static class BillingModule { }
-            }
+                              namespace Sample.Modules.Billing {
+                                  [AppModule("Billing")]
+                                  public static class BillingModule { }
+                              }
 
-            namespace Sample.Modules.BillingPlus {
-                public sealed record SiblingCommand : Elarion.Abstractions.ICommand {
-                    [System.ComponentModel.DataAnnotations.StringLength(10)]
-                    public required string Name { get; init; }
-                }
+                              namespace Sample.Modules.BillingPlus {
+                                  public sealed record SiblingCommand : Elarion.Abstractions.ICommand {
+                                      [System.ComponentModel.DataAnnotations.StringLength(10)]
+                                      public required string Name { get; init; }
+                                  }
 
-                public sealed class SiblingHandler
-                    : Elarion.Abstractions.IHandler<SiblingCommand, Elarion.Abstractions.Result<Elarion.Abstractions.Results.Unit>> {
-                    public ValueTask<Elarion.Abstractions.Result<Elarion.Abstractions.Results.Unit>> HandleAsync(
-                        SiblingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(
-                            Elarion.Abstractions.Result<Elarion.Abstractions.Results.Unit>.Success(default));
-                }
-            }
-            """;
+                                  public sealed class SiblingHandler
+                                      : Elarion.Abstractions.IHandler<SiblingCommand, Elarion.Abstractions.Result<Elarion.Abstractions.Results.Unit>> {
+                                      public ValueTask<Elarion.Abstractions.Result<Elarion.Abstractions.Results.Unit>> HandleAsync(
+                                          SiblingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(
+                                              Elarion.Abstractions.Result<Elarion.Abstractions.Results.Unit>.Success(default));
+                                  }
+                              }
+                              """;
 
         var result = Run(source);
 
@@ -299,28 +290,27 @@ public sealed class ValidationResolverGeneratorTests
     }
 
     [Fact]
-    public void MissingElarionValidationReference_ReportsElval002AndEmitsNothing()
-    {
+    public void MissingElarionValidationReference_ReportsElval002AndEmitsNothing() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record CreateThingCommand : ICommand {
-                    [StringLength(100)]
-                    public required string Name { get; init; }
-                }
+                                  public sealed record CreateThingCommand : ICommand {
+                                      [StringLength(100)]
+                                      public required string Name { get; init; }
+                                  }
 
-                public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<Unit>> {
-                    public ValueTask<Result<Unit>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<Unit>.Success(default));
-                }
-            }
-            """;
+                                  public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<Unit>> {
+                                      public ValueTask<Result<Unit>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<Unit>.Success(default));
+                                  }
+                              }
+                              """;
 
-        var result = Run(source, excludeElarionValidationReference: true);
+        var result = Run(source, true);
 
         // The attributes would flow into every exported schema but nothing would enforce them — that must be
         // a visible choice (ELVAL002), never a silent one.
@@ -331,26 +321,25 @@ public sealed class ValidationResolverGeneratorTests
     }
 
     [Fact]
-    public void IrrelevantEdit_ReusesPipeline()
-    {
+    public void IrrelevantEdit_ReusesPipeline() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record CreateThingCommand : ICommand {
-                    [StringLength(100, MinimumLength = 3)]
-                    public required string Name { get; init; }
-                }
+                                  public sealed record CreateThingCommand : ICommand {
+                                      [StringLength(100, MinimumLength = 3)]
+                                      public required string Name { get; init; }
+                                  }
 
-                public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<Unit>> {
-                    public ValueTask<Result<Unit>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<Unit>.Success(default));
-                }
-            }
-            """;
+                                  public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<Unit>> {
+                                      public ValueTask<Result<Unit>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<Unit>.Success(default));
+                                  }
+                              }
+                              """;
 
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new ValidationResolverGenerator(),
@@ -360,8 +349,7 @@ public sealed class ValidationResolverGeneratorTests
             "ValidationCombined");
     }
 
-    private static GeneratorDriverRunResult Run(string source, bool excludeElarionValidationReference = false)
-    {
+    private static GeneratorDriverRunResult Run(string source, bool excludeElarionValidationReference = false) {
         var compilation = CreateCompilation(source, excludeElarionValidationReference);
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new ValidationResolverGenerator());
@@ -376,11 +364,10 @@ public sealed class ValidationResolverGeneratorTests
     /// <c>Microsoft.Extensions.Validation</c>/<c>Elarion.Validation</c> assemblies — so a base-constructor
     /// signature drift in the pinned package version fails this test.
     /// </summary>
-    private static void AssertGeneratedOutputCompiles(string source)
-    {
-        var compilation = CreateCompilation(source, excludeElarionValidationReference: false);
+    private static void AssertGeneratedOutputCompiles(string source) {
+        var compilation = CreateCompilation(source, false);
 
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+        var driver = CSharpGeneratorDriver.Create(
                 new ValidationResolverGenerator(), new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(new CSharpParseOptions(LanguageVersion.Preview));
         driver.RunGeneratorsAndUpdateCompilation(
@@ -397,8 +384,7 @@ public sealed class ValidationResolverGeneratorTests
             .Should().BeEmpty();
     }
 
-    private static CSharpCompilation CreateCompilation(string source, bool excludeElarionValidationReference)
-    {
+    private static CSharpCompilation CreateCompilation(string source, bool excludeElarionValidationReference) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var syntaxTree = CSharpSyntaxTree.ParseText(
             source, parseOptions, cancellationToken: TestContext.Current.CancellationToken);
@@ -415,21 +401,22 @@ public sealed class ValidationResolverGeneratorTests
         return compilation;
     }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences(bool excludeElarionValidation)
-    {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences(bool excludeElarionValidation) {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
 
         return trustedPlatformAssemblies!
             .Split(Path.PathSeparator)
             .Where(path => !excludeElarionValidation ||
-                !string.Equals(Path.GetFileName(path), "Elarion.Validation.dll", StringComparison.OrdinalIgnoreCase))
+                           !string.Equals(Path.GetFileName(path), "Elarion.Validation.dll",
+                               StringComparison.OrdinalIgnoreCase))
             .Select(path => MetadataReference.CreateFromFile(path))
             .ToArray();
     }

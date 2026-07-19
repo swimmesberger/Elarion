@@ -33,20 +33,15 @@ public sealed class SessionHandler(
 
         foreach (var module in manifest.Modules) {
             modules[module.Name] = module.Enabled;
-            if (!module.Enabled) {
-                continue;
-            }
+            if (!module.Enabled) continue;
 
             foreach (var feature in module.Features) {
-                if (featureFlags is not null && !flags.ContainsKey(feature)) {
+                if (featureFlags is not null && !flags.ContainsKey(feature))
                     flags[feature] = await featureFlags.IsEnabledAsync(feature, ct).ConfigureAwait(false);
-                }
 
                 if (featureVariants is not null && !variants.ContainsKey(feature)) {
                     var variant = await featureVariants.GetVariantAsync(feature, ct).ConfigureAwait(false);
-                    if (variant is not null) {
-                        variants[feature] = variant;
-                    }
+                    if (variant is not null) variants[feature] = variant;
                 }
             }
         }
@@ -60,14 +55,14 @@ public sealed class SessionHandler(
             Email = currentUser.Email,
             IsAuthenticated = currentUser.IsAuthenticated,
             Roles = currentUser.Roles,
-            Permissions = [.. currentUser.GetClaimValues(permissionClaimType)],
+            Permissions = [.. currentUser.GetClaimValues(permissionClaimType)]
         };
 
         return new SessionResponse {
             User = user,
             Modules = modules,
             Flags = flags,
-            Variants = variants,
+            Variants = variants
         };
     }
 }

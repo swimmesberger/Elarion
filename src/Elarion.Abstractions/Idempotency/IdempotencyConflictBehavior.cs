@@ -17,5 +17,5 @@ public enum IdempotencyConflictBehavior {
     /// Block on the key's lock until the first request commits, then replay its result — no 409 for the
     /// caller to handle, at the cost of holding a connection while waiting.
     /// </summary>
-    WaitThenReplay = 1,
+    WaitThenReplay = 1
 }

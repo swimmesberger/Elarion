@@ -34,7 +34,9 @@ public sealed class StreamHub<T> {
     private readonly Queue<StreamItem<T>> _replay;
     private readonly int _replayCapacity;
     private readonly List<Subscriber> _subscribers = [];
+
     private long _sequence;
+
     // The ring's newest element, tracked separately so a Latest subscribe is O(1) instead of copying
     // the ring. Only set while retention is on (ReplayCapacity > 0) — Latest on a no-replay hub
     // greets with nothing, by contract.
@@ -102,35 +104,28 @@ public sealed class StreamHub<T> {
             StreamItem<T> element;
             Subscriber[] snapshot;
             lock (_lock) {
-                if (_completed) {
-                    throw new InvalidOperationException("The stream hub is completed; publishing is over.");
-                }
+                if (_completed) throw new InvalidOperationException("The stream hub is completed; publishing is over.");
 
                 element = new StreamItem<T>(++_sequence, item);
                 if (_replayCapacity > 0) {
                     _latest = element;
                     _replay.Enqueue(element);
-                    while (_replay.Count > _replayCapacity) {
-                        _replay.Dequeue();
-                    }
+                    while (_replay.Count > _replayCapacity) _replay.Dequeue();
                 }
 
                 snapshot = [.. _subscribers];
             }
 
             foreach (var subscriber in snapshot) {
-                if (subscriber.Channel.Writer.TryWrite(element)) {
-                    continue;
-                }
+                if (subscriber.Channel.Writer.TryWrite(element)) continue;
 
                 switch (subscriber.Overflow) {
                     case StreamOverflowMode.Wait:
                         // Await room outside the lock; the publish gate preserves element order.
-                        while (!subscriber.Channel.Writer.TryWrite(element)) {
-                            if (!await subscriber.Channel.Writer.WaitToWriteAsync(cancellationToken).ConfigureAwait(false)) {
+                        while (!subscriber.Channel.Writer.TryWrite(element))
+                            if (!await subscriber.Channel.Writer.WaitToWriteAsync(cancellationToken)
+                                    .ConfigureAwait(false))
                                 break; // subscriber left while we waited
-                            }
-                        }
 
                         break;
                     case StreamOverflowMode.Cancel:
@@ -157,7 +152,9 @@ public sealed class StreamHub<T> {
     /// subscribers may observe it, others may not, and a late replay subscriber may see an element a live
     /// subscriber missed.
     /// </remarks>
-    public void Complete() => Close(null);
+    public void Complete() {
+        Close(null);
+    }
 
     /// <summary>Ends the stream with an error: every subscription (current and future) throws it.</summary>
     /// <remarks>
@@ -176,14 +173,15 @@ public sealed class StreamHub<T> {
     /// Subscribes and returns the elements without their sequence — the ergonomic in-process form. See
     /// <see cref="SubscribeSequenced"/> for semantics (the subscription attaches now, here too).
     /// </summary>
-    public IAsyncEnumerable<T> Subscribe(StreamSubscribeOptions? options = null) =>
-        Unwrap(SubscribeSequenced(options));
+    public IAsyncEnumerable<T> Subscribe(StreamSubscribeOptions? options = null) {
+        return Unwrap(SubscribeSequenced(options));
+    }
 
     private static async IAsyncEnumerable<T> Unwrap(
-        IAsyncEnumerable<StreamItem<T>> source, [EnumeratorCancellation] CancellationToken cancellationToken = default) {
-        await foreach (var item in source.WithCancellation(cancellationToken).ConfigureAwait(false)) {
+        IAsyncEnumerable<StreamItem<T>> source,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default) {
+        await foreach (var item in source.WithCancellation(cancellationToken).ConfigureAwait(false))
             yield return item.Value;
-        }
     }
 
     /// <summary>
@@ -212,19 +210,15 @@ public sealed class StreamHub<T> {
                 FullMode = options.Overflow == StreamOverflowMode.DropOldest
                     ? BoundedChannelFullMode.DropOldest
                     : BoundedChannelFullMode.Wait,
-                SingleReader = true,
+                SingleReader = true
             });
             subscriber = new Subscriber(channel, options.Overflow, capacity);
-            foreach (var item in replayItems) {
-                channel.Writer.TryWrite(item);
-            }
+            foreach (var item in replayItems) channel.Writer.TryWrite(item);
 
-            if (_completed) {
+            if (_completed)
                 channel.Writer.TryComplete(_error);
-            }
-            else {
+            else
                 _subscribers.Add(subscriber);
-            }
         }
 
         return EnumerateAsync(subscriber);
@@ -234,11 +228,9 @@ public sealed class StreamHub<T> {
         if (options.ResumeAfterSequence is { } after) {
             // Everything retained that is newer; a gap that outran the ring shows as a sequence jump.
             List<StreamItem<T>> resumed = [];
-            foreach (var item in _replay) {
-                if (item.Sequence > after) {
+            foreach (var item in _replay)
+                if (item.Sequence > after)
                     resumed.Add(item);
-                }
-            }
 
             return resumed;
         }
@@ -246,16 +238,15 @@ public sealed class StreamHub<T> {
         return options.Replay switch {
             StreamReplay.Latest when _latest is { } latest => [latest],
             StreamReplay.Available => [.. _replay],
-            _ => [],
+            _ => []
         };
     }
 
     private async IAsyncEnumerable<StreamItem<T>> EnumerateAsync(
         Subscriber subscriber, [EnumeratorCancellation] CancellationToken cancellationToken = default) {
         try {
-            await foreach (var item in subscriber.Channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) {
+            await foreach (var item in subscriber.Channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
                 yield return item;
-            }
         }
         finally {
             Remove(subscriber);
@@ -265,9 +256,7 @@ public sealed class StreamHub<T> {
     private void Close(Exception? error) {
         Subscriber[] snapshot;
         lock (_lock) {
-            if (_completed) {
-                return;
-            }
+            if (_completed) return;
 
             _completed = true;
             _error = error;
@@ -275,9 +264,7 @@ public sealed class StreamHub<T> {
             _subscribers.Clear();
         }
 
-        foreach (var subscriber in snapshot) {
-            subscriber.Channel.Writer.TryComplete(error);
-        }
+        foreach (var subscriber in snapshot) subscriber.Channel.Writer.TryComplete(error);
     }
 
     private void Remove(Subscriber subscriber) {
@@ -291,5 +278,8 @@ public sealed class StreamHub<T> {
         subscriber.Channel.Writer.TryComplete();
     }
 
-    private sealed record Subscriber(Channel<StreamItem<T>> Channel, StreamOverflowMode Overflow, int EffectiveCapacity);
+    private sealed record Subscriber(
+        Channel<StreamItem<T>> Channel,
+        StreamOverflowMode Overflow,
+        int EffectiveCapacity);
 }

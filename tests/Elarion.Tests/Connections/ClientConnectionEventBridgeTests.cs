@@ -30,7 +30,7 @@ public sealed partial class ClientConnectionEventBridgeTests {
     [Fact]
     public async Task SubscribeAsync_Unauthenticated_IsRejected() {
         var ct = TestContext.Current.CancellationToken;
-        await using var provider = BuildProvider(new FakeCurrentUser("user-1", isAuthenticated: false));
+        await using var provider = BuildProvider(new FakeCurrentUser("user-1", false));
         var bridge = provider.GetRequiredService<ClientConnectionEventBridge>();
 
         var result = await bridge.SubscribeAsync(
@@ -44,7 +44,7 @@ public sealed partial class ClientConnectionEventBridgeTests {
     [Fact]
     public async Task SubscribeAsync_UnknownTopic_IsNotFound() {
         var ct = TestContext.Current.CancellationToken;
-        await using var provider = BuildProvider(new FakeCurrentUser("user-1", isAuthenticated: true));
+        await using var provider = BuildProvider(new FakeCurrentUser("user-1", true));
         var bridge = provider.GetRequiredService<ClientConnectionEventBridge>();
 
         var result = await bridge.SubscribeAsync(
@@ -57,7 +57,7 @@ public sealed partial class ClientConnectionEventBridgeTests {
     [Fact]
     public async Task SubscribeAsync_DeliversGreetingThenPublishedEnvelopes() {
         var ct = TestContext.Current.CancellationToken;
-        await using var provider = BuildProvider(new FakeCurrentUser("user-1", isAuthenticated: true));
+        await using var provider = BuildProvider(new FakeCurrentUser("user-1", true));
         var bridge = provider.GetRequiredService<ClientConnectionEventBridge>();
         var delivered = Channel.CreateUnbounded<ClientEventEnvelope>();
 
@@ -85,7 +85,7 @@ public sealed partial class ClientConnectionEventBridgeTests {
     [Fact]
     public async Task IdentityPromotion_DisposesSubscriptionsAndAllowsResubscription() {
         var ct = TestContext.Current.CancellationToken;
-        await using var provider = BuildProvider(new FakeCurrentUser("user-1", isAuthenticated: true));
+        await using var provider = BuildProvider(new FakeCurrentUser("user-1", true));
         var bridge = provider.GetRequiredService<ClientConnectionEventBridge>();
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
         var sink = ClientConnectionRegistryTests.AnonymousSink("conn-1");
@@ -100,8 +100,8 @@ public sealed partial class ClientConnectionEventBridgeTests {
 
         (await registry.PromoteAsync("conn-1", new ClientConnectionIdentity {
             Principal = new System.Security.Claims.ClaimsPrincipal(
-                new System.Security.Claims.ClaimsIdentity(authenticationType: "test")),
-            PrincipalId = "user-1",
+                new System.Security.Claims.ClaimsIdentity("test")),
+            PrincipalId = "user-1"
         }, ct)).Should().Be(ClientConnectionPromotionStatus.Promoted);
         await initial.Subscription!.Completion.WaitAsync(ct);
 
@@ -120,7 +120,7 @@ public sealed partial class ClientConnectionEventBridgeTests {
     [Fact]
     public async Task ConnectionUnregistration_DisposesItsSubscriptions() {
         var ct = TestContext.Current.CancellationToken;
-        await using var provider = BuildProvider(new FakeCurrentUser("user-1", isAuthenticated: true));
+        await using var provider = BuildProvider(new FakeCurrentUser("user-1", true));
         var bridge = provider.GetRequiredService<ClientConnectionEventBridge>();
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
         var sink = ClientConnectionRegistryTests.Sink("conn-1", "user-1");
@@ -149,14 +149,18 @@ public sealed partial class ClientConnectionEventBridgeTests {
         return services.BuildServiceProvider();
     }
 
-    private static SimulatedClientConnection Sink(string connectionId, string userId) =>
-        ClientConnectionRegistryTests.Sink(connectionId, userId);
+    private static SimulatedClientConnection Sink(string connectionId, string userId) {
+        return ClientConnectionRegistryTests.Sink(connectionId, userId);
+    }
 
     private sealed class FakeCurrentUser(string userId, bool isAuthenticated) : ICurrentUser {
         public string UserId => userId;
         public string? Email => null;
         public IReadOnlyList<string> Roles => [];
         public bool IsAuthenticated => isAuthenticated;
-        public bool IsInRole(string role) => false;
+
+        public bool IsInRole(string role) {
+            return false;
+        }
     }
 }

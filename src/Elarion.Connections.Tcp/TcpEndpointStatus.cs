@@ -6,7 +6,7 @@ public enum TcpEndpointMode {
     Listener,
 
     /// <summary>Client-based: the endpoint dials the device and maintains the link.</summary>
-    Dialer,
+    Dialer
 }
 
 /// <summary>The advertised state of a runtime-managed endpoint.</summary>
@@ -26,7 +26,7 @@ public enum TcpEndpointState {
 
     /// <summary>The endpoint failed permanently (e.g. the listen port could not be bound) and is not
     /// serving — <see cref="TcpEndpointStatus.Error"/> says why. Re-apply the binding to retry.</summary>
-    Faulted,
+    Faulted
 }
 
 /// <summary>

@@ -27,22 +27,24 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         return services.BuildServiceProvider().GetRequiredService<IElarionJsonSerialization>();
     }
 
-    private static SqlItem NewItem(int index) => new() {
-        Id = Guid.CreateVersion7(),
-        Name = $"item-{index}",
-        Note = index % 3 == 0 ? null : $"note {index}",
-        Quantity = index,
-        Sequence = index * 37L,
-        Price = 10.25m + index,
-        Active = index % 2 == 0,
-        CreatedAt = FixedInstant.AddSeconds(index),
-        Status = (SqlItemStatus)(index % 3),
-        PreviousStatus = index % 4 == 0 ? null : (SqlItemStatus)((index + 1) % 3),
-        Payload = index % 5 == 0 ? null : [1, 2, (byte)index],
-        DueOn = index % 6 == 0 ? null : new DateOnly(2026, 7, 1).AddDays(index),
-        Profile = index % 3 == 0 ? null : new SqlItemProfile { Color = $"color-{index}", Weight = index },
-        Transient = "never persisted",
-    };
+    private static SqlItem NewItem(int index) {
+        return new SqlItem {
+            Id = Guid.CreateVersion7(),
+            Name = $"item-{index}",
+            Note = index % 3 == 0 ? null : $"note {index}",
+            Quantity = index,
+            Sequence = index * 37L,
+            Price = 10.25m + index,
+            Active = index % 2 == 0,
+            CreatedAt = FixedInstant.AddSeconds(index),
+            Status = (SqlItemStatus)(index % 3),
+            PreviousStatus = index % 4 == 0 ? null : (SqlItemStatus)((index + 1) % 3),
+            Payload = index % 5 == 0 ? null : [1, 2, (byte)index],
+            DueOn = index % 6 == 0 ? null : new DateOnly(2026, 7, 1).AddDays(index),
+            Profile = index % 3 == 0 ? null : new SqlItemProfile { Color = $"color-{index}", Weight = index },
+            Transient = "never persisted"
+        };
+    }
 
     private async Task<List<SqlItem>> InsertItemsAsync(int count) {
         await using var connection = fixture.CreateConnection();
@@ -219,7 +221,7 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         var batch = new[] {
             first, // duplicate PK — ON CONFLICT DO NOTHING skips it
             new SqlPositionalRow(Guid.CreateVersion7(), "b", 2),
-            new SqlPositionalRow(Guid.CreateVersion7(), "c", 3),
+            new SqlPositionalRow(Guid.CreateVersion7(), "c", 3)
         };
         var written = await connection.InsertManyAsync(batch, " ON CONFLICT DO NOTHING", cancellationToken: Ct);
         written.Should().Be(2, "the duplicate primary key inserts nothing");
@@ -236,9 +238,8 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
         // Streaming — unbuffered enumeration of all rows.
         var streamed = new List<SqlPositionalRow>();
         await foreach (var r in connection.QueryUnbufferedAsync<SqlPositionalRow>(
-            $"{SqlPositionalRow.Select} ORDER BY count", Ct)) {
+                           $"{SqlPositionalRow.Select} ORDER BY count", Ct))
             streamed.Add(r);
-        }
 
         streamed.Select(r => r.Count).Should().Equal(1, 2, 3);
     }

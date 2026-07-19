@@ -31,9 +31,7 @@ internal sealed class SchedulerClaimPurgeService<TDbContext>(
             }
 
             try {
-                if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) {
-                    return;
-                }
+                if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) return;
             }
             catch (OperationCanceledException) {
                 return;
@@ -54,8 +52,6 @@ internal sealed class SchedulerClaimPurgeService<TDbContext>(
             .ExecuteDeleteAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (deleted > 0) {
-            logger.LogInformation("Purged {Count} scheduler claim row(s) past retention.", deleted);
-        }
+        if (deleted > 0) logger.LogInformation("Purged {Count} scheduler claim row(s) past retention.", deleted);
     }
 }

@@ -51,17 +51,17 @@ public static class ConnectionTelemetry {
             "connection.identity_promotions",
             description: "Total number of connection identity promotion attempts by outcome");
 
-    internal static void RecordPromotion(string transport, ClientConnectionPromotionStatus status) =>
+    internal static void RecordPromotion(string transport, ClientConnectionPromotionStatus status) {
         IdentityPromotions.Add(1, new TagList {
-            { "elarion.connection.transport", transport },
-            {
+            { "elarion.connection.transport", transport }, {
                 "elarion.connection.promotion.outcome", status switch {
                     ClientConnectionPromotionStatus.Promoted => "promoted",
                     ClientConnectionPromotionStatus.AlreadyAuthenticated => "already_authenticated",
-                    _ => "not_found",
+                    _ => "not_found"
                 }
             }
         });
+    }
 
     internal static void RecordOpened(string transport) {
         var tags = new TagList { { "elarion.connection.transport", transport } };

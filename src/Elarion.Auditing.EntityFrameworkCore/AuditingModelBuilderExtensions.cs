@@ -35,17 +35,24 @@ public static class AuditingModelBuilderExtensions {
             // round-trip; ADR-0038's convention pass would do this too, but the mapping states it explicitly.
             builder.Property(entry => entry.Id).HasColumnName(snakeCase ? "id" : "Id").ValueGeneratedNever();
 
-            builder.Property(entry => entry.OccurredAtUtc).HasColumnName(snakeCase ? "occurred_at_utc" : "OccurredAtUtc");
+            builder.Property(entry => entry.OccurredAtUtc)
+                .HasColumnName(snakeCase ? "occurred_at_utc" : "OccurredAtUtc");
             builder.Property(entry => entry.Action).HasColumnName(snakeCase ? "action" : "Action").HasMaxLength(256);
             builder.Property(entry => entry.Module).HasColumnName(snakeCase ? "module" : "Module").HasMaxLength(128);
             builder.Property(entry => entry.UserId).HasColumnName(snakeCase ? "user_id" : "UserId").HasMaxLength(128);
-            builder.Property(entry => entry.ResourceType).HasColumnName(snakeCase ? "resource_type" : "ResourceType").HasMaxLength(128);
-            builder.Property(entry => entry.ResourceId).HasColumnName(snakeCase ? "resource_id" : "ResourceId").HasMaxLength(256);
-            builder.Property(entry => entry.ParentResourceType).HasColumnName(snakeCase ? "parent_resource_type" : "ParentResourceType").HasMaxLength(128);
-            builder.Property(entry => entry.ParentResourceId).HasColumnName(snakeCase ? "parent_resource_id" : "ParentResourceId").HasMaxLength(256);
+            builder.Property(entry => entry.ResourceType).HasColumnName(snakeCase ? "resource_type" : "ResourceType")
+                .HasMaxLength(128);
+            builder.Property(entry => entry.ResourceId).HasColumnName(snakeCase ? "resource_id" : "ResourceId")
+                .HasMaxLength(256);
+            builder.Property(entry => entry.ParentResourceType)
+                .HasColumnName(snakeCase ? "parent_resource_type" : "ParentResourceType").HasMaxLength(128);
+            builder.Property(entry => entry.ParentResourceId)
+                .HasColumnName(snakeCase ? "parent_resource_id" : "ParentResourceId").HasMaxLength(256);
             builder.Property(entry => entry.Outcome).HasColumnName(snakeCase ? "outcome" : "Outcome").HasMaxLength(16);
-            builder.Property(entry => entry.ErrorKind).HasColumnName(snakeCase ? "error_kind" : "ErrorKind").HasMaxLength(32);
-            builder.Property(entry => entry.CorrelationId).HasColumnName(snakeCase ? "correlation_id" : "CorrelationId").HasMaxLength(64);
+            builder.Property(entry => entry.ErrorKind).HasColumnName(snakeCase ? "error_kind" : "ErrorKind")
+                .HasMaxLength(32);
+            builder.Property(entry => entry.CorrelationId).HasColumnName(snakeCase ? "correlation_id" : "CorrelationId")
+                .HasMaxLength(64);
             builder.Property(entry => entry.Changes).HasColumnName(snakeCase ? "changes" : "Changes");
             builder.Property(entry => entry.Details).HasColumnName(snakeCase ? "details" : "Details");
 

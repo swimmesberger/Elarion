@@ -125,9 +125,7 @@ public sealed class KeyedConflaterTests {
 
         await using var conflater = new KeyedConflater<string, int>(
             async (_, value, _) => {
-                if (Interlocked.Increment(ref calls) == 1) {
-                    throw new InvalidOperationException("hub down");
-                }
+                if (Interlocked.Increment(ref calls) == 1) throw new InvalidOperationException("hub down");
 
                 await emissions.Writer.WriteAsync(value, TestToken);
             },
@@ -152,9 +150,7 @@ public sealed class KeyedConflaterTests {
 
         await using var conflater = new KeyedConflater<string, int>(
             async (_, value, _) => {
-                if (Interlocked.Increment(ref calls) == 1) {
-                    throw new InvalidOperationException("hub down");
-                }
+                if (Interlocked.Increment(ref calls) == 1) throw new InvalidOperationException("hub down");
 
                 await emissions.Writer.WriteAsync(value, TestToken);
             },
@@ -190,7 +186,7 @@ public sealed class KeyedConflaterTests {
 
         var flushed = new List<(string, int)> {
             await emissions.Reader.ReadAsync(TestToken),
-            await emissions.Reader.ReadAsync(TestToken),
+            await emissions.Reader.ReadAsync(TestToken)
         };
         flushed.Should().BeEquivalentTo(new[] { ("a", 2), ("b", 20) });
 

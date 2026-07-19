@@ -13,9 +13,8 @@ namespace Elarion.Idempotency;
 internal sealed class IdempotencyKeyScopeInitializer : IDispatchScopeInitializer {
     /// <inheritdoc />
     public void Initialize(IServiceProvider callScope, DispatchScopeContext context) {
-        if (context.TryGet<IdempotencyKey>(out var captured) && captured is not null) {
+        if (context.TryGet<IdempotencyKey>(out var captured) && captured is not null)
             // GetService (not GetRequired): a host may have replaced the accessor without the default.
             callScope.GetService<ScopedIdempotencyKeyAccessor>()?.Seed(captured.Value);
-        }
     }
 }

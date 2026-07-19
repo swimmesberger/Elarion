@@ -52,22 +52,27 @@ public sealed class ClaimsPrincipalCurrentUser(ClaimsCurrentUserOptions options)
     public bool IsAuthenticated => Principal.Identity?.IsAuthenticated == true;
 
     /// <inheritdoc />
-    public bool IsInRole(string role) =>
-        Roles.Contains(role, StringComparer.Ordinal);
+    public bool IsInRole(string role) {
+        return Roles.Contains(role, StringComparer.Ordinal);
+    }
 
     /// <inheritdoc />
-    public bool HasClaim(string type, string value) =>
-        Claims[type].Contains(value, StringComparer.Ordinal);
+    public bool HasClaim(string type, string value) {
+        return Claims[type].Contains(value, StringComparer.Ordinal);
+    }
 
     /// <inheritdoc />
-    public IEnumerable<string> GetClaimValues(string type) =>
-        Claims[type];
+    public IEnumerable<string> GetClaimValues(string type) {
+        return Claims[type];
+    }
 
     /// <summary>
     /// Sets the principal this instance exposes. Claims and roles are materialized lazily on first access, so
     /// this is cheap and is called once per dispatch scope by the current-user dispatch-scope initializer.
     /// </summary>
-    internal void Initialize(ClaimsPrincipal principal) => _principal = principal;
+    internal void Initialize(ClaimsPrincipal principal) {
+        _principal = principal;
+    }
 
     private ILookup<string, string> Claims =>
         _claims ??= Principal.Claims.ToLookup(claim => claim.Type, claim => claim.Value, StringComparer.Ordinal);

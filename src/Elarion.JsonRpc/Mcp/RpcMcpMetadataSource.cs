@@ -21,6 +21,7 @@ public sealed class RpcMcpMetadataSource : IRpcMcpMetadataSource {
     public IReadOnlyList<RpcMcpMethodMetadata> All { get; }
 
     /// <inheritdoc />
-    public RpcMcpMethodMetadata? Get(string methodName) =>
-        _byMethodName.TryGetValue(methodName, out var metadata) ? metadata : null;
+    public RpcMcpMethodMetadata? Get(string methodName) {
+        return _byMethodName.TryGetValue(methodName, out var metadata) ? metadata : null;
+    }
 }

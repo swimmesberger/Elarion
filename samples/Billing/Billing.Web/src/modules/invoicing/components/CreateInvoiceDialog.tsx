@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
-import { toast } from "sonner"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {useEffect, useState} from "react"
+import {toast} from "sonner"
+import {Button} from "@/components/ui/button"
+import {Input} from "@/components/ui/input"
 import {
   Dialog,
   DialogContent,
@@ -12,8 +12,8 @@ import {
 } from "@/components/ui/dialog"
 // Cross-module data access goes through the Clients module's public entry — its published hook — never
 // through its internals.
-import { useClients } from "@/modules/clients"
-import { useCreateInvoice, useSendStatus } from "../hooks/useInvoices"
+import {useClients} from "@/modules/clients"
+import {useCreateInvoice, useSendStatus} from "../hooks/useInvoices"
 
 export function CreateInvoiceDialog() {
   const [open, setOpen] = useState(false)
@@ -89,7 +89,7 @@ export function CreateInvoiceDialog() {
             onChange={(e) => setCurrency(e.target.value.toUpperCase())}
           />
         </div>
-        <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}/>
         <DialogFooter>
           <Button onClick={submit} disabled={!clientId || createInvoice.isPending}>
             {createInvoice.isPending ? "Creating…" : "Create"}

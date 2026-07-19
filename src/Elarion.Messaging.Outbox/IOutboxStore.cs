@@ -13,8 +13,7 @@ namespace Elarion.Messaging.Outbox;
 /// Isolating EF Core behind this seam keeps the bus, dispatcher, and delivery loop database-agnostic and unit-testable.
 /// </para>
 /// </remarks>
-public interface IOutboxStore
-{
+public interface IOutboxStore {
     /// <summary>
     /// Tracks <paramref name="message"/> for insertion as part of the caller's unit of work. Does not call
     /// <c>SaveChanges</c>; the row is persisted when the unit of work commits, and discarded if it rolls back.

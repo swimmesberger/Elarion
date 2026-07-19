@@ -13,9 +13,10 @@ internal static class ServiceContractResolver {
     public const string ServiceAttributeMetadataName = "Elarion.Abstractions.ServiceAttribute";
 
     /// <summary>The class's <c>[Service]</c> attribute, or <see langword="null"/> when it is not a service.</summary>
-    public static AttributeData? FindServiceAttribute(INamedTypeSymbol classSymbol) =>
-        classSymbol.GetAttributes()
+    public static AttributeData? FindServiceAttribute(INamedTypeSymbol classSymbol) {
+        return classSymbol.GetAttributes()
             .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == ServiceAttributeMetadataName);
+    }
 
     /// <summary>The explicit <c>[Service(typeof(...))]</c> contract symbols (empty when none were supplied).</summary>
     public static ImmutableArray<ITypeSymbol> GetExplicitContracts(AttributeData serviceAttr) {
@@ -27,10 +28,9 @@ internal static class ServiceContractResolver {
             return ImmutableArray<ITypeSymbol>.Empty;
 
         var builder = ImmutableArray.CreateBuilder<ITypeSymbol>();
-        foreach (var value in firstArg.Values) {
+        foreach (var value in firstArg.Values)
             if (value.Value is ITypeSymbol contract)
                 builder.Add(contract);
-        }
 
         return builder.ToImmutable();
     }
@@ -57,10 +57,9 @@ internal static class ServiceContractResolver {
     public static ImmutableArray<string> DistinctPreservingOrder(IEnumerable<string> contracts) {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var result = ImmutableArray.CreateBuilder<string>();
-        foreach (var contract in contracts) {
+        foreach (var contract in contracts)
             if (seen.Add(contract))
                 result.Add(contract);
-        }
 
         return result.ToImmutable();
     }

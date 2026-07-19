@@ -8,8 +8,8 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-
 using Elarion.Pipeline;
+
 namespace Elarion.Tests.Validation;
 
 /// <summary>
@@ -82,7 +82,7 @@ public sealed class ValidationEndToEndTests {
         var handler = scope.ServiceProvider.GetRequiredService(handlerInterface);
 
         var invalidResult = await InvokeAsync(
-            handlerInterface, handler, CreateCommand(requestType!, name: "ab", email: "not-an-email"));
+            handlerInterface, handler, CreateCommand(requestType!, "ab", "not-an-email"));
 
         invalidResult.IsSuccess.Should().BeFalse();
         invalidResult.Error.Kind.Should().Be(ErrorKind.Validation);
@@ -91,7 +91,7 @@ public sealed class ValidationEndToEndTests {
         data.FieldErrors!.Keys.Should().BeEquivalentTo("name", "email");
 
         var validResult = await InvokeAsync(
-            handlerInterface, handler, CreateCommand(requestType!, name: "Acme Inc.", email: "billing@acme.test"));
+            handlerInterface, handler, CreateCommand(requestType!, "Acme Inc.", "billing@acme.test"));
 
         validResult.IsSuccess.Should().BeTrue();
     }
@@ -159,13 +159,14 @@ public sealed class ValidationEndToEndTests {
             CreateMetadataReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+        var driver = CSharpGeneratorDriver.Create(
                 new HandlerRegistrationGenerator(),
                 new StreamHandlerRegistrationGenerator(),
                 new ValidationResolverGenerator(),
                 new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
-        driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var generatorDiagnostics, Ct);
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out var outputCompilation, out var generatorDiagnostics,
+            Ct);
 
         generatorDiagnostics
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)

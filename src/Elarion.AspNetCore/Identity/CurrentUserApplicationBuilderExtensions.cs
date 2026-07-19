@@ -10,6 +10,7 @@ public static class CurrentUserApplicationBuilderExtensions {
     /// Copies <see cref="Microsoft.AspNetCore.Http.HttpContext.User"/> into the scoped framework
     /// current-user snapshot for downstream handlers and services.
     /// </summary>
-    public static IApplicationBuilder UseElarionCurrentUser(this IApplicationBuilder app) =>
-        app.UseMiddleware<CurrentUserMiddleware>();
+    public static IApplicationBuilder UseElarionCurrentUser(this IApplicationBuilder app) {
+        return app.UseMiddleware<CurrentUserMiddleware>();
+    }
 }

@@ -9,8 +9,7 @@ namespace Elarion.Generators;
 /// <c>&lt;Compile Include&gt;</c>-linked into every generator package, so the agreement is "call the same
 /// function," never "copy the same string literal" — which removes the drift hazard between packages.
 /// </summary>
-internal static class ElarionGeneratorConventions
-{
+internal static class ElarionGeneratorConventions {
     // --- Marker-attribute metadata names discovered across packages ---------------------------------------
 
     /// <summary><c>[AppModule]</c> — discovered by the manifest and bootstrapper generators.</summary>
@@ -59,11 +58,12 @@ internal static class ElarionGeneratorConventions
     /// <c>partial void OnEntitiesConfigured_{Feature}(ModelBuilder)</c> per such attribute; the owning feature
     /// generator implements the seam derived from its own attribute by <see cref="ModelConfigurationSeamName"/>.
     /// </summary>
-    public static bool IsModelConfigurationFeatureAttribute(string? attributeShortName) =>
-        attributeShortName is not null
-        && attributeShortName.StartsWith(GenerateElarionPrefix, StringComparison.Ordinal)
-        && attributeShortName.EndsWith(AttributeSuffix, StringComparison.Ordinal)
-        && attributeShortName.Length > AttributeSuffix.Length;
+    public static bool IsModelConfigurationFeatureAttribute(string? attributeShortName) {
+        return attributeShortName is not null
+               && attributeShortName.StartsWith(GenerateElarionPrefix, StringComparison.Ordinal)
+               && attributeShortName.EndsWith(AttributeSuffix, StringComparison.Ordinal)
+               && attributeShortName.Length > AttributeSuffix.Length;
+    }
 
     /// <summary>
     /// The model-configuration seam method name for a <c>[GenerateElarion{Feature}]</c> attribute, e.g.
@@ -71,13 +71,15 @@ internal static class ElarionGeneratorConventions
     /// The DbContext generator (declaring the seam) and the feature generator (implementing it) both call this,
     /// so they cannot drift.
     /// </summary>
-    public static string ModelConfigurationSeamName(string attributeShortName) =>
-        "OnEntitiesConfigured_" + StripAttributeSuffix(attributeShortName);
+    public static string ModelConfigurationSeamName(string attributeShortName) {
+        return "OnEntitiesConfigured_" + StripAttributeSuffix(attributeShortName);
+    }
 
-    private static string StripAttributeSuffix(string name) =>
-        name.EndsWith(AttributeSuffix, StringComparison.Ordinal)
+    private static string StripAttributeSuffix(string name) {
+        return name.EndsWith(AttributeSuffix, StringComparison.Ordinal)
             ? name.Substring(0, name.Length - AttributeSuffix.Length)
             : name;
+    }
 
     // --- [ResourceFilter] emitted-member contract ---------------------------------------------------------
 

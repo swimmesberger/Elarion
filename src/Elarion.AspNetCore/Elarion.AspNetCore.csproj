@@ -5,17 +5,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App"/>
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Elarion.Tests" />
+    <InternalsVisibleTo Include="Elarion.Tests"/>
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
-    <ProjectReference Include="..\Elarion.JsonRpc\Elarion.JsonRpc.csproj" />
-    <ProjectReference Include="..\Elarion\Elarion.csproj" />
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj"/>
+    <ProjectReference Include="..\Elarion.JsonRpc\Elarion.JsonRpc.csproj"/>
+    <ProjectReference Include="..\Elarion\Elarion.csproj"/>
   </ItemGroup>
 
 </Project>

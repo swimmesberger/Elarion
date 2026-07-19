@@ -95,8 +95,8 @@ public sealed class PostgreSqlRoleLeaseIntegrationTests(PostgreSqlActorSnapshotS
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider();
         var role = NewRole();
-        var first = CreateLease(provider, time, role, "instance-a", advertisedAddress: "http://10.0.0.1:8080");
-        var second = CreateLease(provider, time, role, "instance-b", advertisedAddress: "http://10.0.0.2:8080");
+        var first = CreateLease(provider, time, role, "instance-a", "http://10.0.0.1:8080");
+        var second = CreateLease(provider, time, role, "instance-b", "http://10.0.0.2:8080");
 
         // The holder advertises; the blocked instance learns the holder's address from the row —
         // the whole "how do I reach the holder" story is this one column (ADR-0050).
@@ -129,12 +129,15 @@ public sealed class PostgreSqlRoleLeaseIntegrationTests(PostgreSqlActorSnapshotS
         instanceB.Role.Should().Be(maintenanceRole);
     }
 
-    private static string NewRole() => $"role-{Guid.CreateVersion7():N}";
+    private static string NewRole() {
+        return $"role-{Guid.CreateVersion7():N}";
+    }
 
     private PostgreSqlRoleLease<ActorSnapshotIntegrationDbContext> CreateLease(
         ServiceProvider provider, FakeTimeProvider time, string role, string instanceId,
-        string? advertisedAddress = null) =>
-        new(provider.GetRequiredService<IServiceScopeFactory>(),
+        string? advertisedAddress = null) {
+        return new PostgreSqlRoleLease<ActorSnapshotIntegrationDbContext>(
+            provider.GetRequiredService<IServiceScopeFactory>(),
             new RoleLeaseOptions {
                 RoleName = role,
                 InstanceId = instanceId,
@@ -145,10 +148,12 @@ public sealed class PostgreSqlRoleLeaseIntegrationTests(PostgreSqlActorSnapshotS
             },
             time,
             NullLogger<PostgreSqlRoleLease<ActorSnapshotIntegrationDbContext>>.Instance);
+    }
 
     private ServiceProvider CreateProvider() {
         var services = new ServiceCollection();
-        services.AddDbContext<ActorSnapshotIntegrationDbContext>(options => options.UseNpgsql(fixture.ConnectionString));
+        services.AddDbContext<ActorSnapshotIntegrationDbContext>(options =>
+            options.UseNpgsql(fixture.ConnectionString));
         return services.BuildServiceProvider();
     }
 }

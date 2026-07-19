@@ -12,20 +12,20 @@
        the runtime surface; PrivateAssets=all keeps it from becoming a downstream package dependency. -->
   <ItemGroup>
     <ProjectReference Include="..\Elarion.EntityFrameworkCore.Generators\Elarion.EntityFrameworkCore.Generators.csproj"
-                     ReferenceOutputAssembly="false"
-                     PrivateAssets="all" />
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"/>
   </ItemGroup>
 
   <Target Name="_BundleEntityFrameworkCoreGenerator" BeforeTargets="_GetPackageFiles">
     <MSBuild Projects="..\Elarion.EntityFrameworkCore.Generators\Elarion.EntityFrameworkCore.Generators.csproj"
              Targets="GetTargetPath">
-      <Output TaskParameter="TargetOutputs" ItemName="_EntityFrameworkCoreGeneratorAnalyzer" />
+      <Output TaskParameter="TargetOutputs" ItemName="_EntityFrameworkCoreGeneratorAnalyzer"/>
     </MSBuild>
     <ItemGroup>
       <None Include="@(_EntityFrameworkCoreGeneratorAnalyzer)"
             Pack="true"
             PackagePath="analyzers/dotnet/cs/"
-            Visible="false" />
+            Visible="false"/>
     </ItemGroup>
   </Target>
 

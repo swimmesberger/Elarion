@@ -17,9 +17,7 @@ public sealed class CacheInvalidationDecorator<TRequest, TResponse>(
         var response = await inner.HandleAsync(request, ct);
 
         // Cache invalidation is tied to Result<T> success, keeping validation/business failures side-effect free.
-        if (response is IResultLike { IsSuccess: true }) {
-            await cache.InvalidateAsync(policy, ct);
-        }
+        if (response is IResultLike { IsSuccess: true }) await cache.InvalidateAsync(policy, ct);
 
         return response;
     }

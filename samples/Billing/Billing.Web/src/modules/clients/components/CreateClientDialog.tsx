@@ -1,7 +1,7 @@
-import { useState } from "react"
-import { toast } from "sonner"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import {useState} from "react"
+import {toast} from "sonner"
+import {Button} from "@/components/ui/button"
+import {Input} from "@/components/ui/input"
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { useCreateClient } from "../hooks/useClients"
+import {useCreateClient} from "../hooks/useClients"
 
 export function CreateClientDialog() {
   const [open, setOpen] = useState(false)
@@ -20,7 +20,7 @@ export function CreateClientDialog() {
 
   function submit() {
     createClient.mutate(
-      { name, email },
+      {name, email},
       {
         onSuccess: (res) => {
           toast.success(`Created client ${res.number}`)
@@ -42,8 +42,8 @@ export function CreateClientDialog() {
         <DialogHeader>
           <DialogTitle>New client</DialogTitle>
         </DialogHeader>
-        <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-        <Input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)}/>
+        <Input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)}/>
         <DialogFooter>
           <Button onClick={submit} disabled={createClient.isPending}>
             {createClient.isPending ? "Creating…" : "Create"}

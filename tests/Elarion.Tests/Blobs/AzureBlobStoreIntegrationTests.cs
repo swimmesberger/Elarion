@@ -78,7 +78,7 @@ public sealed class AzureBlobStoreIntegrationTests(AzuriteFixture fixture) : ICl
         var store = CreateStore();
         var request = NewRequest() with {
             InitialState = BlobLifecycleState.Pending,
-            ExpiresAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5),
+            ExpiresAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5)
         };
         var blobRef = await store.SaveAsync(request, new MemoryStream([1, 2]), ct);
 
@@ -110,14 +110,14 @@ public sealed class AzureBlobStoreIntegrationTests(AzuriteFixture fixture) : ICl
         var expiredPending = await store.SaveAsync(
             NewRequest(container) with {
                 InitialState = BlobLifecycleState.Pending,
-                ExpiresAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5),
+                ExpiresAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5)
             },
             new MemoryStream([1]),
             ct);
         var freshPending = await store.SaveAsync(
             NewRequest(container) with {
                 InitialState = BlobLifecycleState.Pending,
-                ExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(1),
+                ExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(1)
             },
             new MemoryStream([2]),
             ct);
@@ -131,16 +131,20 @@ public sealed class AzureBlobStoreIntegrationTests(AzuriteFixture fixture) : ICl
         (await store.ExistsAsync(committed, ct)).Should().BeTrue();
     }
 
-    private AzureBlobStore CreateStore() =>
-        new(fixture.Client, NullLogger<AzureBlobStore>.Instance);
+    private AzureBlobStore CreateStore() {
+        return new AzureBlobStore(fixture.Client, NullLogger<AzureBlobStore>.Instance);
+    }
 
-    private static string NewContainerName() => $"c{Guid.NewGuid():N}";
+    private static string NewContainerName() {
+        return $"c{Guid.NewGuid():N}";
+    }
 
-    private static BlobUploadRequest NewRequest(string? container = null, string? owner = null) =>
-        new() {
+    private static BlobUploadRequest NewRequest(string? container = null, string? owner = null) {
+        return new BlobUploadRequest {
             Container = container ?? NewContainerName(),
             Name = $"user-1/{Guid.NewGuid():N}/doc.pdf",
             ContentType = "application/pdf",
-            OwnerId = owner,
+            OwnerId = owner
         };
+    }
 }

@@ -10,7 +10,7 @@ public enum SqlProvider {
     /// <c>NpgsqlDbType.Jsonb</c> (a plain string parameter would fail PostgreSQL's jsonb type check).
     /// The consuming assembly must reference Npgsql.
     /// </summary>
-    Npgsql = 1,
+    Npgsql = 1
 }
 
 /// <summary>

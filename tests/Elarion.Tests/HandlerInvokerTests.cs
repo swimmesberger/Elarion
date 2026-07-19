@@ -20,10 +20,11 @@ public sealed class HandlerInvokerTests {
     private sealed record WhoAmIResponse(string UserId, bool Authenticated);
 
     private sealed class WhoAmIHandler(ICurrentUser user) : IHandler<WhoAmIQuery, Result<WhoAmIResponse>> {
-        public ValueTask<Result<WhoAmIResponse>> HandleAsync(WhoAmIQuery request, CancellationToken ct) =>
+        public ValueTask<Result<WhoAmIResponse>> HandleAsync(WhoAmIQuery request, CancellationToken ct) {
             // UserId has no value for an anonymous principal (it throws), so only read it when authenticated.
-            ValueTask.FromResult<Result<WhoAmIResponse>>(
+            return ValueTask.FromResult<Result<WhoAmIResponse>>(
                 new WhoAmIResponse(user.IsAuthenticated ? user.UserId : "", user.IsAuthenticated));
+        }
     }
 
     [Fact]
@@ -34,7 +35,7 @@ public sealed class HandlerInvokerTests {
             .BuildServiceProvider();
         var context = new DispatchScopeContext();
         context.Set<ClaimsPrincipal>(
-            new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "user-9")], authenticationType: "test")));
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "user-9")], "test")));
 
         var result = await HandlerInvoker.InvokeAsync<WhoAmIQuery, WhoAmIResponse>(
             provider, new WhoAmIQuery(), context, TestContext.Current.CancellationToken);
@@ -46,10 +47,12 @@ public sealed class HandlerInvokerTests {
 
     private sealed record InferredWhoAmIQuery : IQuery<InferredWhoAmIQuery, WhoAmIResponse>;
 
-    private sealed class InferredWhoAmIHandler(ICurrentUser user) : IHandler<InferredWhoAmIQuery, Result<WhoAmIResponse>> {
-        public ValueTask<Result<WhoAmIResponse>> HandleAsync(InferredWhoAmIQuery request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<WhoAmIResponse>>(
+    private sealed class InferredWhoAmIHandler(ICurrentUser user)
+        : IHandler<InferredWhoAmIQuery, Result<WhoAmIResponse>> {
+        public ValueTask<Result<WhoAmIResponse>> HandleAsync(InferredWhoAmIQuery request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<WhoAmIResponse>>(
                 new WhoAmIResponse(user.IsAuthenticated ? user.UserId : "", user.IsAuthenticated));
+        }
     }
 
     [Fact]
@@ -59,8 +62,8 @@ public sealed class HandlerInvokerTests {
             .AddScoped<IHandler<InferredWhoAmIQuery, Result<WhoAmIResponse>>, InferredWhoAmIHandler>()
             .BuildServiceProvider();
 
-        Result<WhoAmIResponse> result = await HandlerInvoker.InvokeAsync(
-            provider, new InferredWhoAmIQuery(), context: null, TestContext.Current.CancellationToken);
+        var result = await HandlerInvoker.InvokeAsync(
+            provider, new InferredWhoAmIQuery(), null, TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
         result.Value.Authenticated.Should().BeFalse();
@@ -74,7 +77,7 @@ public sealed class HandlerInvokerTests {
             .BuildServiceProvider();
 
         var result = await HandlerInvoker.InvokeAsync<WhoAmIQuery, WhoAmIResponse>(
-            provider, new WhoAmIQuery(), context: null, TestContext.Current.CancellationToken);
+            provider, new WhoAmIQuery(), null, TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
         result.Value.Authenticated.Should().BeFalse();

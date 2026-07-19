@@ -22,22 +22,22 @@ public sealed class AuthorizationGeneratorTests {
     [Fact]
     public void AttachesAuthorizationDecoratorToGuardedHandler() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record DoThingCommand(int Id) : ICommand;
-                public sealed record DoThingResponse(string Name);
+                                  public sealed record DoThingCommand(int Id) : ICommand;
+                                  public sealed record DoThingResponse(string Name);
 
-                [RequirePermission("tenants", "write")]
-                public sealed class GuardedHandler : IHandler<DoThingCommand, Result<DoThingResponse>> {
-                    public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
-                }
-            }
-            """;
+                                  [RequirePermission("tenants", "write")]
+                                  public sealed class GuardedHandler : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                                      public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_GuardedHandler.g.cs");
@@ -55,21 +55,21 @@ public sealed class AuthorizationGeneratorTests {
     [Fact]
     public void DoesNotAttachToUnannotatedHandlerByDefault() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record ReadThingQuery(int Id) : IQuery;
-                public sealed record ReadThingResponse(string Name);
+                                  public sealed record ReadThingQuery(int Id) : IQuery;
+                                  public sealed record ReadThingResponse(string Name);
 
-                public sealed class OpenHandler : IHandler<ReadThingQuery, Result<ReadThingResponse>> {
-                    public ValueTask<Result<ReadThingResponse>> HandleAsync(ReadThingQuery request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ReadThingResponse>.Success(new ReadThingResponse("x")));
-                }
-            }
-            """;
+                                  public sealed class OpenHandler : IHandler<ReadThingQuery, Result<ReadThingResponse>> {
+                                      public ValueTask<Result<ReadThingResponse>> HandleAsync(ReadThingQuery request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<ReadThingResponse>.Success(new ReadThingResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_OpenHandler.g.cs");
@@ -126,23 +126,23 @@ public sealed class AuthorizationGeneratorTests {
     [Fact]
     public void ReportsElauth001WhenResponseCannotRepresentFailure() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record PlainQuery(int Id) : IQuery;
-                public sealed record PlainResponse(string Name);
+                                  public sealed record PlainQuery(int Id) : IQuery;
+                                  public sealed record PlainResponse(string Name);
 
-                // Bare (non-Result) response: authorization cannot short-circuit -> ELAUTH001.
-                [RequirePermission("x", "read")]
-                public sealed class PlainHandler : IHandler<PlainQuery, PlainResponse> {
-                    public ValueTask<PlainResponse> HandleAsync(PlainQuery request, CancellationToken ct) =>
-                        ValueTask.FromResult(new PlainResponse("x"));
-                }
-            }
-            """;
+                                  // Bare (non-Result) response: authorization cannot short-circuit -> ELAUTH001.
+                                  [RequirePermission("x", "read")]
+                                  public sealed class PlainHandler : IHandler<PlainQuery, PlainResponse> {
+                                      public ValueTask<PlainResponse> HandleAsync(PlainQuery request, CancellationToken ct) =>
+                                          ValueTask.FromResult(new PlainResponse("x"));
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
 
@@ -155,26 +155,26 @@ public sealed class AuthorizationGeneratorTests {
         // [RequirePermission] is Inherited = true, so a requirement declared on a BASE handler must attach the
         // decorator to the derived handler — otherwise the derived handler ships with no enforcement (C5).
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record DoThingCommand(int Id) : ICommand;
-                public sealed record DoThingResponse(string Name);
+                                  public sealed record DoThingCommand(int Id) : ICommand;
+                                  public sealed record DoThingResponse(string Name);
 
-                [RequirePermission("tenants", "write")]
-                public abstract class GuardedBase : IHandler<DoThingCommand, Result<DoThingResponse>> {
-                    public abstract ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct);
-                }
+                                  [RequirePermission("tenants", "write")]
+                                  public abstract class GuardedBase : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                                      public abstract ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct);
+                                  }
 
-                public sealed class DerivedHandler : GuardedBase {
-                    public override ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
-                }
-            }
-            """;
+                                  public sealed class DerivedHandler : GuardedBase {
+                                      public override ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_DerivedHandler.g.cs");
@@ -188,27 +188,27 @@ public sealed class AuthorizationGeneratorTests {
         // [AllowAnonymous] on the derived handler must win over an inherited base requirement, matching the
         // runtime HandlerMetadata GetCustomAttribute(inherit: true) semantics.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record DoThingCommand(int Id) : ICommand;
-                public sealed record DoThingResponse(string Name);
+                                  public sealed record DoThingCommand(int Id) : ICommand;
+                                  public sealed record DoThingResponse(string Name);
 
-                [RequirePermission("tenants", "write")]
-                public abstract class GuardedBase : IHandler<DoThingCommand, Result<DoThingResponse>> {
-                    public abstract ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct);
-                }
+                                  [RequirePermission("tenants", "write")]
+                                  public abstract class GuardedBase : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                                      public abstract ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct);
+                                  }
 
-                [AllowAnonymous]
-                public sealed class OpenDerivedHandler : GuardedBase {
-                    public override ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
-                }
-            }
-            """;
+                                  [AllowAnonymous]
+                                  public sealed class OpenDerivedHandler : GuardedBase {
+                                      public override ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, _) = Run(source);
         GetGenerated(result, "Sample_App_OpenDerivedHandler.g.cs").Should().NotContain("AuthorizationDecorator");
@@ -287,22 +287,22 @@ public sealed class AuthorizationGeneratorTests {
     [Fact]
     public void IrrelevantEditReusesPipeline() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record DoThingCommand(int Id) : ICommand;
-                public sealed record DoThingResponse(string Name);
+                                  public sealed record DoThingCommand(int Id) : ICommand;
+                                  public sealed record DoThingResponse(string Name);
 
-                [RequirePermission("tenants", "write")]
-                public sealed class GuardedHandler : IHandler<DoThingCommand, Result<DoThingResponse>> {
-                    public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
-                }
-            }
-            """;
+                                  [RequirePermission("tenants", "write")]
+                                  public sealed class GuardedHandler : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                                      public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                                  }
+                              }
+                              """;
 
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new HandlerRegistrationGenerator(), source, "Handlers");
@@ -321,11 +321,12 @@ public sealed class AuthorizationGeneratorTests {
         return (result, result.Diagnostics);
     }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static void AssertCompiles(string source, string generated) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);

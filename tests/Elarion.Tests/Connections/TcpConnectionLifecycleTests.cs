@@ -61,7 +61,7 @@ public sealed class TcpConnectionLifecycleTests {
         var ct = TestContext.Current.CancellationToken;
         await using var stream = new GatedWriteStream();
         var (connection, _) = TcpConnectionAdapterTests.CreateStandaloneConnection(
-            stream, new DelimitedTcpFramer((byte)'\n'), initialSendBufferBytes: 16, maxOutboundMessageBytes: 64);
+            stream, new DelimitedTcpFramer((byte)'\n'), 16, 64);
 
         var send = connection.SendTextAsync("one", ct).AsTask();
         await stream.WaitForEnteredWritesAsync(1, ct);
@@ -77,16 +77,14 @@ public sealed class TcpConnectionLifecycleTests {
         var ct = TestContext.Current.CancellationToken;
         await using var stream = new GatedWriteStream();
         var (connection, _) = TcpConnectionAdapterTests.CreateStandaloneConnection(
-            stream, new DelimitedTcpFramer((byte)'\n'), initialSendBufferBytes: 16, maxOutboundMessageBytes: 64);
+            stream, new DelimitedTcpFramer((byte)'\n'), 16, 64);
 
         // The first send becomes the inline writer and blocks in the stream; the rest are admitted in
         // order behind it while it is provably in flight.
         var first = connection.SendTextAsync("m-0", ct).AsTask();
         await stream.WaitForEnteredWritesAsync(1, ct);
         var queued = new List<Task>();
-        for (var i = 1; i <= 3; i++) {
-            queued.Add(connection.SendTextAsync($"m-{i}", ct).AsTask());
-        }
+        for (var i = 1; i <= 3; i++) queued.Add(connection.SendTextAsync($"m-{i}", ct).AsTask());
 
         stream.ReleaseAll();
         await Task.WhenAll([first, .. queued]).WaitAsync(ct);
@@ -102,7 +100,7 @@ public sealed class TcpConnectionLifecycleTests {
         await using var stream = new GatedWriteStream();
         var framer = new CountingFramer();
         var (connection, _) = TcpConnectionAdapterTests.CreateStandaloneConnection(
-            stream, framer, initialSendBufferBytes: 16, maxOutboundMessageBytes: 64, maxPendingSends: 2);
+            stream, framer, 16, 64, 2);
 
         // Capacity 2 = one in-progress physical write + one queued frame.
         var active = connection.SendBinaryAsync(new byte[] { 1 }, ct).AsTask();
@@ -125,7 +123,7 @@ public sealed class TcpConnectionLifecycleTests {
         var ct = TestContext.Current.CancellationToken;
         await using var stream = new GatedWriteStream();
         var (connection, _) = TcpConnectionAdapterTests.CreateStandaloneConnection(
-            stream, new DelimitedTcpFramer((byte)'\n'), initialSendBufferBytes: 16, maxOutboundMessageBytes: 64);
+            stream, new DelimitedTcpFramer((byte)'\n'), 16, 64);
 
         var first = connection.SendTextAsync("kept", ct).AsTask();
         await stream.WaitForEnteredWritesAsync(1, ct);
@@ -146,7 +144,7 @@ public sealed class TcpConnectionLifecycleTests {
         var ct = TestContext.Current.CancellationToken;
         await using var stream = new GatedWriteStream();
         var (connection, lifetime) = TcpConnectionAdapterTests.CreateStandaloneConnection(
-            stream, new DelimitedTcpFramer((byte)'\n'), initialSendBufferBytes: 16, maxOutboundMessageBytes: 64);
+            stream, new DelimitedTcpFramer((byte)'\n'), 16, 64);
 
         using var cancellation = new CancellationTokenSource();
         var send = connection.SendTextAsync("partial", cancellation.Token).AsTask();
@@ -168,7 +166,7 @@ public sealed class TcpConnectionLifecycleTests {
         var ct = TestContext.Current.CancellationToken;
         await using var stream = new GatedWriteStream();
         var (connection, lifetime) = TcpConnectionAdapterTests.CreateStandaloneConnection(
-            stream, new DelimitedTcpFramer((byte)'\n'), initialSendBufferBytes: 16, maxOutboundMessageBytes: 64);
+            stream, new DelimitedTcpFramer((byte)'\n'), 16, 64);
 
         var active = connection.SendTextAsync("active", ct).AsTask();
         await stream.WaitForEnteredWritesAsync(1, ct);
@@ -188,7 +186,7 @@ public sealed class TcpConnectionLifecycleTests {
         var ct = TestContext.Current.CancellationToken;
         await using var stream = new GatedWriteStream();
         var (connection, lifetime) = TcpConnectionAdapterTests.CreateStandaloneConnection(
-            stream, new DelimitedTcpFramer((byte)'\n'), initialSendBufferBytes: 16, maxOutboundMessageBytes: 64);
+            stream, new DelimitedTcpFramer((byte)'\n'), 16, 64);
 
         var active = connection.SendTextAsync("draining-0", ct).AsTask();
         await stream.WaitForEnteredWritesAsync(1, ct);
@@ -210,7 +208,7 @@ public sealed class TcpConnectionLifecycleTests {
         var ct = TestContext.Current.CancellationToken;
         await using var stream = new GatedWriteStream();
         var (connection, lifetime) = TcpConnectionAdapterTests.CreateStandaloneConnection(
-            stream, new DelimitedTcpFramer((byte)'\n'), initialSendBufferBytes: 16, maxOutboundMessageBytes: 64);
+            stream, new DelimitedTcpFramer((byte)'\n'), 16, 64);
 
         var active = connection.SendTextAsync("active", ct).AsTask();
         await stream.WaitForEnteredWritesAsync(1, ct);
@@ -234,12 +232,12 @@ public sealed class TcpConnectionLifecycleTests {
         var live = new TcpLiveConnectionSet();
         var options = new ElarionTcpConnectionOptions {
             Framer = new DelimitedTcpFramer((byte)'\n'),
-            ShutdownGracePeriod = TimeSpan.FromMilliseconds(100),
+            ShutdownGracePeriod = TimeSpan.FromMilliseconds(100)
         };
 
         var run = TcpConnectionRunner.RunAsync(
-            stream, new TcpConnectionPeer(null, null), stream, applyNoDelay: null, options, handler,
-            registry, defaultInvokeTimeout: null, TimeProvider.System, NullLogger.Instance,
+            stream, new TcpConnectionPeer(null, null), stream, null, options, handler,
+            registry, null, TimeProvider.System, NullLogger.Instance,
             CancellationToken.None, live);
         await handler.Opened.Task.WaitAsync(ct);
         registry.Connections.Should().ContainSingle();
@@ -276,9 +274,7 @@ public sealed class TcpConnectionLifecycleTests {
         await using var provider = services.BuildServiceProvider();
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
         var hosted = provider.GetServices<IHostedService>().ToArray();
-        foreach (var service in hosted) {
-            await service.StartAsync(ct);
-        }
+        foreach (var service in hosted) await service.StartAsync(ct);
 
         using var client = new TcpClient();
         await client.ConnectAsync(await boundEndPoint.Task.WaitAsync(ct), ct);
@@ -293,9 +289,7 @@ public sealed class TcpConnectionLifecycleTests {
 
         // The client stays connected: stop must close the connection itself, run the full ordered
         // teardown, and leave the registry empty before StopAsync returns — without the forced path.
-        foreach (var service in hosted) {
-            await service.StopAsync(CancellationToken.None);
-        }
+        foreach (var service in hosted) await service.StopAsync(CancellationToken.None);
 
         registry.Connections.Should().BeEmpty();
         handler.Protocol!.ClosedCalls.Should().Be(1);
@@ -305,7 +299,9 @@ public sealed class TcpConnectionLifecycleTests {
     private sealed class DisposeRecorder : IDisposable {
         public int Disposals { get; private set; }
 
-        public void Dispose() => Disposals++;
+        public void Dispose() {
+            Disposals++;
+        }
     }
 
     /// <summary>A write-side stream whose writes block until released — the barrier the writer tests use
@@ -336,9 +332,7 @@ public sealed class TcpConnectionLifecycleTests {
             while (true) {
                 Task pending;
                 lock (_gate) {
-                    if (_enteredCount >= count) {
-                        return;
-                    }
+                    if (_enteredCount >= count) return;
 
                     pending = _enteredSignal.Task;
                 }
@@ -364,9 +358,7 @@ public sealed class TcpConnectionLifecycleTests {
                 _entered.Clear();
             }
 
-            foreach (var write in pending) {
-                write.Release.TrySetResult();
-            }
+            foreach (var write in pending) write.Release.TrySetResult();
         }
 
         public void FailAll(Exception failure) {
@@ -377,30 +369,22 @@ public sealed class TcpConnectionLifecycleTests {
                 _entered.Clear();
             }
 
-            foreach (var write in pending) {
-                write.Release.TrySetException(failure);
-            }
+            foreach (var write in pending) write.Release.TrySetException(failure);
         }
 
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) {
             var write = new PendingWrite(buffer.ToArray());
             TaskCompletionSource entered;
             lock (_gate) {
-                if (_failure is not null) {
-                    throw _failure;
-                }
+                if (_failure is not null) throw _failure;
 
-                if (Disposed) {
-                    throw new ObjectDisposedException(nameof(GatedWriteStream));
-                }
+                if (Disposed) throw new ObjectDisposedException(nameof(GatedWriteStream));
 
                 _enteredCount++;
-                if (!_releaseEverything) {
+                if (!_releaseEverything)
                     _entered.Enqueue(write);
-                }
-                else {
+                else
                     write.Release.TrySetResult();
-                }
 
                 entered = _enteredSignal;
                 _enteredSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -421,9 +405,8 @@ public sealed class TcpConnectionLifecycleTests {
                 _entered.Clear();
             }
 
-            foreach (var write in pending) {
+            foreach (var write in pending)
                 write.Release.TrySetException(new ObjectDisposedException(nameof(GatedWriteStream)));
-            }
 
             base.Dispose(disposing);
         }
@@ -432,20 +415,34 @@ public sealed class TcpConnectionLifecycleTests {
         public override bool CanSeek => false;
         public override bool CanWrite => true;
         public override long Length => throw new NotSupportedException();
+
         public override long Position {
             get => throw new NotSupportedException();
             set => throw new NotSupportedException();
         }
 
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) =>
-            new(new TaskCompletionSource<int>().Task);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) {
+            return new ValueTask<int>(new TaskCompletionSource<int>().Task);
+        }
 
-        public override void Flush() { }
-        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) =>
+        public override void Flush() {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) {
+            throw new NotSupportedException();
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) {
+            throw new NotSupportedException();
+        }
+
+        public override void SetLength(long value) {
+            throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count) {
             WriteAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+        }
 
         private sealed class PendingWrite(byte[] bytes) {
             public byte[] Bytes { get; } = bytes;
@@ -456,13 +453,16 @@ public sealed class TcpConnectionLifecycleTests {
     /// <summary>A stream whose read ignores cancellation until disposal faults it — the rogue transport
     /// that only the forced abort can unblock.</summary>
     private sealed class BlockedReadStream : Stream {
-        private readonly TaskCompletionSource<int> _blockedRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<int> _blockedRead =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) =>
-            new(_blockedRead.Task);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) {
+            return new ValueTask<int>(_blockedRead.Task);
+        }
 
-        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) =>
-            ValueTask.CompletedTask;
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default) {
+            return ValueTask.CompletedTask;
+        }
 
         protected override void Dispose(bool disposing) {
             _blockedRead.TrySetException(new ObjectDisposedException(nameof(BlockedReadStream)));
@@ -473,16 +473,30 @@ public sealed class TcpConnectionLifecycleTests {
         public override bool CanSeek => false;
         public override bool CanWrite => true;
         public override long Length => throw new NotSupportedException();
+
         public override long Position {
             get => throw new NotSupportedException();
             set => throw new NotSupportedException();
         }
 
-        public override void Flush() { }
-        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Flush() {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) {
+            throw new NotSupportedException();
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) {
+            throw new NotSupportedException();
+        }
+
+        public override void SetLength(long value) {
+            throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count) {
+            throw new NotSupportedException();
+        }
     }
 
     private sealed class CountingFramer : TcpMessageFramer {
@@ -495,7 +509,7 @@ public sealed class TcpConnectionLifecycleTests {
             return false;
         }
 
-        public override void WriteMessage(ReadOnlySpan<byte> payload, System.Buffers.IBufferWriter<byte> output) {
+        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
             WriteCalls++;
             output.Write(payload);
         }
@@ -509,16 +523,18 @@ public sealed class TcpConnectionLifecycleTests {
         public RecordingLifecycleProtocol? Protocol { get; private set; }
 
         public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
-            TcpHandshakeContext handshake, CancellationToken ct) =>
+            TcpHandshakeContext handshake, CancellationToken ct) {
             // Authenticated tickets require a principal id — an id-less authenticated ticket is rejected
             // at registration by the registry's identity normalization.
-            ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "test")),
-                PrincipalId = "lifecycle-device",
+            return ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("test")),
+                PrincipalId = "lifecycle-device"
             });
+        }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            Protocol = new RecordingLifecycleProtocol(Opened);
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return Protocol = new RecordingLifecycleProtocol(Opened);
+        }
     }
 
     private sealed class GreetingTicketHandler : TcpConnectionHandler {
@@ -527,20 +543,19 @@ public sealed class TcpConnectionLifecycleTests {
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) {
             var greeting = await handshake.ReceiveTextAsync(ct);
-            if (greeting is null) {
-                return null;
-            }
+            if (greeting is null) return null;
 
             await handshake.SendTextAsync("welcome", ct);
             return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "test")),
-                PrincipalId = "greeting-device",
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("test")),
+                PrincipalId = "greeting-device"
             };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            Protocol = new RecordingLifecycleProtocol(
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return Protocol = new RecordingLifecycleProtocol(
                 new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        }
     }
 
     private sealed class RecordingLifecycleProtocol(TaskCompletionSource opened) : IClientConnectionProtocol {
@@ -553,8 +568,9 @@ public sealed class TcpConnectionLifecycleTests {
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
-            ValueTask.CompletedTask;
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+            return ValueTask.CompletedTask;
+        }
 
         public ValueTask OnClosedAsync(ClientConnection connection, Exception? reason, CancellationToken ct) {
             ClosedCalls++;

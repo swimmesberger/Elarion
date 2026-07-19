@@ -103,7 +103,8 @@ public sealed class AppModuleDiscoveryGeneratorTests {
             "        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints,");
         generated.Should().Contain(
             "        this global::Microsoft.Extensions.Configuration.IConfiguration configuration,");
-        generated.Should().Contain("global::Sample.Modules.Core.CoreModule.ConfigureServices(services, configuration);");
+        generated.Should()
+            .Contain("global::Sample.Modules.Core.CoreModule.ConfigureServices(services, configuration);");
         generated.Should().Contain("if (IsModuleEnabled(configuration, \"AiAgent\"))");
         generated.Should().Contain("global::Sample.Modules.AiAgent.AiAgentModule.MapEndpoints(endpoints);");
         generated.Should().Contain("\"Core\" => true,");
@@ -148,7 +149,7 @@ public sealed class AppModuleDiscoveryGeneratorTests {
 
         // The skeleton generator ships in the same assembly and emits each module's ConfigureDefaultServices
         // sibling that the bootstrapper invokes, so it runs alongside the host generator here.
-        GeneratorDriver driver = CSharpGeneratorDriver
+        var driver = CSharpGeneratorDriver
             .Create(new AppModuleDiscoveryGenerator(), new ModuleDefaultServicesGenerator())
             .WithUpdatedParseOptions(parseOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(
@@ -169,10 +170,9 @@ public sealed class AppModuleDiscoveryGeneratorTests {
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
 
-        var generatedTree = result.GeneratedTrees.Single(
-            tree => tree.FilePath.EndsWith(
-                "ElarionBootstrapper.g.cs",
-                StringComparison.Ordinal));
+        var generatedTree = result.GeneratedTrees.Single(tree => tree.FilePath.EndsWith(
+            "ElarionBootstrapper.g.cs",
+            StringComparison.Ordinal));
 
         return generatedTree.GetText().ToString();
     }

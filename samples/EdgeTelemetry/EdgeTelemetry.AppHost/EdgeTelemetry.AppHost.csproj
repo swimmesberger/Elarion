@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.6" />
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.6"/>
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -18,12 +18,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.AppHost" />
-    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+    <PackageReference Include="Aspire.Hosting.AppHost"/>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL"/>
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\EdgeTelemetry.Api\EdgeTelemetry.Api.csproj" />
+    <ProjectReference Include="..\EdgeTelemetry.Api\EdgeTelemetry.Api.csproj"/>
   </ItemGroup>
 
 </Project>

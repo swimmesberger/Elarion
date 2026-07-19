@@ -41,14 +41,11 @@ public sealed partial class ElarionOpenApiEndToEndTests {
     private sealed record GetPaymentResponse(Guid Id, string Amount);
 
     private sealed record RegisterCustomerCommand {
-        [EmailAddress]
-        public required string Email { get; init; }
+        [EmailAddress] public required string Email { get; init; }
 
-        [StringLength(100, MinimumLength = 3)]
-        public required string DisplayName { get; init; }
+        [StringLength(100, MinimumLength = 3)] public required string DisplayName { get; init; }
 
-        [Range(1, 120)]
-        public required int Age { get; init; }
+        [Range(1, 120)] public required int Age { get; init; }
     }
 
     private sealed record RegisterCustomerResponse(Guid Id);
@@ -61,18 +58,23 @@ public sealed partial class ElarionOpenApiEndToEndTests {
     private sealed partial class OpenApiTestJsonContext : JsonSerializerContext;
 
     private sealed class CreatePaymentHandler : IHandler<CreatePaymentCommand, Result<CreatePaymentResponse>> {
-        public ValueTask<Result<CreatePaymentResponse>> HandleAsync(CreatePaymentCommand request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<CreatePaymentResponse>>(new CreatePaymentResponse(Guid.NewGuid()));
+        public ValueTask<Result<CreatePaymentResponse>>
+            HandleAsync(CreatePaymentCommand request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<CreatePaymentResponse>>(new CreatePaymentResponse(Guid.NewGuid()));
+        }
     }
 
     private sealed class GetPaymentHandler : IHandler<GetPaymentQuery, Result<GetPaymentResponse>> {
-        public ValueTask<Result<GetPaymentResponse>> HandleAsync(GetPaymentQuery request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<GetPaymentResponse>>(new GetPaymentResponse(request.Id, "10.00"));
+        public ValueTask<Result<GetPaymentResponse>> HandleAsync(GetPaymentQuery request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<GetPaymentResponse>>(new GetPaymentResponse(request.Id, "10.00"));
+        }
     }
 
     private sealed class RegisterCustomerHandler : IHandler<RegisterCustomerCommand, Result<RegisterCustomerResponse>> {
-        public ValueTask<Result<RegisterCustomerResponse>> HandleAsync(RegisterCustomerCommand request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<RegisterCustomerResponse>>(new RegisterCustomerResponse(Guid.NewGuid()));
+        public ValueTask<Result<RegisterCustomerResponse>> HandleAsync(RegisterCustomerCommand request,
+            CancellationToken ct) {
+            return ValueTask.FromResult<Result<RegisterCustomerResponse>>(new RegisterCustomerResponse(Guid.NewGuid()));
+        }
     }
 
     [Fact]
@@ -87,7 +89,8 @@ public sealed partial class ElarionOpenApiEndToEndTests {
         builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(OpenApiTestJsonContext.Default));
         builder.Services.AddProblemDetails();
         builder.Services.AddElarionOpenApi();
-        builder.Services.AddScoped<IHandler<CreatePaymentCommand, Result<CreatePaymentResponse>>, CreatePaymentHandler>();
+        builder.Services
+            .AddScoped<IHandler<CreatePaymentCommand, Result<CreatePaymentResponse>>, CreatePaymentHandler>();
         builder.Services.AddScoped<IHandler<GetPaymentQuery, Result<GetPaymentResponse>>, GetPaymentHandler>();
 
         await using var app = builder.Build();
@@ -157,7 +160,8 @@ public sealed partial class ElarionOpenApiEndToEndTests {
             // …while the plain GET advertises neither.
             HasHeaderParameter(get, "Idempotency-Key").Should().BeFalse();
             get.TryGetProperty(ElarionOpenApiExtensionNames.Idempotent, out _).Should().BeFalse();
-        } finally {
+        }
+        finally {
             await app.StopAsync(ct);
         }
     }
@@ -175,7 +179,8 @@ public sealed partial class ElarionOpenApiEndToEndTests {
         builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(OpenApiTestJsonContext.Default));
         builder.Services.AddProblemDetails();
         builder.Services.AddElarionOpenApi();
-        builder.Services.AddScoped<IHandler<RegisterCustomerCommand, Result<RegisterCustomerResponse>>, RegisterCustomerHandler>();
+        builder.Services
+            .AddScoped<IHandler<RegisterCustomerCommand, Result<RegisterCustomerResponse>>, RegisterCustomerHandler>();
 
         await using var app = builder.Build();
 
@@ -219,7 +224,8 @@ public sealed partial class ElarionOpenApiEndToEndTests {
             var age = properties.GetProperty("age");
             age.GetProperty("minimum").GetDecimal().Should().Be(1);
             age.GetProperty("maximum").GetDecimal().Should().Be(120);
-        } finally {
+        }
+        finally {
             await app.StopAsync(ct);
         }
     }
@@ -229,9 +235,10 @@ public sealed partial class ElarionOpenApiEndToEndTests {
     }
 
     private sealed class ExportHandler : IHandler<ExportQuery, Result<ElarionFile>> {
-        public ValueTask<Result<ElarionFile>> HandleAsync(ExportQuery request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<ElarionFile>>(
+        public ValueTask<Result<ElarionFile>> HandleAsync(ExportQuery request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<ElarionFile>>(
                 new ElarionFile("id;name"u8.ToArray(), "text/csv") { FileName = "export.csv" });
+        }
     }
 
     [Fact]
@@ -283,24 +290,21 @@ public sealed partial class ElarionOpenApiEndToEndTests {
                 .GetProperty("schema");
             schema.GetProperty("type").GetString().Should().Be("string");
             schema.GetProperty("format").GetString().Should().Be("binary");
-        } finally {
+        }
+        finally {
             await app.StopAsync(ct);
         }
     }
 
     private static bool HasHeaderParameter(JsonElement operation, string name) {
-        if (!operation.TryGetProperty("parameters", out var parameters)) {
-            return false;
-        }
+        if (!operation.TryGetProperty("parameters", out var parameters)) return false;
 
-        foreach (var parameter in parameters.EnumerateArray()) {
+        foreach (var parameter in parameters.EnumerateArray())
             if (parameter.TryGetProperty("in", out var location) &&
                 string.Equals(location.GetString(), "header", StringComparison.OrdinalIgnoreCase) &&
                 parameter.TryGetProperty("name", out var parameterName) &&
-                string.Equals(parameterName.GetString(), name, StringComparison.OrdinalIgnoreCase)) {
+                string.Equals(parameterName.GetString(), name, StringComparison.OrdinalIgnoreCase))
                 return true;
-            }
-        }
 
         return false;
     }

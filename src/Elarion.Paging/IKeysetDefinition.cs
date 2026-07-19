@@ -20,8 +20,7 @@ public sealed record KeysetEntry<TDto>(TDto Item, string Cursor);
 /// </summary>
 /// <typeparam name="TEntity">The entity type being paginated.</typeparam>
 public interface IKeysetDefinition<TEntity>
-    where TEntity : class
-{
+    where TEntity : class {
     /// <summary>
     /// Applies the keyset ordering to <paramref name="source"/>. When <paramref name="forward"/> is
     /// <c>false</c> the ordering is reversed so a "before" page can be read; the caller reverses the

@@ -5,18 +5,18 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj" />
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj"/>
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Elarion.Tests" />
+    <InternalsVisibleTo Include="Elarion.Tests"/>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
   </ItemGroup>
 
   <!-- Bundle the scheduler-claims source generator's analyzer into this package. NuGet analyzer assets are not
@@ -25,20 +25,20 @@
        becoming a downstream package dependency. -->
   <ItemGroup>
     <ProjectReference Include="..\Elarion.Scheduling.EntityFrameworkCore.Generators\Elarion.Scheduling.EntityFrameworkCore.Generators.csproj"
-                     ReferenceOutputAssembly="false"
-                     PrivateAssets="all" />
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"/>
   </ItemGroup>
 
   <Target Name="_BundleElarionSchedulerClaimsGenerator" BeforeTargets="_GetPackageFiles">
     <MSBuild Projects="..\Elarion.Scheduling.EntityFrameworkCore.Generators\Elarion.Scheduling.EntityFrameworkCore.Generators.csproj"
              Targets="GetTargetPath">
-      <Output TaskParameter="TargetOutputs" ItemName="_ElarionSchedulerClaimsGeneratorAnalyzer" />
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionSchedulerClaimsGeneratorAnalyzer"/>
     </MSBuild>
     <ItemGroup>
       <None Include="@(_ElarionSchedulerClaimsGeneratorAnalyzer)"
             Pack="true"
             PackagePath="analyzers/dotnet/cs/"
-            Visible="false" />
+            Visible="false"/>
     </ItemGroup>
   </Target>
 

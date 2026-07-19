@@ -41,11 +41,10 @@ public static class ActorStreams {
         return retention is null ? source : Enumerate(source, retention);
 
         static async IAsyncEnumerable<T> Enumerate(
-            IAsyncEnumerable<T> source, IDisposable retention, [EnumeratorCancellation] CancellationToken ct = default) {
+            IAsyncEnumerable<T> source, IDisposable retention,
+            [EnumeratorCancellation] CancellationToken ct = default) {
             try {
-                await foreach (var item in source.WithCancellation(ct).ConfigureAwait(false)) {
-                    yield return item;
-                }
+                await foreach (var item in source.WithCancellation(ct).ConfigureAwait(false)) yield return item;
             }
             finally {
                 retention.Dispose();
@@ -56,8 +55,9 @@ public static class ActorStreams {
     private sealed class DeferredActorStream<T>(
         Func<CancellationToken, ValueTask<IAsyncEnumerable<T>>> subscribe,
         CancellationToken methodToken) : IAsyncEnumerable<T> {
-        public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
-            EnumerateAsync(cancellationToken).GetAsyncEnumerator(CancellationToken.None);
+        public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default) {
+            return EnumerateAsync(cancellationToken).GetAsyncEnumerator(CancellationToken.None);
+        }
 
         private async IAsyncEnumerable<T> EnumerateAsync(
             [EnumeratorCancellation] CancellationToken enumeratorToken = default) {
@@ -66,9 +66,7 @@ public static class ActorStreams {
                 : null;
             var token = linked?.Token ?? (methodToken.CanBeCanceled ? methodToken : enumeratorToken);
             var subscription = await subscribe(token).ConfigureAwait(false);
-            await foreach (var item in subscription.WithCancellation(token).ConfigureAwait(false)) {
-                yield return item;
-            }
+            await foreach (var item in subscription.WithCancellation(token).ConfigureAwait(false)) yield return item;
         }
     }
 }

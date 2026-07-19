@@ -18,27 +18,22 @@ internal sealed class ClientEventSubscriberRegistry(ClientEventSubscriptionLifec
 
     public ClientEventSubscriptionHandle Subscribe(IReadOnlyList<ClientEventSubscription> subscriptions) {
         ArgumentNullException.ThrowIfNull(subscriptions);
-        if (subscriptions.Count == 0) {
+        if (subscriptions.Count == 0)
             throw new ArgumentException("At least one subscription is required.", nameof(subscriptions));
-        }
 
         var id = Guid.CreateVersion7();
         var channel = Channel.CreateBounded<ClientEventEnvelope>(new BoundedChannelOptions(SubscriberBufferCapacity) {
             FullMode = BoundedChannelFullMode.DropOldest,
-            SingleReader = true,
+            SingleReader = true
         });
         var entry = new Entry([.. subscriptions], channel);
         _subscribers[id] = entry;
-        foreach (var subscription in entry.Subscriptions) {
-            lifecycle.OnSubscribed(subscription, channel.Writer);
-        }
+        foreach (var subscription in entry.Subscriptions) lifecycle.OnSubscribed(subscription, channel.Writer);
 
         return new ClientEventSubscriptionHandle(channel.Reader, () => {
             if (_subscribers.TryRemove(id, out var removed)) {
                 removed.Channel.Writer.TryComplete();
-                foreach (var subscription in removed.Subscriptions) {
-                    lifecycle.OnUnsubscribed(subscription);
-                }
+                foreach (var subscription in removed.Subscriptions) lifecycle.OnUnsubscribed(subscription);
             }
         });
     }
@@ -46,18 +41,14 @@ internal sealed class ClientEventSubscriberRegistry(ClientEventSubscriptionLifec
     public void Deliver(ClientEventEnvelope envelope) {
         ArgumentNullException.ThrowIfNull(envelope);
         var key = new ClientEventSubscription { Topic = envelope.Topic, Scope = envelope.Scope };
-        foreach (var (_, entry) in _subscribers) {
-            if (entry.Subscriptions.Contains(key)) {
+        foreach (var (_, entry) in _subscribers)
+            if (entry.Subscriptions.Contains(key))
                 entry.Channel.Writer.TryWrite(envelope);
-            }
-        }
     }
 
     public void DeliverToAll(ClientEventEnvelope envelope) {
         ArgumentNullException.ThrowIfNull(envelope);
-        foreach (var (_, entry) in _subscribers) {
-            entry.Channel.Writer.TryWrite(envelope);
-        }
+        foreach (var (_, entry) in _subscribers) entry.Channel.Writer.TryWrite(envelope);
     }
 
     private sealed record Entry(HashSet<ClientEventSubscription> Subscriptions, Channel<ClientEventEnvelope> Channel);

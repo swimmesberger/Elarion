@@ -13,7 +13,8 @@ public sealed class ResilienceDecorator<TRequest, TResponse>(
 ) : IHandler<TRequest, TResponse> {
     /// <inheritdoc />
     // The decorator retries the entire inner handler pipeline it wraps, not just the handler method body.
-    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         // The runner receives a delegate so the selected resilience runtime can call it once or many times.
-        await runner.ExecuteAsync(policy, token => inner.HandleAsync(request, token), ct);
+        return await runner.ExecuteAsync(policy, token => inner.HandleAsync(request, token), ct);
+    }
 }

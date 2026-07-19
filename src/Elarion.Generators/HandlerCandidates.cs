@@ -12,16 +12,14 @@ namespace Elarion.Generators;
 /// the symbol fresh. Used by <see cref="HandlerRegistrationGenerator"/> and
 /// <see cref="ValidationResolverGenerator"/> so the two can never disagree about what counts as a handler.
 /// </summary>
-internal static class HandlerCandidates
-{
+internal static class HandlerCandidates {
     /// <summary>
     /// Identifies a concrete unary or stream handler class and returns its CLR metadata name, or <see langword="null"/> for
     /// every other class. Only the metadata name is carried — the caller's stage two re-resolves the symbol
     /// from the current compilation, so no attribute or pipeline state is read against a potentially stale
     /// tree here.
     /// </summary>
-    public static string? Identify(GeneratorSyntaxContext ctx, CancellationToken ct)
-    {
+    public static string? Identify(GeneratorSyntaxContext ctx, CancellationToken ct) {
         var classDecl = (ClassDeclarationSyntax)ctx.Node;
         if (ctx.SemanticModel.GetDeclaredSymbol(classDecl, ct) is not INamedTypeSymbol classSymbol)
             return null;
@@ -55,8 +53,7 @@ internal static class HandlerCandidates
     /// a partial handler class (one candidate per declaration node) into a single resolution, so a partial
     /// handler is never processed twice.
     /// </summary>
-    public static EquatableArray<string> FlattenSortedDistinct(ImmutableArray<string?> candidates)
-    {
+    public static EquatableArray<string> FlattenSortedDistinct(ImmutableArray<string?> candidates) {
         if (candidates.IsDefaultOrEmpty)
             return EquatableArray<string>.Empty;
 

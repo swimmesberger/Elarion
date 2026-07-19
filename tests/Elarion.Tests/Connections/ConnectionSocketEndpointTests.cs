@@ -196,35 +196,34 @@ public sealed class ConnectionSocketEndpointTests {
         (await ReceiveTextAsync(socket, ct)).Should().Be("welcome");
     }
 
-    private static async Task SendTextAsync(ClientWebSocket socket, string message, CancellationToken ct) =>
-        await socket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, endOfMessage: true, ct);
+    private static async Task SendTextAsync(ClientWebSocket socket, string message, CancellationToken ct) {
+        await socket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, true, ct);
+    }
 
     private static async Task<string?> ReceiveTextAsync(ClientWebSocket socket, CancellationToken ct) {
         var buffer = new byte[8 * 1024];
         using var assembled = new MemoryStream();
         while (true) {
             var result = await socket.ReceiveAsync(buffer.AsMemory(), ct);
-            if (result.MessageType == WebSocketMessageType.Close) {
-                return null;
-            }
+            if (result.MessageType == WebSocketMessageType.Close) return null;
 
             assembled.Write(buffer, 0, result.Count);
-            if (result.EndOfMessage) {
-                return Encoding.UTF8.GetString(assembled.ToArray());
-            }
+            if (result.EndOfMessage) return Encoding.UTF8.GetString(assembled.ToArray());
         }
     }
 
     private static Task<SocketTestHost> StartAsync(
-        CancellationToken ct, Action<ElarionConnectionSocketOptions>? configure = null) =>
-        StartAsync<ChallengeHandler>(ct, configure);
+        CancellationToken ct, Action<ElarionConnectionSocketOptions>? configure = null) {
+        return StartAsync<ChallengeHandler>(ct, configure);
+    }
 
     private static async Task<SocketTestHost> StartAsync<THandler>(
         CancellationToken ct, Action<ElarionConnectionSocketOptions>? configure = null)
         where THandler : WebSocketConnectionHandler, new() {
         var host = await WebSocketTestHost.StartAsync<THandler>("/ws", ct, services => {
             services.AddSingleton<AwaitableConnectionObserver>();
-            services.AddSingleton<IClientConnectionObserver>(sp => sp.GetRequiredService<AwaitableConnectionObserver>());
+            services.AddSingleton<IClientConnectionObserver>(sp =>
+                sp.GetRequiredService<AwaitableConnectionObserver>());
         }, configure);
         return new SocketTestHost(host);
     }
@@ -239,9 +238,13 @@ public sealed class ConnectionSocketEndpointTests {
 
         public AwaitableConnectionObserver Observer => Services.GetRequiredService<AwaitableConnectionObserver>();
 
-        public Task<ClientWebSocket> ConnectAsync(CancellationToken ct, string query = "") => host.ConnectAsync(ct, query);
+        public Task<ClientWebSocket> ConnectAsync(CancellationToken ct, string query = "") {
+            return host.ConnectAsync(ct, query);
+        }
 
-        public ValueTask DisposeAsync() => host.DisposeAsync();
+        public ValueTask DisposeAsync() {
+            return host.DisposeAsync();
+        }
     }
 
     /// <summary>The device-gateway shape: an in-socket challenge/response handshake and an echo codec.</summary>
@@ -250,28 +253,29 @@ public sealed class ConnectionSocketEndpointTests {
             WebSocketHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
             var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
-                return null;
-            }
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
 
             await handshake.SendTextAsync("welcome", ct);
             return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
                 PrincipalId = reply["device:".Length..],
-                Metadata = new Dictionary<string, string> { ["channel"] = "main" },
+                Metadata = new Dictionary<string, string> { ["channel"] = "main" }
             };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) =>
-            new EchoProtocol(connection);
+        public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) {
+            return new EchoProtocol(connection);
+        }
     }
 
     private sealed class EchoProtocol(WebSocketClientConnection connection) : IClientConnectionProtocol {
-        public ValueTask OnTextAsync(string message, CancellationToken ct) =>
-            connection.SendTextAsync("echo:" + message, ct);
+        public ValueTask OnTextAsync(string message, CancellationToken ct) {
+            return connection.SendTextAsync("echo:" + message, ct);
+        }
 
-        public ValueTask OnIdleAsync(CancellationToken ct) =>
-            connection.SendTextAsync("idle-ping", ct);
+        public ValueTask OnIdleAsync(CancellationToken ct) {
+            return connection.SendTextAsync("idle-ping", ct);
+        }
     }
 
     /// <summary>Records the codec teardown signal — the connection-ended notification a codec mounts its
@@ -283,19 +287,18 @@ public sealed class ConnectionSocketEndpointTests {
             WebSocketHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
             var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
-                return null;
-            }
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
 
             await handshake.SendTextAsync("welcome", ct);
             return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
-                PrincipalId = reply["device:".Length..],
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
+                PrincipalId = reply["device:".Length..]
             };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) =>
-            Protocol = new ClosureRecordingProtocol();
+        public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) {
+            return Protocol = new ClosureRecordingProtocol();
+        }
     }
 
     private sealed class ClosureRecordingProtocol : IClientConnectionProtocol {
@@ -311,22 +314,27 @@ public sealed class ConnectionSocketEndpointTests {
     private sealed class OpeningFailureHandler : WebSocketConnectionHandler {
         public OpeningFailureProtocol? Protocol { get; private set; }
 
-        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(WebSocketHandshakeContext handshake, CancellationToken ct) {
+        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(WebSocketHandshakeContext handshake,
+            CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
             var reply = await handshake.ReceiveTextAsync(ct);
             if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
             await handshake.SendTextAsync("welcome", ct);
-            return new ClientConnectionTicket { Principal = new ClaimsPrincipal(new ClaimsIdentity("device")), PrincipalId = reply[7..] };
+            return new ClientConnectionTicket
+                { Principal = new ClaimsPrincipal(new ClaimsIdentity("device")), PrincipalId = reply[7..] };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) =>
-            Protocol = new OpeningFailureProtocol();
+        public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) {
+            return Protocol = new OpeningFailureProtocol();
+        }
     }
 
     private sealed class OpeningFailureProtocol : IClientConnectionProtocol {
         public int Opened { get; private set; }
         public int Messages { get; private set; }
-        public TaskCompletionSource<ClientConnection> Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<ClientConnection> Closed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public ValueTask OnOpenedAsync(ClientConnection connection, CancellationToken ct) {
             Opened++;
@@ -352,7 +360,7 @@ public sealed class ConnectionSocketEndpointTests {
             var tier = context.Request.Query["tier"].ToString();
             return ValueTask.FromResult<WebSocketConnectionSettings?>(new WebSocketConnectionSettings {
                 Transport = "websocket-" + tier,
-                MaxMessageBytes = tier == "constrained" ? 64 : null,
+                MaxMessageBytes = tier == "constrained" ? 64 : null
             });
         }
 
@@ -360,19 +368,17 @@ public sealed class ConnectionSocketEndpointTests {
             WebSocketHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
             var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
-                return null;
-            }
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
 
             await handshake.SendTextAsync("welcome", ct);
             return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity(authenticationType: "device")),
-                PrincipalId = reply["device:".Length..],
+                Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
+                PrincipalId = reply["device:".Length..]
             };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) =>
-            new EchoProtocol(connection);
+        public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) {
+            return new EchoProtocol(connection);
+        }
     }
-
 }

@@ -8,102 +8,102 @@
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
-    <PackageReference Include="Testcontainers.Azurite" />
-    <PackageReference Include="Testcontainers.PostgreSql" />
-    <PackageReference Include="xunit.v3.mtp-v2" />
-    <PackageReference Include="AwesomeAssertions" />
-    <PackageReference Include="Grpc.Core.Api" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
-    <PackageReference Include="Microsoft.Extensions.Logging" />
-    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
-    <PackageReference Include="OpenFeature.Hosting" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL"/>
+    <PackageReference Include="Testcontainers.Azurite"/>
+    <PackageReference Include="Testcontainers.PostgreSql"/>
+    <PackageReference Include="xunit.v3.mtp-v2"/>
+    <PackageReference Include="AwesomeAssertions"/>
+    <PackageReference Include="Grpc.Core.Api"/>
+    <PackageReference Include="Microsoft.Extensions.Configuration"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection"/>
+    <PackageReference Include="Microsoft.Extensions.Logging"/>
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing"/>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp"/>
+    <PackageReference Include="OpenFeature.Hosting"/>
   </ItemGroup>
   <ItemGroup>
     <!-- Migration-runner test scripts: the runner discovers embedded .sql resources, scoped per scenario
          by resource-name prefix. PostgreSQL and SQLite scenarios live in separate script trees. -->
-    <EmbeddedResource Include="Migrations/Scripts/**/*.sql" />
-    <EmbeddedResource Include="Migrations/SqliteScripts/**/*.sql" />
+    <EmbeddedResource Include="Migrations/Scripts/**/*.sql"/>
+    <EmbeddedResource Include="Migrations/SqliteScripts/**/*.sql"/>
   </ItemGroup>
   <ItemGroup>
     <!-- Long-running-test detection: with diagnostics on, the runner names any test exceeding the
          threshold — a hanging test is identified instead of silently stalling the whole run. -->
-    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest"/>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/Elarion.Abstractions/Elarion.Abstractions.csproj" />
-    <ProjectReference Include="../../src/Elarion/Elarion.csproj" />
-    <ProjectReference Include="../../src/Elarion.Grpc/Elarion.Grpc.csproj" />
-    <ProjectReference Include="../../src/Elarion.Grpc.AspNetCore/Elarion.Grpc.AspNetCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.Actors/Elarion.Actors.csproj" />
-    <ProjectReference Include="../../src/Elarion.Actors.PostgreSql/Elarion.Actors.PostgreSql.csproj" />
-    <ProjectReference Include="../../src/Elarion.Actors.PostgreSql.Generators/Elarion.Actors.PostgreSql.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.Coordination.PostgreSql/Elarion.Coordination.PostgreSql.csproj" />
-    <ProjectReference Include="../../src/Elarion.Coordination.PostgreSql.Generators/Elarion.Coordination.PostgreSql.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.AspNetCore/Elarion.AspNetCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.AspNetCore.Mcp/Elarion.AspNetCore.Mcp.csproj" />
-    <ProjectReference Include="../../src/Elarion.AspNetCore.SchemaGeneration.Tool/Elarion.AspNetCore.SchemaGeneration.Tool.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
-    <ProjectReference Include="../../src/Elarion.Blobs/Elarion.Blobs.csproj" />
-    <ProjectReference Include="../../src/Elarion.Blobs.AspNetCore/Elarion.Blobs.AspNetCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.Blobs.Azure/Elarion.Blobs.Azure.csproj" />
-    <ProjectReference Include="../../src/Elarion.Blobs.PostgreSql/Elarion.Blobs.PostgreSql.csproj" />
-    <ProjectReference Include="../../src/Elarion.Blobs.Tus/Elarion.Blobs.Tus.csproj" />
-    <ProjectReference Include="../../src/Elarion.BulkOperations.PostgreSql/Elarion.BulkOperations.PostgreSql.csproj" />
-    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.BulkOperations/Elarion.EntityFrameworkCore.BulkOperations.csproj" />
-    <ProjectReference Include="../../src/Elarion.ClientEvents/Elarion.ClientEvents.csproj" />
-    <ProjectReference Include="../../src/Elarion.ClientEvents.AspNetCore/Elarion.ClientEvents.AspNetCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.ClientEvents.PostgreSql/Elarion.ClientEvents.PostgreSql.csproj" />
-    <ProjectReference Include="../../src/Elarion.Connections/Elarion.Connections.csproj" />
-    <ProjectReference Include="../../src/Elarion.Connections.AspNetCore/Elarion.Connections.AspNetCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.Connections.AspNetCore.Simulation/Elarion.Connections.AspNetCore.Simulation.csproj" />
-    <ProjectReference Include="../../src/Elarion.Connections.Tcp/Elarion.Connections.Tcp.csproj" />
-    <ProjectReference Include="../../src/Elarion.Connections.Simulation/Elarion.Connections.Simulation.csproj" />
-    <ProjectReference Include="../../src/Elarion.Devices/Elarion.Devices.csproj" />
-    <ProjectReference Include="../../src/Elarion.Devices.EntityFrameworkCore/Elarion.Devices.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.Devices.EntityFrameworkCore.Generators/Elarion.Devices.EntityFrameworkCore.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.JsonRpc/Elarion.JsonRpc.csproj" />
-    <ProjectReference Include="../../src/Elarion.AspNetCore.OpenApi/Elarion.AspNetCore.OpenApi.csproj" />
-    <ProjectReference Include="../../src/Elarion.Paging/Elarion.Paging.csproj" />
-    <ProjectReference Include="../../src/Elarion.Settings/Elarion.Settings.csproj" />
-    <ProjectReference Include="../../src/Elarion.Settings.EntityFrameworkCore/Elarion.Settings.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj" />
-    <ProjectReference Include="../../src/Elarion.Settings.PostgreSql/Elarion.Settings.PostgreSql.csproj" />
-    <ProjectReference Include="../../src/Elarion.Sql/Elarion.Sql.csproj" />
-    <ProjectReference Include="../../src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj" />
+    <ProjectReference Include="../../src/Elarion.Abstractions/Elarion.Abstractions.csproj"/>
+    <ProjectReference Include="../../src/Elarion/Elarion.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Grpc/Elarion.Grpc.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Grpc.AspNetCore/Elarion.Grpc.AspNetCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Actors/Elarion.Actors.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Actors.PostgreSql/Elarion.Actors.PostgreSql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Actors.PostgreSql.Generators/Elarion.Actors.PostgreSql.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Coordination.PostgreSql/Elarion.Coordination.PostgreSql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Coordination.PostgreSql.Generators/Elarion.Coordination.PostgreSql.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.AspNetCore/Elarion.AspNetCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.AspNetCore.Mcp/Elarion.AspNetCore.Mcp.csproj"/>
+    <ProjectReference Include="../../src/Elarion.AspNetCore.SchemaGeneration.Tool/Elarion.AspNetCore.SchemaGeneration.Tool.csproj" ReferenceOutputAssembly="false" PrivateAssets="all"/>
+    <ProjectReference Include="../../src/Elarion.Blobs/Elarion.Blobs.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Blobs.AspNetCore/Elarion.Blobs.AspNetCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Blobs.Azure/Elarion.Blobs.Azure.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Blobs.PostgreSql/Elarion.Blobs.PostgreSql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Blobs.Tus/Elarion.Blobs.Tus.csproj"/>
+    <ProjectReference Include="../../src/Elarion.BulkOperations.PostgreSql/Elarion.BulkOperations.PostgreSql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.BulkOperations/Elarion.EntityFrameworkCore.BulkOperations.csproj"/>
+    <ProjectReference Include="../../src/Elarion.ClientEvents/Elarion.ClientEvents.csproj"/>
+    <ProjectReference Include="../../src/Elarion.ClientEvents.AspNetCore/Elarion.ClientEvents.AspNetCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.ClientEvents.PostgreSql/Elarion.ClientEvents.PostgreSql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Connections/Elarion.Connections.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Connections.AspNetCore/Elarion.Connections.AspNetCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Connections.AspNetCore.Simulation/Elarion.Connections.AspNetCore.Simulation.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Connections.Tcp/Elarion.Connections.Tcp.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Connections.Simulation/Elarion.Connections.Simulation.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Devices/Elarion.Devices.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Devices.EntityFrameworkCore/Elarion.Devices.EntityFrameworkCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Devices.EntityFrameworkCore.Generators/Elarion.Devices.EntityFrameworkCore.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.JsonRpc/Elarion.JsonRpc.csproj"/>
+    <ProjectReference Include="../../src/Elarion.AspNetCore.OpenApi/Elarion.AspNetCore.OpenApi.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Paging/Elarion.Paging.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Settings/Elarion.Settings.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Settings.EntityFrameworkCore/Elarion.Settings.EntityFrameworkCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Settings.PostgreSql/Elarion.Settings.PostgreSql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Sql/Elarion.Sql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj"/>
     <!-- Also applied as an analyzer so the Sql integration tests exercise REAL generated mappers
          compiled into this assembly, not driver-emitted text. -->
     <ProjectReference Include="../../src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj"
                       OutputItemType="Analyzer"
-                      ReferenceOutputAssembly="false" />
-    <ProjectReference Include="../../src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj" />
-    <ProjectReference Include="../../src/Elarion.Migrations.PostgreSql/Elarion.Migrations.PostgreSql.csproj" />
-    <ProjectReference Include="../../src/Elarion.Migrations.Sqlite/Elarion.Migrations.Sqlite.csproj" />
-    <ProjectReference Include="../../src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj" />
-    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.Authorization.EntityFrameworkCore/Elarion.Authorization.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.Authorization.EntityFrameworkCore.Generators/Elarion.Authorization.EntityFrameworkCore.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.Idempotency.EntityFrameworkCore.Generators/Elarion.Idempotency.EntityFrameworkCore.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.Messaging.Outbox.Generators/Elarion.Messaging.Outbox.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.Settings.EntityFrameworkCore.Generators/Elarion.Settings.EntityFrameworkCore.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.Blobs.PostgreSql.Generators/Elarion.Blobs.PostgreSql.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.Generators/Elarion.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj" />
-    <ProjectReference Include="../../src/Elarion.Idempotency.EntityFrameworkCore/Elarion.Idempotency.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.Auditing.EntityFrameworkCore/Elarion.Auditing.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.Auditing.EntityFrameworkCore.Generators/Elarion.Auditing.EntityFrameworkCore.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.FeatureFlags.OpenFeature/Elarion.FeatureFlags.OpenFeature.csproj" />
-    <ProjectReference Include="../../src/Elarion.FeatureFlags.FeatureManagement/Elarion.FeatureFlags.FeatureManagement.csproj" />
-    <ProjectReference Include="../../src/Elarion.Caching/Elarion.Caching.csproj" />
-    <ProjectReference Include="../../src/Elarion.Caching.PostgreSql/Elarion.Caching.PostgreSql.csproj" />
-    <ProjectReference Include="../../src/Elarion.Resilience/Elarion.Resilience.csproj" />
-    <ProjectReference Include="../../src/Elarion.Validation/Elarion.Validation.csproj" />
-    <ProjectReference Include="../../src/Elarion.Scheduling.EntityFrameworkCore/Elarion.Scheduling.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="../../src/Elarion.Scheduling.EntityFrameworkCore.Generators/Elarion.Scheduling.EntityFrameworkCore.Generators.csproj" />
-    <ProjectReference Include="../../src/Elarion.AspNetCore.Identity/Elarion.AspNetCore.Identity.csproj" />
-    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity/Elarion.EntityFrameworkCore.Identity.csproj" />
-    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity.Generators/Elarion.EntityFrameworkCore.Identity.Generators.csproj" />
+                      ReferenceOutputAssembly="false"/>
+    <ProjectReference Include="../../src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Migrations.PostgreSql/Elarion.Migrations.PostgreSql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Migrations.Sqlite/Elarion.Migrations.Sqlite.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj"/>
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Authorization.EntityFrameworkCore/Elarion.Authorization.EntityFrameworkCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Authorization.EntityFrameworkCore.Generators/Elarion.Authorization.EntityFrameworkCore.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Idempotency.EntityFrameworkCore.Generators/Elarion.Idempotency.EntityFrameworkCore.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Messaging.Outbox.Generators/Elarion.Messaging.Outbox.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Settings.EntityFrameworkCore.Generators/Elarion.Settings.EntityFrameworkCore.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Blobs.PostgreSql.Generators/Elarion.Blobs.PostgreSql.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Generators/Elarion.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Idempotency.EntityFrameworkCore/Elarion.Idempotency.EntityFrameworkCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Auditing.EntityFrameworkCore/Elarion.Auditing.EntityFrameworkCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Auditing.EntityFrameworkCore.Generators/Elarion.Auditing.EntityFrameworkCore.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.FeatureFlags.OpenFeature/Elarion.FeatureFlags.OpenFeature.csproj"/>
+    <ProjectReference Include="../../src/Elarion.FeatureFlags.FeatureManagement/Elarion.FeatureFlags.FeatureManagement.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Caching/Elarion.Caching.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Caching.PostgreSql/Elarion.Caching.PostgreSql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Resilience/Elarion.Resilience.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Validation/Elarion.Validation.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Scheduling.EntityFrameworkCore/Elarion.Scheduling.EntityFrameworkCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Scheduling.EntityFrameworkCore.Generators/Elarion.Scheduling.EntityFrameworkCore.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.AspNetCore.Identity/Elarion.AspNetCore.Identity.csproj"/>
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity/Elarion.EntityFrameworkCore.Identity.csproj"/>
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity.Generators/Elarion.EntityFrameworkCore.Identity.Generators.csproj"/>
   </ItemGroup>
 </Project>

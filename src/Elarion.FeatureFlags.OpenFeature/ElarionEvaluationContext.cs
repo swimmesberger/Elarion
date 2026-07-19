@@ -32,9 +32,7 @@ public static class ElarionEvaluationContext {
 
         if (currentUser.Roles.Count > 0) {
             var groups = new List<Value>(currentUser.Roles.Count);
-            foreach (var role in currentUser.Roles) {
-                groups.Add(new Value(role));
-            }
+            foreach (var role in currentUser.Roles) groups.Add(new Value(role));
 
             builder.Set(GroupsKey, new Value(groups));
         }

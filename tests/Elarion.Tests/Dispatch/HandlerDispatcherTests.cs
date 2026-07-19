@@ -16,8 +16,9 @@ public sealed class HandlerDispatcherTests {
     private sealed record Pong(string Value);
 
     private sealed class PingHandler : IHandler<Ping, Result<Pong>> {
-        public ValueTask<Result<Pong>> HandleAsync(Ping request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<Pong>>(new Pong($"pong:{request.Value}"));
+        public ValueTask<Result<Pong>> HandleAsync(Ping request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<Pong>>(new Pong($"pong:{request.Value}"));
+        }
     }
 
     [Fact]

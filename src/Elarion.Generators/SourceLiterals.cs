@@ -8,6 +8,7 @@ namespace Elarion.Generators;
 /// </summary>
 internal static class SourceLiterals {
     /// <summary>Renders a nullable string as a C# expression — a quoted, escaped literal, or <c>null</c>.</summary>
-    public static string String(string? value) =>
-        value is null ? "null" : SymbolDisplay.FormatLiteral(value, quote: true);
+    public static string String(string? value) {
+        return value is null ? "null" : SymbolDisplay.FormatLiteral(value, true);
+    }
 }

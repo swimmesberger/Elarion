@@ -47,7 +47,7 @@ public static class InMemoryTcpLink {
         var shutdown = new CancellationTokenSource();
         var observing = new ObservingRegistry(registry);
         var serverRun = TcpConnectionRunner.RunAsync(
-            serverEnd, new TcpConnectionPeer(null, null), serverEnd, applyNoDelay: null,
+            serverEnd, new TcpConnectionPeer(null, null), serverEnd, null,
             options, handler, observing,
             // The kernel's shipped invoke default — the link behaves like a production endpoint whose
             // host left AddElarionConnections unconfigured.
@@ -64,7 +64,8 @@ public static class InMemoryTcpLink {
         // unobserved-task-exception machinery for a signal it never awaited.
         _ = observing.Registered.Task.ContinueWith(
             static faulted => _ = faulted.Exception,
-            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
         var client = TcpSimulatorClient.FromStream(clientEnd, framer);
         return new InMemoryTcpLinkSession(client, serverRun, observing.Registered.Task, shutdown);
@@ -81,20 +82,25 @@ public static class InMemoryTcpLink {
             Registered.TrySetResult(connection);
         }
 
-        public ValueTask UnregisterAsync(string connectionId, CancellationToken ct = default) =>
-            inner.UnregisterAsync(connectionId, ct);
+        public ValueTask UnregisterAsync(string connectionId, CancellationToken ct = default) {
+            return inner.UnregisterAsync(connectionId, ct);
+        }
 
         public ValueTask<ClientConnectionPromotionStatus> PromoteAsync(
             string connectionId,
             ClientConnectionIdentity identity,
-            CancellationToken ct = default) =>
-            inner.PromoteAsync(connectionId, identity, ct);
+            CancellationToken ct = default) {
+            return inner.PromoteAsync(connectionId, identity, ct);
+        }
 
-        public bool TryGet(string connectionId, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IClientConnectionSink? connection) =>
-            inner.TryGet(connectionId, out connection);
+        public bool TryGet(string connectionId,
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IClientConnectionSink? connection) {
+            return inner.TryGet(connectionId, out connection);
+        }
 
-        public IReadOnlyList<IClientConnectionSink> GetForPrincipal(string principalId) =>
-            inner.GetForPrincipal(principalId);
+        public IReadOnlyList<IClientConnectionSink> GetForPrincipal(string principalId) {
+            return inner.GetForPrincipal(principalId);
+        }
 
         public IReadOnlyCollection<IClientConnectionSink> Connections => inner.Connections;
     }

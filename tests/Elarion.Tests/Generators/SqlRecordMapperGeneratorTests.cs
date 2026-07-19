@@ -61,7 +61,8 @@ public sealed class SqlRecordMapperGeneratorTests {
         source.Should().Contain(
             "Note = reader.IsDBNull(ordinals.Note) ? null : reader.GetFieldValue<string>(ordinals.Note),");
         // Enums read through their underlying type; nullable enums null-check first.
-        source.Should().Contain("Status = (global::Sample.Domain.OrderStatus)reader.GetFieldValue<int>(ordinals.Status),");
+        source.Should()
+            .Contain("Status = (global::Sample.Domain.OrderStatus)reader.GetFieldValue<int>(ordinals.Status),");
         source.Should().Contain(
             "PreviousStatus = reader.IsDBNull(ordinals.PreviousStatus) ? default(global::Sample.Domain.OrderStatus?) : (global::Sample.Domain.OrderStatus)reader.GetFieldValue<int>(ordinals.PreviousStatus),");
         // Excluded members appear nowhere.
@@ -118,7 +119,9 @@ public sealed class SqlRecordMapperGeneratorTests {
         source.Should().Contain("public static ClientSqlMapper Instance { get; } = new ClientSqlMapper();");
         source.Should().Contain("_json ?? global::Elarion.Sql.ElarionSqlJson.Serialization");
         source.Should().Contain("Json.GetTypeInfo<global::Sample.Domain.Profile>()");
-        source.Should().Contain("global::System.Text.Json.JsonSerializer.Deserialize(reader.GetFieldValue<string>(ordinals.Settings), JsonTypeInfoSettings)");
+        source.Should()
+            .Contain(
+                "global::System.Text.Json.JsonSerializer.Deserialize(reader.GetFieldValue<string>(ordinals.Settings), JsonTypeInfoSettings)");
         // Provider-neutral by default: no Npgsql types.
         source.Should().NotContain("NpgsqlDbType");
     }
@@ -239,8 +242,12 @@ public sealed class SqlRecordMapperGeneratorTests {
         var source = GetGenerated(result, "ElarionSqlMapperRegistration.g.cs");
 
         source.Should().Contain("public static class SqlRecordMapperGeneratorTestsSqlMapperRegistration");
-        source.Should().Contain("public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddElarionSqlMappers(");
-        source.Should().Contain("TryAddSingleton<global::Elarion.Sql.ISqlRowMapper<global::Sample.Domain.Order>>(services, static _ => global::Sample.Domain.OrderSqlMapper.Instance);");
+        source.Should()
+            .Contain(
+                "public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddElarionSqlMappers(");
+        source.Should()
+            .Contain(
+                "TryAddSingleton<global::Elarion.Sql.ISqlRowMapper<global::Sample.Domain.Order>>(services, static _ => global::Sample.Domain.OrderSqlMapper.Instance);");
     }
 
     [Fact]
@@ -390,12 +397,10 @@ public sealed class SqlRecordMapperGeneratorTests {
     }
 
     private static GeneratorDriverRunResult Generate(string source, string? assemblyAttribute = null) {
-        var trees = new List<Microsoft.CodeAnalysis.SyntaxTree> {
-            CSharpSyntaxTree.ParseText(source, ParseOptions),
+        var trees = new List<SyntaxTree> {
+            CSharpSyntaxTree.ParseText(source, ParseOptions)
         };
-        if (assemblyAttribute is not null) {
-            trees.Add(CSharpSyntaxTree.ParseText(assemblyAttribute, ParseOptions));
-        }
+        if (assemblyAttribute is not null) trees.Add(CSharpSyntaxTree.ParseText(assemblyAttribute, ParseOptions));
 
         var compilation = CSharpCompilation.Create(
             "SqlRecordMapperGeneratorTests",
@@ -409,16 +414,18 @@ public sealed class SqlRecordMapperGeneratorTests {
 
     private static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Preview);
 
-    private static void NoErrors(GeneratorDriverRunResult result) =>
+    private static void NoErrors(GeneratorDriverRunResult result) {
         result.Diagnostics
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
+    }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static IReadOnlyList<Diagnostic> CompileErrors(params string[] sources) {
         var compilation = CSharpCompilation.Create(
@@ -438,10 +445,14 @@ public sealed class SqlRecordMapperGeneratorTests {
             .. trustedPlatformAssemblies!
                 .Split(Path.PathSeparator)
                 .Select(path => MetadataReference.CreateFromFile(path)),
-            MetadataReference.CreateFromFile(typeof(Elarion.Sql.SqlRecordAttribute).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Elarion.Abstractions.Serialization.IElarionJsonSerialization).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Sql.SqlRecordAttribute).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Elarion.Abstractions.Serialization.IElarionJsonSerialization)
+                .Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection)
+                .Assembly.Location),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions)
+                    .Assembly.Location)
         ];
     }
 }

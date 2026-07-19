@@ -7,7 +7,7 @@ internal sealed class PostgreSqlActorPlacementResolver(IRolePartition partition)
     : IActorPlacementResolver {
     public ActorPlacementResolution Resolve(string actorName, string key) {
         var target = partition.Resolve(actorName, key);
-        return new(
+        return new ActorPlacementResolution(
             target.IsHeld,
             target.CurrentHolder,
             target.CurrentHolderAddress,

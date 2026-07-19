@@ -23,11 +23,9 @@ public static class DevicePrincipal {
         var claims = new List<Claim> {
             new(DeviceIdClaimType, deviceId),
             new(ClaimTypes.NameIdentifier, deviceId),
-            new(ClaimTypes.Name, deviceId),
+            new(ClaimTypes.Name, deviceId)
         };
-        if (additionalClaims is not null) {
-            claims.AddRange(additionalClaims);
-        }
+        if (additionalClaims is not null) claims.AddRange(additionalClaims);
 
         return new ClaimsPrincipal(new ClaimsIdentity(claims, AuthenticationType));
     }
@@ -37,7 +35,8 @@ public static class DevicePrincipal {
     public static bool IsDevice(ClaimsPrincipal principal) {
         ArgumentNullException.ThrowIfNull(principal);
         return principal.Identities.Any(identity =>
-            identity.AuthenticationType == AuthenticationType && identity.HasClaim(claim => claim.Type == DeviceIdClaimType));
+            identity.AuthenticationType == AuthenticationType &&
+            identity.HasClaim(claim => claim.Type == DeviceIdClaimType));
     }
 
     /// <summary>The device id, or <see langword="null"/> for non-device principals.</summary>

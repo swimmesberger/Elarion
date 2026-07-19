@@ -23,10 +23,11 @@ public sealed class RpcToolInvokerTests {
     private sealed record EchoResponse(string Greeting);
 
     private sealed class EchoHandler : IHandler<EchoCommand, Result<EchoResponse>> {
-        public ValueTask<Result<EchoResponse>> HandleAsync(EchoCommand request, CancellationToken ct) =>
-            request.Name == "missing"
+        public ValueTask<Result<EchoResponse>> HandleAsync(EchoCommand request, CancellationToken ct) {
+            return request.Name == "missing"
                 ? ValueTask.FromResult<Result<EchoResponse>>(AppError.NotFound("client not found"))
                 : ValueTask.FromResult<Result<EchoResponse>>(new EchoResponse($"Hello {request.Name}"));
+        }
     }
 
     private sealed record ThrowCommand {
@@ -34,10 +35,11 @@ public sealed class RpcToolInvokerTests {
     }
 
     private sealed class ThrowHandler : IHandler<ThrowCommand, Result<EchoResponse>> {
-        public ValueTask<Result<EchoResponse>> HandleAsync(ThrowCommand request, CancellationToken ct) =>
-            request.Name == "cancel"
+        public ValueTask<Result<EchoResponse>> HandleAsync(ThrowCommand request, CancellationToken ct) {
+            return request.Name == "cancel"
                 ? throw new OperationCanceledException()
                 : throw new InvalidOperationException("boom: secret internal detail");
+        }
     }
 
     // An all-optional tool request as a positional record: no public parameterless constructor, so the old
@@ -47,13 +49,14 @@ public sealed class RpcToolInvokerTests {
     private sealed record ListResponse(string? Search, int Page, int PageSize);
 
     private sealed class ListHandler : IHandler<ListQuery, Result<ListResponse>> {
-        public ValueTask<Result<ListResponse>> HandleAsync(ListQuery request, CancellationToken ct) =>
-            ValueTask.FromResult<Result<ListResponse>>(
+        public ValueTask<Result<ListResponse>> HandleAsync(ListQuery request, CancellationToken ct) {
+            return ValueTask.FromResult<Result<ListResponse>>(
                 new ListResponse(request.Search, request.Page, request.PageSize));
+        }
     }
 
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
     };
 
     private static (HandlerDispatcher Dispatcher, IServiceProvider Services) Build() {
@@ -70,7 +73,9 @@ public sealed class RpcToolInvokerTests {
         return (dispatcher.Registry, services);
     }
 
-    private static JsonElement Args(object value) => JsonSerializer.SerializeToElement(value, Options);
+    private static JsonElement Args(object value) {
+        return JsonSerializer.SerializeToElement(value, Options);
+    }
 
     [Fact]
     public async Task InvokeAsync_Success_ReturnsSerializedResult() {
@@ -93,7 +98,7 @@ public sealed class RpcToolInvokerTests {
         // A tool called with no arguments: the previous Activator.CreateInstance(RequestType) path threw for a
         // positional record (no parameterless constructor). Deserializing "{}" applies the ctor defaults instead.
         var result = await RpcToolInvoker.InvokeAsync(
-            dispatcher, HandlerTransports.All, "list", arguments: null, services, Options,
+            dispatcher, HandlerTransports.All, "list", null, services, Options,
             ct: TestContext.Current.CancellationToken);
 
         result.IsError.Should().BeFalse();
@@ -164,15 +169,21 @@ public sealed class RpcToolInvokerTests {
     private sealed class CapturingLoggerProvider : ILoggerProvider {
         public ConcurrentQueue<string> Errors { get; } = new();
 
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Errors);
+        public ILogger CreateLogger(string categoryName) {
+            return new CapturingLogger(Errors);
+        }
 
         public void Dispose() {
         }
 
         private sealed class CapturingLogger(ConcurrentQueue<string> errors) : ILogger {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull {
+                return null;
+            }
 
-            public bool IsEnabled(LogLevel logLevel) => true;
+            public bool IsEnabled(LogLevel logLevel) {
+                return true;
+            }
 
             public void Log<TState>(
                 LogLevel logLevel,

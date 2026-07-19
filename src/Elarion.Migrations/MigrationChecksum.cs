@@ -11,14 +11,13 @@ namespace Elarion.Migrations;
 internal static class MigrationChecksum {
     /// <summary>Strips a leading BOM and normalizes CRLF to LF.</summary>
     public static string Normalize(string content) {
-        if (content.Length > 0 && content[0] == '﻿') {
-            content = content[1..];
-        }
+        if (content.Length > 0 && content[0] == '﻿') content = content[1..];
 
         return content.Replace("\r\n", "\n", StringComparison.Ordinal);
     }
 
     /// <summary>Computes the lowercase-hex SHA-256 of the (already normalized) content's UTF-8 bytes.</summary>
-    public static string Compute(string normalizedContent) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedContent)));
+    public static string Compute(string normalizedContent) {
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedContent)));
+    }
 }

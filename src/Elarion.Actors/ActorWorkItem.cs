@@ -30,7 +30,8 @@ internal enum ActorTurnOutcome {
 /// </summary>
 /// <typeparam name="TActor">The actor implementation type.</typeparam>
 public abstract class ActorWorkItem<TActor> where TActor : class {
-    private protected ActorWorkItem() { }
+    private protected ActorWorkItem() {
+    }
 
     /// <summary>The invoked actor method name (telemetry identity).</summary>
     public abstract string MethodName { get; }
@@ -100,7 +101,9 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     private CancellationToken _stoppingToken;
     private CancellationTokenRegistration _attributionRegistration;
     private CancellationTokenRegistration _callerRegistration;
+
     private CancellationTokenRegistration _stoppingRegistration;
+
     // Set when a snapshot conflict already consumed this item's one transparent retry. Reset in
     // Initialize (pooled reuse), NOT between the two attempts of one call.
     private bool _snapshotRetryAttempted;
@@ -124,7 +127,9 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     /// <c>ActorStreams.RetainWhileEnumerating</c>. Returns <see langword="null"/> outside a turn.
     /// Correctness passivations (snapshot conflict) and shutdown ignore retention by design.
     /// </summary>
-    protected IDisposable? RetainActivation() => _retainer?.Retain();
+    protected IDisposable? RetainActivation() {
+        return _retainer?.Retain();
+    }
 
     internal override void Initialize(
         string actorName,
@@ -135,7 +140,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
         CancellationToken callerToken) {
         // Reset the per-call state a pooled reuse would otherwise inherit (a fresh completion, and
         // no leftover timeout/cancellation wiring). Registrations are already default after Cleanup.
-        _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _completion = new TaskCompletionSource<TResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         _invocationCts = null;
         _timeoutArmed = false;
         _snapshotRetryAttempted = false;
@@ -146,9 +151,9 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
         _callerContext = Activity.Current?.Context ?? default;
         _enqueuedTimestamp = timeProvider.GetTimestamp();
 
-        if (callTimeout is null && !callerToken.CanBeCanceled) {
-            return; // fast path: the invocation token is just the activation's stopping token
-        }
+        if (callTimeout is null &&
+            !callerToken
+                .CanBeCanceled) return; // fast path: the invocation token is just the activation's stopping token
 
         _cancellationPool = cancellationPool;
         _invocationCts = cancellationPool.Rent();
@@ -165,13 +170,12 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
             self.OnInvocationCanceled();
         }, this);
 
-        if (callerToken.CanBeCanceled) {
+        if (callerToken.CanBeCanceled)
             _callerRegistration = callerToken.UnsafeRegister(static state => {
                 var self = (ActorWorkItem<TActor, TResult>)state!;
                 self._completion.TrySetCanceled(self._callerToken);
                 self._invocationCts?.Cancel();
             }, this);
-        }
     }
 
     internal override async ValueTask<ActorTurnOutcome> RunAsync(
@@ -205,18 +209,15 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
                 // A retried turn runs on a NEW activation with a new stopping token: drop the
                 // previous attempt's registration before wiring the current one (no-op first time).
                 _stoppingRegistration.Dispose();
-                if (stopping.CanBeCanceled) {
+                if (stopping.CanBeCanceled)
                     _stoppingRegistration = stopping.UnsafeRegister(static state =>
                         ((ActorWorkItem<TActor, TResult>)state!)._invocationCts?.Cancel(), this);
-                }
 
                 token = _invocationCts.Token;
             }
 
             var result = await InvokeAsync(actor, token).ConfigureAwait(false);
-            if (!_completion.TrySetResult(result)) {
-                outcome = "abandoned";
-            }
+            if (!_completion.TrySetResult(result)) outcome = "abandoned";
         }
         catch (OperationCanceledException oce) when (
             _invocationCts is { IsCancellationRequested: true }
@@ -229,9 +230,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
             // The method observed the invocation token — attribute the cancellation here instead of
             // racing the attribution registration: a timeout must surface as TimeoutException even
             // when this catch runs before that callback.
-            if (_invocationCts is { IsCancellationRequested: true }) {
-                OnInvocationCanceled();
-            }
+            if (_invocationCts is { IsCancellationRequested: true }) OnInvocationCanceled();
 
             _completion.TrySetCanceled(oce.CancellationToken.CanBeCanceled ? oce.CancellationToken : stopping);
             outcome = _completion.Task.IsFaulted ? "timeout" : "canceled";
@@ -277,14 +276,12 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
             // _timeProvider). Cleanup must be the last touch of this instance on every path.
             ActorTelemetry.RecordMessage(
                 _actorName, MethodName, outcome, _timeProvider.GetElapsedTime(startTimestamp));
-            if (turnOutcome == ActorTurnOutcome.SnapshotConflictRetry) {
+            if (turnOutcome == ActorTurnOutcome.SnapshotConflictRetry)
                 // The item lives on into its retry: no Cleanup/Recycle, and the queue-wait clock
                 // restarts so the second attempt measures its own re-queue time.
                 _enqueuedTimestamp = _timeProvider.GetTimestamp();
-            }
-            else {
+            else
                 Cleanup();
-            }
         }
 
         return turnOutcome;
@@ -300,9 +297,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
         // with the same outcome the backstop produces during execution (TimeoutException for the
         // call timeout, canceled for the caller's token) — attribute deterministically here instead
         // of racing the attribution registration.
-        if (_invocationCts is { IsCancellationRequested: true }) {
-            OnInvocationCanceled();
-        }
+        if (_invocationCts is { IsCancellationRequested: true }) OnInvocationCanceled();
 
         // Canceled (not faulted) so an item dropped before enqueue never surfaces as an unobserved
         // task exception — the caller already got the enqueue failure directly.
@@ -311,17 +306,14 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     }
 
     private void OnInvocationCanceled() {
-        if (_callerToken.IsCancellationRequested) {
+        if (_callerToken.IsCancellationRequested)
             _completion.TrySetCanceled(_callerToken);
-        }
-        else if (_stoppingToken.IsCancellationRequested) {
+        else if (_stoppingToken.IsCancellationRequested)
             _completion.TrySetCanceled(_stoppingToken);
-        }
-        else if (_timeoutArmed) {
+        else if (_timeoutArmed)
             _completion.TrySetException(new TimeoutException(
                 $"Actor call '{_actorName}.{MethodName}' timed out. If two actors await each " +
                 "other this is the deadlock backstop; break the cycle or mark an actor [Reentrant]."));
-        }
     }
 
     private void Cleanup() {
@@ -353,5 +345,6 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     /// Hook for a pooling work-item subclass to return itself to its pool. Called once the item is
     /// fully done. The default keeps the item as plain garbage (no pooling).
     /// </summary>
-    protected virtual void Recycle() { }
+    protected virtual void Recycle() {
+    }
 }

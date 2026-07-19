@@ -11,7 +11,9 @@ namespace Elarion.Tests.Settings;
 public sealed class SettingsConfigurationTests {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static SettingEntry Entry(string key, string? value) => new(key, value, default, 1);
+    private static SettingEntry Entry(string key, string? value) {
+        return new SettingEntry(key, value, default, 1);
+    }
 
     [Fact]
     public void Source_Build_ReturnsTheSharedProvider() {
@@ -121,9 +123,10 @@ public sealed class SettingsConfigurationTests {
 
     private static SettingsConfigurationRefresher CreateRefresher(
         ServiceProvider provider,
-        SettingsConfigurationProvider configurationProvider) =>
-        new(configurationProvider,
+        SettingsConfigurationProvider configurationProvider) {
+        return new SettingsConfigurationRefresher(configurationProvider,
             provider.GetRequiredService<IServiceScopeFactory>(),
             provider.GetRequiredService<ISettingsChangeSource>(),
             NullLogger<SettingsConfigurationRefresher>.Instance);
+    }
 }

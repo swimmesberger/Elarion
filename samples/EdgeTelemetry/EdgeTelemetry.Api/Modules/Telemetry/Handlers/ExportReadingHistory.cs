@@ -15,20 +15,17 @@ public sealed class ExportReadingHistory(NpgsqlDataSource db)
     public sealed record Query(string DeviceId, string Metric, int Limit) : IQuery;
 
     public ValueTask<Result<IAsyncEnumerable<ReadingRow>>> HandleAsync(Query query, CancellationToken ct) {
-        if (string.IsNullOrWhiteSpace(query.DeviceId)) {
+        if (string.IsNullOrWhiteSpace(query.DeviceId))
             return ValueTask.FromResult<Result<IAsyncEnumerable<ReadingRow>>>(
                 AppError.Validation("A device id is required."));
-        }
 
-        if (string.IsNullOrWhiteSpace(query.Metric)) {
+        if (string.IsNullOrWhiteSpace(query.Metric))
             return ValueTask.FromResult<Result<IAsyncEnumerable<ReadingRow>>>(
                 AppError.Validation("A metric is required."));
-        }
 
-        if (query.Limit is < 1 or > 1_000) {
+        if (query.Limit is < 1 or > 1_000)
             return ValueTask.FromResult<Result<IAsyncEnumerable<ReadingRow>>>(
                 AppError.Validation("Limit must be between 1 and 1000."));
-        }
 
         return ValueTask.FromResult(Result<IAsyncEnumerable<ReadingRow>>.Success(
             db.QueryUnbufferedAsync<ReadingRow>(

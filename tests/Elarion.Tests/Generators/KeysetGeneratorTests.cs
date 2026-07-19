@@ -6,14 +6,12 @@ using Xunit;
 
 namespace Elarion.Tests.Generators;
 
-public sealed class KeysetGeneratorTests
-{
+public sealed class KeysetGeneratorTests {
     private const string NpgsqlAssemblyAttribute =
         "[assembly: Elarion.EntityFrameworkCore.UseElarionEntityFrameworkCore(Provider = Elarion.EntityFrameworkCore.EfCoreProvider.Npgsql)]";
 
     [Fact]
-    public void Keyset_CompositeMixedDirection_EmitsOrderingSeekAndCodec()
-    {
+    public void Keyset_CompositeMixedDirection_EmitsOrderingSeekAndCodec() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -53,8 +51,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_Npgsql_UniformAscending_EmitsRowValueSeek()
-    {
+    public void Keyset_Npgsql_UniformAscending_EmitsRowValueSeek() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -84,8 +81,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_Npgsql_UniformDescending_EmitsLessThanForward()
-    {
+    public void Keyset_Npgsql_UniformDescending_EmitsLessThanForward() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -113,8 +109,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_Npgsql_MixedDirection_FallsBackToOrOfAnds()
-    {
+    public void Keyset_Npgsql_MixedDirection_FallsBackToOrOfAnds() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -139,8 +134,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_Npgsql_SingleColumn_UsesScalarSeek()
-    {
+    public void Keyset_Npgsql_SingleColumn_UsesScalarSeek() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -163,8 +157,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_PortableDefault_DoesNotEmitRowValues()
-    {
+    public void Keyset_PortableDefault_DoesNotEmitRowValues() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -188,8 +181,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_GeneratedSource_CompilesAgainstRuntime()
-    {
+    public void Keyset_GeneratedSource_CompilesAgainstRuntime() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -221,8 +213,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_MultipleKeysetsOnSameEntity_GenerateDistinctDefinitions()
-    {
+    public void Keyset_MultipleKeysetsOnSameEntity_GenerateDistinctDefinitions() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -267,8 +258,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_NonPartialClass_ReportsErrorAndGeneratesNothing()
-    {
+    public void Keyset_NonPartialClass_ReportsErrorAndGeneratesNothing() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -287,8 +277,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_UnknownColumn_ReportsErrorAndGeneratesNothing()
-    {
+    public void Keyset_UnknownColumn_ReportsErrorAndGeneratesNothing() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -306,8 +295,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_NullableColumn_ReportsError()
-    {
+    public void Keyset_NullableColumn_ReportsError() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -326,8 +314,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_UnsupportedColumnType_ReportsError()
-    {
+    public void Keyset_UnsupportedColumnType_ReportsError() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -346,8 +333,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_IdNotInKeyset_WarnsButStillGenerates()
-    {
+    public void Keyset_IdNotInKeyset_WarnsButStillGenerates() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -369,8 +355,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_ConventionalEntityIdNotInKeyset_Warns()
-    {
+    public void Keyset_ConventionalEntityIdNotInKeyset_Warns() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -390,8 +375,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_KeyAttributedPropertyNotInKeyset_Warns()
-    {
+    public void Keyset_KeyAttributedPropertyNotInKeyset_Warns() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -412,8 +396,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_ConventionalEntityIdInKeyset_DoesNotWarn()
-    {
+    public void Keyset_ConventionalEntityIdInKeyset_DoesNotWarn() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -431,8 +414,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_EmitsIdentityTagAndVerifiesItOnDecode()
-    {
+    public void Keyset_EmitsIdentityTagAndVerifiesItOnDecode() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -459,8 +441,7 @@ public sealed class KeysetGeneratorTests
     }
 
     [Fact]
-    public void Keyset_DifferentDefinitions_ProduceDifferentIdentityTags()
-    {
+    public void Keyset_DifferentDefinitions_ProduceDifferentIdentityTags() {
         var result = Generate(
             """
             namespace Sample.Domain {
@@ -485,76 +466,76 @@ public sealed class KeysetGeneratorTests
         byDate.Should().NotBe(byTitle);
     }
 
-    private static string TagOf(string source)
-    {
+    private static string TagOf(string source) {
         const string marker = "private const uint __CursorTag = ";
         var start = source.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
         var end = source.IndexOf(';', start);
         return source.Substring(start, end - start);
     }
 
-    private static GeneratorDriverRunResult Generate(string testSource, string assemblyAttributes = "")
-    {
+    private static GeneratorDriverRunResult Generate(string testSource, string assemblyAttributes = "") {
         var source =
             $$"""
-            {{assemblyAttributes}}
-            namespace Elarion.Paging {
-                [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-                public sealed class KeysetAttribute<TEntity> : System.Attribute where TEntity : class {
-                    public KeysetAttribute(params string[] columns) {
-                    }
-                }
-            }
+              {{assemblyAttributes}}
+              namespace Elarion.Paging {
+                  [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+                  public sealed class KeysetAttribute<TEntity> : System.Attribute where TEntity : class {
+                      public KeysetAttribute(params string[] columns) {
+                      }
+                  }
+              }
 
-            namespace Elarion.EntityFrameworkCore {
-                public enum EfCoreProvider { Portable = 0, Npgsql = 1 }
+              namespace Elarion.EntityFrameworkCore {
+                  public enum EfCoreProvider { Portable = 0, Npgsql = 1 }
 
-                [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
-                public sealed class UseElarionEntityFrameworkCoreAttribute : System.Attribute {
-                    public EfCoreProvider Provider { get; set; }
-                }
-            }
+                  [System.AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
+                  public sealed class UseElarionEntityFrameworkCoreAttribute : System.Attribute {
+                      public EfCoreProvider Provider { get; set; }
+                  }
+              }
 
-            {{testSource}}
-            """;
+              {{testSource}}
+              """;
 
         var syntaxTree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview));
         var compilation = CSharpCompilation.Create(
             "KeysetGeneratorTests",
             [syntaxTree],
             PlatformReferences(),
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new KeysetGenerator());
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
-    private static IReadOnlyList<Diagnostic> CompileErrors(params string[] sources)
-    {
+    private static IReadOnlyList<Diagnostic> CompileErrors(params string[] sources) {
         var compilation = CSharpCompilation.Create(
             "KeysetCompileCheck",
             sources.Select(s => CSharpSyntaxTree.ParseText(s, new CSharpParseOptions(LanguageVersion.Preview))),
             RuntimeReferences(),
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
 
         return compilation.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
     }
 
-    private static void NoErrors(GeneratorDriverRunResult result) =>
+    private static void NoErrors(GeneratorDriverRunResult result) {
         result.Diagnostics
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
+    }
 
-    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGeneratedSource(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
-    private static IReadOnlyList<MetadataReference> PlatformReferences()
-    {
+    private static IReadOnlyList<MetadataReference> PlatformReferences() {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
 
@@ -564,8 +545,7 @@ public sealed class KeysetGeneratorTests
             .ToArray();
     }
 
-    private static IReadOnlyList<MetadataReference> RuntimeReferences()
-    {
+    private static IReadOnlyList<MetadataReference> RuntimeReferences() {
         var references = PlatformReferences().ToList();
         references.Add(MetadataReference.CreateFromFile(
             typeof(Elarion.Paging.CursorWriter).Assembly.Location));

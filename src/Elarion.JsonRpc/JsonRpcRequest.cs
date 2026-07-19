@@ -17,9 +17,13 @@ public readonly record struct JsonRpcIdInfo(JsonRpcIdKind Kind, string? Value, s
 
     public static JsonRpcIdInfo Null { get; } = new(JsonRpcIdKind.Null, null, null);
 
-    public static JsonRpcIdInfo String(string? value) => new(JsonRpcIdKind.String, value, value);
+    public static JsonRpcIdInfo String(string? value) {
+        return new JsonRpcIdInfo(JsonRpcIdKind.String, value, value);
+    }
 
-    public static JsonRpcIdInfo Number(string raw) => new(JsonRpcIdKind.Number, raw, raw);
+    public static JsonRpcIdInfo Number(string raw) {
+        return new JsonRpcIdInfo(JsonRpcIdKind.Number, raw, raw);
+    }
 }
 
 /// <summary>
@@ -35,13 +39,16 @@ public sealed record JsonRpcRequest {
 
     /// <summary>JSON-RPC protocol version, always "2.0".</summary>
     public required string Jsonrpc { get; init; }
+
     /// <summary>The RPC method name to invoke.</summary>
     public required string Method { get; init; }
+
     /// <summary>
     /// Optional parameters for the method. Per JSON-RPC 2.0 §4.2 the field MAY be omitted;
     /// absent is treated identically to null/empty.
     /// </summary>
     public JsonElement? Params { get; init; }
+
     /// <summary>
     /// The request identifier; absent means the request is a notification (no response expected).
     /// Accepts both string and number values per the spec.
@@ -90,9 +97,8 @@ public sealed record JsonRpcRequest {
 
 internal sealed class JsonRpcRequestConverter : JsonConverter<JsonRpcRequest> {
     public override JsonRpcRequest Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) {
-        if (reader.TokenType != JsonTokenType.StartObject) {
+        if (reader.TokenType != JsonTokenType.StartObject)
             throw new JsonException("JSON-RPC request envelope must be an object.");
-        }
 
         string? jsonrpc = null;
         string? method = null;
@@ -100,7 +106,7 @@ internal sealed class JsonRpcRequestConverter : JsonConverter<JsonRpcRequest> {
         var id = JsonRpcIdInfo.Missing;
 
         while (reader.Read()) {
-            if (reader.TokenType == JsonTokenType.EndObject) {
+            if (reader.TokenType == JsonTokenType.EndObject)
                 return new JsonRpcRequest {
                     Jsonrpc = jsonrpc ?? string.Empty,
                     Method = method ?? string.Empty,
@@ -110,16 +116,12 @@ internal sealed class JsonRpcRequestConverter : JsonConverter<JsonRpcRequest> {
                     IdKind = id.Kind,
                     IdRaw = id.Raw
                 };
-            }
 
-            if (reader.TokenType != JsonTokenType.PropertyName) {
+            if (reader.TokenType != JsonTokenType.PropertyName)
                 throw new JsonException("JSON-RPC request envelope property name expected.");
-            }
 
             var propertyName = reader.GetString();
-            if (!reader.Read()) {
-                throw new JsonException("JSON-RPC request envelope ended unexpectedly.");
-            }
+            if (!reader.Read()) throw new JsonException("JSON-RPC request envelope ended unexpectedly.");
 
             switch (propertyName) {
                 case "jsonrpc":
@@ -136,6 +138,7 @@ internal sealed class JsonRpcRequestConverter : JsonConverter<JsonRpcRequest> {
                     using (var parametersDocument = JsonDocument.ParseValue(ref reader)) {
                         parameters = parametersDocument.RootElement.Clone();
                     }
+
                     break;
                 case "id":
                     id = ReadId(ref reader);

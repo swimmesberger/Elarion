@@ -36,8 +36,9 @@ public sealed class HmacChallengeVerifier(IDeviceKeyStore deviceKeys) {
     /// </summary>
     /// <param name="key">The device key.</param>
     /// <param name="nonce">The challenge nonce.</param>
-    public static byte[] ComputeResponse(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce) =>
-        HMACSHA256.HashData(key, nonce);
+    public static byte[] ComputeResponse(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce) {
+        return HMACSHA256.HashData(key, nonce);
+    }
 
     /// <summary>
     /// Verifies a challenge response; returns the device principal, or <see langword="null"/> when
@@ -52,12 +53,10 @@ public sealed class HmacChallengeVerifier(IDeviceKeyStore deviceKeys) {
         ReadOnlyMemory<byte> nonce,
         ReadOnlyMemory<byte> response,
         CancellationToken cancellationToken = default) {
-        if (string.IsNullOrWhiteSpace(deviceId) || nonce.IsEmpty) {
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(deviceId) || nonce.IsEmpty) return null;
 
         var key = await deviceKeys.GetKeyAsync(deviceId, cancellationToken).ConfigureAwait(false);
-        ReadOnlySpan<byte> material = key.HasValue ? key.Value.Span : DecoyKey;
+        var material = key.HasValue ? key.Value.Span : DecoyKey;
         var expected = HMACSHA256.HashData(material, nonce.Span);
         var matches = CryptographicOperations.FixedTimeEquals(expected, response.Span);
         return matches && key.HasValue ? DevicePrincipal.Create(deviceId) : null;

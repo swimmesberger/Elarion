@@ -16,7 +16,7 @@ public enum ClientEventSubscriptionStatus {
 
     /// <summary>An unknown topic, a failed topic requirement, or a denied resource scope — deliberately
     /// indistinguishable so a topic's existence is never leaked (HTTP: 404).</summary>
-    NotFound,
+    NotFound
 }
 
 /// <summary>
@@ -44,6 +44,8 @@ public sealed record ClientEventSubscriptionResolution {
         new() { Status = ClientEventSubscriptionStatus.NotFound };
 
     /// <summary>A successful resolution carrying <paramref name="subscriptions"/>.</summary>
-    public static ClientEventSubscriptionResolution Resolved(IReadOnlyList<ClientEventSubscription> subscriptions) =>
-        new() { Status = ClientEventSubscriptionStatus.Resolved, Subscriptions = subscriptions };
+    public static ClientEventSubscriptionResolution Resolved(IReadOnlyList<ClientEventSubscription> subscriptions) {
+        return new ClientEventSubscriptionResolution
+            { Status = ClientEventSubscriptionStatus.Resolved, Subscriptions = subscriptions };
+    }
 }

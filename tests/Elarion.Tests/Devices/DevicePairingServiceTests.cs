@@ -14,7 +14,9 @@ public sealed class DevicePairingServiceTests {
     private readonly InMemoryDeviceKeyStore _keys = new();
     private readonly DeviceProvisioningOptions _options = new();
 
-    private DevicePairingService CreateService() => new(_codes, _keys, _options, _time);
+    private DevicePairingService CreateService() {
+        return new DevicePairingService(_codes, _keys, _options, _time);
+    }
 
     [Fact]
     public async Task Issue_ProducesCodeFromAlphabetWithConfiguredLengthAndTtl() {
@@ -46,7 +48,8 @@ public sealed class DevicePairingServiceTests {
     public async Task Issue_RejectsBlankCallerSuppliedDeviceId(string deviceId) {
         var service = CreateService();
 
-        var issue = async () => await service.IssueAsync(new PairingCodeIssueOptions { DeviceId = deviceId }, TestToken);
+        var issue = async () =>
+            await service.IssueAsync(new PairingCodeIssueOptions { DeviceId = deviceId }, TestToken);
 
         await issue.Should().ThrowAsync<ArgumentException>();
     }
@@ -163,10 +166,12 @@ public sealed class DevicePairingServiceTests {
     public async Task Redeem_ForAnAlreadyProvisionedDeviceId_RotatesTheKey() {
         var service = CreateService();
         var first = await service.RedeemAsync(
-            (await service.IssueAsync(new PairingCodeIssueOptions { DeviceId = "gateway-7" }, TestToken)).Code, TestToken);
+            (await service.IssueAsync(new PairingCodeIssueOptions { DeviceId = "gateway-7" }, TestToken)).Code,
+            TestToken);
 
         var second = await service.RedeemAsync(
-            (await service.IssueAsync(new PairingCodeIssueOptions { DeviceId = "gateway-7" }, TestToken)).Code, TestToken);
+            (await service.IssueAsync(new PairingCodeIssueOptions { DeviceId = "gateway-7" }, TestToken)).Code,
+            TestToken);
 
         second.Should().NotBeNull();
         second!.Key.ToArray().Should().NotEqual(first!.Key.ToArray());
@@ -186,9 +191,9 @@ public sealed class DevicePairingServiceTests {
 
     [Theory]
     [InlineData("abcdefghjkmnpqrstvwxyz23456789")] // lowercase: not normalization-stable
-    [InlineData("ABCD-EFGH23456789")]              // separator: stripped by normalization
-    [InlineData("AABCDEFGH23456789")]              // duplicate: biases generation
-    [InlineData("ABC123")]                         // too short
+    [InlineData("ABCD-EFGH23456789")] // separator: stripped by normalization
+    [InlineData("AABCDEFGH23456789")] // duplicate: biases generation
+    [InlineData("ABC123")] // too short
     public void AddElarionDeviceIdentity_RejectsUnredeemableOrBiasedAlphabets(string alphabet) {
         var services = new ServiceCollection();
 

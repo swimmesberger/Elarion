@@ -29,7 +29,8 @@ public static class StreamHandlerInvoker {
             }
 
             return new StreamHandlerInvocation<TItem>(start.Value!, scope);
-        } catch {
+        }
+        catch {
             await scope.DisposeAsync().ConfigureAwait(false);
             throw;
         }
@@ -75,16 +76,19 @@ public sealed class StreamHandlerInvocation<TItem> : IAsyncEnumerable<TItem>, IA
         IAsyncEnumerator<TItem> inner;
         lock (_gate) {
             ObjectDisposedException.ThrowIf(_state == 2, this);
-            if (_state != 0) throw new InvalidOperationException("A stream handler invocation can only be enumerated once.");
+            if (_state != 0)
+                throw new InvalidOperationException("A stream handler invocation can only be enumerated once.");
             _state = 1;
             try {
                 inner = _stream.GetAsyncEnumerator(cancellationToken);
-            } catch {
+            }
+            catch {
                 _state = 2;
                 _disposeTask = _scope.DisposeAsync().AsTask();
                 throw;
             }
         }
+
         return new Enumerator(this, inner);
     }
 
@@ -96,15 +100,21 @@ public sealed class StreamHandlerInvocation<TItem> : IAsyncEnumerable<TItem>, IA
                 _state = 2;
                 (_stream as IStreamInvocationObservation)?.Abandon();
                 disposal = _disposeTask ??= _scope.DisposeAsync().AsTask();
-            } else if (_state == 1) {
+            }
+            else if (_state == 1) {
                 _state = 2;
-                disposal = (_enumerationCompletion ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
-            } else if (_disposeTask is not null) {
+                disposal = (_enumerationCompletion ??=
+                    new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+            }
+            else if (_disposeTask is not null) {
                 disposal = _disposeTask;
-            } else {
-                disposal = (_enumerationCompletion ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+            }
+            else {
+                disposal = (_enumerationCompletion ??=
+                    new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
             }
         }
+
         await disposal.ConfigureAwait(false);
     }
 
@@ -120,13 +130,15 @@ public sealed class StreamHandlerInvocation<TItem> : IAsyncEnumerable<TItem>, IA
         try {
             await disposal.ConfigureAwait(false);
             completion?.TrySetResult();
-        } catch (Exception exception) {
+        }
+        catch (Exception exception) {
             completion?.TrySetException(exception);
             throw;
         }
     }
 
-    private sealed class Enumerator(StreamHandlerInvocation<TItem> owner, IAsyncEnumerator<TItem> inner) : IAsyncEnumerator<TItem> {
+    private sealed class Enumerator(StreamHandlerInvocation<TItem> owner, IAsyncEnumerator<TItem> inner)
+        : IAsyncEnumerator<TItem> {
         private int _completed;
 
         public TItem Current => inner.Current;
@@ -137,13 +149,16 @@ public sealed class StreamHandlerInvocation<TItem> : IAsyncEnumerable<TItem>, IA
                 if (!moved)
                     await FinishAsync().ConfigureAwait(false);
                 return moved;
-            } catch {
+            }
+            catch {
                 await FinishAsync().ConfigureAwait(false);
                 throw;
             }
         }
 
-        public ValueTask DisposeAsync() => FinishAsync();
+        public ValueTask DisposeAsync() {
+            return FinishAsync();
+        }
 
         // The iterator may use scoped services in its finally block. Its cleanup therefore has to finish before
         // releasing the dispatch scope, regardless of whether enumeration ended normally, faulted, or cancelled.
@@ -154,7 +169,8 @@ public sealed class StreamHandlerInvocation<TItem> : IAsyncEnumerable<TItem>, IA
 
             try {
                 await inner.DisposeAsync().ConfigureAwait(false);
-            } finally {
+            }
+            finally {
                 await owner.CompleteEnumerationAsync().ConfigureAwait(false);
             }
         }
@@ -169,11 +185,14 @@ internal sealed class DispatchScopeLease(AsyncServiceScope scope) : IAsyncDispos
 
     public ValueTask DisposeAsync() {
         Task disposal;
-        lock (_gate)
+        lock (_gate) {
             disposal = _disposeTask ??= DisposeCoreAsync();
+        }
+
         return new ValueTask(disposal);
     }
 
-    private async Task DisposeCoreAsync() =>
+    private async Task DisposeCoreAsync() {
         await scope.DisposeAsync().ConfigureAwait(false);
+    }
 }

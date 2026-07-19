@@ -11,24 +11,47 @@ public sealed partial class HandlerRegistrationGenerator {
     private const string CacheableAttributeMetadataName = "Elarion.Abstractions.Caching.CacheableAttribute";
     private const string CacheInvalidateAttributeMetadataName = "Elarion.Abstractions.Caching.CacheInvalidateAttribute";
     private const string ResilientAttributeMetadataName = "Elarion.Abstractions.Resilience.ResilientAttribute";
-    private const string ResiliencePolicyAttributeMetadataName = "Elarion.Abstractions.Resilience.ResiliencePolicyAttribute";
+
+    private const string ResiliencePolicyAttributeMetadataName =
+        "Elarion.Abstractions.Resilience.ResiliencePolicyAttribute";
+
     private const string HandlerMetadataTypeName = "Elarion.Abstractions.Pipeline.HandlerMetadata";
     private const string RequireClaimAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireClaimAttribute";
-    private const string RequirePermissionAttributeMetadataName = "Elarion.Abstractions.Authorization.RequirePermissionAttribute";
+
+    private const string RequirePermissionAttributeMetadataName =
+        "Elarion.Abstractions.Authorization.RequirePermissionAttribute";
+
     private const string RequireRoleAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireRoleAttribute";
-    private const string RequirePolicyAttributeMetadataName = "Elarion.Abstractions.Authorization.RequirePolicyAttribute";
-    private const string RequireResourceAttributeMetadataName = "Elarion.Abstractions.Authorization.RequireResourceAttribute";
-    private const string AllowAnonymousAttributeMetadataName = "Elarion.Abstractions.Authorization.AllowAnonymousAttribute";
-    private const string AuthorizationDefaultsAttributeMetadataName = "Elarion.Abstractions.Authorization.ElarionAuthorizationDefaultsAttribute";
+
+    private const string RequirePolicyAttributeMetadataName =
+        "Elarion.Abstractions.Authorization.RequirePolicyAttribute";
+
+    private const string RequireResourceAttributeMetadataName =
+        "Elarion.Abstractions.Authorization.RequireResourceAttribute";
+
+    private const string AllowAnonymousAttributeMetadataName =
+        "Elarion.Abstractions.Authorization.AllowAnonymousAttribute";
+
+    private const string AuthorizationDefaultsAttributeMetadataName =
+        "Elarion.Abstractions.Authorization.ElarionAuthorizationDefaultsAttribute";
+
     private const string FeatureGateAttributeMetadataName = "Elarion.Abstractions.Features.FeatureGateAttribute";
     private const string FeatureVariantAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute";
     private const string IdempotentAttributeMetadataName = "Elarion.Abstractions.Idempotency.IdempotentAttribute";
     private const string AuditableAttributeMetadataName = "Elarion.Abstractions.Auditing.AuditableAttribute";
-    private const string AuditDefaultsAttributeMetadataName = "Elarion.Abstractions.Auditing.ElarionAuditDefaultsAttribute";
+
+    private const string AuditDefaultsAttributeMetadataName =
+        "Elarion.Abstractions.Auditing.ElarionAuditDefaultsAttribute";
+
     private const string AuditTrailMetadataName = "Elarion.Abstractions.Auditing.IAuditTrail";
     private const string CommandMarkerMetadataName = "Elarion.Abstractions.ICommand";
-    private const string AllowDuplicatesAttributeMetadataName = "Elarion.Abstractions.Messaging.AllowDuplicatesAttribute";
-    private const string ElarionValidationExtensionsMetadataName = "Elarion.Validation.ElarionValidationServiceCollectionExtensions";
+
+    private const string AllowDuplicatesAttributeMetadataName =
+        "Elarion.Abstractions.Messaging.AllowDuplicatesAttribute";
+
+    private const string ElarionValidationExtensionsMetadataName =
+        "Elarion.Validation.ElarionValidationServiceCollectionExtensions";
+
     private const string ResultFailureFactoryMetadataName = "Elarion.Abstractions.IResultFailureFactory`1";
     private const string DomainEventMetadataName = "Elarion.Abstractions.Messaging.IDomainEvent";
     private const string IntegrationEventMetadataName = "Elarion.Abstractions.Messaging.IIntegrationEvent";
@@ -134,7 +157,7 @@ public sealed partial class HandlerRegistrationGenerator {
         "Handler '{0}' cannot use both CacheableAttribute and CacheInvalidateAttribute",
         "Elarion.Abstractions.Caching",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor EmptyCacheTagsDescriptor = new(
         "ELCACHE002",
@@ -142,7 +165,7 @@ public sealed partial class HandlerRegistrationGenerator {
         "Handler '{0}' must define at least one non-empty cache tag",
         "Elarion.Abstractions.Caching",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor InvalidCacheTagDescriptor = new(
         "ELCACHE003",
@@ -150,7 +173,7 @@ public sealed partial class HandlerRegistrationGenerator {
         "Handler '{0}' contains invalid cache tag '{1}'",
         "Elarion.Abstractions.Caching",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor InvalidCacheDurationDescriptor = new(
         "ELCACHE004",
@@ -158,7 +181,7 @@ public sealed partial class HandlerRegistrationGenerator {
         "Handler '{0}' must define a positive cache duration",
         "Elarion.Abstractions.Caching",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor CacheableOnEventConsumerDescriptor = new(
         "ELCACHE005",
@@ -167,7 +190,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "side effect on a legitimate re-delivery; remove [Cacheable] from the event consumer",
         "Elarion.Abstractions.Caching",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor UnsupportedCacheKeyPropertyTypeDescriptor = new(
         "ELCACHE006",
@@ -179,7 +202,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "cache key with the KeyProperties argument of [Cacheable]",
         "Elarion.Abstractions.Caching",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor CacheKeyPropertyNotFoundDescriptor = new(
         "ELCACHE007",
@@ -189,7 +212,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "property (e.g. nameof(Request.Id)).",
         "Elarion.Abstractions.Caching",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor ResilientOnDomainEventDescriptor = new(
         "ELPIPE003",
@@ -200,7 +223,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "resilient).",
         "Elarion.Abstractions.Resilience",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor ResilientCommandWithoutIdempotentDescriptor = new(
         "ELPIPE004",
@@ -215,7 +238,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "retries.",
         "Elarion.Abstractions.Resilience",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor AuthorizationResponseNotFailureCapable = new(
         "ELAUTH001",
@@ -225,7 +248,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "skipped; return Result<T> or Result",
         "Elarion.Abstractions.Authorization",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     internal static readonly DiagnosticDescriptor ResourceIdPathNotFound = new(
         "ELAUTH002",
@@ -234,7 +257,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "request type '{2}'; use nameof(Request.Id) or a dotted path of existing properties",
         "Elarion.Abstractions.Authorization",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor FeatureGateResponseNotFailureCapable = new(
         "ELFEAT001",
@@ -244,7 +267,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "return Result<T> or Result",
         "Elarion.Abstractions.Features",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     internal static readonly DiagnosticDescriptor EmptyFeatureGateDescriptor = new(
         "ELFEAT002",
@@ -252,7 +275,7 @@ public sealed partial class HandlerRegistrationGenerator {
         "Handler '{0}' declares a [FeatureGate] with no feature name (or a blank one); the gate has no effect",
         "Elarion.Abstractions.Features",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor ValidationResponseNotFailureCapable = new(
         "ELVAL001",
@@ -262,7 +285,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "silently skipped; return Result<T> or Result",
         "Elarion.Abstractions.Validation",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor IdempotentResponseNotFailureCapable = new(
         "ELIDEM001",
@@ -272,7 +295,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "outcomes and would be silently skipped; return Result<T> or Result",
         "Elarion.Abstractions.Idempotency",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor IdempotentOnNonCommandDescriptor = new(
         "ELIDEM002",
@@ -281,7 +304,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "applies to state-changing commands, so the attribute has no effect",
         "Elarion.Abstractions.Idempotency",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor InvalidIdempotentRetentionDescriptor = new(
         "ELIDEM003",
@@ -289,7 +312,7 @@ public sealed partial class HandlerRegistrationGenerator {
         "Handler '{0}' must declare a positive RetentionHours on [Idempotent]",
         "Elarion.Abstractions.Idempotency",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor IdempotentAndCacheableDescriptor = new(
         "ELIDEM004",
@@ -298,7 +321,7 @@ public sealed partial class HandlerRegistrationGenerator {
         + "commands",
         "Elarion.Abstractions.Idempotency",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor AllowDuplicatesOnNonIntegrationEventDescriptor = new(
         "ELINBX001",
@@ -308,5 +331,5 @@ public sealed partial class HandlerRegistrationGenerator {
         + "inline in the publisher's transaction and are exactly-once by atomicity), so the attribute has no effect",
         "Elarion.Abstractions.Messaging",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        true);
 }

@@ -22,21 +22,17 @@ public sealed class MarketSubscriptionObserver(IActorSystem actors) : IClientEve
     public async ValueTask OnSubscribedAsync(
         ClientEventSubscription subscription, IClientEventSubscriberSink sink, CancellationToken ct) {
         // Only symbol subscriptions get a greeting; the endpoint's implicit global/user entries carry none.
-        if (subscription.Scope is not { Kind: ClientEventScopeKind.Resource, Value: { Length: > 0 } symbol }) {
-            return;
-        }
+        if (subscription.Scope is not { Kind: ClientEventScopeKind.Resource, Value: { Length: > 0 } symbol }) return;
 
         var quote = await actors.Get<IStockQuote>(symbol.ToUpperInvariant()).GetQuote(ct);
-        if (quote is null) {
-            return;
-        }
+        if (quote is null) return;
 
         await sink.PublishAsync(new QuoteChanged {
             Symbol = quote.Symbol,
             Price = quote.Price,
             ChangePercent = quote.ChangePercent,
             Seq = quote.Seq,
-            At = quote.At,
+            At = quote.At
         }, ct);
     }
 }

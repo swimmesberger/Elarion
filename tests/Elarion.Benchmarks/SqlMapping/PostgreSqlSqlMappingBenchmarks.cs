@@ -19,8 +19,7 @@ namespace Elarion.Benchmarks.SqlMapping;
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 3, iterationCount: 10)]
 public class PostgreSqlSqlMappingReadBenchmarks {
-    [Params(1_000, 100_000)]
-    public int Rows { get; set; }
+    [Params(1_000, 100_000)] public int Rows { get; set; }
 
     private PostgreSqlContainer _container = null!;
     private NpgsqlConnection _connection = null!;
@@ -64,7 +63,7 @@ public class PostgreSqlSqlMappingReadBenchmarks {
         await using var command = new NpgsqlCommand(SelectSql, _connection);
         await using var reader = await command.ExecuteReaderAsync();
         var rows = new List<BenchReadRow>();
-        while (await reader.ReadAsync()) {
+        while (await reader.ReadAsync())
             rows.Add(new BenchReadRow {
                 Id = reader.GetFieldValue<Guid>(0),
                 Name = reader.GetFieldValue<string>(1),
@@ -73,9 +72,8 @@ public class PostgreSqlSqlMappingReadBenchmarks {
                 Sequence = reader.GetFieldValue<long>(4),
                 Price = reader.GetFieldValue<decimal>(5),
                 CreatedAt = reader.GetFieldValue<DateTime>(6),
-                Active = reader.GetFieldValue<bool>(7),
+                Active = reader.GetFieldValue<bool>(7)
             });
-        }
 
         return rows;
     }
@@ -89,24 +87,28 @@ public class PostgreSqlSqlMappingReadBenchmarks {
     }
 
     [Benchmark]
-    public Task<List<BenchReadRow>> ElarionQueryAsync() =>
+    public Task<List<BenchReadRow>> ElarionQueryAsync() {
         // The product path end-to-end: self-mapping (BenchReadRow resolves its own mapper) +
         // interpolated statement build + connection extension.
-        _connection.QueryAsync<BenchReadRow>($"{BenchReadRow.Select}");
+        return _connection.QueryAsync<BenchReadRow>($"{BenchReadRow.Select}");
+    }
 
     [Benchmark]
     [DapperAot(false)]
-    public async Task<List<BenchReadRow>> Dapper() =>
-        (await _connection.QueryAsync<BenchReadRow>(SelectSql)).AsList();
+    public async Task<List<BenchReadRow>> Dapper() {
+        return (await _connection.QueryAsync<BenchReadRow>(SelectSql)).AsList();
+    }
 
     [Benchmark]
     [DapperAot]
-    public async Task<List<BenchReadRow>> DapperAot() =>
-        (await _connection.QueryAsync<BenchReadRow>(AliasedSelectSql)).AsList();
+    public async Task<List<BenchReadRow>> DapperAot() {
+        return (await _connection.QueryAsync<BenchReadRow>(AliasedSelectSql)).AsList();
+    }
 
     [Benchmark]
-    public Task<List<BenchReadRow>> EfCoreNoTracking() =>
-        _context.Rows.AsNoTracking().ToListAsync();
+    public Task<List<BenchReadRow>> EfCoreNoTracking() {
+        return _context.Rows.AsNoTracking().ToListAsync();
+    }
 }
 
 // Single-row path: one query by id per op — this is where per-call abstraction overhead
@@ -155,9 +157,7 @@ public class PostgreSqlSqlMappingSingleRowBenchmarks {
         await using var command = new NpgsqlCommand(SelectOneSql, _connection);
         command.Parameters.AddWithValue("id", _targetId);
         await using var reader = await command.ExecuteReaderAsync(System.Data.CommandBehavior.SingleRow);
-        if (!await reader.ReadAsync()) {
-            return null;
-        }
+        if (!await reader.ReadAsync()) return null;
 
         return new BenchReadRow {
             Id = reader.GetFieldValue<Guid>(0),
@@ -167,7 +167,7 @@ public class PostgreSqlSqlMappingSingleRowBenchmarks {
             Sequence = reader.GetFieldValue<long>(4),
             Price = reader.GetFieldValue<decimal>(5),
             CreatedAt = reader.GetFieldValue<DateTime>(6),
-            Active = reader.GetFieldValue<bool>(7),
+            Active = reader.GetFieldValue<bool>(7)
         };
     }
 
@@ -184,20 +184,23 @@ public class PostgreSqlSqlMappingSingleRowBenchmarks {
     }
 
     [Benchmark]
-    public Task<BenchReadRow?> ElarionQueryAsync() =>
+    public Task<BenchReadRow?> ElarionQueryAsync() {
         // The product path end-to-end: self-mapping + interpolated statement (one parameter).
-        _connection.QueryFirstOrDefaultAsync<BenchReadRow>(
+        return _connection.QueryFirstOrDefaultAsync<BenchReadRow>(
             $"{BenchReadRow.Select} WHERE id = {_targetId}");
+    }
 
     [Benchmark]
     [DapperAot(false)]
-    public Task<BenchReadRow?> Dapper() =>
-        _connection.QueryFirstOrDefaultAsync<BenchReadRow>(SelectOneSql, new { id = _targetId });
+    public Task<BenchReadRow?> Dapper() {
+        return _connection.QueryFirstOrDefaultAsync<BenchReadRow>(SelectOneSql, new { id = _targetId });
+    }
 
     [Benchmark]
     [DapperAot]
-    public Task<BenchReadRow?> DapperAot() =>
-        _connection.QueryFirstOrDefaultAsync<BenchReadRow>(AliasedSelectOneSql, new { id = _targetId });
+    public Task<BenchReadRow?> DapperAot() {
+        return _connection.QueryFirstOrDefaultAsync<BenchReadRow>(AliasedSelectOneSql, new { id = _targetId });
+    }
 
     [Benchmark]
     public Task<BenchReadRow?> EfCoreNoTracking() {
@@ -234,7 +237,7 @@ public sealed partial class BenchReadRow {
 public sealed class BenchReadContext(DbContextOptions<BenchReadContext> options) : DbContext(options) {
     public DbSet<BenchReadRow> Rows => Set<BenchReadRow>();
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder) =>
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.Entity<BenchReadRow>(builder => {
             builder.ToTable("read_rows");
             builder.HasKey(row => row.Id);
@@ -247,6 +250,7 @@ public sealed class BenchReadContext(DbContextOptions<BenchReadContext> options)
             builder.Property(row => row.CreatedAt).HasColumnName("created_at");
             builder.Property(row => row.Active).HasColumnName("active");
         });
+    }
 }
 
 internal static class BenchReadRows {
@@ -275,23 +279,19 @@ internal static class BenchReadRows {
             "COPY read_rows (id, name, description, quantity, sequence, price, created_at, active) FROM STDIN (FORMAT BINARY)");
         for (var i = 0; i < rows; i++) {
             var id = Guid.CreateVersion7();
-            if (i == rows / 2) {
-                targetId = id;
-            }
+            if (i == rows / 2) targetId = id;
 
             importer.StartRow();
             importer.Write(id, NpgsqlDbType.Uuid);
             importer.Write($"row-{i}", NpgsqlDbType.Text);
-            if (i % 3 == 0) {
+            if (i % 3 == 0)
                 importer.WriteNull();
-            }
-            else {
+            else
                 importer.Write($"description of row {i} with some payload text", NpgsqlDbType.Text);
-            }
 
             importer.Write(i, NpgsqlDbType.Integer);
             importer.Write(i * 37L, NpgsqlDbType.Bigint);
-            importer.Write(10.25m + (i % 1000), NpgsqlDbType.Numeric);
+            importer.Write(10.25m + i % 1000, NpgsqlDbType.Numeric);
             importer.Write(baseInstant.AddSeconds(i), NpgsqlDbType.TimestampTz);
             importer.Write(i % 2 == 0, NpgsqlDbType.Boolean);
         }

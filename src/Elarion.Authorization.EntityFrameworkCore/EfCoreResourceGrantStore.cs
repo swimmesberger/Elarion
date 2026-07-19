@@ -37,13 +37,12 @@ internal sealed class EfCoreResourceGrantStore<TDbContext>(TDbContext dbContext)
         ArgumentNullException.ThrowIfNull(grant);
 
         var sql = GrantSqlCache.GetOrAdd(dbContext.Model, static (_, context) => BuildGrantSql(context), dbContext);
-        object[] parameters =
-        [
+        object[] parameters = [
             grant.ResourceType,
             grant.ResourceId,
             grant.Principal.Kind,
             grant.Principal.Id,
-            grant.Operation.Name,
+            grant.Operation.Name
         ];
 
         // ON CONFLICT DO NOTHING: a concurrent duplicate is a no-op, never a 23505 that would poison the
@@ -75,44 +74,51 @@ internal sealed class EfCoreResourceGrantStore<TDbContext>(TDbContext dbContext)
         return rows.Select(ToContract).ToList();
     }
 
-    private static System.Linq.Expressions.Expression<Func<ResourceGrantEntity, bool>> MatchesPredicate(ResourceGrantEntity e)
-        => grant => grant.ResourceType == e.ResourceType
-            && grant.ResourceId == e.ResourceId
-            && grant.PrincipalKind == e.PrincipalKind
-            && grant.PrincipalId == e.PrincipalId
-            && grant.Operation == e.Operation;
+    private static System.Linq.Expressions.Expression<Func<ResourceGrantEntity, bool>> MatchesPredicate(
+        ResourceGrantEntity e) {
+        return grant => grant.ResourceType == e.ResourceType
+                        && grant.ResourceId == e.ResourceId
+                        && grant.PrincipalKind == e.PrincipalKind
+                        && grant.PrincipalId == e.PrincipalId
+                        && grant.Operation == e.Operation;
+    }
 
-    private static ResourceGrantEntity ToEntity(ResourceGrant grant) => new()
-    {
-        ResourceType = grant.ResourceType,
-        ResourceId = grant.ResourceId,
-        PrincipalKind = grant.Principal.Kind,
-        PrincipalId = grant.Principal.Id,
-        Operation = grant.Operation.Name,
-    };
+    private static ResourceGrantEntity ToEntity(ResourceGrant grant) {
+        return new ResourceGrantEntity {
+            ResourceType = grant.ResourceType,
+            ResourceId = grant.ResourceId,
+            PrincipalKind = grant.Principal.Kind,
+            PrincipalId = grant.Principal.Id,
+            Operation = grant.Operation.Name
+        };
+    }
 
-    private static ResourceGrant ToContract(ResourceGrantEntity entity) => new(
-        entity.ResourceType,
-        entity.ResourceId,
-        new ResourcePrincipal(entity.PrincipalKind, entity.PrincipalId),
-        new ResourceOperation(entity.Operation));
+    private static ResourceGrant ToContract(ResourceGrantEntity entity) {
+        return new ResourceGrant(
+            entity.ResourceType,
+            entity.ResourceId,
+            new ResourcePrincipal(entity.PrincipalKind, entity.PrincipalId),
+            new ResourceOperation(entity.Operation));
+    }
 
     private static string BuildGrantSql(DbContext context) {
         var entityType = context.Model.FindEntityType(typeof(ResourceGrantEntity))
-            ?? throw new InvalidOperationException(
-                "The ResourceGrantEntity is not mapped. Call modelBuilder.ApplyElarionResourceGrants() in OnModelCreating.");
+                         ?? throw new InvalidOperationException(
+                             "The ResourceGrantEntity is not mapped. Call modelBuilder.ApplyElarionResourceGrants() in OnModelCreating.");
         var sqlHelper = context.GetService<ISqlGenerationHelper>();
 
         var tableName = entityType.GetTableName()
-            ?? throw new InvalidOperationException("The ResourceGrantEntity is not mapped to a table.");
+                        ?? throw new InvalidOperationException("The ResourceGrantEntity is not mapped to a table.");
         var schema = entityType.GetSchema();
         var storeObject = StoreObjectIdentifier.Table(tableName, schema);
 
         string Column(string propertyName) {
             var property = entityType.FindProperty(propertyName)
-                ?? throw new InvalidOperationException($"The ResourceGrantEntity.{propertyName} property is not mapped.");
+                           ?? throw new InvalidOperationException(
+                               $"The ResourceGrantEntity.{propertyName} property is not mapped.");
             var columnName = property.GetColumnName(storeObject)
-                ?? throw new InvalidOperationException($"The ResourceGrantEntity.{propertyName} property has no column.");
+                             ?? throw new InvalidOperationException(
+                                 $"The ResourceGrantEntity.{propertyName} property has no column.");
             return sqlHelper.DelimitIdentifier(columnName);
         }
 
@@ -124,8 +130,8 @@ internal sealed class EfCoreResourceGrantStore<TDbContext>(TDbContext dbContext)
         var operationCol = Column(nameof(ResourceGrantEntity.Operation));
 
         return $"INSERT INTO {table} (" +
-            $"{resourceTypeCol}, {resourceIdCol}, {principalKindCol}, {principalIdCol}, {operationCol}) " +
-            "VALUES ({0}, {1}, {2}, {3}, {4}) " +
-            $"ON CONFLICT ({resourceTypeCol}, {resourceIdCol}, {principalKindCol}, {principalIdCol}, {operationCol}) DO NOTHING";
+               $"{resourceTypeCol}, {resourceIdCol}, {principalKindCol}, {principalIdCol}, {operationCol}) " +
+               "VALUES ({0}, {1}, {2}, {3}, {4}) " +
+               $"ON CONFLICT ({resourceTypeCol}, {resourceIdCol}, {principalKindCol}, {principalIdCol}, {operationCol}) DO NOTHING";
     }
 }

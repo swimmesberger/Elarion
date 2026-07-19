@@ -8,7 +8,7 @@
        whole point of the split: the Identity *model* surface depends on EF Core + Identity stores only, so a
        web-free data layer can compose it. The host wiring (AddElarionIdentity) lives in Elarion.AspNetCore.Identity. -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore"/>
   </ItemGroup>
 
   <!-- Bundle the Identity model source generator's analyzer into this package. NuGet analyzer assets are not
@@ -17,20 +17,20 @@
        off the runtime surface; PrivateAssets=all keeps it from becoming a downstream package dependency. -->
   <ItemGroup>
     <ProjectReference Include="..\Elarion.EntityFrameworkCore.Identity.Generators\Elarion.EntityFrameworkCore.Identity.Generators.csproj"
-                     ReferenceOutputAssembly="false"
-                     PrivateAssets="all" />
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"/>
   </ItemGroup>
 
   <Target Name="_BundleElarionEntityFrameworkCoreIdentityGenerator" BeforeTargets="_GetPackageFiles">
     <MSBuild Projects="..\Elarion.EntityFrameworkCore.Identity.Generators\Elarion.EntityFrameworkCore.Identity.Generators.csproj"
              Targets="GetTargetPath">
-      <Output TaskParameter="TargetOutputs" ItemName="_ElarionEntityFrameworkCoreIdentityGeneratorAnalyzer" />
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionEntityFrameworkCoreIdentityGeneratorAnalyzer"/>
     </MSBuild>
     <ItemGroup>
       <None Include="@(_ElarionEntityFrameworkCoreIdentityGeneratorAnalyzer)"
             Pack="true"
             PackagePath="analyzers/dotnet/cs/"
-            Visible="false" />
+            Visible="false"/>
     </ItemGroup>
   </Target>
 

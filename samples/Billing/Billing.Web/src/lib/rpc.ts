@@ -1,4 +1,4 @@
-import { createRpcApi } from "@/generated/rpc-client"
+import {createRpcApi} from "@/generated/rpc-client"
 
 // The API base URL is injected by the Aspire app host (VITE_API_URL); falls back to localhost for a
 // standalone `npm run dev`. No token resolver here: in Development the host stamps a dev principal, so

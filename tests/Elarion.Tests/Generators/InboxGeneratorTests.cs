@@ -27,21 +27,21 @@ public sealed class InboxGeneratorTests {
     [Fact]
     public void AttachesInboxToIntegrationEventConsumerByDefault() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record InvoiceCreated(int Id) : IIntegrationEvent;
+                                  public sealed record InvoiceCreated(int Id) : IIntegrationEvent;
 
-                [ConsumeEvent]
-                public sealed class SendInvoiceEmail : IHandler<InvoiceCreated> {
-                    public ValueTask<Result> HandleAsync(InvoiceCreated request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result.Success());
-                }
-            }
-            """;
+                                  [ConsumeEvent]
+                                  public sealed class SendInvoiceEmail : IHandler<InvoiceCreated> {
+                                      public ValueTask<Result> HandleAsync(InvoiceCreated request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result.Success());
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
         var generated = GetGenerated(result, "Sample_App_SendInvoiceEmail.g.cs");
@@ -59,7 +59,9 @@ public sealed class InboxGeneratorTests {
         generated.Should().Contain("global::System.TimeSpan.FromHours(24)");
         // Soft attach: without AddElarionIdempotency the consumer runs un-deduped instead of failing resolution,
         // and the delivery scope has no caller, so ICurrentUser is soft-resolved too.
-        generated.Should().Contain("if (sp.GetService<global::Elarion.Abstractions.Idempotency.IIdempotencyStore>() is { } __inboxStore)");
+        generated.Should()
+            .Contain(
+                "if (sp.GetService<global::Elarion.Abstractions.Idempotency.IIdempotencyStore>() is { } __inboxStore)");
         generated.Should().Contain("sp.GetService<global::Elarion.Abstractions.Identity.ICurrentUser>()");
         // Result<Unit> stores the success flag only — Unit is registered in no JSON context, so the payload
         // methods must never call GetTypeInfo(typeof(Unit)).
@@ -72,22 +74,22 @@ public sealed class InboxGeneratorTests {
     [Fact]
     public void AllowDuplicatesRestoresPlainPipeline() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record InvoiceCreated(int Id) : IIntegrationEvent;
+                                  public sealed record InvoiceCreated(int Id) : IIntegrationEvent;
 
-                [ConsumeEvent]
-                [AllowDuplicates] // conditional state transition — converges by itself
-                public sealed class SelfDedupingConsumer : IHandler<InvoiceCreated> {
-                    public ValueTask<Result> HandleAsync(InvoiceCreated request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result.Success());
-                }
-            }
-            """;
+                                  [ConsumeEvent]
+                                  [AllowDuplicates] // conditional state transition — converges by itself
+                                  public sealed class SelfDedupingConsumer : IHandler<InvoiceCreated> {
+                                      public ValueTask<Result> HandleAsync(InvoiceCreated request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result.Success());
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
 
@@ -98,21 +100,21 @@ public sealed class InboxGeneratorTests {
     [Fact]
     public void DoesNotAttachToDomainEventConsumer() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record LineAdded(int Id) : IDomainEvent;
+                                  public sealed record LineAdded(int Id) : IDomainEvent;
 
-                [ConsumeEvent]
-                public sealed class RecalculateTotals : IHandler<LineAdded> {
-                    public ValueTask<Result> HandleAsync(LineAdded request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result.Success());
-                }
-            }
-            """;
+                                  [ConsumeEvent]
+                                  public sealed class RecalculateTotals : IHandler<LineAdded> {
+                                      public ValueTask<Result> HandleAsync(LineAdded request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result.Success());
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
 
@@ -123,21 +125,21 @@ public sealed class InboxGeneratorTests {
     [Fact]
     public void ReportsElinbx001OnNonIntegrationEventHandler() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record PayCommand(int Id) : ICommand;
+                                  public sealed record PayCommand(int Id) : ICommand;
 
-                [AllowDuplicates]
-                public sealed class PayHandler : IHandler<PayCommand, Result<string>> {
-                    public ValueTask<Result<string>> HandleAsync(PayCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<string>.Success("r"));
-                }
-            }
-            """;
+                                  [AllowDuplicates]
+                                  public sealed class PayHandler : IHandler<PayCommand, Result<string>> {
+                                      public ValueTask<Result<string>> HandleAsync(PayCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<string>.Success("r"));
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
 
@@ -148,21 +150,21 @@ public sealed class InboxGeneratorTests {
     [Fact]
     public void IrrelevantEditReusesInboxPipeline() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record InvoiceCreated(int Id) : IIntegrationEvent;
+                                  public sealed record InvoiceCreated(int Id) : IIntegrationEvent;
 
-                [ConsumeEvent]
-                public sealed class SendInvoiceEmail : IHandler<InvoiceCreated> {
-                    public ValueTask<Result> HandleAsync(InvoiceCreated request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result.Success());
-                }
-            }
-            """;
+                                  [ConsumeEvent]
+                                  public sealed class SendInvoiceEmail : IHandler<InvoiceCreated> {
+                                      public ValueTask<Result> HandleAsync(InvoiceCreated request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result.Success());
+                                  }
+                              }
+                              """;
 
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new HandlerRegistrationGenerator(), source, "Handlers");
@@ -181,11 +183,12 @@ public sealed class InboxGeneratorTests {
         return (result, result.Diagnostics);
     }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static void AssertCompiles(string source, string generated) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);

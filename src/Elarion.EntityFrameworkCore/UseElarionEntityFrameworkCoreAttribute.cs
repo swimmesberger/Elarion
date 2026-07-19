@@ -19,8 +19,7 @@ namespace Elarion.EntityFrameworkCore;
 /// </code>
 /// </example>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
-public sealed class UseElarionEntityFrameworkCoreAttribute : Attribute
-{
+public sealed class UseElarionEntityFrameworkCoreAttribute : Attribute {
     /// <summary>
     /// Gets the target database provider. Defaults to <see cref="EfCoreProvider.Portable"/>.
     /// </summary>

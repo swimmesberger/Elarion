@@ -32,7 +32,7 @@ public sealed class ElarionBlobStorageGenerator : IIncrementalGenerator {
         + "so the blob-storage DbSet and model-configuration seam are generated",
         "Elarion.Blobs.PostgreSql",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var targets = context.SyntaxProvider
@@ -44,17 +44,11 @@ public sealed class ElarionBlobStorageGenerator : IIncrementalGenerator {
             .WithTrackingName("BlobStorageTargets");
 
         context.RegisterSourceOutput(targets, static (spc, target) => {
-            if (target is null) {
-                return;
-            }
+            if (target is null) return;
 
-            foreach (var diagnostic in target.Diagnostics) {
-                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
-            }
+            foreach (var diagnostic in target.Diagnostics) spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
-            if (target.Emit) {
-                Emit(spc, target);
-            }
+            if (target.Emit) Emit(spc, target);
         });
     }
 
@@ -70,16 +64,14 @@ public sealed class ElarionBlobStorageGenerator : IIncrementalGenerator {
         EquatableArray<DiagnosticInfo> Diagnostics);
 
     private static BlobStorageTarget? GetTarget(GeneratorAttributeSyntaxContext ctx) {
-        if (ctx.TargetSymbol is not INamedTypeSymbol contextSymbol) {
-            return null;
-        }
+        if (ctx.TargetSymbol is not INamedTypeSymbol contextSymbol) return null;
 
         var snakeCase = true;
         string? tableName = null;
         string? contentTableName = null;
         string? schema = null;
-        if (ctx.Attributes.Length > 0) {
-            foreach (var namedArgument in ctx.Attributes[0].NamedArguments) {
+        if (ctx.Attributes.Length > 0)
+            foreach (var namedArgument in ctx.Attributes[0].NamedArguments)
                 switch (namedArgument.Key) {
                     case "SnakeCase" when namedArgument.Value.Value is bool value:
                         snakeCase = value;
@@ -94,8 +86,6 @@ public sealed class ElarionBlobStorageGenerator : IIncrementalGenerator {
                         schema = schemaValue;
                         break;
                 }
-            }
-        }
 
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
         var ns = contextSymbol.ContainingNamespace is { IsGlobalNamespace: false } containing
@@ -108,10 +98,9 @@ public sealed class ElarionBlobStorageGenerator : IIncrementalGenerator {
             .Any(attribute => attribute.AttributeClass?.ToDisplayString() == GenerateDbSetsAttributeName);
 
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
-        if (!hasGenerateDbSets) {
+        if (!hasGenerateDbSets)
             diagnostics.Add(DiagnosticInfo.Create(
                 MissingGenerateDbSets, LocationInfo.From(contextSymbol), contextSymbol.ToDisplayString(fmt)));
-        }
 
         return new BlobStorageTarget(
             ns,
@@ -121,7 +110,7 @@ public sealed class ElarionBlobStorageGenerator : IIncrementalGenerator {
             tableName,
             contentTableName,
             schema,
-            Emit: hasGenerateDbSets,
+            hasGenerateDbSets,
             diagnostics.ToImmutable());
     }
 
@@ -140,9 +129,11 @@ public sealed class ElarionBlobStorageGenerator : IIncrementalGenerator {
 
         sb.AppendLine($"partial class {target.ContextName}");
         sb.AppendLine("{");
-        sb.AppendLine($"    public DbSet<{BlobsNamespace}.StoredBlob> StoredBlobs => Set<{BlobsNamespace}.StoredBlob>();");
+        sb.AppendLine(
+            $"    public DbSet<{BlobsNamespace}.StoredBlob> StoredBlobs => Set<{BlobsNamespace}.StoredBlob>();");
         sb.AppendLine();
-        sb.AppendLine("    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
+        sb.AppendLine(
+            "    // Implements the per-feature model-configuration seam the EF DbContext generator calls at the");
         sb.AppendLine("    // end of ConfigureEntities, so it composes with the other [GenerateElarion*] features.");
         sb.AppendLine($"    partial void {SeamMethodName}(ModelBuilder modelBuilder) =>");
         sb.AppendLine($"        {BlobsNamespace}.PostgreSqlBlobStorageModelBuilderExtensions.UseElarionBlobStorage(");

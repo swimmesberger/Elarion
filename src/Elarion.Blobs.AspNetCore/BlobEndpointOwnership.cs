@@ -10,6 +10,7 @@ internal static class BlobEndpointOwnership {
     /// owner id that happens to contain the naming separator cannot be forged. A blob with no recorded owner
     /// is denied to everyone (fail closed).
     /// </summary>
-    public static bool IsOwnedBy(BlobMetadata metadata, string ownerId) =>
-        metadata.OwnerId is not null && string.Equals(metadata.OwnerId, ownerId, StringComparison.Ordinal);
+    public static bool IsOwnedBy(BlobMetadata metadata, string ownerId) {
+        return metadata.OwnerId is not null && string.Equals(metadata.OwnerId, ownerId, StringComparison.Ordinal);
+    }
 }

@@ -26,8 +26,7 @@ namespace Elarion.Benchmarks.BulkInsert;
 [MemoryDiagnoser]
 [SimpleJob(RunStrategy.Monitoring, warmupCount: 1, iterationCount: 10, invocationCount: 1)]
 public class PostgreSqlBulkInsertBenchmarks {
-    [Params(1_000, 10_000, 100_000)]
-    public int Rows { get; set; }
+    [Params(1_000, 10_000, 100_000)] public int Rows { get; set; }
 
     private PostgreSqlContainer _container = null!;
     private string _connectionString = "";
@@ -46,16 +45,18 @@ public class PostgreSqlBulkInsertBenchmarks {
         _context.Database.EnsureCreated();
 
         var baseInstant = new DateTimeOffset(2026, 7, 11, 12, 0, 0, TimeSpan.Zero);
-        _rows = [.. Enumerable.Range(0, Rows).Select(i => new BenchRow {
-            Id = Guid.CreateVersion7(),
-            Name = $"row-{i}",
-            Description = i % 3 == 0 ? null : $"description of row {i} with some payload text",
-            Quantity = i,
-            Sequence = i * 37L,
-            Price = 10.25m + (i % 1000),
-            CreatedAt = baseInstant.AddSeconds(i),
-            Active = i % 2 == 0,
-        })];
+        _rows = [
+            .. Enumerable.Range(0, Rows).Select(i => new BenchRow {
+                Id = Guid.CreateVersion7(),
+                Name = $"row-{i}",
+                Description = i % 3 == 0 ? null : $"description of row {i} with some payload text",
+                Quantity = i,
+                Sequence = i * 37L,
+                Price = 10.25m + i % 1000,
+                CreatedAt = baseInstant.AddSeconds(i),
+                Active = i % 2 == 0
+            })
+        ];
     }
 
     [GlobalCleanup]
@@ -82,17 +83,25 @@ public class PostgreSqlBulkInsertBenchmarks {
     }
 
     [Benchmark]
-    public Task<long> ElarionExecuteInsert() => _context.Rows.ExecuteInsertAsync(_rows);
+    public Task<long> ElarionExecuteInsert() {
+        return _context.Rows.ExecuteInsertAsync(_rows);
+    }
 
     [Benchmark]
-    public Task BulkExtensionsMit() => _context.BulkInsertAsync(_rows);
+    public Task BulkExtensionsMit() {
+        return _context.BulkInsertAsync(_rows);
+    }
 
     [Benchmark]
-    public Task<BulkCopyRowsCopied> Linq2DbBulkCopy() =>
-        _context.BulkCopyAsync(new BulkCopyOptions { BulkCopyType = LinqToDB.Data.BulkCopyType.ProviderSpecific }, _rows);
+    public Task<BulkCopyRowsCopied> Linq2DbBulkCopy() {
+        return _context.BulkCopyAsync(
+            new BulkCopyOptions { BulkCopyType = LinqToDB.Data.BulkCopyType.ProviderSpecific }, _rows);
+    }
 
     [Benchmark]
-    public Task PhenXBulkInsert() => _context.Rows.ExecuteBulkInsertAsync(_rows);
+    public Task PhenXBulkInsert() {
+        return _context.Rows.ExecuteBulkInsertAsync(_rows);
+    }
 
     [Benchmark]
     public async Task<ulong> RawNpgsqlBinaryCopy() {
@@ -105,12 +114,10 @@ public class PostgreSqlBulkInsertBenchmarks {
             await importer.StartRowAsync();
             await importer.WriteAsync(row.Id, NpgsqlDbType.Uuid);
             await importer.WriteAsync(row.Name, NpgsqlDbType.Text);
-            if (row.Description is null) {
+            if (row.Description is null)
                 await importer.WriteNullAsync();
-            }
-            else {
+            else
                 await importer.WriteAsync(row.Description, NpgsqlDbType.Text);
-            }
 
             await importer.WriteAsync(row.Quantity, NpgsqlDbType.Integer);
             await importer.WriteAsync(row.Sequence, NpgsqlDbType.Bigint);
@@ -134,13 +141,14 @@ public class PostgreSqlBulkInsertBenchmarks {
 public sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) : DbContext(options) {
     public DbSet<BenchRow> Rows => Set<BenchRow>();
 
-    protected override void OnModelCreating(ModelBuilder modelBuilder) =>
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.Entity<BenchRow>(builder => {
             builder.ToTable("bench_rows");
             builder.HasKey(row => row.Id);
             builder.Property(row => row.Id).ValueGeneratedNever();
             builder.Property(row => row.Price).HasPrecision(18, 2);
         });
+    }
 }
 
 public sealed class BenchRow {

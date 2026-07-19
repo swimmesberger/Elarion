@@ -2,15 +2,15 @@
 // Elarion.Abstractions ↔ Elarion.AspNetCore): one provider, one hook, one slot component. Everything
 // interesting happens in the framework-free core; this file only surfaces the resolved registry through
 // React context, so porting it to another view framework is a page of code, not a redesign.
-import { createContext, Fragment, useContext, type ReactNode } from "react"
-import type { Contribution, ContributionRegistry, ExtensionPoint } from "./index.js"
+import {createContext, Fragment, useContext, type ReactNode} from "react"
+import type {Contribution, ContributionRegistry, ExtensionPoint} from "./index.js"
 
 const RegistryContext = createContext<ContributionRegistry | null>(null)
 
 export function ContributionProvider({
-  registry,
-  children,
-}: {
+                                       registry,
+                                       children,
+                                     }: {
   registry: ContributionRegistry
   children: ReactNode
 }) {

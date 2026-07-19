@@ -13,5 +13,7 @@ public sealed class JsonRpcAppErrorTranslator : IAppErrorTranslator<RpcError> {
     public static JsonRpcAppErrorTranslator Default { get; } = new();
 
     /// <inheritdoc />
-    public RpcError Translate(AppError error) => AppErrorMapper.ToRpcError(error);
+    public RpcError Translate(AppError error) {
+        return AppErrorMapper.ToRpcError(error);
+    }
 }

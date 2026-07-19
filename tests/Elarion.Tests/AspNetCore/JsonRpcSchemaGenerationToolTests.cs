@@ -13,24 +13,24 @@ public sealed class JsonRpcSchemaGenerationToolTests {
         Directory.CreateDirectory(projectDirectory);
 
         var project = $$"""
-            <Project Sdk="Microsoft.NET.Sdk">
-              <PropertyGroup>
-                <OutputType>Exe</OutputType>
-                <AssemblyName>dotnet-elarion-getrpcschema</AssemblyName>
-                <TargetFramework>net10.0</TargetFramework>
-                <Nullable>enable</Nullable>
-                <ImplicitUsings>enable</ImplicitUsings>
-              </PropertyGroup>
-              <ItemGroup>
-                <ProjectReference Include="{{Path.Combine(root, "src", "Elarion.JsonRpc", "Elarion.JsonRpc.csproj")}}" />
-              </ItemGroup>
-            </Project>
-            """;
+                        <Project Sdk="Microsoft.NET.Sdk">
+                          <PropertyGroup>
+                            <OutputType>Exe</OutputType>
+                            <AssemblyName>dotnet-elarion-getrpcschema</AssemblyName>
+                            <TargetFramework>net10.0</TargetFramework>
+                            <Nullable>enable</Nullable>
+                            <ImplicitUsings>enable</ImplicitUsings>
+                          </PropertyGroup>
+                          <ItemGroup>
+                            <ProjectReference Include="{{Path.Combine(root, "src", "Elarion.JsonRpc", "Elarion.JsonRpc.csproj")}}" />
+                          </ItemGroup>
+                        </Project>
+                        """;
         var program = """
-            using Elarion.JsonRpc;
+                      using Elarion.JsonRpc;
 
-            Console.WriteLine(JsonRpcSchemaGeneration.IsRunning);
-            """;
+                      Console.WriteLine(JsonRpcSchemaGeneration.IsRunning);
+                      """;
 
         await File.WriteAllTextAsync(
             Path.Combine(projectDirectory, "EntryNameProbe.csproj"),
@@ -52,7 +52,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
     [Fact]
     public async Task Tool_ExportsSchemaFromBuiltApplicationHost() {
         var root = FindRepositoryRoot();
-        var projectDirectory = await CreateFixtureApplicationAsync(root, package: null);
+        var projectDirectory = await CreateFixtureApplicationAsync(root, null);
         var build = await RunDotnetAsync(projectDirectory, "build", "--configuration", TestConfiguration, "--nologo");
         build.ExitCode.Should().Be(0, build.ToString());
 
@@ -100,51 +100,51 @@ public sealed class JsonRpcSchemaGenerationToolTests {
             : "";
 
         var project = $$"""
-            <Project Sdk="Microsoft.NET.Sdk.Web">
-              <PropertyGroup>
-                <TargetFramework>net10.0</TargetFramework>
-                <Nullable>enable</Nullable>
-                <ImplicitUsings>enable</ImplicitUsings>
-                {{generationProperties}}
-              </PropertyGroup>
-              <ItemGroup>
-                <ProjectReference Include="{{Path.Combine(root, "src", "Elarion.AspNetCore", "Elarion.AspNetCore.csproj")}}" />
-                <ProjectReference Include="{{Path.Combine(root, "src", "Elarion.JsonRpc", "Elarion.JsonRpc.csproj")}}" />
-                {{packageReference}}
-              </ItemGroup>
-            </Project>
-            """;
+                        <Project Sdk="Microsoft.NET.Sdk.Web">
+                          <PropertyGroup>
+                            <TargetFramework>net10.0</TargetFramework>
+                            <Nullable>enable</Nullable>
+                            <ImplicitUsings>enable</ImplicitUsings>
+                            {{generationProperties}}
+                          </PropertyGroup>
+                          <ItemGroup>
+                            <ProjectReference Include="{{Path.Combine(root, "src", "Elarion.AspNetCore", "Elarion.AspNetCore.csproj")}}" />
+                            <ProjectReference Include="{{Path.Combine(root, "src", "Elarion.JsonRpc", "Elarion.JsonRpc.csproj")}}" />
+                            {{packageReference}}
+                          </ItemGroup>
+                        </Project>
+                        """;
 
         var program = """
-            using System.Text.Json;
-            using Elarion.Abstractions;
-            using Elarion.AspNetCore;
-            using Elarion.JsonRpc;
+                      using System.Text.Json;
+                      using Elarion.Abstractions;
+                      using Elarion.AspNetCore;
+                      using Elarion.JsonRpc;
 
-            var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            var builder = WebApplication.CreateSlimBuilder(args);
-            builder.Services.AddElarionJsonRpc();
+                      var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+                      var builder = WebApplication.CreateSlimBuilder(args);
+                      builder.Services.AddElarionJsonRpc();
 
-            var dispatcher = new JsonRpcDispatcher(options)
-                .MapDelegate<PingRequest, PingResponse>(
-                    "sample.ping",
-                    (request, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse(request.Message)))
-                .Freeze();
+                      var dispatcher = new JsonRpcDispatcher(options)
+                          .MapDelegate<PingRequest, PingResponse>(
+                              "sample.ping",
+                              (request, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse(request.Message)))
+                          .Freeze();
 
-            builder.Services.AddSingleton(dispatcher);
+                      builder.Services.AddSingleton(dispatcher);
 
-            var app = builder.Build();
+                      var app = builder.Build();
 
-            if (JsonRpcSchemaGeneration.IsRunning) {
-                throw new InvalidOperationException("Code after Build should not run during schema generation.");
-            }
+                      if (JsonRpcSchemaGeneration.IsRunning) {
+                          throw new InvalidOperationException("Code after Build should not run during schema generation.");
+                      }
 
-            app.MapElarionJsonRpc();
-            await app.RunAsync();
+                      app.MapElarionJsonRpc();
+                      await app.RunAsync();
 
-            public sealed record PingRequest(string Message);
-            public sealed record PingResponse(string Message);
-            """;
+                      public sealed record PingRequest(string Message);
+                      public sealed record PingResponse(string Message);
+                      """;
 
         await File.WriteAllTextAsync(Path.Combine(projectDirectory, "FixtureApp.csproj"), project, Encoding.UTF8);
         await File.WriteAllTextAsync(Path.Combine(projectDirectory, "Program.cs"), program, Encoding.UTF8);
@@ -152,8 +152,8 @@ public sealed class JsonRpcSchemaGenerationToolTests {
         return projectDirectory;
     }
 
-    private static string GetToolPath(string root) =>
-        Path.Combine(
+    private static string GetToolPath(string root) {
+        return Path.Combine(
             root,
             "src",
             "Elarion.AspNetCore.SchemaGeneration.Tool",
@@ -161,6 +161,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
             TestConfiguration,
             "net10.0",
             "dotnet-elarion-getrpcschema.dll");
+    }
 
     private static async Task<PackedPackage> PackSchemaGenerationPackageAsync(string root) {
         var packageSource = Path.Combine(Path.GetTempPath(), $"elarion-schema-packages-{Guid.NewGuid():N}");
@@ -170,7 +171,8 @@ public sealed class JsonRpcSchemaGenerationToolTests {
         var result = await RunDotnetAsync(
             root,
             "pack",
-            Path.Combine(root, "src", "Elarion.AspNetCore.SchemaGeneration", "Elarion.AspNetCore.SchemaGeneration.csproj"),
+            Path.Combine(root, "src", "Elarion.AspNetCore.SchemaGeneration",
+                "Elarion.AspNetCore.SchemaGeneration.csproj"),
             "--configuration",
             TestConfiguration,
             "--no-build",
@@ -190,15 +192,13 @@ public sealed class JsonRpcSchemaGenerationToolTests {
         var startInfo = new ProcessStartInfo("dotnet") {
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            RedirectStandardError = true
         };
 
-        foreach (var argument in arguments) {
-            startInfo.ArgumentList.Add(argument);
-        }
+        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
 
         using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Could not start dotnet process.");
+                            ?? throw new InvalidOperationException("Could not start dotnet process.");
 
         var stdout = await process.StandardOutput.ReadToEndAsync();
         var stderr = await process.StandardError.ReadToEndAsync();
@@ -210,9 +210,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
     private static string FindRepositoryRoot() {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null) {
-            if (File.Exists(Path.Combine(directory.FullName, "Elarion.slnx"))) {
-                return directory.FullName;
-            }
+            if (File.Exists(Path.Combine(directory.FullName, "Elarion.slnx"))) return directory.FullName;
 
             directory = directory.Parent;
         }
@@ -228,14 +226,15 @@ public sealed class JsonRpcSchemaGenerationToolTests {
     }
 
     private sealed record CommandResult(int ExitCode, string StandardOutput, string StandardError) {
-        public override string ToString() =>
-            $"""
-            Exit code: {ExitCode}
-            Standard output:
-            {StandardOutput}
-            Standard error:
-            {StandardError}
-            """;
+        public override string ToString() {
+            return $"""
+                    Exit code: {ExitCode}
+                    Standard output:
+                    {StandardOutput}
+                    Standard error:
+                    {StandardError}
+                    """;
+        }
     }
 
     private sealed record PackedPackage(string SourceDirectory, string Version);

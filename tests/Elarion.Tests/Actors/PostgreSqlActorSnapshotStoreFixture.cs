@@ -39,15 +39,14 @@ public sealed class PostgreSqlActorSnapshotStoreFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
-    public ActorSnapshotIntegrationDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<ActorSnapshotIntegrationDbContext>()
+    public ActorSnapshotIntegrationDbContext CreateContext() {
+        return new ActorSnapshotIntegrationDbContext(new DbContextOptionsBuilder<ActorSnapshotIntegrationDbContext>()
             .UseNpgsql(ConnectionString)
             .Options);
+    }
 }
 
 /// <summary>Context mapping the snapshot and role-lease tables the way a generated context would

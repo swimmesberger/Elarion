@@ -33,10 +33,11 @@ public sealed class ElarionMcpEndToEndTests {
     private sealed record EchoResponse(string Greeting);
 
     private sealed class EchoHandler : IHandler<EchoCommand, Result<EchoResponse>> {
-        public ValueTask<Result<EchoResponse>> HandleAsync(EchoCommand request, CancellationToken ct) =>
-            request.Name == "boom"
+        public ValueTask<Result<EchoResponse>> HandleAsync(EchoCommand request, CancellationToken ct) {
+            return request.Name == "boom"
                 ? ValueTask.FromResult<Result<EchoResponse>>(AppError.NotFound("no such name"))
                 : ValueTask.FromResult<Result<EchoResponse>>(new EchoResponse($"Hello {request.Name}"));
+        }
     }
 
     [Fact]
@@ -50,17 +51,20 @@ public sealed class ElarionMcpEndToEndTests {
         builder.Services.AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>();
         // The plain test DTOs are not in a source-gen context, so opt the canonical serializer into reflection.
         builder.Services.ConfigureElarionJson(o => o.EnableReflectionFallback = true);
+
         // Both transports must share ONE registration delegate — the bus is a single shared singleton.
-        static HandlerDispatcher RegisterHandlers(HandlerDispatcher dispatcher) =>
-            dispatcher.Map<EchoCommand, EchoResponse>("echo");
+        static HandlerDispatcher RegisterHandlers(HandlerDispatcher dispatcher) {
+            return dispatcher.Map<EchoCommand, EchoResponse>("echo");
+        }
+
         builder.Services.AddElarionJsonRpc(RegisterHandlers);
         builder.Services.AddElarionMcp(
             new RpcMcpMetadataSource([
                 new RpcMcpMethodMetadata {
                     MethodName = "echo",
                     RequestType = typeof(EchoCommand),
-                    Description = "Echoes a greeting.",
-                },
+                    Description = "Echoes a greeting."
+                }
             ]),
             RegisterHandlers,
             o => o.ServerName = "Test");
@@ -76,7 +80,7 @@ public sealed class ElarionMcpEndToEndTests {
             await using var transport = new HttpClientTransport(
                 new HttpClientTransportOptions {
                     Endpoint = new Uri($"{baseAddress}/mcp"),
-                    TransportMode = HttpTransportMode.StreamableHttp,
+                    TransportMode = HttpTransportMode.StreamableHttp
                 },
                 NullLoggerFactory.Instance);
 
@@ -100,7 +104,8 @@ public sealed class ElarionMcpEndToEndTests {
                 "echo", new Dictionary<string, object?> { ["name"] = "boom" }, cancellationToken: ct);
             failure.IsError.Should().Be(true);
             failure.Content.OfType<TextContentBlock>().Single().Text.Should().Be("no such name");
-        } finally {
+        }
+        finally {
             await app.StopAsync(ct);
         }
     }

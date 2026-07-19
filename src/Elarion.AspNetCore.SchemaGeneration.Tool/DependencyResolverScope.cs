@@ -17,9 +17,7 @@ internal sealed class DependencyResolverScope : IDisposable {
         var alreadyLoaded = AppDomain.CurrentDomain.GetAssemblies()
             .FirstOrDefault(assembly => AssemblyName.ReferenceMatchesDefinition(assembly.GetName(), assemblyName));
 
-        if (alreadyLoaded is not null) {
-            return alreadyLoaded;
-        }
+        if (alreadyLoaded is not null) return alreadyLoaded;
 
         var path = _resolver.ResolveAssemblyToPath(assemblyName);
         return path is null ? null : context.LoadFromAssemblyPath(path);

@@ -19,8 +19,8 @@ public sealed class ConnectionSimulationUtilitiesTests {
     [Fact]
     public async Task SimulatedClientConnection_CapturesSendsAnswersInvokes_AndFaultsAfterClose() {
         var ct = TestContext.Current.CancellationToken;
-        var connection = new SimulatedClientConnection(principalId: "dev-1") {
-            InvokeResponder = (name, request) => ValueTask.FromResult<object>($"{name}:{request}:ack"),
+        var connection = new SimulatedClientConnection("dev-1") {
+            InvokeResponder = (name, request) => ValueTask.FromResult<object>($"{name}:{request}:ack")
         };
 
         await connection.SendAsync("state.changed", new { Value = 1 }, ct);
@@ -38,7 +38,7 @@ public sealed class ConnectionSimulationUtilitiesTests {
         var ct = TestContext.Current.CancellationToken;
         await using var provider = new ServiceCollection().AddElarionConnections().BuildServiceProvider();
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
-        var connection = new SimulatedClientConnection(principalId: "dev-2");
+        var connection = new SimulatedClientConnection("dev-2");
 
         await registry.RegisterAsync(connection, ct);
 
@@ -50,7 +50,7 @@ public sealed class ConnectionSimulationUtilitiesTests {
     [Fact]
     public async Task TcpSimulatorClient_CompletesAFramedHandshakeAndEcho() {
         var ct = TestContext.Current.CancellationToken;
-        var framer = new DelimitedTcpFramer(end: (byte)'\n');
+        var framer = new DelimitedTcpFramer((byte)'\n');
         var bound = new TaskCompletionSource<IPEndPoint>(TaskCreationOptions.RunContinuationsAsynchronously);
         var services = new ServiceCollection();
         services.AddElarionConnections();
@@ -62,9 +62,7 @@ public sealed class ConnectionSimulationUtilitiesTests {
         });
         await using var provider = services.BuildServiceProvider();
         var hosted = provider.GetServices<IHostedService>().ToArray();
-        foreach (var service in hosted) {
-            await service.StartAsync(ct);
-        }
+        foreach (var service in hosted) await service.StartAsync(ct);
 
         try {
             await using var client = await TcpSimulatorClient.ConnectAsync(await bound.Task.WaitAsync(ct), framer, ct);
@@ -76,9 +74,7 @@ public sealed class ConnectionSimulationUtilitiesTests {
             (await client.ReceiveTextAsync(ct)).Should().Be("echo:ping");
         }
         finally {
-            foreach (var service in hosted) {
-                await service.StopAsync(CancellationToken.None);
-            }
+            foreach (var service in hosted) await service.StopAsync(CancellationToken.None);
         }
     }
 
@@ -89,7 +85,7 @@ public sealed class ConnectionSimulationUtilitiesTests {
         var registry = provider.GetRequiredService<IClientConnectionRegistry>();
 
         await using (var link = InMemoryTcpLink.Start(new EchoHandler(), registry,
-                         o => o.Framer = new DelimitedTcpFramer(end: (byte)'\n'))) {
+                         o => o.Framer = new DelimitedTcpFramer((byte)'\n'))) {
             (await link.Client.ReceiveTextAsync(ct)).Should().Be("challenge");
             await link.Client.SendTextAsync("device:mem-1", ct);
             (await link.Client.ReceiveTextAsync(ct)).Should().Be("welcome");
@@ -126,24 +122,24 @@ public sealed class ConnectionSimulationUtilitiesTests {
             TcpHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
             var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) {
-                return null;
-            }
+            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
 
             await handshake.SendTextAsync("welcome", ct);
             return new ClientConnectionTicket {
                 Principal = new System.Security.Claims.ClaimsPrincipal(
-                    new System.Security.Claims.ClaimsIdentity(authenticationType: "device")),
-                PrincipalId = reply["device:".Length..],
+                    new System.Security.Claims.ClaimsIdentity("device")),
+                PrincipalId = reply["device:".Length..]
             };
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
-            new EchoProtocol(connection);
+        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+            return new EchoProtocol(connection);
+        }
     }
 
     private sealed class EchoProtocol(TcpClientConnection connection) : IClientConnectionProtocol {
-        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
-            connection.SendTextAsync("echo:" + System.Text.Encoding.UTF8.GetString(message.Span), ct);
+        public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+            return connection.SendTextAsync("echo:" + System.Text.Encoding.UTF8.GetString(message.Span), ct);
+        }
     }
 }

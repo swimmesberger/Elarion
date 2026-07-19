@@ -29,27 +29,27 @@ public sealed class ValidationDecoratorGeneratorTests {
     [Fact]
     public void AttachesValidationDecoratorJustInsideFeatureGate() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record CreateThingCommand : ICommand {
-                    [StringLength(100, MinimumLength = 3)]
-                    public required string Name { get; init; }
-                }
+                                  public sealed record CreateThingCommand : ICommand {
+                                      [StringLength(100, MinimumLength = 3)]
+                                      public required string Name { get; init; }
+                                  }
 
-                public sealed record CreateThingResponse(string Name);
+                                  public sealed record CreateThingResponse(string Name);
 
-                [RequirePermission("things", "write")]
-                [FeatureGate("new-things")]
-                public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<CreateThingResponse>> {
-                    public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<CreateThingResponse>.Success(new CreateThingResponse("x")));
-                }
-            }
-            """;
+                                  [RequirePermission("things", "write")]
+                                  [FeatureGate("new-things")]
+                                  public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<CreateThingResponse>> {
+                                      public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<CreateThingResponse>.Success(new CreateThingResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_CreateThingHandler.g.cs");
@@ -73,37 +73,37 @@ public sealed class ValidationDecoratorGeneratorTests {
         // The [DefaultPipeline]-style [DecoratorList] chain (e.g. the transaction) runs INSIDE validation: an
         // invalid request must fail before it can open a transaction or touch the pipeline.
         const string source = Preamble +
-            """
+                              """
 
-            [assembly: Sample.App.AppPipeline]
+                              [assembly: Sample.App.AppPipeline]
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed class FakeTransactionDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
-                    : IHandler<TRequest, TResponse> {
-                    public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
-                        inner.HandleAsync(request, ct);
-                }
+                                  public sealed class FakeTransactionDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
+                                      : IHandler<TRequest, TResponse> {
+                                      public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+                                          inner.HandleAsync(request, ct);
+                                  }
 
-                [Elarion.Abstractions.Pipeline.DecoratorList(typeof(FakeTransactionDecorator<,>))]
-                [System.AttributeUsage(System.AttributeTargets.Assembly | System.AttributeTargets.Class)]
-                public sealed class AppPipelineAttribute : System.Attribute { }
+                                  [Elarion.Abstractions.Pipeline.DecoratorList(typeof(FakeTransactionDecorator<,>))]
+                                  [System.AttributeUsage(System.AttributeTargets.Assembly | System.AttributeTargets.Class)]
+                                  public sealed class AppPipelineAttribute : System.Attribute { }
 
-                public sealed record CreateThingCommand : ICommand {
-                    [StringLength(100)]
-                    public required string Name { get; init; }
-                }
+                                  public sealed record CreateThingCommand : ICommand {
+                                      [StringLength(100)]
+                                      public required string Name { get; init; }
+                                  }
 
-                public sealed record CreateThingResponse(string Name);
+                                  public sealed record CreateThingResponse(string Name);
 
-                public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<CreateThingResponse>> {
-                    public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<CreateThingResponse>.Success(new CreateThingResponse("x")));
-                }
-            }
-            """;
+                                  public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<CreateThingResponse>> {
+                                      public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<CreateThingResponse>.Success(new CreateThingResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_CreateThingHandler.g.cs");
@@ -120,30 +120,30 @@ public sealed class ValidationDecoratorGeneratorTests {
         // The request itself is clean; a transitively reachable property type carries the constraint — the
         // shared graph walk must still mark the request validatable.
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record CustomerAddress {
-                    [StringLength(64)]
-                    public required string Street { get; init; }
-                }
+                                  public sealed record CustomerAddress {
+                                      [StringLength(64)]
+                                      public required string Street { get; init; }
+                                  }
 
-                public sealed record RegisterCustomerCommand : ICommand {
-                    public required CustomerAddress Address { get; init; }
-                }
+                                  public sealed record RegisterCustomerCommand : ICommand {
+                                      public required CustomerAddress Address { get; init; }
+                                  }
 
-                public sealed record RegisterCustomerResponse(string Id);
+                                  public sealed record RegisterCustomerResponse(string Id);
 
-                public sealed class RegisterCustomerHandler
-                    : IHandler<RegisterCustomerCommand, Result<RegisterCustomerResponse>> {
-                    public ValueTask<Result<RegisterCustomerResponse>> HandleAsync(RegisterCustomerCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<RegisterCustomerResponse>.Success(new RegisterCustomerResponse("x")));
-                }
-            }
-            """;
+                                  public sealed class RegisterCustomerHandler
+                                      : IHandler<RegisterCustomerCommand, Result<RegisterCustomerResponse>> {
+                                      public ValueTask<Result<RegisterCustomerResponse>> HandleAsync(RegisterCustomerCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<RegisterCustomerResponse>.Success(new RegisterCustomerResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, _) = Run(source);
         var generated = GetGenerated(result, "Sample_App_RegisterCustomerHandler.g.cs");
@@ -154,21 +154,21 @@ public sealed class ValidationDecoratorGeneratorTests {
     [Fact]
     public void DoesNotAttachToUnannotatedHandler() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record ReadThingQuery(int Id) : IQuery;
-                public sealed record ReadThingResponse(string Name);
+                                  public sealed record ReadThingQuery(int Id) : IQuery;
+                                  public sealed record ReadThingResponse(string Name);
 
-                public sealed class ReadThingHandler : IHandler<ReadThingQuery, Result<ReadThingResponse>> {
-                    public ValueTask<Result<ReadThingResponse>> HandleAsync(ReadThingQuery request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<ReadThingResponse>.Success(new ReadThingResponse("x")));
-                }
-            }
-            """;
+                                  public sealed class ReadThingHandler : IHandler<ReadThingQuery, Result<ReadThingResponse>> {
+                                      public ValueTask<Result<ReadThingResponse>> HandleAsync(ReadThingQuery request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<ReadThingResponse>.Success(new ReadThingResponse("x")));
+                                  }
+                              }
+                              """;
 
         var (result, _) = Run(source);
 
@@ -178,26 +178,26 @@ public sealed class ValidationDecoratorGeneratorTests {
     [Fact]
     public void ReportsElval001WhenResponseCannotRepresentFailure() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record CreateThingCommand : ICommand {
-                    [StringLength(100)]
-                    public required string Name { get; init; }
-                }
+                                  public sealed record CreateThingCommand : ICommand {
+                                      [StringLength(100)]
+                                      public required string Name { get; init; }
+                                  }
 
-                public sealed record PlainResponse(string Name);
+                                  public sealed record PlainResponse(string Name);
 
-                // Bare (non-Result) response: the validation check cannot short-circuit -> ELVAL001.
-                public sealed class PlainHandler : IHandler<CreateThingCommand, PlainResponse> {
-                    public ValueTask<PlainResponse> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(new PlainResponse("x"));
-                }
-            }
-            """;
+                                  // Bare (non-Result) response: the validation check cannot short-circuit -> ELVAL001.
+                                  public sealed class PlainHandler : IHandler<CreateThingCommand, PlainResponse> {
+                                      public ValueTask<PlainResponse> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(new PlainResponse("x"));
+                                  }
+                              }
+                              """;
 
         var (result, diagnostics) = Run(source);
 
@@ -210,27 +210,27 @@ public sealed class ValidationDecoratorGeneratorTests {
         // Attach is conditional on the enforcement package: without the Elarion.Validation reference no
         // decorator attaches (the ValidationResolverGenerator's ELVAL002 makes the gap visible).
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record CreateThingCommand : ICommand {
-                    [StringLength(100)]
-                    public required string Name { get; init; }
-                }
+                                  public sealed record CreateThingCommand : ICommand {
+                                      [StringLength(100)]
+                                      public required string Name { get; init; }
+                                  }
 
-                public sealed record CreateThingResponse(string Name);
+                                  public sealed record CreateThingResponse(string Name);
 
-                public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<CreateThingResponse>> {
-                    public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<CreateThingResponse>.Success(new CreateThingResponse("x")));
-                }
-            }
-            """;
+                                  public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<CreateThingResponse>> {
+                                      public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<CreateThingResponse>.Success(new CreateThingResponse("x")));
+                                  }
+                              }
+                              """;
 
-        var (result, diagnostics) = Run(source, excludeElarionValidationReference: true);
+        var (result, diagnostics) = Run(source, true);
 
         GetGenerated(result, "Sample_App_CreateThingHandler.g.cs").Should().NotContain("ValidationDecorator");
         diagnostics.Should().NotContain(d => d.Id == "ELVAL001");
@@ -239,25 +239,25 @@ public sealed class ValidationDecoratorGeneratorTests {
     [Fact]
     public void IrrelevantEditReusesPipeline() {
         const string source = Preamble +
-            """
+                              """
 
-            namespace Sample.App {
-                [AppModule("App")]
-                public static class AppModule { }
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
 
-                public sealed record CreateThingCommand : ICommand {
-                    [StringLength(100, MinimumLength = 3)]
-                    public required string Name { get; init; }
-                }
+                                  public sealed record CreateThingCommand : ICommand {
+                                      [StringLength(100, MinimumLength = 3)]
+                                      public required string Name { get; init; }
+                                  }
 
-                public sealed record CreateThingResponse(string Name);
+                                  public sealed record CreateThingResponse(string Name);
 
-                public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<CreateThingResponse>> {
-                    public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
-                        ValueTask.FromResult(Result<CreateThingResponse>.Success(new CreateThingResponse("x")));
-                }
-            }
-            """;
+                                  public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<CreateThingResponse>> {
+                                      public ValueTask<Result<CreateThingResponse>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<CreateThingResponse>.Success(new CreateThingResponse("x")));
+                                  }
+                              }
+                              """;
 
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new HandlerRegistrationGenerator(), source, "Handlers");
@@ -280,21 +280,24 @@ public sealed class ValidationDecoratorGeneratorTests {
         return (result, result.Diagnostics);
     }
 
-    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) =>
-        result.GeneratedTrees
+    private static string GetGenerated(GeneratorDriverRunResult result, string fileName) {
+        return result.GeneratedTrees
             .Single(tree => string.Equals(Path.GetFileName(tree.FilePath), fileName, StringComparison.Ordinal))
             .GetText()
             .ToString();
+    }
 
     private static void AssertCompiles(string source, string generated) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var compilation = CSharpCompilation.Create(
             "ValidationDecoratorGeneratorCompile",
             [
-                CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
-                CSharpSyntaxTree.ParseText(generated, parseOptions, cancellationToken: TestContext.Current.CancellationToken)
+                CSharpSyntaxTree.ParseText(source, parseOptions,
+                    cancellationToken: TestContext.Current.CancellationToken),
+                CSharpSyntaxTree.ParseText(generated, parseOptions,
+                    cancellationToken: TestContext.Current.CancellationToken)
             ],
-            CreateMetadataReferences(excludeElarionValidation: false),
+            CreateMetadataReferences(false),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         compilation.GetDiagnostics(TestContext.Current.CancellationToken)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
@@ -307,7 +310,8 @@ public sealed class ValidationDecoratorGeneratorTests {
         return trustedPlatformAssemblies!
             .Split(Path.PathSeparator)
             .Where(path => !excludeElarionValidation ||
-                !string.Equals(Path.GetFileName(path), "Elarion.Validation.dll", StringComparison.OrdinalIgnoreCase))
+                           !string.Equals(Path.GetFileName(path), "Elarion.Validation.dll",
+                               StringComparison.OrdinalIgnoreCase))
             .Select(path => MetadataReference.CreateFromFile(path))
             .ToArray();
     }

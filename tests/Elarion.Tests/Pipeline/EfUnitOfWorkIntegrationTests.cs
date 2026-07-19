@@ -16,7 +16,9 @@ public sealed class EfUnitOfWorkIntegrationTests(PostgreSqlUnitOfWorkFixture fix
     : IClassFixture<PostgreSqlUnitOfWorkFixture> {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static string NewId() => Guid.NewGuid().ToString("N");
+    private static string NewId() {
+        return Guid.NewGuid().ToString("N");
+    }
 
     [Fact]
     public async Task Commit_FlushesPendingChanges_WhenHandlerForgotToSave() {
@@ -73,7 +75,7 @@ public sealed class EfUnitOfWorkIntegrationTests(PostgreSqlUnitOfWorkFixture fix
         // A nested [Idempotent] command must not block unbounded on the claim row while holding outer locks:
         // the nested branch applies the requested lock_timeout too.
         await using (var inner = await uow.BeginAsync(
-            new UnitOfWorkOptions { LockTimeout = TimeSpan.FromSeconds(1) }, Ct)) {
+                         new UnitOfWorkOptions { LockTimeout = TimeSpan.FromSeconds(1) }, Ct)) {
             (await CurrentLockTimeoutAsync(context)).Should().Be("1s");
             await inner.CommitAsync(Ct);
         }
@@ -94,7 +96,7 @@ public sealed class EfUnitOfWorkIntegrationTests(PostgreSqlUnitOfWorkFixture fix
         var ambient = await CurrentLockTimeoutAsync(context);
 
         await using (var inner = await uow.BeginAsync(
-            new UnitOfWorkOptions { LockTimeout = TimeSpan.FromSeconds(1) }, Ct)) {
+                         new UnitOfWorkOptions { LockTimeout = TimeSpan.FromSeconds(1) }, Ct)) {
             (await CurrentLockTimeoutAsync(context)).Should().Be("1s");
             // Rolling back to the savepoint (created before the SET LOCAL) reverts the timeout implicitly.
             await inner.RollbackAsync(Ct);
@@ -104,10 +106,11 @@ public sealed class EfUnitOfWorkIntegrationTests(PostgreSqlUnitOfWorkFixture fix
         await outer.CommitAsync(Ct);
     }
 
-    private static Task<string> CurrentLockTimeoutAsync(UnitOfWorkDbContext context) =>
-        context.Database
+    private static Task<string> CurrentLockTimeoutAsync(UnitOfWorkDbContext context) {
+        return context.Database
             .SqlQueryRaw<string>("SELECT current_setting('lock_timeout') AS \"Value\"")
             .SingleAsync(Ct);
+    }
 
     [Fact]
     public async Task NestedScope_Rollback_DiscardsOnlyInnerWrites() {

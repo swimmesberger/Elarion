@@ -67,8 +67,8 @@ public static class ElarionMcpServiceExtensions {
         Action<ElarionMcpOptions> configure) {
         ArgumentNullException.ThrowIfNull(registerHandlers);
 
-        services.AddElarionHandlerDispatcher(
-            (dispatcher, sp) => registerHandlers(dispatcher, sp.GetRequiredService<IConfiguration>()));
+        services.AddElarionHandlerDispatcher((dispatcher, sp) =>
+            registerHandlers(dispatcher, sp.GetRequiredService<IConfiguration>()));
         return services.AddElarionMcpCore(metadata, configure);
     }
 
@@ -81,10 +81,9 @@ public static class ElarionMcpServiceExtensions {
 
         var options = new ElarionMcpOptions();
         configure(options);
-        if (string.IsNullOrWhiteSpace(options.ServerName)) {
+        if (string.IsNullOrWhiteSpace(options.ServerName))
             throw new InvalidOperationException(
                 $"{nameof(ElarionMcpOptions)}.{nameof(ElarionMcpOptions.ServerName)} must be set.");
-        }
 
         services.AddElarionJson();
         services.AddSingleton(options);
@@ -95,7 +94,7 @@ public static class ElarionMcpServiceExtensions {
         var builder = services
             .AddMcpServer(server => server.ServerInfo = new Implementation {
                 Name = options.ServerName,
-                Version = options.ServerVersion,
+                Version = options.ServerVersion
             })
             .WithHttpTransport();
 
@@ -107,16 +106,16 @@ public static class ElarionMcpServiceExtensions {
             var toolName = method.ToolName is { Length: > 0 } overridden
                 ? overridden
                 : options.ToolNameTransform(method.MethodName);
-            if (!toolNamesSeen.TryAdd(toolName, method.MethodName)) {
+            if (!toolNamesSeen.TryAdd(toolName, method.MethodName))
                 throw new InvalidOperationException(
                     $"MCP tool name '{toolName}' is produced by both '{toolNamesSeen[toolName]}' and '{method.MethodName}'. " +
                     $"Disambiguate via [McpHandler(ToolName = ...)] or {nameof(ElarionMcpOptions)}.{nameof(ElarionMcpOptions.ToolNameTransform)}.");
-            }
 
             var capturedMethod = method;
             var capturedName = toolName;
             services.AddSingleton<McpServerTool>(sp =>
-                BuildTool(capturedMethod, capturedName, sp.GetRequiredService<IElarionJsonSerialization>().Options, options));
+                BuildTool(capturedMethod, capturedName, sp.GetRequiredService<IElarionJsonSerialization>().Options,
+                    options));
         }
 
         return builder;
@@ -142,7 +141,7 @@ public static class ElarionMcpServiceExtensions {
         var protocolTool = new Tool {
             Name = toolName,
             Description = string.IsNullOrEmpty(method.Description) ? null : method.Description,
-            InputSchema = inputSchema,
+            InputSchema = inputSchema
         };
 
         return new ElarionMcpServerTool(method.MethodName, protocolTool, options.IncludeErrorDetails);
@@ -166,11 +165,10 @@ public static class ElarionMcpServiceExtensions {
 
             // Fail fast on a duplicate tool name (e.g. "a.b" and "a_b" both → "a_b" under the default transform)
             // rather than letting it surface as a confusing MCP handshake error.
-            if (!toolNamesSeen.TryAdd(toolName, method.MethodName)) {
+            if (!toolNamesSeen.TryAdd(toolName, method.MethodName))
                 throw new InvalidOperationException(
                     $"MCP tool name '{toolName}' is produced by both '{toolNamesSeen[toolName]}' and '{method.MethodName}'. " +
                     $"Disambiguate via [McpHandler(ToolName = ...)] or {nameof(ElarionMcpOptions)}.{nameof(ElarionMcpOptions.ToolNameTransform)}.");
-            }
 
             tools.Add(BuildTool(method, toolName, serializerOptions, options));
         }

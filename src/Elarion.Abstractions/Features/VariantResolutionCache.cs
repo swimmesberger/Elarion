@@ -41,7 +41,8 @@ public sealed class VariantResolutionCache {
             lock (_resolved) {
                 _resolved[typeof(TService)] = instance;
             }
-        } finally {
+        }
+        finally {
             _gate.Release();
         }
     }

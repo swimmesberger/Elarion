@@ -10,21 +10,21 @@ internal sealed record CommandLineOptions(
     string[] ApplicationArguments,
     bool ShowHelp) {
     public const string HelpText = """
-        Elarion JSON-RPC schema generation tool.
+                                   Elarion JSON-RPC schema generation tool.
 
-        Required:
-          --assembly <path>       Path to the application assembly to load.
-          --output <path>         Path where rpc-schema.json should be written.
+                                   Required:
+                                     --assembly <path>       Path to the application assembly to load.
+                                     --output <path>         Path where rpc-schema.json should be written.
 
-        Optional:
-          --file-list <path>      Path to write a newline-delimited list of generated files.
-          --project <name>        Project name for diagnostics.
-          --framework <name>      Target framework moniker for diagnostics.
-          --environment <name>    DOTNET_ENVIRONMENT/ASPNETCORE_ENVIRONMENT value. Defaults to Development.
-          --help                  Show help.
+                                   Optional:
+                                     --file-list <path>      Path to write a newline-delimited list of generated files.
+                                     --project <name>        Project name for diagnostics.
+                                     --framework <name>      Target framework moniker for diagnostics.
+                                     --environment <name>    DOTNET_ENVIRONMENT/ASPNETCORE_ENVIRONMENT value. Defaults to Development.
+                                     --help                  Show help.
 
-        Any arguments after -- are passed to the application entry point.
-        """;
+                                   Any arguments after -- are passed to the application entry point.
+                                   """;
 
     public static CommandLineOptions Parse(string[] args) {
         string? assemblyPath = null;
@@ -42,17 +42,16 @@ internal sealed record CommandLineOptions(
                 break;
             }
 
-            if (arg is "--help" or "-h") {
+            if (arg is "--help" or "-h")
                 return new CommandLineOptions(
-                    AssemblyPath: string.Empty,
-                    OutputPath: string.Empty,
-                    FileListPath: null,
-                    ProjectName: null,
-                    FrameworkName: null,
-                    EnvironmentName: environmentName,
-                    ApplicationArguments: applicationArguments,
-                    ShowHelp: true);
-            }
+                    string.Empty,
+                    string.Empty,
+                    null,
+                    null,
+                    null,
+                    environmentName,
+                    applicationArguments,
+                    true);
 
             var value = ReadValue(args, ref i, arg);
             switch (arg) {
@@ -79,13 +78,11 @@ internal sealed record CommandLineOptions(
             }
         }
 
-        if (string.IsNullOrWhiteSpace(assemblyPath)) {
+        if (string.IsNullOrWhiteSpace(assemblyPath))
             throw new CommandLineException("Missing required option '--assembly <path>'.");
-        }
 
-        if (string.IsNullOrWhiteSpace(outputPath)) {
+        if (string.IsNullOrWhiteSpace(outputPath))
             throw new CommandLineException("Missing required option '--output <path>'.");
-        }
 
         return new CommandLineOptions(
             assemblyPath,
@@ -95,13 +92,12 @@ internal sealed record CommandLineOptions(
             frameworkName,
             environmentName,
             applicationArguments,
-            ShowHelp: false);
+            false);
     }
 
     private static string ReadValue(string[] args, ref int index, string option) {
-        if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal)) {
+        if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
             throw new CommandLineException($"Missing value for option '{option}'.");
-        }
 
         index++;
         return args[index];

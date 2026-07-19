@@ -14,17 +14,25 @@ public sealed class StreamFeatureGateDecorator<TRequest, TItem>(
     IFeatureFlagService features
 ) : IStreamHandler<TRequest, TItem> {
     public async ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) {
-        foreach (var gate in metadata.HandlerType.GetCustomAttributes<FeatureGateAttribute>(inherit: true)) {
+        foreach (var gate in metadata.HandlerType.GetCustomAttributes<FeatureGateAttribute>(true)) {
             // Generator diagnostics make this visible at build time. At runtime an empty gate is deliberately
             // inert (including Negate=true), matching FeatureGateDecorator's unary semantics.
-            var effectiveFeatures = gate.Features.Where(static feature => !string.IsNullOrWhiteSpace(feature)).ToArray();
+            var effectiveFeatures =
+                gate.Features.Where(static feature => !string.IsNullOrWhiteSpace(feature)).ToArray();
             if (effectiveFeatures.Length == 0)
                 continue;
             var enabled = gate.Requirement == FeatureRequirement.All;
             foreach (var feature in effectiveFeatures) {
                 var current = await features.IsEnabledAsync(feature, ct).ConfigureAwait(false);
-                if (gate.Requirement == FeatureRequirement.All && !current) { enabled = false; break; }
-                if (gate.Requirement == FeatureRequirement.Any && current) { enabled = true; break; }
+                if (gate.Requirement == FeatureRequirement.All && !current) {
+                    enabled = false;
+                    break;
+                }
+
+                if (gate.Requirement == FeatureRequirement.Any && current) {
+                    enabled = true;
+                    break;
+                }
             }
 
             if (gate.Negate ? enabled : !enabled) {

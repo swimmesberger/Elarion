@@ -61,10 +61,10 @@ public sealed class PostgreSqlSqlMapperFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
-    public NpgsqlConnection CreateConnection() => new(ConnectionString);
+    public NpgsqlConnection CreateConnection() {
+        return new NpgsqlConnection(ConnectionString);
+    }
 }

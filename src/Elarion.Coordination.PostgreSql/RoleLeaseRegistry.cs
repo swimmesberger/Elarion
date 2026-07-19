@@ -8,5 +8,7 @@ internal sealed class RoleLeaseRegistry : IRoleLeaseRegistry {
 
     public IReadOnlyCollection<IRoleLease> Leases => _leases.Values.ToArray();
 
-    public void Add(IRoleLease lease) => _leases.TryAdd(lease.Role, lease);
+    public void Add(IRoleLease lease) {
+        _leases.TryAdd(lease.Role, lease);
+    }
 }

@@ -17,9 +17,7 @@ internal sealed class ElarionOperationIdDocumentTransformer : IOpenApiDocumentTr
         OpenApiDocument document,
         OpenApiDocumentTransformerContext context,
         CancellationToken cancellationToken) {
-        if (document.Paths is null) {
-            return Task.CompletedTask;
-        }
+        if (document.Paths is null) return Task.CompletedTask;
 
         var operations = document.Paths.Values
             .Where(pathItem => pathItem.Operations is not null)
@@ -27,7 +25,8 @@ internal sealed class ElarionOperationIdDocumentTransformer : IOpenApiDocumentTr
             .Where(operation => !string.IsNullOrEmpty(operation.OperationId))
             .ToList();
 
-        var candidates = operations.ToDictionary(operation => operation, operation => Normalize(operation.OperationId!));
+        var candidates =
+            operations.ToDictionary(operation => operation, operation => Normalize(operation.OperationId!));
 
         var occurrences = candidates.Values
             .GroupBy(candidate => candidate, StringComparer.Ordinal)
@@ -35,9 +34,7 @@ internal sealed class ElarionOperationIdDocumentTransformer : IOpenApiDocumentTr
 
         foreach (var operation in operations) {
             var candidate = candidates[operation];
-            if (occurrences[candidate] == 1) {
-                operation.OperationId = candidate;
-            }
+            if (occurrences[candidate] == 1) operation.OperationId = candidate;
         }
 
         return Task.CompletedTask;
@@ -47,12 +44,11 @@ internal sealed class ElarionOperationIdDocumentTransformer : IOpenApiDocumentTr
         var lastDot = operationId.LastIndexOf('.');
         var simple = lastDot >= 0 ? operationId[(lastDot + 1)..] : operationId;
 
-        foreach (var suffix in StrippedSuffixes) {
+        foreach (var suffix in StrippedSuffixes)
             if (simple.Length > suffix.Length && simple.EndsWith(suffix, StringComparison.Ordinal)) {
                 simple = simple[..^suffix.Length];
                 break;
             }
-        }
 
         return simple;
     }

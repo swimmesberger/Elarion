@@ -1,9 +1,9 @@
 // The application shell. The sidebar is not hard-coded: it renders whatever the enabled modules
 // contributed to the `sidebarItems` point, so adding a module never edits this file — the
 // review-isolation test of ADR-0032, extended to the frontend.
-import { Link, Outlet } from "@tanstack/react-router"
-import { useContributions } from "@swimmesberger/elarion-contributions/react"
-import { sidebarItems } from "@/platform/points"
+import {Link, Outlet} from "@tanstack/react-router"
+import {useContributions} from "@swimmesberger/elarion-contributions/react"
+import {sidebarItems} from "@/platform/points"
 
 export function AppShell() {
   const items = useContributions(sidebarItems)
@@ -26,14 +26,14 @@ export function AppShell() {
                 className: "bg-[var(--color-accent)] font-medium text-[var(--color-foreground)]",
               }}
             >
-              <item.icon className="h-4 w-4" />
+              <item.icon className="h-4 w-4"/>
               {item.label}
             </Link>
           ))}
         </nav>
       </aside>
       <main className="flex-1 px-8 py-10">
-        <Outlet />
+        <Outlet/>
       </main>
     </div>
   )

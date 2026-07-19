@@ -45,8 +45,7 @@ namespace Elarion.Benchmarks.Handlers;
 /// </summary>
 [MemoryDiagnoser]
 public class HandlerPipelineBenchmarks {
-    [Params(false, true)]
-    public bool TracingListener { get; set; }
+    [Params(false, true)] public bool TracingListener { get; set; }
 
     private ServiceProvider _provider = null!;
     private IServiceScope _scope = null!;
@@ -64,7 +63,8 @@ public class HandlerPipelineBenchmarks {
             // call (its HasListeners() fast path is off), so these rows show the active-tracing cost.
             _listener = new ActivityListener {
                 ShouldListenTo = source => source.Name == HandlerTelemetry.ActivitySourceName,
-                Sample = static (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+                Sample = static (ref ActivityCreationOptions<ActivityContext> _) =>
+                    ActivitySamplingResult.AllDataAndRecorded
             };
             ActivitySource.AddActivityListener(_listener);
         }

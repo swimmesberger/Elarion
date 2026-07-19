@@ -57,15 +57,11 @@ internal sealed class PostgreSqlClientEventBroadcaster : IClientEventBroadcaster
     }
 
     public void Dispose() {
-        if (_ownsDataSource) {
-            DataSource.Dispose();
-        }
+        if (_ownsDataSource) DataSource.Dispose();
     }
 
     public ValueTask DisposeAsync() {
-        if (_ownsDataSource) {
-            return DataSource.DisposeAsync();
-        }
+        if (_ownsDataSource) return DataSource.DisposeAsync();
 
         return ValueTask.CompletedTask;
     }

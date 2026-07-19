@@ -2,18 +2,18 @@
 // action on the Clients table, wired by importing the Clients module's published token (its frontend
 // [ModuleContract]). The lazy `component` keeps the dialog out of the initial bundle and out of Clients'
 // chunk: contributing costs the token import, nothing more.
-import { createRoute, lazyRouteComponent } from "@tanstack/react-router"
-import { FilePlus2, ReceiptText } from "lucide-react"
-import { lazy } from "react"
-import { Modules, Permissions } from "@/generated/session-client"
-import { contribute, defineModule } from "@/platform/contributions"
-import { sidebarItems } from "@/platform/points"
-import { redirectUnless, rootRoute } from "@/platform/router"
-import { clientRowActions } from "@/modules/clients"
+import {createRoute, lazyRouteComponent} from "@tanstack/react-router"
+import {FilePlus2, ReceiptText} from "lucide-react"
+import {lazy} from "react"
+import {Modules, Permissions} from "@/generated/session-client"
+import {contribute, defineModule} from "@/platform/contributions"
+import {sidebarItems} from "@/platform/points"
+import {redirectUnless, rootRoute} from "@/platform/router"
+import {clientRowActions} from "@/modules/clients"
 
 export const invoicingManifest = defineModule({
   name: Modules.Invoicing,
-  when: { module: Modules.Invoicing },
+  when: {module: Modules.Invoicing},
   contributes: [
     contribute(sidebarItems, [
       {
@@ -22,7 +22,7 @@ export const invoicingManifest = defineModule({
         icon: ReceiptText,
         to: "/invoices",
         order: 20,
-        when: { permission: Permissions.invoices.read },
+        when: {permission: Permissions.invoices.read},
       },
     ]),
     contribute(clientRowActions, [
@@ -37,7 +37,7 @@ export const invoicingManifest = defineModule({
             default: m.CreateInvoiceForClient,
           }))
         ),
-        when: { permission: Permissions.invoices.write },
+        when: {permission: Permissions.invoices.write},
       },
     ]),
   ],
@@ -50,7 +50,7 @@ export const invoicingRoute = createRoute({
   // semantics — so a deep link into a hidden module bounces home. UX only: the handlers behind this page
   // still enforce [RequirePermission] on every call.
   beforeLoad: redirectUnless(
-    { module: Modules.Invoicing, permission: Permissions.invoices.read },
+    {module: Modules.Invoicing, permission: Permissions.invoices.read},
     "/"
   ),
   component: lazyRouteComponent(() => import("./InvoicesPage"), "InvoicesPage"),

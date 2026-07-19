@@ -19,7 +19,8 @@ namespace Elarion.Settings.PostgreSql;
 /// <c>PostgreSqlTransactionalSettingsChangeNotifier</c> on its own connection, so a transactional write is
 /// delivered only on commit.
 /// </remarks>
-public sealed class PostgreSqlSettingsChangeSource : ISettingsChangeSource, ISettingsChangePublisher, IDisposable, IAsyncDisposable {
+public sealed class PostgreSqlSettingsChangeSource : ISettingsChangeSource, ISettingsChangePublisher, IDisposable,
+    IAsyncDisposable {
     private readonly ConcurrentDictionary<WatchKey, TokenHolder> _holders = new();
     private readonly bool _ownsDataSource;
     private readonly PostgreSqlSettingsChangeOptions _options;
@@ -58,7 +59,8 @@ public sealed class PostgreSqlSettingsChangeSource : ISettingsChangeSource, ISet
         try {
             using var command = DataSource.CreateCommand("SELECT pg_notify($1, $2)");
             command.Parameters.Add(new NpgsqlParameter { Value = _options.ChannelName });
-            command.Parameters.Add(new NpgsqlParameter { Value = PostgreSqlSettingsChangePayload.Serialize(scope, key) });
+            command.Parameters.Add(
+                new NpgsqlParameter { Value = PostgreSqlSettingsChangePayload.Serialize(scope, key) });
             command.ExecuteNonQuery();
         }
         catch (NpgsqlException exception) {
@@ -73,11 +75,9 @@ public sealed class PostgreSqlSettingsChangeSource : ISettingsChangeSource, ISet
 
     /// <summary>Fires every watch whose scope and prefix match a received notification.</summary>
     internal void FireMatching(SettingsScope scope, string key) {
-        foreach (var (watchKey, holder) in _holders) {
-            if (watchKey.Scope == scope && SettingsPath.IsUnderPrefix(key, watchKey.Prefix)) {
+        foreach (var (watchKey, holder) in _holders)
+            if (watchKey.Scope == scope && SettingsPath.IsUnderPrefix(key, watchKey.Prefix))
                 holder.Fire();
-            }
-        }
     }
 
     /// <summary>
@@ -88,23 +88,17 @@ public sealed class PostgreSqlSettingsChangeSource : ISettingsChangeSource, ISet
     /// always safe — watchers re-read through the store.
     /// </summary>
     internal void FireAll() {
-        foreach (var holder in _holders.Values) {
-            holder.Fire();
-        }
+        foreach (var holder in _holders.Values) holder.Fire();
     }
 
     /// <inheritdoc />
     public void Dispose() {
-        if (_ownsDataSource) {
-            DataSource.Dispose();
-        }
+        if (_ownsDataSource) DataSource.Dispose();
     }
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() {
-        if (_ownsDataSource) {
-            return DataSource.DisposeAsync();
-        }
+        if (_ownsDataSource) return DataSource.DisposeAsync();
 
         return ValueTask.CompletedTask;
     }
@@ -116,7 +110,9 @@ public sealed class PostgreSqlSettingsChangeSource : ISettingsChangeSource, ISet
     private sealed class TokenHolder {
         private CancellationTokenSource _cts = new();
 
-        public IChangeToken GetToken() => new CancellationChangeToken(Volatile.Read(ref _cts).Token);
+        public IChangeToken GetToken() {
+            return new CancellationChangeToken(Volatile.Read(ref _cts).Token);
+        }
 
         public void Fire() {
             var previous = Interlocked.Exchange(ref _cts, new CancellationTokenSource());

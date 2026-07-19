@@ -7,13 +7,11 @@ using Xunit;
 
 namespace Elarion.Tests.Paging;
 
-public sealed class QueryablePagingExtensionsTests
-{
+public sealed class QueryablePagingExtensionsTests {
     private static readonly DateTime BaseTime = new(2026, 6, 19, 0, 0, 0, DateTimeKind.Utc);
 
     [Fact]
-    public async Task ToKeysetPageAsync_FirstPage_ReturnsOrderedHeadWithNextCursor()
-    {
+    public async Task ToKeysetPageAsync_FirstPage_ReturnsOrderedHeadWithNextCursor() {
         var data = Items(10).AsAsyncQueryable();
 
         var page = await data.ToKeysetPageAsync(
@@ -27,14 +25,14 @@ public sealed class QueryablePagingExtensionsTests
     }
 
     [Fact]
-    public async Task ToKeysetPageAsync_AfterCursor_ReturnsNextPage()
-    {
+    public async Task ToKeysetPageAsync_AfterCursor_ReturnsNextPage() {
         var data = Items(10).AsAsyncQueryable();
 
         var first = await data.ToKeysetPageAsync(
             new KeysetPageRequest { Size = 3 }, TestEntityKeyset.Definition, Project, cancellationToken: Token);
         var second = await data.ToKeysetPageAsync(
-            new KeysetPageRequest { After = first.EndCursor, Size = 3 }, TestEntityKeyset.Definition, Project, cancellationToken: Token);
+            new KeysetPageRequest { After = first.EndCursor, Size = 3 }, TestEntityKeyset.Definition, Project,
+            cancellationToken: Token);
 
         second.Items.Select(i => i.Name).Should().Equal("item3", "item4", "item5");
         second.HasPrevious.Should().BeTrue();
@@ -42,16 +40,17 @@ public sealed class QueryablePagingExtensionsTests
     }
 
     [Fact]
-    public async Task ToKeysetPageAsync_BeforeCursor_ReturnsPriorPageInNaturalOrder()
-    {
+    public async Task ToKeysetPageAsync_BeforeCursor_ReturnsPriorPageInNaturalOrder() {
         var data = Items(10).AsAsyncQueryable();
 
         var first = await data.ToKeysetPageAsync(
             new KeysetPageRequest { Size = 3 }, TestEntityKeyset.Definition, Project, cancellationToken: Token);
         var second = await data.ToKeysetPageAsync(
-            new KeysetPageRequest { After = first.EndCursor, Size = 3 }, TestEntityKeyset.Definition, Project, cancellationToken: Token);
+            new KeysetPageRequest { After = first.EndCursor, Size = 3 }, TestEntityKeyset.Definition, Project,
+            cancellationToken: Token);
         var back = await data.ToKeysetPageAsync(
-            new KeysetPageRequest { Before = second.StartCursor, Size = 3 }, TestEntityKeyset.Definition, Project, cancellationToken: Token);
+            new KeysetPageRequest { Before = second.StartCursor, Size = 3 }, TestEntityKeyset.Definition, Project,
+            cancellationToken: Token);
 
         back.Items.Select(i => i.Name).Should().Equal("item0", "item1", "item2");
         back.HasNext.Should().BeTrue();
@@ -59,21 +58,17 @@ public sealed class QueryablePagingExtensionsTests
     }
 
     [Fact]
-    public async Task ToKeysetPageAsync_PageThroughAll_YieldsEveryItemOnceInOrder()
-    {
+    public async Task ToKeysetPageAsync_PageThroughAll_YieldsEveryItemOnceInOrder() {
         var data = Items(10).AsAsyncQueryable();
         var collected = new List<string>();
         string? after = null;
 
-        while (true)
-        {
+        while (true) {
             var page = await data.ToKeysetPageAsync(
-                new KeysetPageRequest { After = after, Size = 4 }, TestEntityKeyset.Definition, Project, cancellationToken: Token);
+                new KeysetPageRequest { After = after, Size = 4 }, TestEntityKeyset.Definition, Project,
+                cancellationToken: Token);
             collected.AddRange(page.Items.Select(i => i.Name));
-            if (!page.HasNext)
-            {
-                break;
-            }
+            if (!page.HasNext) break;
 
             after = page.EndCursor;
         }
@@ -82,8 +77,7 @@ public sealed class QueryablePagingExtensionsTests
     }
 
     [Fact]
-    public async Task ToKeysetPageAsync_EmptySource_ReturnsEmptyPage()
-    {
+    public async Task ToKeysetPageAsync_EmptySource_ReturnsEmptyPage() {
         var data = Items(0).AsAsyncQueryable();
 
         var page = await data.ToKeysetPageAsync(
@@ -97,20 +91,18 @@ public sealed class QueryablePagingExtensionsTests
     }
 
     [Fact]
-    public async Task ToKeysetPageAsync_SizeExceedsMax_ClampsToMax()
-    {
+    public async Task ToKeysetPageAsync_SizeExceedsMax_ClampsToMax() {
         var data = Items(10).AsAsyncQueryable();
 
         var page = await data.ToKeysetPageAsync(
-            new KeysetPageRequest { Size = 1000 }, TestEntityKeyset.Definition, Project, maxSize: 5, cancellationToken: Token);
+            new KeysetPageRequest { Size = 1000 }, TestEntityKeyset.Definition, Project, 5, Token);
 
         page.Items.Should().HaveCount(5);
         page.HasNext.Should().BeTrue();
     }
 
     [Fact]
-    public async Task ToKeysetPageAsync_MalformedCursor_ThrowsInsteadOfReturningFirstPage()
-    {
+    public async Task ToKeysetPageAsync_MalformedCursor_ThrowsInsteadOfReturningFirstPage() {
         var data = Items(10).AsAsyncQueryable();
 
         var act = async () => await data.ToKeysetPageAsync(
@@ -123,8 +115,7 @@ public sealed class QueryablePagingExtensionsTests
     }
 
     [Fact]
-    public async Task ToOffsetPageAsync_FirstPage_IncludesTotalAndPaging()
-    {
+    public async Task ToOffsetPageAsync_FirstPage_IncludesTotalAndPaging() {
         var data = Items(10).AsAsyncQueryable();
 
         var page = await data.ToOffsetPageAsync(
@@ -137,8 +128,7 @@ public sealed class QueryablePagingExtensionsTests
     }
 
     [Fact]
-    public async Task ToOffsetPageAsync_LastPage_HasNoNext()
-    {
+    public async Task ToOffsetPageAsync_LastPage_HasNoNext() {
         var data = Items(10).AsAsyncQueryable();
 
         var page = await data.ToOffsetPageAsync(
@@ -151,19 +141,18 @@ public sealed class QueryablePagingExtensionsTests
     }
 
     [Fact]
-    public async Task ToOffsetPageAsync_DescendingSort_OrdersByKeyDescending()
-    {
+    public async Task ToOffsetPageAsync_DescendingSort_OrdersByKeyDescending() {
         var data = Items(10).AsAsyncQueryable();
 
         var page = await data.ToOffsetPageAsync(
-            new OffsetPageRequest { Page = 1, Size = 2, Sort = "-createdAt" }, Project, DefaultSort, cancellationToken: Token);
+            new OffsetPageRequest { Page = 1, Size = 2, Sort = "-createdAt" }, Project, DefaultSort,
+            cancellationToken: Token);
 
         page.Items.Select(i => i.Name).Should().Equal("item9", "item8");
     }
 
     [Fact]
-    public async Task ToOffsetPageAsync_HostilePageNumber_ReturnsEmptyPageInsteadOfWrapping()
-    {
+    public async Task ToOffsetPageAsync_HostilePageNumber_ReturnsEmptyPageInsteadOfWrapping() {
         // (int.MaxValue - 1) * 2 wraps a 32-bit skip negative, which would silently serve the first
         // page; the clamped long computation lands past the data and yields the usual empty page.
         var data = Items(10).AsAsyncQueryable();
@@ -178,8 +167,7 @@ public sealed class QueryablePagingExtensionsTests
     }
 
     [Fact]
-    public async Task ToOffsetPageAsync_NegativePageNumber_ClampsToFirstPage()
-    {
+    public async Task ToOffsetPageAsync_NegativePageNumber_ClampsToFirstPage() {
         var data = Items(10).AsAsyncQueryable();
 
         var page = await data.ToOffsetPageAsync(
@@ -197,16 +185,15 @@ public sealed class QueryablePagingExtensionsTests
 
     private static readonly Expression<Func<TestEntity, TestDto>> Project = e => new TestDto(e.Id, e.Name);
 
-    private static IEnumerable<TestEntity> Items(int count) =>
-        Enumerable.Range(0, count).Select(i => new TestEntity
-        {
+    private static IEnumerable<TestEntity> Items(int count) {
+        return Enumerable.Range(0, count).Select(i => new TestEntity {
             Id = new Guid(i, 0, 0, new byte[8]),
             CreatedAt = BaseTime.AddMinutes(i),
-            Name = $"item{i}",
+            Name = $"item{i}"
         });
+    }
 
-    private sealed class TestEntity
-    {
+    private sealed class TestEntity {
         public Guid Id { get; init; }
         public DateTime CreatedAt { get; init; }
         public string Name { get; init; } = "";
@@ -215,23 +202,19 @@ public sealed class QueryablePagingExtensionsTests
     private sealed record TestDto(Guid Id, string Name);
 
     /// <summary>Hand-written mirror of the generator's emission for <c>[Keyset&lt;TestEntity&gt;("CreatedAt", "Id")]</c>.</summary>
-    private sealed class TestEntityKeyset : IKeysetDefinition<TestEntity>
-    {
+    private sealed class TestEntityKeyset : IKeysetDefinition<TestEntity> {
         private const uint CursorTag = 0xABCD1234u;
 
         public static TestEntityKeyset Definition { get; } = new();
 
-        public IOrderedQueryable<TestEntity> ApplyOrder(IQueryable<TestEntity> source, bool forward)
-            => forward
+        public IOrderedQueryable<TestEntity> ApplyOrder(IQueryable<TestEntity> source, bool forward) {
+            return forward
                 ? source.OrderBy(e => e.CreatedAt).ThenBy(e => e.Id)
                 : source.OrderByDescending(e => e.CreatedAt).ThenByDescending(e => e.Id);
+        }
 
-        public Expression<Func<TestEntity, bool>> BuildSeek(string cursor, bool forward)
-        {
-            if (!TryDecode(cursor, out var createdAt, out var id))
-            {
-                throw new MalformedCursorException();
-            }
+        public Expression<Func<TestEntity, bool>> BuildSeek(string cursor, bool forward) {
+            if (!TryDecode(cursor, out var createdAt, out var id)) throw new MalformedCursorException();
 
             return forward
                 ? e => e.CreatedAt > createdAt || (e.CreatedAt == createdAt && e.Id.CompareTo(id) > 0)
@@ -239,24 +222,22 @@ public sealed class QueryablePagingExtensionsTests
         }
 
         public async Task<IReadOnlyList<KeysetEntry<TDto>>> ToEntriesAsync<TDto>(
-            IQueryable<TestEntity> query, Expression<Func<TestEntity, TDto>> selector, CancellationToken cancellationToken)
-        {
+            IQueryable<TestEntity> query, Expression<Func<TestEntity, TDto>> selector,
+            CancellationToken cancellationToken) {
             var parameter = selector.Parameters[0];
             var projection = Expression.Lambda<Func<TestEntity, Projection<TDto>>>(
                 Expression.New(
                     typeof(Projection<TDto>).GetConstructors()[0],
-                    new Expression[]
-                    {
+                    new Expression[] {
                         selector.Body,
                         Expression.Property(parameter, nameof(TestEntity.CreatedAt)),
-                        Expression.Property(parameter, nameof(TestEntity.Id)),
+                        Expression.Property(parameter, nameof(TestEntity.Id))
                     }),
                 parameter);
 
             var rows = await query.Select(projection).ToListAsync(cancellationToken);
             var entries = new KeysetEntry<TDto>[rows.Count];
-            for (var i = 0; i < rows.Count; i++)
-            {
+            for (var i = 0; i < rows.Count; i++) {
                 var writer = new CursorWriter(CursorTag);
                 writer.WriteDateTime(rows[i].Key0);
                 writer.WriteGuid(rows[i].Key1);
@@ -266,22 +247,16 @@ public sealed class QueryablePagingExtensionsTests
             return entries;
         }
 
-        private static bool TryDecode(string cursor, out DateTime createdAt, out Guid id)
-        {
+        private static bool TryDecode(string cursor, out DateTime createdAt, out Guid id) {
             createdAt = default;
             id = default;
-            if (!CursorReader.TryCreate(cursor, CursorTag, out var reader))
-            {
-                return false;
-            }
+            if (!CursorReader.TryCreate(cursor, CursorTag, out var reader)) return false;
 
             return reader.TryReadDateTime(out createdAt) && reader.TryReadGuid(out id) && reader.AtEnd;
         }
 
-        private sealed class Projection<TDto>
-        {
-            public Projection(TDto item, DateTime key0, Guid key1)
-            {
+        private sealed class Projection<TDto> {
+            public Projection(TDto item, DateTime key0, Guid key1) {
                 Item = item;
                 Key0 = key0;
                 Key1 = key1;

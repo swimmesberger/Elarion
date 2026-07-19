@@ -44,22 +44,19 @@ public sealed class AzureBlobStore(
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal) {
             [AzureBlobMetadata.StateKey] = request.InitialState == BlobLifecycleState.Pending
                 ? AzureBlobMetadata.PendingState
-                : AzureBlobMetadata.CommittedState,
+                : AzureBlobMetadata.CommittedState
         };
         // Expiry is only retained for pending blobs so a committed blob is never accidentally reclaimed.
-        if (request.InitialState == BlobLifecycleState.Pending && request.ExpiresAt is { } expiresAt) {
+        if (request.InitialState == BlobLifecycleState.Pending && request.ExpiresAt is { } expiresAt)
             metadata[AzureBlobMetadata.ExpiresAtKey] = AzureBlobMetadata.FormatInstant(expiresAt);
-        }
 
-        if (request.OwnerId is { } ownerId) {
-            metadata[AzureBlobMetadata.OwnerKey] = AzureBlobMetadata.Encode(ownerId);
-        }
+        if (request.OwnerId is { } ownerId) metadata[AzureBlobMetadata.OwnerKey] = AzureBlobMetadata.Encode(ownerId);
 
         await blob.UploadAsync(
             content,
             new BlobUploadOptions {
                 HttpHeaders = new BlobHttpHeaders { ContentType = request.ContentType },
-                Metadata = metadata,
+                Metadata = metadata
             },
             cancellationToken);
 
@@ -81,7 +78,7 @@ public sealed class AzureBlobStore(
         try {
             var properties = await blob.GetPropertiesAsync(cancellationToken: cancellationToken);
             var content = await blob.OpenReadAsync(
-                new BlobOpenReadOptions(allowModifications: false), cancellationToken);
+                new BlobOpenReadOptions(false), cancellationToken);
             return new BlobDownload(ToMetadata(location, properties.Value), content);
         }
         catch (RequestFailedException ex) when (ex.Status == 404) {
@@ -109,9 +106,7 @@ public sealed class AzureBlobStore(
         var blob = client.GetBlobContainerClient(location.Container).GetBlobClient(location.Name);
 
         var response = await blob.DeleteIfExistsAsync(cancellationToken: cancellationToken);
-        if (response.Value) {
-            logger.LogInformation("Blob deleted: {BlobRef}", blobRef.Value);
-        }
+        if (response.Value) logger.LogInformation("Blob deleted: {BlobRef}", blobRef.Value);
 
         return response.Value;
     }
@@ -147,14 +142,11 @@ public sealed class AzureBlobStore(
                 var pageable = container.GetBlobsByHierarchyAsync(
                     BlobTraits.Metadata, BlobStates.None, delimiter, prefix, cancellationToken);
                 await foreach (var page in pageable.AsPages(continuationToken, request.PageSize)) {
-                    foreach (var item in page.Values) {
-                        if (item.IsPrefix) {
+                    foreach (var item in page.Values)
+                        if (item.IsPrefix)
                             prefixes.Add(item.Prefix);
-                        }
-                        else {
+                        else
                             AddIfMatchesState(blobs, request, item.Blob);
-                        }
-                    }
 
                     nextToken = string.IsNullOrEmpty(page.ContinuationToken) ? null : page.ContinuationToken;
                     break;
@@ -164,9 +156,7 @@ public sealed class AzureBlobStore(
                 var pageable = container.GetBlobsAsync(
                     new GetBlobsOptions { Traits = BlobTraits.Metadata, Prefix = prefix }, cancellationToken);
                 await foreach (var page in pageable.AsPages(continuationToken, request.PageSize)) {
-                    foreach (var item in page.Values) {
-                        AddIfMatchesState(blobs, request, item);
-                    }
+                    foreach (var item in page.Values) AddIfMatchesState(blobs, request, item);
 
                     nextToken = string.IsNullOrEmpty(page.ContinuationToken) ? null : page.ContinuationToken;
                     break;
@@ -180,16 +170,15 @@ public sealed class AzureBlobStore(
         return new BlobListing {
             Blobs = blobs,
             Prefixes = prefixes,
-            ContinuationToken = nextToken,
+            ContinuationToken = nextToken
         };
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<string>> ListContainersAsync(CancellationToken cancellationToken) {
         var names = new List<string>();
-        await foreach (var containerItem in client.GetBlobContainersAsync(cancellationToken: cancellationToken)) {
+        await foreach (var containerItem in client.GetBlobContainersAsync(cancellationToken: cancellationToken))
             names.Add(containerItem.Name);
-        }
 
         return names;
     }
@@ -198,9 +187,7 @@ public sealed class AzureBlobStore(
         var state = item.Metadata is not null && AzureBlobMetadata.IsPending(item.Metadata)
             ? BlobLifecycleState.Pending
             : BlobLifecycleState.Committed;
-        if (request.State is { } filter && filter != state) {
-            return;
-        }
+        if (request.State is { } filter && filter != state) return;
 
         var location = new AzureBlobLocation(request.Container, item.Name);
         blobs.Add(new BlobMetadata {
@@ -213,7 +200,7 @@ public sealed class AzureBlobStore(
             State = state,
             OwnerId = item.Metadata is null
                 ? null
-                : AzureBlobMetadata.Decode(item.Metadata, AzureBlobMetadata.OwnerKey),
+                : AzureBlobMetadata.Decode(item.Metadata, AzureBlobMetadata.OwnerKey)
         });
     }
 
@@ -224,7 +211,7 @@ public sealed class AzureBlobStore(
 
         // ETag-guarded metadata flip, retried on concurrent modification: the garbage collector deletes
         // only with the ETag it listed, so whichever of commit/collect lands first invalidates the other.
-        for (var attempt = 0; ; attempt++) {
+        for (var attempt = 0;; attempt++) {
             BlobProperties properties;
             try {
                 properties = await blob.GetPropertiesAsync(cancellationToken: cancellationToken);
@@ -233,12 +220,10 @@ public sealed class AzureBlobStore(
                 return false;
             }
 
-            if (!AzureBlobMetadata.IsPending(properties.Metadata)) {
-                return true;
-            }
+            if (!AzureBlobMetadata.IsPending(properties.Metadata)) return true;
 
             var metadata = new Dictionary<string, string>(properties.Metadata, StringComparer.Ordinal) {
-                [AzureBlobMetadata.StateKey] = AzureBlobMetadata.CommittedState,
+                [AzureBlobMetadata.StateKey] = AzureBlobMetadata.CommittedState
             };
             metadata.Remove(AzureBlobMetadata.ExpiresAtKey);
 
@@ -275,22 +260,17 @@ public sealed class AzureBlobStore(
             var listing = container.GetBlobsAsync(
                 new GetBlobsOptions { Traits = BlobTraits.Metadata }, cancellationToken);
             await foreach (var blobItem in listing) {
-                if (blobItem.Metadata is null || !AzureBlobMetadata.IsPending(blobItem.Metadata)) {
-                    continue;
-                }
+                if (blobItem.Metadata is null || !AzureBlobMetadata.IsPending(blobItem.Metadata)) continue;
 
                 if (AzureBlobMetadata.ParseInstant(blobItem.Metadata, AzureBlobMetadata.ExpiresAtKey)
-                    is not { } expiresAt || expiresAt >= olderThanUtc) {
+                        is not { } expiresAt || expiresAt >= olderThanUtc)
                     continue;
-                }
 
                 try {
                     var response = await container.GetBlobClient(blobItem.Name).DeleteIfExistsAsync(
                         conditions: new BlobRequestConditions { IfMatch = blobItem.Properties.ETag },
                         cancellationToken: cancellationToken);
-                    if (response.Value) {
-                        deleted++;
-                    }
+                    if (response.Value) deleted++;
                 }
                 catch (RequestFailedException ex) when (ex.Status == 412) {
                     // Committed (or replaced) concurrently; leave it alone.
@@ -307,11 +287,10 @@ public sealed class AzureBlobStore(
         return deleted;
     }
 
-    internal async Task<BlobContainerClient> EnsureContainerAsync(string containerName, CancellationToken cancellationToken) {
+    internal async Task<BlobContainerClient> EnsureContainerAsync(string containerName,
+        CancellationToken cancellationToken) {
         var container = client.GetBlobContainerClient(containerName);
-        if (_ensuredContainers.ContainsKey(containerName)) {
-            return container;
-        }
+        if (_ensuredContainers.ContainsKey(containerName)) return container;
 
         await container.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
         _ensuredContainers.TryAdd(containerName, 0);
@@ -319,13 +298,11 @@ public sealed class AzureBlobStore(
     }
 
     private void LogCollected(int deleted) {
-        if (deleted > 0) {
-            logger.LogInformation("Garbage collected {Count} expired pending blob(s).", deleted);
-        }
+        if (deleted > 0) logger.LogInformation("Garbage collected {Count} expired pending blob(s).", deleted);
     }
 
-    private static BlobMetadata ToMetadata(AzureBlobLocation location, BlobProperties properties) =>
-        new() {
+    private static BlobMetadata ToMetadata(AzureBlobLocation location, BlobProperties properties) {
+        return new BlobMetadata {
             Id = location.ToBlobRef().Value,
             Container = location.Container,
             Name = location.Name,
@@ -335,8 +312,9 @@ public sealed class AzureBlobStore(
             State = AzureBlobMetadata.IsPending(properties.Metadata)
                 ? BlobLifecycleState.Pending
                 : BlobLifecycleState.Committed,
-            OwnerId = AzureBlobMetadata.Decode(properties.Metadata, AzureBlobMetadata.OwnerKey),
+            OwnerId = AzureBlobMetadata.Decode(properties.Metadata, AzureBlobMetadata.OwnerKey)
         };
+    }
 
     private static void ValidateUploadRequest(BlobUploadRequest request) {
         ArgumentNullException.ThrowIfNull(request);

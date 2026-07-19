@@ -56,9 +56,7 @@ public sealed class BlobDownload : IAsyncDisposable {
         finally {
             // The backend resource (for example a streaming store's cloned connection) must be released
             // even when disposing the content stream throws, or it would leak with the exception.
-            if (_ownedResource is not null) {
-                await _ownedResource.DisposeAsync().ConfigureAwait(false);
-            }
+            if (_ownedResource is not null) await _ownedResource.DisposeAsync().ConfigureAwait(false);
         }
     }
 }

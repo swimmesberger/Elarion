@@ -84,7 +84,7 @@ public sealed class PostgreSqlStagedUploadStoreIntegrationTests(PostgreSqlStaged
         await using var context = fixture.CreateContext();
         var store = CreateStore(context, out var blobStore);
 
-        var created = await store.CreateAsync(NewCreation(length: null), ct);
+        var created = await store.CreateAsync(NewCreation(null), ct);
         created.Length.Should().BeNull();
 
         await store.AppendAsync(created.Id, 0, new MemoryStream([1, 2, 3]), ct);
@@ -233,21 +233,23 @@ public sealed class PostgreSqlStagedUploadStoreIntegrationTests(PostgreSqlStaged
         return new PostgreSqlStagedUploadStore<StagedUploadBlobDbContext>(context, blobStore, TimeProvider.System);
     }
 
-    private static StagedUploadCreation NewCreation(long? length) =>
-        new() {
+    private static StagedUploadCreation NewCreation(long? length) {
+        return new StagedUploadCreation {
             Container = $"c-{Guid.NewGuid():N}",
             Name = $"user-1/{Guid.NewGuid():N}/file.bin",
             Length = length,
             ContentType = "application/octet-stream",
             OwnerId = "user-1",
-            ExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(24),
+            ExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(24)
         };
+    }
 
-    private static StagedUploadCompletion NewCompletion() =>
-        new() {
+    private static StagedUploadCompletion NewCompletion() {
+        return new StagedUploadCompletion {
             SessionExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(1),
-            BlobExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(30),
+            BlobExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(30)
         };
+    }
 }
 
 /// <summary>
@@ -283,17 +285,18 @@ public sealed class PostgreSqlStagedUploadFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
-    public StagedUploadBlobDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<StagedUploadBlobDbContext>().UseNpgsql(ConnectionString).Options);
+    public StagedUploadBlobDbContext CreateContext() {
+        return new StagedUploadBlobDbContext(new DbContextOptionsBuilder<StagedUploadBlobDbContext>()
+            .UseNpgsql(ConnectionString).Options);
+    }
 }
 
 /// <summary>EF Core context mapping both the blob tables and the staged-upload table.</summary>
-public sealed class StagedUploadBlobDbContext(DbContextOptions<StagedUploadBlobDbContext> options) : DbContext(options) {
+public sealed class StagedUploadBlobDbContext(DbContextOptions<StagedUploadBlobDbContext> options)
+    : DbContext(options) {
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.UseElarionBlobStorage();
         modelBuilder.UseElarionStagedUploads();

@@ -19,9 +19,7 @@ public sealed class AuditRetentionService<TDbContext>(
     where TDbContext : DbContext {
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
-        if (options.RetainFor is not { } retainFor) {
-            return;
-        }
+        if (options.RetainFor is not { } retainFor) return;
 
         using var timer = new PeriodicTimer(options.PollingInterval, timeProvider);
 
@@ -37,9 +35,7 @@ public sealed class AuditRetentionService<TDbContext>(
                 logger.LogError(ex, "Audit-log retention purge failed.");
             }
 
-            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) {
-                break;
-            }
+            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) break;
         }
     }
 
@@ -50,8 +46,6 @@ public sealed class AuditRetentionService<TDbContext>(
         var purged = await dbContext.Set<AuditLogEntry>()
             .Where(entry => entry.OccurredAtUtc < cutoff)
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
-        if (purged > 0) {
-            logger.LogInformation("Audit-log retention purge deleted {Count} expired record(s).", purged);
-        }
+        if (purged > 0) logger.LogInformation("Audit-log retention purge deleted {Count} expired record(s).", purged);
     }
 }

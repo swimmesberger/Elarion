@@ -15,18 +15,18 @@
          Elarion.Sql                   — [SqlRecord] generated mappers + injection-safe interpolation.
        Everything else is the stock slim builder. -->
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj" />
-    <ProjectReference Include="..\..\..\src\Elarion.AspNetCore\Elarion.AspNetCore.csproj" />
-    <ProjectReference Include="..\..\..\src\Elarion.Sql\Elarion.Sql.csproj" />
-    <ProjectReference Include="..\..\..\src\Elarion.Migrations.PostgreSql\Elarion.Migrations.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.AspNetCore\Elarion.AspNetCore.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.Sql\Elarion.Sql.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.Migrations.PostgreSql\Elarion.Migrations.PostgreSql.csproj"/>
   </ItemGroup>
 
   <!-- Observability for the Aspire dashboard (OTLP). The whole pipeline only activates when an OTLP
        endpoint is configured, so the bare edge binary stays lean. -->
   <ItemGroup>
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol"/>
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting"/>
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore"/>
   </ItemGroup>
 
   <!-- The generators as analyzers (building from source; from NuGet they ship inside their packages):
@@ -34,17 +34,17 @@
        the row mappers. -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
-                     OutputItemType="Analyzer"
-                     ReferenceOutputAssembly="false" />
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"/>
     <ProjectReference Include="..\..\..\src\Elarion.Sql.Generators\Elarion.Sql.Generators.csproj"
-                     OutputItemType="Analyzer"
-                     ReferenceOutputAssembly="false" />
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"/>
   </ItemGroup>
 
   <!-- Migration scripts are embedded resources: discovery reads the assembly manifest — AOT-safe,
        no filesystem layout to ship next to the binary. -->
   <ItemGroup>
-    <EmbeddedResource Include="Migrations/**/*.sql" />
+    <EmbeddedResource Include="Migrations/**/*.sql"/>
   </ItemGroup>
 
 </Project>

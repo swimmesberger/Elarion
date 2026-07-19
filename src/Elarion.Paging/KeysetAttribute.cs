@@ -34,8 +34,7 @@ namespace Elarion.Paging;
 /// </example>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class KeysetAttribute<TEntity> : Attribute
-    where TEntity : class
-{
+    where TEntity : class {
     /// <summary>
     /// Initializes a new instance of the <see cref="KeysetAttribute{TEntity}"/> class.
     /// </summary>
@@ -43,8 +42,7 @@ public sealed class KeysetAttribute<TEntity> : Attribute
     /// The ordered keyset column names. Each entry names a property on <typeparamref name="TEntity"/>; a
     /// leading <c>-</c> marks the column descending.
     /// </param>
-    public KeysetAttribute(params string[] columns)
-    {
+    public KeysetAttribute(params string[] columns) {
         Columns = columns;
     }
 

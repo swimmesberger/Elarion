@@ -42,7 +42,7 @@ public sealed class ElarionManifestGeneratorCacheTests {
         """;
 
     [Fact]
-    public void ReusesOutputsAfterIrrelevantEdit() =>
+    public void ReusesOutputsAfterIrrelevantEdit() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new ElarionManifestGenerator(),
             Source,
@@ -56,9 +56,10 @@ public sealed class ElarionManifestGeneratorCacheTests {
             "ManifestFeatureVariants",
             "ManifestConfigurationVariants",
             "Manifest");
+    }
 
     [Fact]
-    public void ManifestStaysCached_WhenAnUnrelatedFileChanges() =>
+    public void ManifestStaysCached_WhenAnUnrelatedFileChanges() {
         // The strict form: every discovery is per-node cached, so the collect + encode + emit stage must not
         // re-run at all for an unrelated-file edit.
         GeneratorCacheAssert.ReusesDiscoveryAfterUnrelatedFileEdit(
@@ -69,4 +70,5 @@ public sealed class ElarionManifestGeneratorCacheTests {
             "ManifestHttpEndpoints",
             "ManifestRpcMethods",
             "Manifest");
+    }
 }

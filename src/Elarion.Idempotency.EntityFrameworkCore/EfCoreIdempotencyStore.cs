@@ -54,32 +54,27 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
         // above fast-fails/bounds its wait on a concurrent duplicate's row. That timeout must not govern the
         // handler's business statements — an ordinary hot-row wait inside the handler would otherwise surface
         // as 55P03 (a 500). The claim is done, so revert to the session default for the rest of the transaction.
-        if (dbContext.Database.CurrentTransaction is not null) {
+        if (dbContext.Database.CurrentTransaction is not null)
             await dbContext.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout TO DEFAULT", ct).ConfigureAwait(false);
-        }
 
-        if (inserted == 1) {
-            return IdempotencyBeginResult.Began();
-        }
+        if (inserted == 1) return IdempotencyBeginResult.Began();
 
         // Zero rows: the key already exists and is committed — a pending marker never commits in the
         // single-transaction model, so an existing row is a completed outcome to replay.
         var existing = await dbContext.Set<IdempotencyKeyEntity>()
             .AsNoTracking()
             .Where(entity => entity.Operation == key.Operation && entity.Scope == scope
-                && entity.Owner == key.Owner && entity.Key == key.Key)
+                                                               && entity.Owner == key.Owner && entity.Key == key.Key)
             .Select(entity => new StoredOutcome(entity.Completed, entity.Fingerprint, entity.Payload, entity.IsFailure))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        if (existing is not { Completed: true }) {
+        if (existing is not { Completed: true })
             // Raced with a concurrent purge/abandon of the same key; let the caller retry as a conflict.
             return IdempotencyBeginResult.InProgress();
-        }
 
-        if (fingerprint.Length > 0 && !string.Equals(existing.Fingerprint, fingerprint, StringComparison.Ordinal)) {
+        if (fingerprint.Length > 0 && !string.Equals(existing.Fingerprint, fingerprint, StringComparison.Ordinal))
             return IdempotencyBeginResult.FingerprintMismatch();
-        }
 
         return IdempotencyBeginResult.Replay(existing.Payload ?? string.Empty, existing.IsFailure);
     }
@@ -97,7 +92,8 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
 
         await dbContext.Set<IdempotencyKeyEntity>()
             .Where(entity => entity.Operation == key.Operation && entity.Scope == scope
-                && entity.Owner == key.Owner && entity.Key == key.Key && !entity.Completed)
+                                                               && entity.Owner == key.Owner && entity.Key == key.Key &&
+                                                               !entity.Completed)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(entity => entity.Completed, true)
                 .SetProperty(entity => entity.Payload, payload)
@@ -109,10 +105,11 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
     }
 
     /// <inheritdoc />
-    public ValueTask AbandonAsync(IdempotencyStoreKey key, CancellationToken ct) =>
+    public ValueTask AbandonAsync(IdempotencyStoreKey key, CancellationToken ct) {
         // The pending marker lives in the ambient transaction; rolling the unit of work back discards it, so
         // there is nothing to do here for the EF backend.
-        default;
+        return default;
+    }
 
     /// <inheritdoc />
     public async ValueTask<int> PurgeCompletedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) {
@@ -124,29 +121,32 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
         return deleted;
     }
 
-    private static string MapScope(IdempotencyScope scope) =>
-        scope switch {
+    private static string MapScope(IdempotencyScope scope) {
+        return scope switch {
             IdempotencyScope.CurrentUser => "user",
             IdempotencyScope.Consumer => "consumer",
-            _ => "global",
+            _ => "global"
         };
+    }
 
     private static string BuildClaimSql(DbContext context) {
         var entityType = context.Model.FindEntityType(typeof(IdempotencyKeyEntity))
-            ?? throw new InvalidOperationException(
-                "The IdempotencyKeyEntity is not mapped. Call modelBuilder.ApplyElarionIdempotencyKeys() in OnModelCreating.");
+                         ?? throw new InvalidOperationException(
+                             "The IdempotencyKeyEntity is not mapped. Call modelBuilder.ApplyElarionIdempotencyKeys() in OnModelCreating.");
         var sqlHelper = context.GetService<ISqlGenerationHelper>();
 
         var tableName = entityType.GetTableName()
-            ?? throw new InvalidOperationException("The IdempotencyKeyEntity is not mapped to a table.");
+                        ?? throw new InvalidOperationException("The IdempotencyKeyEntity is not mapped to a table.");
         var schema = entityType.GetSchema();
         var storeObject = StoreObjectIdentifier.Table(tableName, schema);
 
         string Column(string propertyName) {
             var property = entityType.FindProperty(propertyName)
-                ?? throw new InvalidOperationException($"The IdempotencyKeyEntity.{propertyName} property is not mapped.");
+                           ?? throw new InvalidOperationException(
+                               $"The IdempotencyKeyEntity.{propertyName} property is not mapped.");
             var columnName = property.GetColumnName(storeObject)
-                ?? throw new InvalidOperationException($"The IdempotencyKeyEntity.{propertyName} property has no column.");
+                             ?? throw new InvalidOperationException(
+                                 $"The IdempotencyKeyEntity.{propertyName} property has no column.");
             return sqlHelper.DelimitIdentifier(columnName);
         }
 
@@ -157,11 +157,11 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
         var keyCol = Column(nameof(IdempotencyKeyEntity.Key));
 
         return $"INSERT INTO {table} (" +
-            $"{operationCol}, {scopeCol}, {ownerCol}, {keyCol}, {Column(nameof(IdempotencyKeyEntity.Fingerprint))}, " +
-            $"{Column(nameof(IdempotencyKeyEntity.Completed))}, {Column(nameof(IdempotencyKeyEntity.IsFailure))}, " +
-            $"{Column(nameof(IdempotencyKeyEntity.CreatedOnUtc))}, {Column(nameof(IdempotencyKeyEntity.Version))}) " +
-            "VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}) " +
-            $"ON CONFLICT ({operationCol}, {scopeCol}, {ownerCol}, {keyCol}) DO NOTHING";
+               $"{operationCol}, {scopeCol}, {ownerCol}, {keyCol}, {Column(nameof(IdempotencyKeyEntity.Fingerprint))}, " +
+               $"{Column(nameof(IdempotencyKeyEntity.Completed))}, {Column(nameof(IdempotencyKeyEntity.IsFailure))}, " +
+               $"{Column(nameof(IdempotencyKeyEntity.CreatedOnUtc))}, {Column(nameof(IdempotencyKeyEntity.Version))}) " +
+               "VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}) " +
+               $"ON CONFLICT ({operationCol}, {scopeCol}, {ownerCol}, {keyCol}) DO NOTHING";
     }
 
     private sealed record StoredOutcome(bool Completed, string Fingerprint, string? Payload, bool IsFailure);

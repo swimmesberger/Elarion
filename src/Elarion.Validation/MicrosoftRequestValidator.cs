@@ -27,24 +27,21 @@ public sealed class MicrosoftRequestValidator(
     IElarionJsonSerialization jsonSerialization
 ) : IRequestValidator {
     /// <inheritdoc />
-    public async ValueTask<RequestValidationErrors?> ValidateAsync(Type requestType, object request, CancellationToken cancellationToken) {
+    public async ValueTask<RequestValidationErrors?> ValidateAsync(Type requestType, object request,
+        CancellationToken cancellationToken) {
         var options = validationOptions.Value;
-        if (!options.TryGetValidatableTypeInfo(requestType, out var validatableInfo)) {
-            return null;
-        }
+        if (!options.TryGetValidatableTypeInfo(requestType, out var validatableInfo)) return null;
 
         // The explicit-display-name constructor is the trim-safe one (no reflection over DisplayNameAttribute);
         // the validation walker overwrites DisplayName per member before each check anyway.
         var context = new ValidateContext {
-            ValidationContext = new ValidationContext(request, requestType.Name, serviceProvider, items: null),
-            ValidationOptions = options,
+            ValidationContext = new ValidationContext(request, requestType.Name, serviceProvider, null),
+            ValidationOptions = options
         };
 
         await validatableInfo.ValidateAsync(request, context, cancellationToken).ConfigureAwait(false);
 
-        if (context.ValidationErrors is not { Count: > 0 } errors) {
-            return null;
-        }
+        if (context.ValidationErrors is not { Count: > 0 } errors) return null;
 
         var namingPolicy = jsonSerialization.Options.PropertyNamingPolicy;
         var fieldErrors = new Dictionary<string, string[]>(errors.Count, StringComparer.Ordinal);
@@ -68,21 +65,15 @@ public sealed class MicrosoftRequestValidator(
     /// leaves the path unchanged.
     /// </summary>
     private static string TranslatePath(string path, JsonNamingPolicy? namingPolicy) {
-        if (namingPolicy is null || path.Length == 0) {
-            return path;
-        }
+        if (namingPolicy is null || path.Length == 0) return path;
 
         var builder = new StringBuilder(path.Length);
         var index = 0;
         while (index < path.Length) {
             var nameStart = index;
-            while (index < path.Length && path[index] != '.' && path[index] != '[') {
-                index++;
-            }
+            while (index < path.Length && path[index] != '.' && path[index] != '[') index++;
 
-            if (index > nameStart) {
-                builder.Append(namingPolicy.ConvertName(path[nameStart..index]));
-            }
+            if (index > nameStart) builder.Append(namingPolicy.ConvertName(path[nameStart..index]));
 
             while (index < path.Length && path[index] == '[') {
                 var close = path.IndexOf(']', index);

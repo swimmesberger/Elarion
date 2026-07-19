@@ -20,18 +20,19 @@ public readonly record struct SettingsScope(string Kind, string? Owner) {
     public const string UserKind = "user";
 
     /// <summary>The system-wide scope, shared by all users.</summary>
-    public static SettingsScope Global { get; } = new(GlobalKind, Owner: null);
+    public static SettingsScope Global { get; } = new(GlobalKind, null);
 
     /// <summary>
     /// A placeholder for "the ambient current user". The accessor resolves the owner from <c>ICurrentUser</c>
     /// at call time; it never reaches a store. Use <see cref="User"/> to target a specific user explicitly.
     /// </summary>
-    public static SettingsScope CurrentUser { get; } = new(UserKind, Owner: null);
+    public static SettingsScope CurrentUser { get; } = new(UserKind, null);
 
     /// <summary>Creates a scope bound to a specific user.</summary>
     /// <param name="userId">The user id; must not be <see langword="null"/>.</param>
-    public static SettingsScope User(string userId) =>
-        new(UserKind, userId ?? throw new ArgumentNullException(nameof(userId)));
+    public static SettingsScope User(string userId) {
+        return new SettingsScope(UserKind, userId ?? throw new ArgumentNullException(nameof(userId)));
+    }
 
     /// <summary>
     /// Whether this is the <see cref="CurrentUser"/> placeholder — a <c>user</c>-kind scope with no resolved

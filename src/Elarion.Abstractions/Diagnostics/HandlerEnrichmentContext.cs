@@ -24,9 +24,7 @@ public sealed class HandlerEnrichmentContext {
     /// same key overwrites the earlier one on the span.
     /// </summary>
     public void SetTag(string key, object? value) {
-        if (string.IsNullOrEmpty(key) || value is null) {
-            return;
-        }
+        if (string.IsNullOrEmpty(key) || value is null) return;
 
         (_tags ??= []).Add(new KeyValuePair<string, object>(key, value));
     }
@@ -36,16 +34,16 @@ public sealed class HandlerEnrichmentContext {
     /// <paramref name="key"/> is null/empty or <paramref name="value"/> is null.
     /// </summary>
     public void AddScopeItem(string key, object? value) {
-        if (string.IsNullOrEmpty(key) || value is null) {
-            return;
-        }
+        if (string.IsNullOrEmpty(key) || value is null) return;
 
         (_scopeItems ??= []).Add(new KeyValuePair<string, object>(key, value));
     }
 
     /// <summary>Tags accumulated for the handler span. Drained by the runtime; enrichers write via <see cref="SetTag"/>.</summary>
-    public IReadOnlyList<KeyValuePair<string, object>> Tags => _tags ?? (IReadOnlyList<KeyValuePair<string, object>>)Empty;
+    public IReadOnlyList<KeyValuePair<string, object>> Tags =>
+        _tags ?? (IReadOnlyList<KeyValuePair<string, object>>)Empty;
 
     /// <summary>Items accumulated for the handler log scope. Drained by the runtime; enrichers write via <see cref="AddScopeItem"/>.</summary>
-    public IReadOnlyList<KeyValuePair<string, object>> ScopeItems => _scopeItems ?? (IReadOnlyList<KeyValuePair<string, object>>)Empty;
+    public IReadOnlyList<KeyValuePair<string, object>> ScopeItems =>
+        _scopeItems ?? (IReadOnlyList<KeyValuePair<string, object>>)Empty;
 }

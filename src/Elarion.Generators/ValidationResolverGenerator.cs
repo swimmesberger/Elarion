@@ -32,8 +32,7 @@ namespace Elarion.Generators;
 /// </para>
 /// </summary>
 [Generator(LanguageNames.CSharp)]
-public sealed class ValidationResolverGenerator : IIncrementalGenerator
-{
+public sealed class ValidationResolverGenerator : IIncrementalGenerator {
     private const string TriggerAttributeMetadataName =
         "Elarion.Abstractions.GenerateModuleHandlersAttribute";
 
@@ -58,7 +57,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
         + "run time; reference Elarion.Validation and call AddElarionValidation()",
         "Elarion.Abstractions.Validation",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        true);
 
     private sealed record ModuleResolverModel(
         string ModuleName,
@@ -68,27 +67,24 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
 
     private sealed record ValidationModel(
         EquatableArray<ModuleResolverModel> Modules,
-        EquatableArray<DiagnosticInfo> Diagnostics)
-    {
+        EquatableArray<DiagnosticInfo> Diagnostics) {
         public static readonly ValidationModel Empty = new(
             EquatableArray<ModuleResolverModel>.Empty, EquatableArray<DiagnosticInfo>.Empty);
     }
 
-    private static class TrackingNames
-    {
+    private static class TrackingNames {
         public const string Candidates = "ValidationCandidates";
         public const string Resolvers = "ValidationResolvers";
         public const string Combined = "ValidationCombined";
     }
 
     /// <inheritdoc />
-    public void Initialize(IncrementalGeneratorInitializationContext context)
-    {
+    public void Initialize(IncrementalGeneratorInitializationContext context) {
         // Stage one (cached per syntax tree): shared handler-candidate discovery — metadata names only.
         var handlerCandidates = context.SyntaxProvider
             .CreateSyntaxProvider(
-                predicate: static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
-                transform: static (ctx, ct) => HandlerCandidates.Identify(ctx, ct))
+                static (node, _) => node is ClassDeclarationSyntax { BaseList: not null },
+                static (ctx, ct) => HandlerCandidates.Identify(ctx, ct))
             .Where(static candidate => candidate is not null)
             .Collect()
             .Select(static (candidates, _) => HandlerCandidates.FlattenSortedDistinct(candidates))
@@ -110,8 +106,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
 
         var combined = model.Combine(trigger).WithTrackingName(TrackingNames.Combined);
 
-        context.RegisterSourceOutput(combined, static (spc, source) =>
-        {
+        context.RegisterSourceOutput(combined, static (spc, source) => {
             var (model, hasTrigger) = source;
             if (!hasTrigger)
                 return;
@@ -128,8 +123,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
         EquatableArray<string> candidates,
         EquatableArray<ModuleScanner.Module> modules,
         Compilation compilation,
-        CancellationToken ct)
-    {
+        CancellationToken ct) {
         if (candidates.IsEmpty)
             return ValidationModel.Empty;
 
@@ -141,8 +135,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
         // The validatable request roots per module (handler module by longest-prefix namespace match, like
         // every other per-module registration; a handler under no module contributes nothing).
         var moduleRoots = new Dictionary<ModuleScanner.Module, List<ITypeSymbol>>();
-        foreach (var metadataName in candidates)
-        {
+        foreach (var metadataName in candidates) {
             ct.ThrowIfCancellationRequested();
             if (compilation.Assembly.GetTypeByMetadataName(metadataName) is not { } classSymbol)
                 continue;
@@ -158,9 +151,9 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
             // A dual-shape handler has two independent request contracts. Discover both roots rather than
             // choosing unary first; deduplication below retains the shared-root case.
             foreach (var handlerInterface in new[] {
-                HandlerShape.FindHandlerInterface(classSymbol),
-                HandlerShape.FindStreamHandlerInterface(classSymbol)
-            }.Where(static candidate => candidate is not null).Cast<INamedTypeSymbol>()) {
+                         HandlerShape.FindHandlerInterface(classSymbol),
+                         HandlerShape.FindStreamHandlerInterface(classSymbol)
+                     }.Where(static candidate => candidate is not null).Cast<INamedTypeSymbol>()) {
                 var requestType = handlerInterface.TypeArguments[0];
                 if (!ValidatableTypeWalker.IsValidatable(requestType, walkContext))
                     continue;
@@ -188,8 +181,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
             return new ValidationModel(EquatableArray<ModuleResolverModel>.Empty, diagnostics.ToImmutable());
 
         var moduleModels = ImmutableArray.CreateBuilder<ModuleResolverModel>();
-        foreach (var module in modules.OrderBy(static m => m.Name, StringComparer.Ordinal))
-        {
+        foreach (var module in modules.OrderBy(static m => m.Name, StringComparer.Ordinal)) {
             ct.ThrowIfCancellationRequested();
             if (!moduleRoots.TryGetValue(module, out var roots))
                 continue;
@@ -204,26 +196,28 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
         return new ValidationModel(moduleModels.ToImmutable(), diagnostics.ToImmutable());
     }
 
-    private static void EmitModuleResolver(SourceProductionContext spc, ModuleResolverModel module)
-    {
+    private static void EmitModuleResolver(SourceProductionContext spc, ModuleResolverModel module) {
         var resolverName = $"{module.ModuleName}ValidatableInfoResolver";
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("// Source: Elarion.Generators.ValidationResolverGenerator");
         sb.AppendLine("#nullable enable");
-        sb.AppendLine("#pragma warning disable ASP0029 // The Microsoft.Extensions.Validation extensibility surface is experimental; this generated resolver is its contained consumer (ADR-0027).");
+        sb.AppendLine(
+            "#pragma warning disable ASP0029 // The Microsoft.Extensions.Validation extensibility surface is experimental; this generated resolver is its contained consumer (ADR-0027).");
         sb.AppendLine();
-        if (module.ModuleNamespace.Length > 0)
-        {
+        if (module.ModuleNamespace.Length > 0) {
             sb.AppendLine($"namespace {module.ModuleNamespace};");
             sb.AppendLine();
         }
 
         sb.AppendLine("/// <summary>");
-        sb.AppendLine($"/// Source-generated validation metadata for the {module.ModuleName} module's handler request types.");
-        sb.AppendLine("/// Attribute arrays are cached, constant-constructed compile-time values — no runtime attribute reflection.");
+        sb.AppendLine(
+            $"/// Source-generated validation metadata for the {module.ModuleName} module's handler request types.");
+        sb.AppendLine(
+            "/// Attribute arrays are cached, constant-constructed compile-time values — no runtime attribute reflection.");
         sb.AppendLine("/// </summary>");
-        sb.AppendLine($"internal sealed class {resolverName} : global::Microsoft.Extensions.Validation.IValidatableInfoResolver");
+        sb.AppendLine(
+            $"internal sealed class {resolverName} : global::Microsoft.Extensions.Validation.IValidatableInfoResolver");
         sb.AppendLine("{");
 
         AppendTryGetValidatableTypeInfo(sb, module);
@@ -248,15 +242,14 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
             $"global::Elarion.Validation.ElarionValidationServiceCollectionExtensions.AddElarionValidationResolver(services, new {nsPrefix}{resolverName}());");
     }
 
-    private static void AppendTryGetValidatableTypeInfo(StringBuilder sb, ModuleResolverModel module)
-    {
+    private static void AppendTryGetValidatableTypeInfo(StringBuilder sb, ModuleResolverModel module) {
         sb.AppendLine("    /// <inheritdoc />");
         sb.AppendLine("    public bool TryGetValidatableTypeInfo(");
         sb.AppendLine("        global::System.Type type,");
-        sb.AppendLine($"        [global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {ValidatableInfoFqn}? validatableInfo)");
+        sb.AppendLine(
+            $"        [global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {ValidatableInfoFqn}? validatableInfo)");
         sb.AppendLine("    {");
-        for (var i = 0; i < module.Types.Length; i++)
-        {
+        for (var i = 0; i < module.Types.Length; i++) {
             sb.AppendLine($"        if (type == typeof({module.Types[i].TypeFqn}))");
             sb.AppendLine("        {");
             sb.AppendLine($"            validatableInfo = __type{i};");
@@ -270,58 +263,54 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
     }
 
-    private static void AppendTryGetValidatableParameterInfo(StringBuilder sb)
-    {
+    private static void AppendTryGetValidatableParameterInfo(StringBuilder sb) {
         sb.AppendLine("    /// <inheritdoc />");
         sb.AppendLine("    public bool TryGetValidatableParameterInfo(");
         sb.AppendLine("        global::System.Reflection.ParameterInfo parameterInfo,");
-        sb.AppendLine($"        [global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {ValidatableInfoFqn}? validatableInfo)");
+        sb.AppendLine(
+            $"        [global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {ValidatableInfoFqn}? validatableInfo)");
         sb.AppendLine("    {");
-        sb.AppendLine("        // Handler requests are dispatched as whole objects; parameter binding is a transport concern.");
+        sb.AppendLine(
+            "        // Handler requests are dispatched as whole objects; parameter binding is a transport concern.");
         sb.AppendLine("        validatableInfo = null;");
         sb.AppendLine("        return false;");
         sb.AppendLine("    }");
     }
 
-    private static void AppendTypeInfoFields(StringBuilder sb, ModuleResolverModel module)
-    {
-        if (NeedsEmptyAttributeArray(module))
-        {
+    private static void AppendTypeInfoFields(StringBuilder sb, ModuleResolverModel module) {
+        if (NeedsEmptyAttributeArray(module)) {
             sb.AppendLine($"    private static readonly {ValidationAttributeFqn}[] __noAttributes =");
             sb.AppendLine($"        global::System.Array.Empty<{ValidationAttributeFqn}>();");
             sb.AppendLine();
         }
 
-        for (var i = 0; i < module.Types.Length; i++)
-        {
+        for (var i = 0; i < module.Types.Length; i++) {
             var type = module.Types[i];
             if (i > 0)
                 sb.AppendLine();
 
-            sb.AppendLine($"    private static readonly {ValidatableInfoFqn} __type{i} = new ElarionValidatableTypeInfo(");
+            sb.AppendLine(
+                $"    private static readonly {ValidatableInfoFqn} __type{i} = new ElarionValidatableTypeInfo(");
             sb.AppendLine($"        typeof({type.TypeFqn}),");
-            if (type.Members.IsEmpty)
-            {
+            if (type.Members.IsEmpty) {
                 sb.AppendLine($"        global::System.Array.Empty<{ValidatablePropertyInfoFqn}>(),");
             }
-            else
-            {
+            else {
                 sb.AppendLine($"        new {ValidatablePropertyInfoFqn}[]");
                 sb.AppendLine("        {");
-                foreach (var member in type.Members)
-                {
+                foreach (var member in type.Members) {
                     sb.AppendLine("            new ElarionValidatablePropertyInfo(");
                     sb.AppendLine($"                typeof({type.TypeFqn}),");
                     sb.AppendLine($"                typeof({member.PropertyTypeFqn}),");
                     sb.AppendLine($"                {SourceLiterals.String(member.Name)},");
                     sb.AppendLine($"                {SourceLiterals.String(member.DisplayName)},");
-                    AppendAttributeArray(sb, member.Attributes, indent: "                ", terminator: "),");
+                    AppendAttributeArray(sb, member.Attributes, "                ", "),");
                 }
 
                 sb.AppendLine("        },");
             }
 
-            AppendAttributeArray(sb, type.TypeAttributes, indent: "        ", terminator: ");");
+            AppendAttributeArray(sb, type.TypeAttributes, "        ", ");");
         }
     }
 
@@ -329,10 +318,8 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
         StringBuilder sb,
         EquatableArray<string> attributes,
         string indent,
-        string terminator)
-    {
-        if (attributes.IsEmpty)
-        {
+        string terminator) {
+        if (attributes.IsEmpty) {
             sb.AppendLine($"{indent}__noAttributes{terminator}");
             return;
         }
@@ -344,34 +331,31 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}}}{terminator}");
     }
 
-    private static bool NeedsEmptyAttributeArray(ModuleResolverModel module)
-    {
-        foreach (var type in module.Types)
-        {
+    private static bool NeedsEmptyAttributeArray(ModuleResolverModel module) {
+        foreach (var type in module.Types) {
             if (type.TypeAttributes.IsEmpty)
                 return true;
 
             foreach (var member in type.Members)
-            {
                 if (member.Attributes.IsEmpty)
                     return true;
-            }
         }
 
         return false;
     }
 
-    private static void AppendInfoSubclasses(StringBuilder sb)
-    {
+    private static void AppendInfoSubclasses(StringBuilder sb) {
         // The constructor signatures below bind against Microsoft.Extensions.Validation's protected base
         // constructors; the DynamicallyAccessedMembers annotations mirror the base parameters so the trimmer
         // keeps what the runtime walker touches.
-        sb.AppendLine("    private sealed class ElarionValidatableTypeInfo : global::Microsoft.Extensions.Validation.ValidatableTypeInfo");
+        sb.AppendLine(
+            "    private sealed class ElarionValidatableTypeInfo : global::Microsoft.Extensions.Validation.ValidatableTypeInfo");
         sb.AppendLine("    {");
         sb.AppendLine($"        private readonly {ValidationAttributeFqn}[] _typeAttributes;");
         sb.AppendLine();
         sb.AppendLine("        public ElarionValidatableTypeInfo(");
-        sb.AppendLine("            [param: global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.Interfaces)]");
+        sb.AppendLine(
+            "            [param: global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.Interfaces)]");
         sb.AppendLine("            global::System.Type type,");
         sb.AppendLine($"            {ValidatablePropertyInfoFqn}[] members,");
         sb.AppendLine($"            {ValidationAttributeFqn}[] typeAttributes) : base(type, members)");
@@ -379,25 +363,30 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator
         sb.AppendLine("            _typeAttributes = typeAttributes;");
         sb.AppendLine("        }");
         sb.AppendLine();
-        sb.AppendLine($"        protected override {ValidationAttributeFqn}[] GetValidationAttributes() => _typeAttributes;");
+        sb.AppendLine(
+            $"        protected override {ValidationAttributeFqn}[] GetValidationAttributes() => _typeAttributes;");
         sb.AppendLine("    }");
         sb.AppendLine();
-        sb.AppendLine("    private sealed class ElarionValidatablePropertyInfo : global::Microsoft.Extensions.Validation.ValidatablePropertyInfo");
+        sb.AppendLine(
+            "    private sealed class ElarionValidatablePropertyInfo : global::Microsoft.Extensions.Validation.ValidatablePropertyInfo");
         sb.AppendLine("    {");
         sb.AppendLine($"        private readonly {ValidationAttributeFqn}[] _validationAttributes;");
         sb.AppendLine();
         sb.AppendLine("        public ElarionValidatablePropertyInfo(");
-        sb.AppendLine("            [param: global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)]");
+        sb.AppendLine(
+            "            [param: global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)]");
         sb.AppendLine("            global::System.Type declaringType,");
         sb.AppendLine("            global::System.Type propertyType,");
         sb.AppendLine("            string name,");
         sb.AppendLine("            string displayName,");
-        sb.AppendLine($"            {ValidationAttributeFqn}[] validationAttributes) : base(declaringType, propertyType, name, displayName)");
+        sb.AppendLine(
+            $"            {ValidationAttributeFqn}[] validationAttributes) : base(declaringType, propertyType, name, displayName)");
         sb.AppendLine("        {");
         sb.AppendLine("            _validationAttributes = validationAttributes;");
         sb.AppendLine("        }");
         sb.AppendLine();
-        sb.AppendLine($"        protected override {ValidationAttributeFqn}[] GetValidationAttributes() => _validationAttributes;");
+        sb.AppendLine(
+            $"        protected override {ValidationAttributeFqn}[] GetValidationAttributes() => _validationAttributes;");
         sb.AppendLine("    }");
     }
 }

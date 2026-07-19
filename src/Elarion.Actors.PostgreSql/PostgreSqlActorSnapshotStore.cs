@@ -34,7 +34,8 @@ public sealed class PostgreSqlActorSnapshotStore<TDbContext>(
     private static readonly ConcurrentDictionary<IModel, string> InsertSqlCache = new();
 
     /// <inheritdoc />
-    public async ValueTask<ActorSnapshot?> ReadAsync(ActorSnapshotKey key, CancellationToken cancellationToken = default) {
+    public async ValueTask<ActorSnapshot?> ReadAsync(ActorSnapshotKey key,
+        CancellationToken cancellationToken = default) {
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
         var row = await dbContext.Set<ActorSnapshotEntity>()
@@ -60,14 +61,13 @@ public sealed class PostgreSqlActorSnapshotStore<TDbContext>(
         var now = timeProvider.GetUtcNow();
 
         if (expectedETag is null) {
-            var sql = InsertSqlCache.GetOrAdd(dbContext.Model, static (_, context) => BuildInsertSql(context), dbContext);
+            var sql = InsertSqlCache.GetOrAdd(dbContext.Model, static (_, context) => BuildInsertSql(context),
+                dbContext);
             var version = MintLineageVersion();
             var inserted = await dbContext.Database
                 .ExecuteSqlRawAsync(sql, [key.ActorName, key.Key, payload, now, version], cancellationToken)
                 .ConfigureAwait(false);
-            if (inserted == 0) {
-                throw new ActorSnapshotConcurrencyException(key, expectedETag: null);
-            }
+            if (inserted == 0) throw new ActorSnapshotConcurrencyException(key, null);
 
             return FormatVersion(version);
         }
@@ -84,15 +84,14 @@ public sealed class PostgreSqlActorSnapshotStore<TDbContext>(
                     .SetProperty(entity => entity.Version, newVersion),
                 cancellationToken)
             .ConfigureAwait(false);
-        if (updated == 0) {
-            throw new ActorSnapshotConcurrencyException(key, expectedETag);
-        }
+        if (updated == 0) throw new ActorSnapshotConcurrencyException(key, expectedETag);
 
         return FormatVersion(newVersion);
     }
 
     /// <inheritdoc />
-    public async ValueTask ClearAsync(ActorSnapshotKey key, string expectedETag, CancellationToken cancellationToken = default) {
+    public async ValueTask ClearAsync(ActorSnapshotKey key, string expectedETag,
+        CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(expectedETag);
         var expectedVersion = ParseVersion(expectedETag);
         await using var scope = scopeFactory.CreateAsyncScope();
@@ -103,9 +102,7 @@ public sealed class PostgreSqlActorSnapshotStore<TDbContext>(
                              && entity.Version == expectedVersion)
             .ExecuteDeleteAsync(cancellationToken)
             .ConfigureAwait(false);
-        if (deleted == 0) {
-            throw new ActorSnapshotConcurrencyException(key, expectedETag);
-        }
+        if (deleted == 0) throw new ActorSnapshotConcurrencyException(key, expectedETag);
     }
 
     // Create mints a lineage-unique starting version instead of 1: version values must never repeat
@@ -121,27 +118,33 @@ public sealed class PostgreSqlActorSnapshotStore<TDbContext>(
         return version == 0 ? 1 : version;
     }
 
-    private static string FormatVersion(long version) => version.ToString(CultureInfo.InvariantCulture);
+    private static string FormatVersion(long version) {
+        return version.ToString(CultureInfo.InvariantCulture);
+    }
 
-    private static long ParseVersion(string etag) => long.Parse(etag, CultureInfo.InvariantCulture);
+    private static long ParseVersion(string etag) {
+        return long.Parse(etag, CultureInfo.InvariantCulture);
+    }
 
     private static string BuildInsertSql(DbContext context) {
         var entityType = context.Model.FindEntityType(typeof(ActorSnapshotEntity))
-            ?? throw new InvalidOperationException(
-                "The ActorSnapshotEntity is not mapped. Call modelBuilder.UseElarionActorSnapshots() in OnModelCreating "
-                + "or annotate the context with [GenerateElarionActorSnapshots].");
+                         ?? throw new InvalidOperationException(
+                             "The ActorSnapshotEntity is not mapped. Call modelBuilder.UseElarionActorSnapshots() in OnModelCreating "
+                             + "or annotate the context with [GenerateElarionActorSnapshots].");
         var sqlHelper = context.GetService<ISqlGenerationHelper>();
 
         var tableName = entityType.GetTableName()
-            ?? throw new InvalidOperationException("The ActorSnapshotEntity is not mapped to a table.");
+                        ?? throw new InvalidOperationException("The ActorSnapshotEntity is not mapped to a table.");
         var schema = entityType.GetSchema();
         var storeObject = StoreObjectIdentifier.Table(tableName, schema);
 
         string Column(string propertyName) {
             var property = entityType.FindProperty(propertyName)
-                ?? throw new InvalidOperationException($"The ActorSnapshotEntity.{propertyName} property is not mapped.");
+                           ?? throw new InvalidOperationException(
+                               $"The ActorSnapshotEntity.{propertyName} property is not mapped.");
             var columnName = property.GetColumnName(storeObject)
-                ?? throw new InvalidOperationException($"The ActorSnapshotEntity.{propertyName} property has no column.");
+                             ?? throw new InvalidOperationException(
+                                 $"The ActorSnapshotEntity.{propertyName} property has no column.");
             return sqlHelper.DelimitIdentifier(columnName);
         }
 
@@ -153,9 +156,9 @@ public sealed class PostgreSqlActorSnapshotStore<TDbContext>(
         // conversion to the jsonb column. ON CONFLICT DO NOTHING keeps a lost create race from
         // raising a unique violation; zero rows is the concurrency signal.
         return $"INSERT INTO {table} (" +
-            $"{nameCol}, {keyCol}, {Column(nameof(ActorSnapshotEntity.State))}, " +
-            $"{Column(nameof(ActorSnapshotEntity.UpdatedOnUtc))}, {Column(nameof(ActorSnapshotEntity.Version))}) " +
-            "VALUES ({0}, {1}, CAST({2} AS jsonb), {3}, {4}) " +
-            $"ON CONFLICT ({nameCol}, {keyCol}) DO NOTHING";
+               $"{nameCol}, {keyCol}, {Column(nameof(ActorSnapshotEntity.State))}, " +
+               $"{Column(nameof(ActorSnapshotEntity.UpdatedOnUtc))}, {Column(nameof(ActorSnapshotEntity.Version))}) " +
+               "VALUES ({0}, {1}, CAST({2} AS jsonb), {3}, {4}) " +
+               $"ON CONFLICT ({nameCol}, {keyCol}) DO NOTHING";
     }
 }

@@ -9,9 +9,9 @@ using Elarion.Authorization;
 using Elarion.Tests.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
-
 using Elarion.Pipeline;
 using Elarion.Diagnostics;
+
 namespace Elarion.Tests.Authorization;
 
 public sealed class AuthorizationDecoratorTests {
@@ -42,14 +42,16 @@ public sealed class AuthorizationDecoratorTests {
             inner,
             new HandlerMetadata(typeof(NoAttributesHandler), typeof(GuardedCommand), typeof(Result<string>)),
             authorizer,
-            requireAuthenticatedByDefault: false,
-            resourceBindings: [new ResourceRequirementBinding<GuardedCommand>(
-                typeof(string), ResourceOperation.Update, static command => command.Id)]);
+            false,
+            [
+                new ResourceRequirementBinding<GuardedCommand>(
+                    typeof(string), ResourceOperation.Update, static command => command.Id)
+            ]);
     }
 
     [Fact]
     public async Task RequireResource_ResolvesIdFromRequest_AndDeniesWhenAuthorizerDenies() {
-        var resourceAuthorizer = new StubResourceAuthorizer(allow: false);
+        var resourceAuthorizer = new StubResourceAuthorizer(false);
         var decorator = DecorateWithResource(new FakeCurrentUser { IsAuthenticated = true }, resourceAuthorizer);
 
         var result = await decorator.HandleAsync(new GuardedCommand(42), TestContext.Current.CancellationToken);
@@ -65,7 +67,7 @@ public sealed class AuthorizationDecoratorTests {
     [Fact]
     public async Task RequireResource_AllowsWhenAuthorizerAllows() {
         var decorator = DecorateWithResource(
-            new FakeCurrentUser { IsAuthenticated = true }, new StubResourceAuthorizer(allow: true));
+            new FakeCurrentUser { IsAuthenticated = true }, new StubResourceAuthorizer(true));
 
         var result = await decorator.HandleAsync(new GuardedCommand(7), TestContext.Current.CancellationToken);
 
@@ -74,7 +76,7 @@ public sealed class AuthorizationDecoratorTests {
 
     [Fact]
     public async Task RequireResource_UnauthenticatedReturnsUnauthorized_WithoutCallingResourceAuthorizer() {
-        var resourceAuthorizer = new StubResourceAuthorizer(allow: true);
+        var resourceAuthorizer = new StubResourceAuthorizer(true);
         var decorator = DecorateWithResource(new FakeCurrentUser { IsAuthenticated = false }, resourceAuthorizer);
 
         var result = await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
@@ -85,7 +87,7 @@ public sealed class AuthorizationDecoratorTests {
 
     [Fact]
     public async Task RequireResource_PassesFullNameDiscriminatorByDefault() {
-        var resourceAuthorizer = new StubResourceAuthorizer(allow: true);
+        var resourceAuthorizer = new StubResourceAuthorizer(true);
         var inner = new StubInnerHandler<GuardedCommand, Result<string>>(Result<string>.Success("ok"));
         var authorizer = new ClaimsAuthorizer(
             new FakeCurrentUser { IsAuthenticated = true }, [], resourceAuthorizer,
@@ -94,9 +96,11 @@ public sealed class AuthorizationDecoratorTests {
             inner,
             new HandlerMetadata(typeof(NoAttributesHandler), typeof(GuardedCommand), typeof(Result<string>)),
             authorizer,
-            requireAuthenticatedByDefault: false,
-            resourceBindings: [new ResourceRequirementBinding<GuardedCommand>(
-                typeof(Contact), ResourceOperation.Read, static command => command.Id)]);
+            false,
+            [
+                new ResourceRequirementBinding<GuardedCommand>(
+                    typeof(Contact), ResourceOperation.Read, static command => command.Id)
+            ]);
 
         await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
 
@@ -105,7 +109,7 @@ public sealed class AuthorizationDecoratorTests {
 
     [Fact]
     public async Task RequireResource_PassesExplicitDiscriminatorOverride() {
-        var resourceAuthorizer = new StubResourceAuthorizer(allow: true);
+        var resourceAuthorizer = new StubResourceAuthorizer(true);
         var inner = new StubInnerHandler<GuardedCommand, Result<string>>(Result<string>.Success("ok"));
         var authorizer = new ClaimsAuthorizer(
             new FakeCurrentUser { IsAuthenticated = true }, [], resourceAuthorizer,
@@ -114,9 +118,11 @@ public sealed class AuthorizationDecoratorTests {
             inner,
             new HandlerMetadata(typeof(NoAttributesHandler), typeof(GuardedCommand), typeof(Result<string>)),
             authorizer,
-            requireAuthenticatedByDefault: false,
-            resourceBindings: [new ResourceRequirementBinding<GuardedCommand>(
-                typeof(Contact), ResourceOperation.Read, static command => command.Id, resourceTypeName: "Contact")]);
+            false,
+            [
+                new ResourceRequirementBinding<GuardedCommand>(
+                    typeof(Contact), ResourceOperation.Read, static command => command.Id, "Contact")
+            ]);
 
         await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
 
@@ -218,7 +224,7 @@ public sealed class AuthorizationDecoratorTests {
     [Fact]
     public async Task PolicyAndRoleBothRequired() {
         var authorized = new FakeCurrentUser {
-            IsAuthenticated = true, Roles = ["Admin"], Claims = [("age", "30")],
+            IsAuthenticated = true, Roles = ["Admin"], Claims = [("age", "30")]
         };
         var policy = new AtLeast21Policy();
         var decorator = Decorate(
@@ -242,14 +248,14 @@ public sealed class AuthorizationDecoratorTests {
     [Fact]
     public async Task SecureByDefaultRequiresAuthenticationForUnannotatedHandler() {
         var anonymous = new FakeCurrentUser { IsAuthenticated = false };
-        var decorator = Decorate(typeof(NoAttributesHandler), anonymous, requireAuthenticatedByDefault: true);
+        var decorator = Decorate(typeof(NoAttributesHandler), anonymous, true);
 
         var result = await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
 
         result.Error.Kind.Should().Be(ErrorKind.Unauthorized);
 
         var authenticated = new FakeCurrentUser { IsAuthenticated = true };
-        var allowedDecorator = Decorate(typeof(NoAttributesHandler), authenticated, requireAuthenticatedByDefault: true);
+        var allowedDecorator = Decorate(typeof(NoAttributesHandler), authenticated, true);
         var allowed = await allowedDecorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
         allowed.IsSuccess.Should().BeTrue();
     }

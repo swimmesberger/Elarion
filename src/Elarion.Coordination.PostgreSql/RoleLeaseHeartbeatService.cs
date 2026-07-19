@@ -31,9 +31,7 @@ internal sealed class RoleLeaseHeartbeatService<TDbContext>(
                     ex, "Role lease '{Role}' renewal failed; retrying on the next tick.", options.RoleName);
             }
 
-            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) {
-                break;
-            }
+            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) break;
         }
     }
 

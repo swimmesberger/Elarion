@@ -15,24 +15,31 @@ internal sealed class PostgreSqlBulkOperationsOptionsExtension : IDbContextOptio
 
     public DbContextOptionsExtensionInfo Info => _info ??= new ExtensionInfo(this);
 
-    public void ApplyServices(IServiceCollection services) =>
+    public void ApplyServices(IServiceCollection services) {
         services.TryAddSingleton<IBulkInsertProvider, PostgreSqlBulkInsertProvider>();
+    }
 
     // Provider mismatch (a non-Npgsql context) surfaces at execution time with a targeted message;
     // at validation time the relational provider extension may not be configured yet.
     public void Validate(IDbContextOptions options) {
     }
 
-    private sealed class ExtensionInfo(IDbContextOptionsExtension extension) : DbContextOptionsExtensionInfo(extension) {
+    private sealed class ExtensionInfo(IDbContextOptionsExtension extension)
+        : DbContextOptionsExtensionInfo(extension) {
         public override bool IsDatabaseProvider => false;
 
         public override string LogFragment => "using Elarion PostgreSQL bulk operations ";
 
-        public override int GetServiceProviderHashCode() => 0;
+        public override int GetServiceProviderHashCode() {
+            return 0;
+        }
 
-        public override bool ShouldUseSameServiceProvider(DbContextOptionsExtensionInfo other) => other is ExtensionInfo;
+        public override bool ShouldUseSameServiceProvider(DbContextOptionsExtensionInfo other) {
+            return other is ExtensionInfo;
+        }
 
-        public override void PopulateDebugInfo(IDictionary<string, string> debugInfo) =>
+        public override void PopulateDebugInfo(IDictionary<string, string> debugInfo) {
             debugInfo["Elarion.BulkOperations.PostgreSql"] = "1";
+        }
     }
 }

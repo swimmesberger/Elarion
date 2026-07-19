@@ -30,7 +30,7 @@ public sealed class SchedulerPlacementTests {
             InvokeAsync = (_, _, _, _) => {
                 executed.TrySetResult();
                 return ValueTask.CompletedTask;
-            },
+            }
         });
         var hostedService = provider.GetRequiredService<IHostedService>();
 
@@ -53,7 +53,7 @@ public sealed class SchedulerPlacementTests {
             InvokeAsync = (_, _, _, _) => {
                 executed = true;
                 return ValueTask.CompletedTask;
-            },
+            }
         });
         var hostedService = provider.GetRequiredService<IHostedService>();
         var inspector = provider.GetRequiredService<IJobSchedulerInspector>();
@@ -61,7 +61,7 @@ public sealed class SchedulerPlacementTests {
         await hostedService.StartAsync(cts.Token);
         try {
             while (!inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
-                outcome.JobName == "test.cluster" && outcome.Status == ScheduledJobRunStatus.Skipped)) {
+                       outcome.JobName == "test.cluster" && outcome.Status == ScheduledJobRunStatus.Skipped)) {
                 cts.Token.ThrowIfCancellationRequested();
                 await Task.Delay(25, cts.Token);
             }
@@ -86,7 +86,8 @@ public sealed class SchedulerPlacementTests {
     }
 
     private sealed class DenyAllCoordinator : IScheduledOccurrenceCoordinator {
-        public ValueTask<bool> TryClaimAsync(ScheduledOccurrence occurrence, CancellationToken cancellationToken) =>
-            ValueTask.FromResult(false);
+        public ValueTask<bool> TryClaimAsync(ScheduledOccurrence occurrence, CancellationToken cancellationToken) {
+            return ValueTask.FromResult(false);
+        }
     }
 }

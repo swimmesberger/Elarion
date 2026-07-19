@@ -71,7 +71,8 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
         var sql = AcquireSqlCache.GetOrAdd(dbContext.Model, static (_, context) => BuildAcquireSql(context), dbContext);
         // A missing address is a plain null parameter (EF has no type mapping for DBNull); the SQL
         // casts it explicitly because PostgreSQL cannot infer an untyped NULL's type.
-        object?[] parameters = [options.RoleName, options.InstanceId, advertisedAddress, now + options.LeaseDuration, now];
+        object?[] parameters =
+            [options.RoleName, options.InstanceId, advertisedAddress, now + options.LeaseDuration, now];
         var acquired = await dbContext.Database
             .ExecuteSqlRawAsync(sql, parameters!, cancellationToken)
             .ConfigureAwait(false) == 1;
@@ -83,11 +84,10 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
                 attemptTimestamp + (long)(holdFor.TotalSeconds * timeProvider.TimestampFrequency));
             _currentHolder = options.InstanceId;
             _currentHolderAddress = advertisedAddress;
-            if (!wasHeld) {
+            if (!wasHeld)
                 logger.LogInformation(
                     "Instance {InstanceId} acquired the role lease '{Role}'.",
                     options.InstanceId, options.RoleName);
-            }
 
             return true;
         }
@@ -101,11 +101,10 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
             .ConfigureAwait(false);
         _currentHolder = holderRow?.Owner;
         _currentHolderAddress = holderRow?.Address;
-        if (wasHeld) {
+        if (wasHeld)
             logger.LogWarning(
                 "Instance {InstanceId} lost the role lease '{Role}' to {Holder}.",
                 options.InstanceId, options.RoleName, _currentHolder);
-        }
 
         return false;
     }
@@ -127,21 +126,23 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
 
     private static string BuildAcquireSql(DbContext context) {
         var entityType = context.Model.FindEntityType(typeof(RoleLeaseEntity))
-            ?? throw new InvalidOperationException(
-                "The RoleLeaseEntity is not mapped. Call modelBuilder.UseElarionRoleLeases() in OnModelCreating "
-                + "or annotate the context with [GenerateElarionRoleLeases].");
+                         ?? throw new InvalidOperationException(
+                             "The RoleLeaseEntity is not mapped. Call modelBuilder.UseElarionRoleLeases() in OnModelCreating "
+                             + "or annotate the context with [GenerateElarionRoleLeases].");
         var sqlHelper = context.GetService<ISqlGenerationHelper>();
 
         var tableName = entityType.GetTableName()
-            ?? throw new InvalidOperationException("The RoleLeaseEntity is not mapped to a table.");
+                        ?? throw new InvalidOperationException("The RoleLeaseEntity is not mapped to a table.");
         var schema = entityType.GetSchema();
         var storeObject = StoreObjectIdentifier.Table(tableName, schema);
 
         string Column(string propertyName) {
             var property = entityType.FindProperty(propertyName)
-                ?? throw new InvalidOperationException($"The RoleLeaseEntity.{propertyName} property is not mapped.");
+                           ?? throw new InvalidOperationException(
+                               $"The RoleLeaseEntity.{propertyName} property is not mapped.");
             var columnName = property.GetColumnName(storeObject)
-                ?? throw new InvalidOperationException($"The RoleLeaseEntity.{propertyName} property has no column.");
+                             ?? throw new InvalidOperationException(
+                                 $"The RoleLeaseEntity.{propertyName} property has no column.");
             return sqlHelper.DelimitIdentifier(columnName);
         }
 
@@ -157,9 +158,9 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
         // schema-qualified table name. The address is cast explicitly: it is nullable, and PostgreSQL
         // cannot infer the type of an untyped NULL parameter.
         return $"INSERT INTO {table} AS lease ({roleCol}, {ownerCol}, {addressCol}, {expiresCol}) " +
-            "VALUES ({0}, {1}, CAST({2} AS character varying), {3}) " +
-            $"ON CONFLICT ({roleCol}) DO UPDATE SET {ownerCol} = EXCLUDED.{ownerCol}, " +
-            $"{addressCol} = EXCLUDED.{addressCol}, {expiresCol} = EXCLUDED.{expiresCol} " +
-            $"WHERE lease.{ownerCol} = EXCLUDED.{ownerCol} OR lease.{expiresCol} <= {{4}}";
+               "VALUES ({0}, {1}, CAST({2} AS character varying), {3}) " +
+               $"ON CONFLICT ({roleCol}) DO UPDATE SET {ownerCol} = EXCLUDED.{ownerCol}, " +
+               $"{addressCol} = EXCLUDED.{addressCol}, {expiresCol} = EXCLUDED.{expiresCol} " +
+               $"WHERE lease.{ownerCol} = EXCLUDED.{ownerCol} OR lease.{expiresCol} <= {{4}}";
     }
 }

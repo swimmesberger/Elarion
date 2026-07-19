@@ -46,7 +46,7 @@ app.Use(async (context, next) => {
     context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "demo-user")], "Demo"));
     await next();
 });
-app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
+app.UseElarionCurrentUser(); // snapshot claims into the scoped ICurrentUser
 
 // The role-holder proxy (ADR-0050): in this single-process sample it installs NOTHING (no role
 // lease is registered), so the pipeline is untouched. The moment you scale to a homogeneous fleet —
@@ -57,10 +57,10 @@ app.UseElarionCurrentUser();   // snapshot claims into the scoped ICurrentUser
 app.UseElarionRoleHolderProxy("actors", "/quotes", "/events");
 
 app.UseDefaultFiles();
-app.UseStaticFiles();          // the demo dashboard (wwwroot/index.html)
+app.UseStaticFiles(); // the demo dashboard (wwwroot/index.html)
 
-app.MapElarionEndpoints(app.Configuration);   // generated [HttpEndpoint] routes: GET /quotes, GET /quotes/{symbol}
-app.MapElarionClientEvents("/events");        // the SSE stream: ?subscriptions=[{"topic":"market.quoteChanged","resource":"ELN"}]
+app.MapElarionEndpoints(app.Configuration); // generated [HttpEndpoint] routes: GET /quotes, GET /quotes/{symbol}
+app.MapElarionClientEvents("/events"); // the SSE stream: ?subscriptions=[{"topic":"market.quoteChanged","resource":"ELN"}]
 
 // The ordered tier (ADR-0052) next to the conflated hints above: every accepted tick for one symbol,
 // in order, over one SSE connection — `id:` is the stream sequence, so the browser's automatic

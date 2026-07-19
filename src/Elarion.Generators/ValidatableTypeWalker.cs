@@ -28,8 +28,7 @@ namespace Elarion.Generators;
 /// reflection-free arrays.
 /// </para>
 /// </summary>
-internal static class ValidatableTypeWalker
-{
+internal static class ValidatableTypeWalker {
     private const string ValidationAttributeDisplay = "System.ComponentModel.DataAnnotations.ValidationAttribute";
     private const string ValidatableObjectDisplay = "System.ComponentModel.DataAnnotations.IValidatableObject";
     private const string DisplayAttributeDisplay = "System.ComponentModel.DataAnnotations.DisplayAttribute";
@@ -38,8 +37,7 @@ internal static class ValidatableTypeWalker
 
     // Leaf BCL types never walked (beyond what SpecialType already excludes: primitives, string, object,
     // decimal, DateTime, enums, delegates). These have public properties but carry no user annotations.
-    private static readonly HashSet<string> ExcludedLeafTypes = new(StringComparer.Ordinal)
-    {
+    private static readonly HashSet<string> ExcludedLeafTypes = new(StringComparer.Ordinal) {
         "System.Guid",
         "System.DateTimeOffset",
         "System.DateOnly",
@@ -47,15 +45,14 @@ internal static class ValidatableTypeWalker
         "System.TimeSpan",
         "System.Uri",
         "System.Version",
-        "System.Type",
+        "System.Type"
     };
 
     /// <summary>
     /// Per-resolution-pass walk state: memoizes visited type nodes and per-root validatability across all
     /// handlers of one compilation pass. Never stored in a pipeline value (it holds symbols).
     /// </summary>
-    internal sealed class Context(IAssemblySymbol currentAssembly)
-    {
+    internal sealed class Context(IAssemblySymbol currentAssembly) {
         public IAssemblySymbol CurrentAssembly { get; } = currentAssembly;
 
         internal Dictionary<ITypeSymbol, TypeNode> Nodes { get; } =
@@ -66,8 +63,7 @@ internal static class ValidatableTypeWalker
     }
 
     /// <summary>A visited graph node. Transient within one resolution pass — holds symbols, never cached in the pipeline.</summary>
-    internal sealed class TypeNode(ITypeSymbol type)
-    {
+    internal sealed class TypeNode(ITypeSymbol type) {
         public ITypeSymbol Type { get; } = type;
 
         /// <summary>Direct annotation: a validation attribute on the type or a property, or IValidatableObject.</summary>
@@ -89,14 +85,12 @@ internal static class ValidatableTypeWalker
     /// True when the request type's graph contains any annotated type — i.e. the handler needs the
     /// <c>ValidationDecorator</c> and the resolver an entry for the request. Memoized per root in the context.
     /// </summary>
-    public static bool IsValidatable(ITypeSymbol requestType, Context context)
-    {
+    public static bool IsValidatable(ITypeSymbol requestType, Context context) {
         if (context.ValidatableCache.TryGetValue(requestType, out var cached))
             return cached;
 
         var result = false;
-        if (IsWalkable(requestType, context))
-        {
+        if (IsWalkable(requestType, context)) {
             var root = Visit(requestType, context);
             result = ReachesAnnotated(root, new HashSet<TypeNode>());
         }
@@ -112,12 +106,10 @@ internal static class ValidatableTypeWalker
     /// so emission is deterministic. A member is included when it carries attributes or when its (unwrapped)
     /// type is itself registered — the recursion carrier the runtime walker follows.
     /// </summary>
-    public static EquatableArray<ValidatableTypeModel> BuildModels(IReadOnlyList<ITypeSymbol> roots, Context context)
-    {
+    public static EquatableArray<ValidatableTypeModel> BuildModels(IReadOnlyList<ITypeSymbol> roots, Context context) {
         // The reachable closure over all roots.
         var reachable = new HashSet<TypeNode>();
-        foreach (var root in roots)
-        {
+        foreach (var root in roots) {
             if (!IsWalkable(root, context))
                 continue;
 
@@ -130,29 +122,22 @@ internal static class ValidatableTypeWalker
         // Fixpoint: registered = annotated ∪ { t | t has a member whose target is registered }.
         var registered = new HashSet<TypeNode>();
         foreach (var node in reachable)
-        {
             if (node.Annotated)
                 registered.Add(node);
-        }
 
         var changed = registered.Count > 0;
-        while (changed)
-        {
+        while (changed) {
             changed = false;
-            foreach (var node in reachable)
-            {
+            foreach (var node in reachable) {
                 if (registered.Contains(node))
                     continue;
 
                 foreach (var property in node.Properties)
-                {
-                    if (property.Target is not null && registered.Contains(property.Target))
-                    {
+                    if (property.Target is not null && registered.Contains(property.Target)) {
                         registered.Add(node);
                         changed = true;
                         break;
                     }
-                }
             }
         }
 
@@ -160,11 +145,9 @@ internal static class ValidatableTypeWalker
             return EquatableArray<ValidatableTypeModel>.Empty;
 
         var models = ImmutableArray.CreateBuilder<ValidatableTypeModel>(registered.Count);
-        foreach (var node in registered)
-        {
+        foreach (var node in registered) {
             var members = ImmutableArray.CreateBuilder<ValidatablePropertyModel>();
-            foreach (var property in node.Properties)
-            {
+            foreach (var property in node.Properties) {
                 var carriesRecursion = property.Target is not null && registered.Contains(property.Target);
                 if (property.Attributes.IsEmpty && !carriesRecursion)
                     continue;
@@ -186,20 +169,16 @@ internal static class ValidatableTypeWalker
         return models.ToImmutable();
     }
 
-    private static void CollectClosure(TypeNode node, HashSet<TypeNode> closure)
-    {
+    private static void CollectClosure(TypeNode node, HashSet<TypeNode> closure) {
         if (!closure.Add(node))
             return;
 
         foreach (var property in node.Properties)
-        {
             if (property.Target is not null)
                 CollectClosure(property.Target, closure);
-        }
     }
 
-    private static bool ReachesAnnotated(TypeNode node, HashSet<TypeNode> visited)
-    {
+    private static bool ReachesAnnotated(TypeNode node, HashSet<TypeNode> visited) {
         if (!visited.Add(node))
             return false;
 
@@ -207,16 +186,13 @@ internal static class ValidatableTypeWalker
             return true;
 
         foreach (var property in node.Properties)
-        {
             if (property.Target is not null && ReachesAnnotated(property.Target, visited))
                 return true;
-        }
 
         return false;
     }
 
-    private static TypeNode Visit(ITypeSymbol type, Context context)
-    {
+    private static TypeNode Visit(ITypeSymbol type, Context context) {
         if (context.Nodes.TryGetValue(type, out var existing))
             return existing;
 
@@ -227,10 +203,9 @@ internal static class ValidatableTypeWalker
 
         node.TypeAttributes.AddRange(RenderValidationAttributes(type.GetAttributes(), context));
         var annotated = node.TypeAttributes.Count > 0 ||
-            HandlerShape.Implements(type, ValidatableObjectDisplay);
+                        HandlerShape.Implements(type, ValidatableObjectDisplay);
 
-        foreach (var property in CollectProperties(type))
-        {
+        foreach (var property in CollectProperties(type)) {
             var attributeData = CollectPropertyAttributeData(property);
             var attributes = RenderValidationAttributes(attributeData, context).ToImmutableArray();
             if (!attributes.IsEmpty)
@@ -254,14 +229,13 @@ internal static class ValidatableTypeWalker
     // Public, gettable instance properties (no indexers), including inherited ones with most-derived-wins
     // dedupe — mirroring the runtime walker, which reads members via DeclaringType.GetProperty(name) on the
     // registered (concrete) type.
-    private static List<IPropertySymbol> CollectProperties(ITypeSymbol type)
-    {
+    private static List<IPropertySymbol> CollectProperties(ITypeSymbol type) {
         var result = new List<IPropertySymbol>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        for (var current = type; current is not null && current.SpecialType != SpecialType.System_Object; current = current.BaseType)
-        {
-            foreach (var member in current.GetMembers())
-            {
+        for (var current = type;
+             current is not null && current.SpecialType != SpecialType.System_Object;
+             current = current.BaseType)
+            foreach (var member in current.GetMembers()) {
                 if (member is not IPropertySymbol { IsStatic: false, IsIndexer: false, GetMethod: not null } property)
                     continue;
 
@@ -271,7 +245,6 @@ internal static class ValidatableTypeWalker
                 if (seen.Add(property.Name))
                     result.Add(property);
             }
-        }
 
         return result;
     }
@@ -279,39 +252,31 @@ internal static class ValidatableTypeWalker
     // The property's own attributes plus — matching Microsoft's record handling — the attributes of the first
     // constructor parameter with the same name (a positional record's `[StringLength(…)] string Name` lands on
     // the parameter, not the synthesized property).
-    private static List<AttributeData> CollectPropertyAttributeData(IPropertySymbol property)
-    {
+    private static List<AttributeData> CollectPropertyAttributeData(IPropertySymbol property) {
         var result = new List<AttributeData>(property.GetAttributes());
         if (property.ContainingType is not { } declaringType)
             return result;
 
         foreach (var constructor in declaringType.InstanceConstructors)
-        {
-            foreach (var parameter in constructor.Parameters)
-            {
-                if (!string.Equals(parameter.Name, property.Name, StringComparison.OrdinalIgnoreCase))
-                    continue;
+        foreach (var parameter in constructor.Parameters) {
+            if (!string.Equals(parameter.Name, property.Name, StringComparison.OrdinalIgnoreCase))
+                continue;
 
-                result.AddRange(parameter.GetAttributes());
-                return result;
-            }
+            result.AddRange(parameter.GetAttributes());
+            return result;
         }
 
         return result;
     }
 
-    private static string ResolveDisplayName(List<AttributeData> attributes, string propertyName)
-    {
-        foreach (var attribute in attributes)
-        {
+    private static string ResolveDisplayName(List<AttributeData> attributes, string propertyName) {
+        foreach (var attribute in attributes) {
             if (attribute.AttributeClass?.ToDisplayString() != DisplayAttributeDisplay)
                 continue;
 
             foreach (var named in attribute.NamedArguments)
-            {
                 if (named.Key == "Name" && named.Value.Value is string name && name.Length > 0)
                     return name;
-            }
         }
 
         return propertyName;
@@ -322,15 +287,12 @@ internal static class ValidatableTypeWalker
     /// <c>IEnumerable&lt;T&gt;</c> element types (innermost element for nested collections, matching the
     /// runtime walker's per-item resolution), then returns it when it is walkable, else <see langword="null"/>.
     /// </summary>
-    private static ITypeSymbol? UnwrapWalkTarget(ITypeSymbol type, Context context)
-    {
+    private static ITypeSymbol? UnwrapWalkTarget(ITypeSymbol type, Context context) {
         var current = type;
         // A self-referential enumerable (class X : IEnumerable<X>) would unwrap forever; the seen-set breaks it.
         var seen = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
-        while (seen.Add(current))
-        {
-            if (current is IArrayTypeSymbol array)
-            {
+        while (seen.Add(current)) {
+            if (current is IArrayTypeSymbol array) {
                 current = array.ElementType;
                 continue;
             }
@@ -338,15 +300,15 @@ internal static class ValidatableTypeWalker
             if (current.SpecialType == SpecialType.System_String)
                 break;
 
-            if (current is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
-            {
+            if (current is INamedTypeSymbol {
+                    OriginalDefinition.SpecialType: SpecialType.System_Nullable_T
+                } nullable) {
                 current = nullable.TypeArguments[0];
                 continue;
             }
 
             var element = GetEnumerableElement(current);
-            if (element is not null)
-            {
+            if (element is not null) {
                 current = element;
                 continue;
             }
@@ -357,22 +319,20 @@ internal static class ValidatableTypeWalker
         return IsWalkable(current, context) ? current : null;
     }
 
-    private static ITypeSymbol? GetEnumerableElement(ITypeSymbol type)
-    {
-        if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Collections_Generic_IEnumerable_T } direct)
+    private static ITypeSymbol? GetEnumerableElement(ITypeSymbol type) {
+        if (type is INamedTypeSymbol {
+                OriginalDefinition.SpecialType: SpecialType.System_Collections_Generic_IEnumerable_T
+            } direct)
             return direct.TypeArguments[0];
 
         foreach (var iface in type.AllInterfaces)
-        {
             if (iface.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
                 return iface.TypeArguments[0];
-        }
 
         return null;
     }
 
-    private static bool IsWalkable(ITypeSymbol type, Context context)
-    {
+    private static bool IsWalkable(ITypeSymbol type, Context context) {
         if (type is not INamedTypeSymbol named)
             return false;
 
@@ -401,11 +361,9 @@ internal static class ValidatableTypeWalker
     /// represented as compile-time constants, or whose type is not accessible from the generated code, are
     /// skipped (attribute arguments are constants by construction, so this is a guard, not a policy).
     /// </summary>
-    private static List<string> RenderValidationAttributes(IEnumerable<AttributeData> attributes, Context context)
-    {
+    private static List<string> RenderValidationAttributes(IEnumerable<AttributeData> attributes, Context context) {
         var result = new List<string>();
-        foreach (var attribute in attributes)
-        {
+        foreach (var attribute in attributes) {
             if (attribute.AttributeClass is not { TypeKind: not TypeKind.Error } attributeClass)
                 continue;
 
@@ -419,13 +377,10 @@ internal static class ValidatableTypeWalker
         return result;
     }
 
-    private static bool DerivesFromValidationAttribute(INamedTypeSymbol attributeClass)
-    {
+    private static bool DerivesFromValidationAttribute(INamedTypeSymbol attributeClass) {
         for (var current = attributeClass.BaseType; current is not null; current = current.BaseType)
-        {
             if (current.ToDisplayString() == ValidationAttributeDisplay)
                 return true;
-        }
 
         return false;
     }
@@ -434,15 +389,13 @@ internal static class ValidatableTypeWalker
         AttributeData attribute,
         INamedTypeSymbol attributeClass,
         Context context,
-        out string rendered)
-    {
+        out string rendered) {
         rendered = string.Empty;
         if (!IsAccessibleFromGeneratedCode(attributeClass, context.CurrentAssembly))
             return false;
 
         var arguments = new List<string>(attribute.ConstructorArguments.Length);
-        foreach (var constant in attribute.ConstructorArguments)
-        {
+        foreach (var constant in attribute.ConstructorArguments) {
             if (!TryRenderTypedConstant(constant, context, out var value))
                 return false;
 
@@ -450,8 +403,7 @@ internal static class ValidatableTypeWalker
         }
 
         var initializers = new List<string>(attribute.NamedArguments.Length);
-        foreach (var named in attribute.NamedArguments)
-        {
+        foreach (var named in attribute.NamedArguments) {
             if (!TryRenderTypedConstant(named.Value, context, out var value))
                 return false;
 
@@ -466,21 +418,18 @@ internal static class ValidatableTypeWalker
         return true;
     }
 
-    private static bool TryRenderTypedConstant(TypedConstant constant, Context context, out string rendered)
-    {
+    private static bool TryRenderTypedConstant(TypedConstant constant, Context context, out string rendered) {
         rendered = string.Empty;
-        if (constant.IsNull)
-        {
+        if (constant.IsNull) {
             // Cast the null so overloaded attribute constructors stay unambiguous.
             rendered = constant.Type is { TypeKind: not TypeKind.Error } type &&
-                IsAccessibleFromGeneratedCode(type, context.CurrentAssembly)
-                    ? $"({type.ToDisplayString(Fmt)})null"
-                    : "null";
+                       IsAccessibleFromGeneratedCode(type, context.CurrentAssembly)
+                ? $"({type.ToDisplayString(Fmt)})null"
+                : "null";
             return true;
         }
 
-        switch (constant.Kind)
-        {
+        switch (constant.Kind) {
             case TypedConstantKind.Primitive:
                 return TryRenderPrimitive(constant.Value!, out rendered);
 
@@ -488,9 +437,7 @@ internal static class ValidatableTypeWalker
                 if (constant.Type is not { } enumType ||
                     !IsAccessibleFromGeneratedCode(enumType, context.CurrentAssembly) ||
                     !TryRenderPrimitive(constant.Value!, out var underlying))
-                {
                     return false;
-                }
 
                 // Cast the underlying constant back to the enum type — exact for undeclared/flags combinations.
                 rendered = $"({enumType.ToDisplayString(Fmt)})({underlying})";
@@ -500,9 +447,7 @@ internal static class ValidatableTypeWalker
                 if (constant.Value is not ITypeSymbol typeValue ||
                     typeValue.TypeKind == TypeKind.Error ||
                     !IsAccessibleFromGeneratedCode(typeValue, context.CurrentAssembly))
-                {
                     return false;
-                }
 
                 rendered = $"typeof({typeValue.ToDisplayString(Fmt)})";
                 return true;
@@ -510,13 +455,10 @@ internal static class ValidatableTypeWalker
             case TypedConstantKind.Array:
                 if (constant.Type is not IArrayTypeSymbol arrayType ||
                     !IsAccessibleFromGeneratedCode(arrayType.ElementType, context.CurrentAssembly))
-                {
                     return false;
-                }
 
                 var elements = new List<string>(constant.Values.Length);
-                foreach (var value in constant.Values)
-                {
+                foreach (var value in constant.Values) {
                     if (!TryRenderTypedConstant(value, context, out var element))
                         return false;
 
@@ -534,15 +476,13 @@ internal static class ValidatableTypeWalker
         }
     }
 
-    private static bool TryRenderPrimitive(object value, out string rendered)
-    {
-        switch (value)
-        {
+    private static bool TryRenderPrimitive(object value, out string rendered) {
+        switch (value) {
             case string s:
-                rendered = SymbolDisplay.FormatLiteral(s, quote: true);
+                rendered = SymbolDisplay.FormatLiteral(s, true);
                 return true;
             case char c:
-                rendered = SymbolDisplay.FormatLiteral(c, quote: true);
+                rendered = SymbolDisplay.FormatLiteral(c, true);
                 return true;
             case bool b:
                 rendered = b ? "true" : "false";
@@ -592,8 +532,7 @@ internal static class ValidatableTypeWalker
 
     // Whether generated code in the current assembly may reference the type in typeof()/new expressions:
     // public all the way out, or internal within this assembly (or an assembly granting it access via IVT).
-    private static bool IsAccessibleFromGeneratedCode(ITypeSymbol type, IAssemblySymbol currentAssembly)
-    {
+    private static bool IsAccessibleFromGeneratedCode(ITypeSymbol type, IAssemblySymbol currentAssembly) {
         if (type is IArrayTypeSymbol array)
             return IsAccessibleFromGeneratedCode(array.ElementType, currentAssembly);
 
@@ -604,15 +543,11 @@ internal static class ValidatableTypeWalker
             return type.TypeKind == TypeKind.Dynamic;
 
         foreach (var argument in named.TypeArguments)
-        {
             if (!IsAccessibleFromGeneratedCode(argument, currentAssembly))
                 return false;
-        }
 
-        for (INamedTypeSymbol? current = named; current is not null; current = current.ContainingType)
-        {
-            switch (current.DeclaredAccessibility)
-            {
+        for (var current = named; current is not null; current = current.ContainingType)
+            switch (current.DeclaredAccessibility) {
                 case Accessibility.Public:
                 case Accessibility.NotApplicable:
                     continue;
@@ -620,15 +555,12 @@ internal static class ValidatableTypeWalker
                 case Accessibility.ProtectedOrInternal:
                     if (SymbolEqualityComparer.Default.Equals(current.ContainingAssembly, currentAssembly) ||
                         current.ContainingAssembly.GivesAccessTo(currentAssembly))
-                    {
                         continue;
-                    }
 
                     return false;
                 default:
                     return false;
             }
-        }
 
         return true;
     }

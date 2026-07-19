@@ -16,5 +16,6 @@ public sealed class ElarionIdempotentEndpointMetadata {
     /// <summary>The shared marker instance emitted onto every idempotent generated endpoint.</summary>
     public static readonly ElarionIdempotentEndpointMetadata Instance = new();
 
-    private ElarionIdempotentEndpointMetadata() { }
+    private ElarionIdempotentEndpointMetadata() {
+    }
 }

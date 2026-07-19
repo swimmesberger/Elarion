@@ -87,8 +87,9 @@ public sealed record ScheduledJobSchedule {
     /// Fixed-rate should be used when due times matter independently of execution duration,
     /// such as "every minute on the minute".
     /// </remarks>
-    public static ScheduledJobSchedule FixedRate(string every, string? initialDelay = null, bool runOnStart = true) =>
-        CreateInterval(ScheduledJobScheduleKind.FixedRate, every, initialDelay, runOnStart);
+    public static ScheduledJobSchedule FixedRate(string every, string? initialDelay = null, bool runOnStart = true) {
+        return CreateInterval(ScheduledJobScheduleKind.FixedRate, every, initialDelay, runOnStart);
+    }
 
     /// <summary>
     /// Creates a schedule due a fixed delay after each run completes.
@@ -97,8 +98,9 @@ public sealed record ScheduledJobSchedule {
     /// Fixed-delay should be used when the job should wait after each completed pass, such as
     /// polling or cleanup loops.
     /// </remarks>
-    public static ScheduledJobSchedule FixedDelay(string delay, string? initialDelay = null, bool runOnStart = true) =>
-        CreateInterval(ScheduledJobScheduleKind.FixedDelay, delay, initialDelay, runOnStart);
+    public static ScheduledJobSchedule FixedDelay(string delay, string? initialDelay = null, bool runOnStart = true) {
+        return CreateInterval(ScheduledJobScheduleKind.FixedDelay, delay, initialDelay, runOnStart);
+    }
 
     /// <summary>
     /// Creates a cron schedule, e.g. <c>"0 0 3 * * *"</c>, evaluated in <paramref name="timeZone"/> (UTC by default).
@@ -110,14 +112,12 @@ public sealed record ScheduledJobSchedule {
     public static ScheduledJobSchedule Cron(string expression, string? timeZone = null) {
         ArgumentException.ThrowIfNullOrWhiteSpace(expression);
         // Note 19: Literal cron expressions are validated eagerly; placeholders are validated later after configuration is resolved.
-        if (!VariableSubstitution.IsPlaceholder(expression) && expression != CronDisabled) {
+        if (!VariableSubstitution.IsPlaceholder(expression) && expression != CronDisabled)
             CronExpression.Parse(expression);
-        }
 
         // Note 20: Time zone ids are also validated eagerly unless they are placeholders.
-        if (timeZone is not null && !VariableSubstitution.IsPlaceholder(timeZone)) {
+        if (timeZone is not null && !VariableSubstitution.IsPlaceholder(timeZone))
             TimeZoneInfo.FindSystemTimeZoneById(timeZone);
-        }
 
         return new ScheduledJobSchedule {
             Kind = ScheduledJobScheduleKind.Cron,
@@ -135,9 +135,7 @@ public sealed record ScheduledJobSchedule {
     /// </remarks>
     public static ScheduledJobSchedule Once(string initialDelay) {
         ArgumentException.ThrowIfNullOrWhiteSpace(initialDelay);
-        if (!VariableSubstitution.IsPlaceholder(initialDelay)) {
-            ParseDuration(initialDelay);
-        }
+        if (!VariableSubstitution.IsPlaceholder(initialDelay)) ParseDuration(initialDelay);
 
         return new ScheduledJobSchedule {
             Kind = ScheduledJobScheduleKind.OneTime,
@@ -172,13 +170,12 @@ public sealed record ScheduledJobSchedule {
             : ParseDuration(VariableSubstitution.ResolveRequired(InitialDelay, variables));
 
         if (Kind == ScheduledJobScheduleKind.Cron) {
-            if (value == CronDisabled) {
+            if (value == CronDisabled)
                 return new ResolvedSchedule {
                     Kind = Kind,
                     TimeZone = TimeZoneInfo.Utc,
                     IsDisabled = true
                 };
-            }
 
             var timeZoneId = TimeZone is null ? null : VariableSubstitution.ResolveRequired(TimeZone, variables);
             return new ResolvedSchedule {
@@ -190,7 +187,7 @@ public sealed record ScheduledJobSchedule {
             };
         }
 
-        if (Kind == ScheduledJobScheduleKind.OneTime) {
+        if (Kind == ScheduledJobScheduleKind.OneTime)
             return new ResolvedSchedule {
                 Kind = Kind,
                 Interval = null,
@@ -198,7 +195,6 @@ public sealed record ScheduledJobSchedule {
                 InitialDelay = ParseDuration(value),
                 RunOnStart = false
             };
-        }
 
         return new ResolvedSchedule {
             Kind = Kind,
@@ -214,9 +210,7 @@ public sealed record ScheduledJobSchedule {
         DateTimeOffset nowUtc,
         TimeSpan every) {
         var next = previousDueTimeUtc + every;
-        if (next > nowUtc) {
-            return next;
-        }
+        if (next > nowUtc) return next;
 
         // Note 22: Fixed-rate schedules stay aligned to their original grid instead of drifting by "now + interval".
         var missedIntervals = (nowUtc - previousDueTimeUtc).Ticks / every.Ticks;
@@ -224,17 +218,17 @@ public sealed record ScheduledJobSchedule {
     }
 
     internal static TimeSpan ParseDuration(string value) {
-        if (TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out var parsed)) {
+        if (TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out var parsed))
             // Note 23: Invariant TimeSpan keeps parsing stable regardless of the server's culture.
             return parsed;
-        }
 
         string numberText;
         Func<double, TimeSpan>? factory;
         if (value.EndsWith("ms", StringComparison.OrdinalIgnoreCase)) {
             numberText = value[..^2];
             factory = TimeSpan.FromMilliseconds;
-        } else {
+        }
+        else {
             numberText = value.Length > 0 ? value[..^1] : value;
             factory = value.Length > 0
                 ? value[^1] switch {
@@ -249,11 +243,11 @@ public sealed record ScheduledJobSchedule {
 
         if (factory is null ||
             numberText.Length == 0 ||
-            !double.TryParse(numberText, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var amount)) {
+            !double.TryParse(numberText, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign,
+                CultureInfo.InvariantCulture, out var amount))
             // Note 24: Throwing FormatException here gives configuration users a precise startup/runtime error.
             throw new FormatException(
                 $"Duration '{value}' is invalid. Use invariant TimeSpan text or a number with the suffix ms, s, m, h, or d.");
-        }
 
         return factory(amount);
     }
@@ -264,13 +258,9 @@ public sealed record ScheduledJobSchedule {
         string? initialDelay,
         bool runOnStart) {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        if (!VariableSubstitution.IsPlaceholder(value)) {
-            ParsePositiveDuration(value);
-        }
+        if (!VariableSubstitution.IsPlaceholder(value)) ParsePositiveDuration(value);
 
-        if (initialDelay is not null && !VariableSubstitution.IsPlaceholder(initialDelay)) {
-            ParseDuration(initialDelay);
-        }
+        if (initialDelay is not null && !VariableSubstitution.IsPlaceholder(initialDelay)) ParseDuration(initialDelay);
 
         return new ScheduledJobSchedule {
             Kind = kind,
@@ -282,9 +272,9 @@ public sealed record ScheduledJobSchedule {
 
     private static TimeSpan ParsePositiveDuration(string value) {
         var interval = ParseDuration(value);
-        if (interval <= TimeSpan.Zero) {
-            throw new ArgumentOutOfRangeException(nameof(value), $"The scheduled interval '{value}' must be greater than zero.");
-        }
+        if (interval <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(value),
+                $"The scheduled interval '{value}' must be greater than zero.");
 
         return interval;
     }
@@ -332,9 +322,7 @@ public sealed record ResolvedSchedule {
     /// have no due time.
     /// </remarks>
     public DateTimeOffset GetFirstDueTime(DateTimeOffset nowUtc) {
-        if (IsDisabled) {
-            throw new InvalidOperationException("A disabled schedule does not have a due time.");
-        }
+        if (IsDisabled) throw new InvalidOperationException("A disabled schedule does not have a due time.");
 
         if (InitialDelay is { } initialDelay) {
             nowUtc += initialDelay;
@@ -358,12 +346,13 @@ public sealed record ResolvedSchedule {
     /// Misfire policy is handled by the scheduler before it calls this method. This method
     /// returns one next due time, not a list of all missed occurrences.
     /// </remarks>
-    public DateTimeOffset GetNextDueTime(DateTimeOffset previousDueTimeUtc, DateTimeOffset nowUtc) =>
-        Kind switch {
+    public DateTimeOffset GetNextDueTime(DateTimeOffset previousDueTimeUtc, DateTimeOffset nowUtc) {
+        return Kind switch {
             ScheduledJobScheduleKind.FixedRate =>
                 ScheduledJobSchedule.GetNextGridOccurrence(previousDueTimeUtc, nowUtc, Interval!.Value),
             ScheduledJobScheduleKind.FixedDelay => nowUtc + Interval!.Value,
             ScheduledJobScheduleKind.Cron => Cron!.GetNextOccurrence(nowUtc, TimeZone),
             _ => throw new InvalidOperationException("A one-time schedule does not have a next due time.")
         };
+    }
 }

@@ -23,6 +23,7 @@ public class SqlStatementBuildingBenchmarks {
     // old {Columns.All:raw} + {TableName:raw} shape, now expressed via Verbatim since :raw was removed).
     private static readonly SqlStatement ColumnsAll =
         SqlStatement.Verbatim("device_id, metric, recorded_at, value, meta");
+
     private static readonly SqlStatement TableName = SqlStatement.Verbatim("readings");
 
     // The redesign's generated Row.Select — a cached pure-literal fragment combining SELECT-list + FROM,

@@ -16,5 +16,5 @@ public enum AuditRecordDurability {
     /// recorded once the commit succeeds (the EF sink does so from a transaction interceptor); if the
     /// commit fails, the scope stays unrecorded and the outer decorator writes the detached failure record.
     /// </summary>
-    EnlistedInTransaction,
+    EnlistedInTransaction
 }

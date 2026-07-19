@@ -32,7 +32,7 @@ namespace Elarion.Abstractions.Serialization;
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     UseStringEnumConverter = true)]
 [JsonSerializable(typeof(ValidationErrorData))]
-[JsonSerializable(typeof(Elarion.Abstractions.Idempotency.StoredResult))]
+[JsonSerializable(typeof(Idempotency.StoredResult))]
 [JsonSerializable(typeof(AppError))]
 [JsonSerializable(typeof(ElarionFile))]
 public sealed partial class ElarionFrameworkJsonContext : JsonSerializerContext;

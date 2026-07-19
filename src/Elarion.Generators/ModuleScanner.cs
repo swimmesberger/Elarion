@@ -7,8 +7,7 @@ namespace Elarion.Generators;
 /// transport- or runtime-registrations by owning module. Discovery is an incremental provider:
 /// see <see cref="ModuleProviders.CollectModules"/>.
 /// </summary>
-internal static class ModuleScanner
-{
+internal static class ModuleScanner {
     /// <summary>
     /// Two <c>[AppModule]</c> declarations share one module name. Module names key the generated hint names,
     /// the per-module extension methods, the bootstrapper's switch cases, and configuration gating — a duplicate
@@ -16,14 +15,13 @@ internal static class ModuleScanner
     /// is reported and only one deterministic winner is generated.
     /// </summary>
     public static readonly DiagnosticDescriptor DuplicateModuleName = new(
-        id: "ELMOD006",
-        title: "Duplicate [AppModule] name",
-        messageFormat:
+        "ELMOD006",
+        "Duplicate [AppModule] name",
         "Modules '{0}' and '{1}' both declare the [AppModule] name '{2}'; module names must be unique across the "
         + "application — only '{0}' (ordinal-first by type name) is generated",
-        category: "Elarion.Modules",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        "Elarion.Modules",
+        DiagnosticSeverity.Error,
+        true);
 
     /// <summary>
     /// Collapses same-named module entries to one deterministic winner per name (ordinal-first by the entry's
@@ -34,15 +32,12 @@ internal static class ModuleScanner
         IEnumerable<T> entries,
         Func<T, string> nameSelector,
         Func<T, string> typeIdSelector,
-        List<DiagnosticInfo>? diagnostics = null)
-    {
+        List<DiagnosticInfo>? diagnostics = null) {
         var order = new List<string>();
         var groups = new Dictionary<string, List<T>>(StringComparer.Ordinal);
-        foreach (var entry in entries)
-        {
+        foreach (var entry in entries) {
             var name = nameSelector(entry);
-            if (!groups.TryGetValue(name, out var group))
-            {
+            if (!groups.TryGetValue(name, out var group)) {
                 group = [];
                 groups[name] = group;
                 order.Add(name);
@@ -52,8 +47,7 @@ internal static class ModuleScanner
         }
 
         var result = new List<T>(order.Count);
-        foreach (var name in order)
-        {
+        foreach (var name in order) {
             var group = groups[name];
             group.Sort((left, right) =>
                 string.Compare(typeIdSelector(left), typeIdSelector(right), StringComparison.Ordinal));
@@ -63,14 +57,12 @@ internal static class ModuleScanner
                 continue;
 
             for (var i = 1; i < group.Count; i++)
-            {
                 diagnostics.Add(DiagnosticInfo.Create(
                     DuplicateModuleName,
                     (Location?)null,
                     typeIdSelector(group[0]),
                     typeIdSelector(group[i]),
                     name));
-            }
         }
 
         return result;
@@ -91,10 +83,9 @@ internal static class ModuleScanner
     /// Builds the <c>GetTypeByMetadataName</c>-compatible name for a source-declared type: namespace-qualified,
     /// nested types joined with <c>+</c>, generic arity suffixes preserved.
     /// </summary>
-    public static string BuildMetadataName(INamedTypeSymbol type)
-    {
+    public static string BuildMetadataName(INamedTypeSymbol type) {
         var parts = new List<string>();
-        for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
+        for (var current = type; current is not null; current = current.ContainingType)
             parts.Insert(0, current.MetadataName);
 
         var ns = type.ContainingNamespace is { IsGlobalNamespace: false } containing
@@ -103,11 +94,9 @@ internal static class ModuleScanner
         return ns + string.Join("+", parts);
     }
 
-    public static Module? FindBest(string handlerNamespace, IReadOnlyList<Module> modules)
-    {
+    public static Module? FindBest(string handlerNamespace, IReadOnlyList<Module> modules) {
         Module? best = null;
-        foreach (var module in modules)
-        {
+        foreach (var module in modules) {
             if (!IsInScope(handlerNamespace, module.Namespace))
                 continue;
             if (best is null || module.Namespace.Length > best.Namespace.Length)
@@ -117,8 +106,9 @@ internal static class ModuleScanner
         return best;
     }
 
-    public static bool IsInScope(string candidateNamespace, string moduleNamespace) =>
-        moduleNamespace.Length == 0 ||
-        candidateNamespace == moduleNamespace ||
-        candidateNamespace.StartsWith(moduleNamespace + ".", StringComparison.Ordinal);
+    public static bool IsInScope(string candidateNamespace, string moduleNamespace) {
+        return moduleNamespace.Length == 0 ||
+               candidateNamespace == moduleNamespace ||
+               candidateNamespace.StartsWith(moduleNamespace + ".", StringComparison.Ordinal);
+    }
 }

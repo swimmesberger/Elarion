@@ -16,11 +16,12 @@ namespace Elarion.Generators;
 /// <para>Trigger: <c>[assembly: UseElarion]</c> or <c>[assembly: GenerateModuleAuthorizationPolicies]</c>.</para>
 /// </summary>
 [Generator(LanguageNames.CSharp)]
-public sealed class AuthorizationPolicyRegistrationGenerator : IIncrementalGenerator
-{
+public sealed class AuthorizationPolicyRegistrationGenerator : IIncrementalGenerator {
     private const string AttributeMetadataName = "Elarion.Abstractions.Authorization.AuthorizationPolicyAttribute";
     private const string PolicyInterfaceMetadataName = "Elarion.Abstractions.Authorization.IAuthorizationPolicy";
-    private const string TriggerAttributeMetadataName = "Elarion.Abstractions.GenerateModuleAuthorizationPoliciesAttribute";
+
+    private const string TriggerAttributeMetadataName =
+        "Elarion.Abstractions.GenerateModuleAuthorizationPoliciesAttribute";
 
     private static readonly DiagnosticDescriptor NotAnAuthorizationPolicy = new(
         "ELPOL001",
@@ -28,7 +29,7 @@ public sealed class AuthorizationPolicyRegistrationGenerator : IIncrementalGener
         "Type '{0}' is annotated with [AuthorizationPolicy] but does not implement IAuthorizationPolicy; it will not be registered",
         "Elarion.Abstractions.Authorization",
         DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
+        true);
 
     private static readonly DiagnosticDescriptor PolicyNotInModule = new(
         "ELPOL002",
@@ -36,7 +37,7 @@ public sealed class AuthorizationPolicyRegistrationGenerator : IIncrementalGener
         "Authorization policy '{0}' is not under any [AppModule] namespace, so it is not auto-registered; move it under a module or register it manually",
         "Elarion.Abstractions.Authorization",
         DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
+        true);
 
     private sealed record PolicyInfo(
         string PolicyFqn,
@@ -46,14 +47,12 @@ public sealed class AuthorizationPolicyRegistrationGenerator : IIncrementalGener
         LocationInfo Location,
         EquatableArray<DiagnosticInfo> Diagnostics);
 
-    private static class TrackingNames
-    {
+    private static class TrackingNames {
         public const string Policies = "AuthorizationPolicies";
         public const string Combined = "AuthorizationPoliciesCombined";
     }
 
-    public void Initialize(IncrementalGeneratorInitializationContext context)
-    {
+    public void Initialize(IncrementalGeneratorInitializationContext context) {
         var policies = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 AttributeMetadataName,
@@ -69,70 +68,51 @@ public sealed class AuthorizationPolicyRegistrationGenerator : IIncrementalGener
 
         var combined = policies.Combine(modules).Combine(trigger).WithTrackingName(TrackingNames.Combined);
 
-        context.RegisterSourceOutput(combined, static (spc, source) =>
-        {
+        context.RegisterSourceOutput(combined, static (spc, source) => {
             var ((policyList, modules), hasTrigger) = source;
-            if (!hasTrigger)
-            {
-                return;
-            }
+            if (!hasTrigger) return;
 
             Emit(spc, policyList, modules);
         });
     }
 
-    private static PolicyInfo? CreatePolicy(GeneratorAttributeSyntaxContext ctx)
-    {
-        if (ctx.TargetSymbol is not INamedTypeSymbol type || type.IsAbstract)
-        {
-            return null;
-        }
+    private static PolicyInfo? CreatePolicy(GeneratorAttributeSyntaxContext ctx) {
+        if (ctx.TargetSymbol is not INamedTypeSymbol type || type.IsAbstract) return null;
 
         if (ctx.Attributes.Length == 0 ||
             ctx.Attributes[0].ConstructorArguments.Length == 0 ||
             ctx.Attributes[0].ConstructorArguments[0].Value is not string name ||
             string.IsNullOrWhiteSpace(name))
-        {
             return null;
-        }
 
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
         var policyInterface = ctx.SemanticModel.Compilation.GetTypeByMetadataName(PolicyInterfaceMetadataName);
         var implements = policyInterface is not null &&
-            type.AllInterfaces.Any(iface => SymbolEqualityComparer.Default.Equals(iface, policyInterface));
+                         type.AllInterfaces.Any(iface => SymbolEqualityComparer.Default.Equals(iface, policyInterface));
 
         var location = LocationInfo.From(type);
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
         if (!implements)
-        {
             diagnostics.Add(DiagnosticInfo.Create(NotAnAuthorizationPolicy, location, type.ToDisplayString(fmt)));
-        }
 
-        var ns = type.ContainingNamespace is { IsGlobalNamespace: false } containing ? containing.ToDisplayString() : "";
+        var ns = type.ContainingNamespace is { IsGlobalNamespace: false } containing
+            ? containing.ToDisplayString()
+            : "";
         return new PolicyInfo(type.ToDisplayString(fmt), name, ns, implements, location, diagnostics.ToImmutable());
     }
 
     private static void Emit(
         SourceProductionContext spc,
         ImmutableArray<PolicyInfo> policies,
-        EquatableArray<ModuleScanner.Module> modules)
-    {
+        EquatableArray<ModuleScanner.Module> modules) {
         foreach (var policy in policies)
-        {
-            foreach (var diagnostic in policy.Diagnostics)
-            {
-                spc.ReportDiagnostic(diagnostic.ToDiagnostic());
-            }
-        }
+        foreach (var diagnostic in policy.Diagnostics)
+            spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
         var modulePolicies = modules.ToDictionary(module => module, _ => new List<(string Fqn, string Name)>());
 
-        foreach (var policy in policies)
-        {
-            if (!policy.ImplementsInterface)
-            {
-                continue;
-            }
+        foreach (var policy in policies) {
+            if (!policy.ImplementsInterface) continue;
 
             ModuleScanner.Module? bestMatch = null;
             foreach (var module in modules)
@@ -143,13 +123,13 @@ public sealed class AuthorizationPolicyRegistrationGenerator : IIncrementalGener
             if (bestMatch is not null)
                 modulePolicies[bestMatch].Add((policy.PolicyFqn, policy.Name));
             else
-                spc.ReportDiagnostic(DiagnosticInfo.Create(PolicyNotInModule, policy.Location, policy.PolicyFqn).ToDiagnostic());
+                spc.ReportDiagnostic(DiagnosticInfo.Create(PolicyNotInModule, policy.Location, policy.PolicyFqn)
+                    .ToDiagnostic());
         }
 
         foreach (var kvp in modulePolicies
                      .Where(x => x.Value.Count > 0)
-                     .OrderBy(x => x.Key.Name, StringComparer.Ordinal))
-        {
+                     .OrderBy(x => x.Key.Name, StringComparer.Ordinal)) {
             var module = kvp.Key;
             var moduleName = module.Name;
 
@@ -173,7 +153,7 @@ public sealed class AuthorizationPolicyRegistrationGenerator : IIncrementalGener
 
             foreach (var (fqn, name) in kvp.Value.OrderBy(x => x.Fqn, StringComparer.Ordinal))
                 sb.AppendLine(
-                    $"        services.AddElarionAuthorizationPolicy<{fqn}>({SymbolDisplay.FormatLiteral(name, quote: true)});");
+                    $"        services.AddElarionAuthorizationPolicy<{fqn}>({SymbolDisplay.FormatLiteral(name, true)});");
 
             sb.AppendLine("        return services;");
             sb.AppendLine("    }");

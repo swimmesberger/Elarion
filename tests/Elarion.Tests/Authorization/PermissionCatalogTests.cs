@@ -24,18 +24,18 @@ public sealed class PermissionCatalogTests {
         services.AddSingleton(new PermissionCatalogModule {
             Module = "Catalog",
             Permissions = [Entry("widgets", "read")],
-            Roles = [],
+            Roles = []
         });
         services.AddSingleton(new PermissionCatalogModule {
             Module = "Billing",
             Permissions = [Entry("invoices", "read"), Entry("invoices", "write")],
-            Roles = ["accountant"],
+            Roles = ["accountant"]
         });
         services.AddSingleton(new PermissionCatalogModule {
             Module = "Clients",
             // invoices.read also in Billing -> deduplicated; accountant also in Billing -> deduplicated.
             Permissions = [Entry("invoices", "read"), Entry("clients", "read")],
-            Roles = ["accountant"],
+            Roles = ["accountant"]
         });
 
         var catalog = services.BuildServiceProvider().GetRequiredService<IPermissionCatalog>();
@@ -54,9 +54,9 @@ public sealed class PermissionCatalogTests {
             Permissions = [
                 Entry("invoices", "read"),
                 Entry("invoices", "write"),
-                Entry("clients", "read"),
+                Entry("clients", "read")
             ],
-            Roles = [],
+            Roles = []
         });
 
         var catalog = services.BuildServiceProvider().GetRequiredService<IPermissionCatalog>();
@@ -80,6 +80,7 @@ public sealed class PermissionCatalogTests {
         catalog.Modules.Should().BeEmpty();
     }
 
-    private static PermissionCatalogEntry Entry(string resource, string verb) =>
-        new() { Permission = resource + "." + verb, Resource = resource, Verb = verb };
+    private static PermissionCatalogEntry Entry(string resource, string verb) {
+        return new PermissionCatalogEntry { Permission = resource + "." + verb, Resource = resource, Verb = verb };
+    }
 }

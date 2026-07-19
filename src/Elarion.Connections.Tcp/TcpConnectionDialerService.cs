@@ -12,16 +12,18 @@ namespace Elarion.Connections.Tcp;
 /// <see cref="TcpConnectionEndpoints"/> instead — both run the identical loop.
 /// </summary>
 internal sealed class TcpConnectionDialerService<THandler>(
-    ElarionTcpDialerOptions options, IServiceProvider services) : BackgroundService
+    ElarionTcpDialerOptions options,
+    IServiceProvider services) : BackgroundService
     where THandler : TcpConnectionHandler {
-    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
-        TcpEndpointLoops.RunDialerAsync(
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) {
+        return TcpEndpointLoops.RunDialerAsync(
             options,
             services.GetRequiredService<THandler>(),
             services.GetRequiredService<IClientConnectionRegistry>(),
             (services.GetService<ElarionConnectionsOptions>() ?? new ElarionConnectionsOptions()).DefaultInvokeTimeout,
             services.GetService<TimeProvider>() ?? TimeProvider.System,
             services.GetService<ILoggerFactory>()?.CreateLogger(GetType().Namespace + ".TcpDialer")
-                ?? (ILogger)NullLogger.Instance,
+            ?? (ILogger)NullLogger.Instance,
             stoppingToken);
+    }
 }

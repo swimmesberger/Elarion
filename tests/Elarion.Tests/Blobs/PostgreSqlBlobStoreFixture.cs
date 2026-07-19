@@ -43,20 +43,20 @@ public sealed class PostgreSqlBlobStoreFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
     /// <summary>Creates a fresh context bound to the container, so each test owns its own connection.</summary>
-    public IntegrationBlobDbContext CreateContext() =>
-        new(new DbContextOptionsBuilder<IntegrationBlobDbContext>()
+    public IntegrationBlobDbContext CreateContext() {
+        return new IntegrationBlobDbContext(new DbContextOptionsBuilder<IntegrationBlobDbContext>()
             .UseNpgsql(ConnectionString)
             .Options);
+    }
 }
 
 /// <summary>EF Core context mapping the PostgreSQL blob tables for integration tests.</summary>
 public sealed class IntegrationBlobDbContext(DbContextOptions<IntegrationBlobDbContext> options) : DbContext(options) {
-    protected override void OnModelCreating(ModelBuilder modelBuilder) =>
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.UseElarionBlobStorage();
+    }
 }

@@ -13,8 +13,7 @@ using Xunit;
 
 namespace Elarion.Tests.Services;
 
-public sealed class InMemorySchedulerTests
-{
+public sealed class InMemorySchedulerTests {
     // These tests drive real background job execution and poll for the outcome on the wall clock (WaitUntilAsync /
     // AdvanceUntilAsync). The scheduler advances via FakeTimeProvider, but the loop's continuations run on the
     // thread pool, so a heavily loaded CI runner (e.g. many Testcontainers Postgres instances in parallel) can
@@ -26,8 +25,7 @@ public sealed class InMemorySchedulerTests
     private const string InlineRetryPolicyName = "test-inline-retry";
 
     [Fact]
-    public async Task EnqueueAsync_RuntimeJob_ExecutesTypedPayload()
-    {
+    public async Task EnqueueAsync_RuntimeJob_ExecutesTypedPayload() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -70,7 +68,8 @@ public sealed class InMemorySchedulerTests
         await hostedService.StopAsync(cts.Token);
 
         observed.Should().Be("traced");
-        var schedule = activities.Activities.Single(activity => activity.DisplayName == "scheduler schedule test.runtime");
+        var schedule =
+            activities.Activities.Single(activity => activity.DisplayName == "scheduler schedule test.runtime");
         var execution = activities.Activities.Single(activity => activity.DisplayName == "scheduled test.runtime");
         activities.Activities.Should().Contain(activity =>
             activity.DisplayName == "scheduler enqueue test.runtime" &&
@@ -85,8 +84,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task EnqueueAsync_DisabledScheduler_RejectsInsteadOfQueueingForever()
-    {
+    public async Task EnqueueAsync_DisabledScheduler_RejectsInsteadOfQueueingForever() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(
@@ -113,8 +111,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task ScheduleAsync_FutureRun_ExecutesOnceDueTimeIsReached()
-    {
+    public async Task ScheduleAsync_FutureRun_ExecutesOnceDueTimeIsReached() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -140,8 +137,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task ScheduleAsync_PastRun_ExecutesWithoutRecurringMisfireHandling()
-    {
+    public async Task ScheduleAsync_PastRun_ExecutesWithoutRecurringMisfireHandling() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -163,8 +159,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task CancelRunAsync_QueuedFutureRun_PreventsExecution()
-    {
+    public async Task CancelRunAsync_QueuedFutureRun_PreventsExecution() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -209,15 +204,16 @@ public sealed class InMemorySchedulerTests
             outcome.Message == "disabled"));
         await hostedService.StopAsync(cts.Token);
 
-        var schedule = activities.Activities.Single(activity => activity.DisplayName == "scheduler schedule test.disabledRuntime");
-        var skipped = activities.Activities.Single(activity => activity.DisplayName == "scheduled test.disabledRuntime skipped");
+        var schedule =
+            activities.Activities.Single(activity => activity.DisplayName == "scheduler schedule test.disabledRuntime");
+        var skipped =
+            activities.Activities.Single(activity => activity.DisplayName == "scheduled test.disabledRuntime skipped");
         skipped.TraceId.Should().Be(schedule.TraceId);
         skipped.ParentSpanId.Should().Be(schedule.SpanId);
     }
 
     [Fact]
-    public async Task RecurringJob_MillisecondInterval_RunsOncePerInterval()
-    {
+    public async Task RecurringJob_MillisecondInterval_RunsOncePerInterval() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateCountingDescriptor("test.milliseconds", ScheduledJobSchedule.FixedRate("50ms"));
@@ -239,8 +235,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task RecurringJob_LongPause_FireOnceRunsSingleOverdueOccurrence()
-    {
+    public async Task RecurringJob_LongPause_FireOnceRunsSingleOverdueOccurrence() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateCountingDescriptor("test.catchUp", ScheduledJobSchedule.FixedRate("50ms"));
@@ -264,8 +259,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task RecurringJob_LongPause_SkipMisfirePolicySkipsOverdueOccurrence()
-    {
+    public async Task RecurringJob_LongPause_SkipMisfirePolicySkipsOverdueOccurrence() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateCountingDescriptor(
@@ -282,10 +276,11 @@ public sealed class InMemorySchedulerTests
 
         // Keyed on the misfire outcome (recorded synchronously at dispatch); an over-advance can
         // only produce further skips, so the single-run assertion below stays policy-protected.
-        await AdvanceUntilAsync(time, TimeSpan.FromSeconds(10), () => inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
-            outcome.JobName == "test.skipMisfire" &&
-            outcome.Status == ScheduledJobRunStatus.Skipped &&
-            outcome.Message == "misfire"));
+        await AdvanceUntilAsync(time, TimeSpan.FromSeconds(10), () => inspector.GetSnapshot().RecentOutcomes
+            .Any(outcome =>
+                outcome.JobName == "test.skipMisfire" &&
+                outcome.Status == ScheduledJobRunStatus.Skipped &&
+                outcome.Message == "misfire"));
         await Task.Delay(100, cts.Token);
 
         await hostedService.StopAsync(cts.Token);
@@ -308,10 +303,11 @@ public sealed class InMemorySchedulerTests
         await hostedService.StartAsync(cts.Token);
         await WaitUntilAsync(() => provider.GetRequiredService<RunCounter>().Count >= 1);
 
-        await AdvanceUntilAsync(time, TimeSpan.FromSeconds(10), () => inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
-            outcome.JobName == "test.traceSkipMisfire" &&
-            outcome.Status == ScheduledJobRunStatus.Skipped &&
-            outcome.Message == "misfire"));
+        await AdvanceUntilAsync(time, TimeSpan.FromSeconds(10), () => inspector.GetSnapshot().RecentOutcomes
+            .Any(outcome =>
+                outcome.JobName == "test.traceSkipMisfire" &&
+                outcome.Status == ScheduledJobRunStatus.Skipped &&
+                outcome.Message == "misfire"));
 
         await hostedService.StopAsync(cts.Token);
         activities.Activities.Should().Contain(activity =>
@@ -321,8 +317,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task RecurringJob_LongPause_CatchUpMisfirePolicyRunsBoundedMissedOccurrences()
-    {
+    public async Task RecurringJob_LongPause_CatchUpMisfirePolicyRunsBoundedMissedOccurrences() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateCountingDescriptor(
@@ -354,8 +349,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task FixedDelayJob_NextRunIsScheduledAfterCompletion()
-    {
+    public async Task FixedDelayJob_NextRunIsScheduledAfterCompletion() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateBlockingDescriptor(
@@ -390,8 +384,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task FixedDelayJob_DisabledOccurrence_ReschedulesForLaterConfigChanges()
-    {
+    public async Task FixedDelayJob_DisabledOccurrence_ReschedulesForLaterConfigChanges() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var configuration = new ConfigurationManager {
@@ -417,8 +410,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task CancelRunAsync_QueuedRecurringGridOccurrence_SkipsItAndTheChainContinues()
-    {
+    public async Task CancelRunAsync_QueuedRecurringGridOccurrence_SkipsItAndTheChainContinues() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateCountingDescriptor("test.cancelGrid", ScheduledJobSchedule.FixedRate("50ms"));
@@ -443,8 +435,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task CancelRunAsync_QueuedFixedDelayOccurrence_SkipsItAndTheChainContinues()
-    {
+    public async Task CancelRunAsync_QueuedFixedDelayOccurrence_SkipsItAndTheChainContinues() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateCountingDescriptor("test.cancelDelay", ScheduledJobSchedule.FixedDelay("50ms"));
@@ -461,9 +452,7 @@ public sealed class InMemorySchedulerTests
         var queuedRunId = Guid.Empty;
         await WaitUntilAsync(() => {
             var queued = inspector.GetSnapshot().QueuedRuns.SingleOrDefault(run => run.JobName == "test.cancelDelay");
-            if (queued is null) {
-                return false;
-            }
+            if (queued is null) return false;
 
             queuedRunId = queued.RunId;
             return true;
@@ -478,8 +467,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task CronJob_RunsAtCronOccurrences()
-    {
+    public async Task CronJob_RunsAtCronOccurrences() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateCountingDescriptor(
@@ -502,8 +490,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task CronJob_DisabledSentinel_DoesNotRun()
-    {
+    public async Task CronJob_DisabledSentinel_DoesNotRun() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateCountingDescriptor(
@@ -522,8 +509,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task OneTimeJob_RunsOnceAfterInitialDelay()
-    {
+    public async Task OneTimeJob_RunsOnceAfterInitialDelay() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateCountingDescriptor(
@@ -544,8 +530,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task OneTimeJob_NeverReEnqueuesThroughTheRecurringReschedulePath()
-    {
+    public async Task OneTimeJob_NeverReEnqueuesThroughTheRecurringReschedulePath() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var errors = new ErrorLogCollector();
@@ -578,8 +563,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task RecurringJob_Skip_DropsOverlappingRuns()
-    {
+    public async Task RecurringJob_Skip_DropsOverlappingRuns() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateBlockingDescriptor("test.skip", ScheduledJobOverlap.Skip);
@@ -602,8 +586,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task RecurringJob_Queue_CoalescesIntoSinglePendingRun()
-    {
+    public async Task RecurringJob_Queue_CoalescesIntoSinglePendingRun() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateBlockingDescriptor("test.queue", ScheduledJobOverlap.Queue);
@@ -633,8 +616,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task RecurringJob_AllowConcurrent_StartsOverlappingRuns()
-    {
+    public async Task RecurringJob_AllowConcurrent_StartsOverlappingRuns() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateBlockingDescriptor("test.allowConcurrent", ScheduledJobOverlap.AllowConcurrent);
@@ -657,8 +639,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task RecurringJob_AllowConcurrentWithMaxConcurrentRuns_SkipsAboveCap()
-    {
+    public async Task RecurringJob_AllowConcurrentWithMaxConcurrentRuns_SkipsAboveCap() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateBlockingDescriptor(
@@ -687,8 +668,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task CancelRunAsync_ActiveRun_RequestsCancellation()
-    {
+    public async Task CancelRunAsync_ActiveRun_RequestsCancellation() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -710,8 +690,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task CancelRunAsync_RunWaitingForGlobalConcurrency_CancelsBeforeJobStarts()
-    {
+    public async Task CancelRunAsync_RunWaitingForGlobalConcurrency_CancelsBeforeJobStarts() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(
@@ -748,8 +727,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task Shutdown_RunWaitingForConcurrencySlot_RecordsCancelledOutcome()
-    {
+    public async Task Shutdown_RunWaitingForConcurrencySlot_RecordsCancelledOutcome() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(
@@ -784,11 +762,11 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task IScheduledJobContext_RequestCancellation_AfterTheRunCompleted_DoesNotThrow()
-    {
+    public async Task IScheduledJobContext_RequestCancellation_AfterTheRunCompleted_DoesNotThrow() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
-        var stashedContext = new TaskCompletionSource<IScheduledJobContext>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stashedContext =
+            new TaskCompletionSource<IScheduledJobContext>(TaskCreationOptions.RunContinuationsAsynchronously);
         var descriptor = new ScheduledJobDescriptor {
             Name = "test.stashedContext",
             Schedule = ScheduledJobSchedule.Once("50ms"),
@@ -811,8 +789,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task IScheduledJobContext_RequestCancellation_MarksRunCancelled()
-    {
+    public async Task IScheduledJobContext_RequestCancellation_MarksRunCancelled() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var observedCancellation = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -841,8 +818,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task CronJob_DisabledPlaceholderAfterStartup_SkipsFutureOccurrences()
-    {
+    public async Task CronJob_DisabledPlaceholderAfterStartup_SkipsFutureOccurrences() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var configuration = new ConfigurationManager {
@@ -862,17 +838,17 @@ public sealed class InMemorySchedulerTests
         configuration["Jobs:Cron"] = "-";
         // Every occurrence crossed while the sentinel is set skips, so over-advancing keeps the
         // single-run assertion below intact.
-        await AdvanceUntilAsync(time, TimeSpan.FromSeconds(30), () => inspector.GetSnapshot().RecentOutcomes.Any(outcome =>
-            outcome.JobName == "test.cronToggle" &&
-            outcome.Status == ScheduledJobRunStatus.Skipped));
+        await AdvanceUntilAsync(time, TimeSpan.FromSeconds(30), () => inspector.GetSnapshot().RecentOutcomes
+            .Any(outcome =>
+                outcome.JobName == "test.cronToggle" &&
+                outcome.Status == ScheduledJobRunStatus.Skipped));
         await hostedService.StopAsync(cts.Token);
 
         counter.Count.Should().Be(1);
     }
 
     [Fact]
-    public async Task GetSnapshot_ReportsDescriptorsQueuedActiveAndOutcomes()
-    {
+    public async Task GetSnapshot_ReportsDescriptorsQueuedActiveAndOutcomes() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateBlockingDescriptor("test.snapshot", ScheduledJobOverlap.AllowConcurrent);
@@ -896,11 +872,14 @@ public sealed class InMemorySchedulerTests
             job.ScheduleKind == ScheduledJobScheduleKind.FixedRate &&
             job.MisfirePolicy == ScheduledJobMisfirePolicy.FireOnce &&
             job.NextDueTimeUtc != null);
-        runningSnapshot.ActiveRuns.Should().Contain(run => run.JobName == "test.snapshot" && run.Status == ScheduledJobRunStatus.Running);
-        runningSnapshot.QueuedRuns.Should().Contain(run => run.RunId == handle.RunId && run.Status == ScheduledJobRunStatus.Queued);
+        runningSnapshot.ActiveRuns.Should().Contain(run =>
+            run.JobName == "test.snapshot" && run.Status == ScheduledJobRunStatus.Running);
+        runningSnapshot.QueuedRuns.Should()
+            .Contain(run => run.RunId == handle.RunId && run.Status == ScheduledJobRunStatus.Queued);
 
         probe.ReleaseAll();
-        await WaitUntilAsync(() => inspector.GetSnapshot().RecentOutcomes.Any(outcome => outcome.JobName == "test.snapshot"));
+        await WaitUntilAsync(() =>
+            inspector.GetSnapshot().RecentOutcomes.Any(outcome => outcome.JobName == "test.snapshot"));
         await hostedService.StopAsync(cts.Token);
 
         inspector.GetSnapshot().RecentOutcomes.Should().Contain(outcome =>
@@ -909,8 +888,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task QueueOverlap_PendingOccurrence_DoesNotStarveOtherJobs()
-    {
+    public async Task QueueOverlap_PendingOccurrence_DoesNotStarveOtherJobs() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         var descriptor = CreateBlockingDescriptor("test.starvation", ScheduledJobOverlap.Queue);
@@ -943,8 +921,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task DeferredRetry_RuntimeJob_SucceedsAfterRetryWithStableJobId()
-    {
+    public async Task DeferredRetry_RuntimeJob_SucceedsAfterRetryWithStableJobId() {
         using var activities = new ActivityCollector(SchedulerTelemetry.ActivitySourceName);
         using var meters = new MeterCollector(SchedulerTelemetry.MeterName);
         using var cts = new CancellationTokenSource(WaitTimeout);
@@ -998,8 +975,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task DeferredRetry_CancelJobAsync_CancelsWaitingRetry()
-    {
+    public async Task DeferredRetry_CancelJobAsync_CancelsWaitingRetry() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -1030,8 +1006,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task DeferredRetry_ExhaustionRecordsFailedState()
-    {
+    public async Task DeferredRetry_ExhaustionRecordsFailedState() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -1052,9 +1027,7 @@ public sealed class InMemorySchedulerTests
             await WaitUntilAsync(() => inspector.GetJob(handle.JobId)?.Status is
                 ScheduledJobLifecycleStatus.WaitingRetry or ScheduledJobLifecycleStatus.Failed);
             var state = inspector.GetJob(handle.JobId)!;
-            if (state.Status == ScheduledJobLifecycleStatus.Failed) {
-                break;
-            }
+            if (state.Status == ScheduledJobLifecycleStatus.Failed) break;
 
             // Advance until this waiting attempt actually dispatches (a single exact-to-due advance
             // can lose the tick, after which "due - now" is zero and the loop would spin forever).
@@ -1077,8 +1050,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task DeferredRetry_NonRetryableExceptionRecordsFailedWithoutRetry()
-    {
+    public async Task DeferredRetry_NonRetryableExceptionRecordsFailedWithoutRetry() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -1106,8 +1078,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task InlineResilience_RuntimeJob_RetriesInsideSingleSchedulerRun()
-    {
+    public async Task InlineResilience_RuntimeJob_RetriesInsideSingleSchedulerRun() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -1137,8 +1108,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task DeferredRetry_UnknownPolicyMetadata_ThrowsWhenScheduling()
-    {
+    public async Task DeferredRetry_UnknownPolicyMetadata_ThrowsWhenScheduling() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -1157,8 +1127,7 @@ public sealed class InMemorySchedulerTests
     }
 
     [Fact]
-    public async Task DisabledRuntimeJob_RecordsSkippedState()
-    {
+    public async Task DisabledRuntimeJob_RecordsSkippedState() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
         await using var provider = CreateProvider(time);
@@ -1183,25 +1152,21 @@ public sealed class InMemorySchedulerTests
         recorder.HasObserved.Should().BeFalse();
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition)
-    {
+    private static async Task WaitUntilAsync(Func<bool> condition) {
         var stopwatch = Stopwatch.StartNew();
         while (!condition()) {
-            if (stopwatch.Elapsed > WaitTimeout) {
+            if (stopwatch.Elapsed > WaitTimeout)
                 throw new TimeoutException("The expected scheduler state was not reached in time.");
-            }
 
             await Task.Delay(10);
         }
     }
 
-    private static async Task AdvanceUntilAsync(FakeTimeProvider time, TimeSpan step, Func<bool> condition)
-    {
+    private static async Task AdvanceUntilAsync(FakeTimeProvider time, TimeSpan step, Func<bool> condition) {
         var stopwatch = Stopwatch.StartNew();
         while (!condition()) {
-            if (stopwatch.Elapsed > WaitTimeout) {
+            if (stopwatch.Elapsed > WaitTimeout)
                 throw new TimeoutException("The expected scheduler state was not reached in time.");
-            }
 
             time.Advance(step);
             await Task.Delay(10);
@@ -1221,10 +1186,11 @@ public sealed class InMemorySchedulerTests
         FakeTimeProvider time,
         IJobSchedulerInspector inspector,
         string jobName,
-        TimeSpan step)
-    {
-        DateTimeOffset? NextDue() => inspector.GetSnapshot().Jobs
-            .Single(job => job.Name == jobName).NextDueTimeUtc;
+        TimeSpan step) {
+        DateTimeOffset? NextDue() {
+            return inspector.GetSnapshot().Jobs
+                .Single(job => job.Name == jobName).NextDueTimeUtc;
+        }
 
         var before = NextDue();
         await AdvanceUntilAsync(time, step, () => NextDue() != before);
@@ -1232,52 +1198,53 @@ public sealed class InMemorySchedulerTests
 
     private static ServiceProvider CreateProvider(
         FakeTimeProvider timeProvider,
-        params ScheduledJobDescriptor[] descriptors) =>
-        CreateProvider(
+        params ScheduledJobDescriptor[] descriptors) {
+        return CreateProvider(
             timeProvider,
             new ConfigurationBuilder().Build(),
             new SchedulerOptions { Enabled = true, MaxConcurrentExecutions = 8 },
             descriptors);
+    }
 
     private static ServiceProvider CreateProvider(
         FakeTimeProvider timeProvider,
         SchedulerOptions options,
-        params ScheduledJobDescriptor[] descriptors) =>
-        CreateProvider(
+        params ScheduledJobDescriptor[] descriptors) {
+        return CreateProvider(
             timeProvider,
             new ConfigurationBuilder().Build(),
             options,
             descriptors);
+    }
 
     private static ServiceProvider CreateProvider(
         FakeTimeProvider timeProvider,
         IConfiguration configuration,
-        params ScheduledJobDescriptor[] descriptors) =>
-        CreateProvider(
+        params ScheduledJobDescriptor[] descriptors) {
+        return CreateProvider(
             timeProvider,
             configuration,
             new SchedulerOptions { Enabled = true, MaxConcurrentExecutions = 8 },
             descriptors);
+    }
 
     private static ServiceProvider CreateProvider(
         FakeTimeProvider timeProvider,
         IConfiguration configuration,
         SchedulerOptions options,
-        params ScheduledJobDescriptor[] descriptors) =>
-        CreateProvider(timeProvider, configuration, options, loggerProvider: null, descriptors);
+        params ScheduledJobDescriptor[] descriptors) {
+        return CreateProvider(timeProvider, configuration, options, null, descriptors);
+    }
 
     private static ServiceProvider CreateProvider(
         FakeTimeProvider timeProvider,
         IConfiguration configuration,
         SchedulerOptions options,
         ILoggerProvider? loggerProvider,
-        params ScheduledJobDescriptor[] descriptors)
-    {
+        params ScheduledJobDescriptor[] descriptors) {
         var services = new ServiceCollection();
         services.AddLogging(builder => {
-            if (loggerProvider is not null) {
-                builder.AddProvider(loggerProvider);
-            }
+            if (loggerProvider is not null) builder.AddProvider(loggerProvider);
         });
         services.AddSingleton(configuration);
         services.AddSingleton<TimeProvider>(timeProvider);
@@ -1348,10 +1315,7 @@ public sealed class InMemorySchedulerTests
             }
         });
 
-        foreach (var descriptor in descriptors)
-        {
-            services.AddSingleton(descriptor);
-        }
+        foreach (var descriptor in descriptors) services.AddSingleton(descriptor);
 
         services.AddElarionScheduler(options);
         // The scheduler registers the (core) policy catalog; the Polly-backed runner that executes deferred/inline
@@ -1365,8 +1329,8 @@ public sealed class InMemorySchedulerTests
         string name,
         ScheduledJobOverlap overlap,
         ScheduledJobSchedule? schedule = null,
-        int maxConcurrentRuns = 0) =>
-        new() {
+        int maxConcurrentRuns = 0) {
+        return new ScheduledJobDescriptor {
             Name = name,
             Schedule = schedule ?? ScheduledJobSchedule.FixedRate("50ms"),
             Overlap = overlap,
@@ -1374,12 +1338,13 @@ public sealed class InMemorySchedulerTests
             InvokeAsync = static (serviceProvider, payload, context, ct) =>
                 serviceProvider.GetRequiredService<OverlapProbe>().RunAsync(ct)
         };
+    }
 
     private static ScheduledJobDescriptor CreateCountingDescriptor(
         string name,
         ScheduledJobSchedule schedule,
-        ScheduledJobMisfirePolicy misfirePolicy = ScheduledJobMisfirePolicy.FireOnce) =>
-        new() {
+        ScheduledJobMisfirePolicy misfirePolicy = ScheduledJobMisfirePolicy.FireOnce) {
+        return new ScheduledJobDescriptor {
             Name = name,
             Schedule = schedule,
             Overlap = ScheduledJobOverlap.AllowConcurrent,
@@ -1389,6 +1354,7 @@ public sealed class InMemorySchedulerTests
                 return ValueTask.CompletedTask;
             }
         };
+    }
 
     private sealed record TestPayload {
         public required string Value { get; init; }
@@ -1403,20 +1369,23 @@ public sealed class InMemorySchedulerTests
 
         public int Count => Volatile.Read(ref _count);
 
-        public void Increment() => Interlocked.Increment(ref _count);
+        public void Increment() {
+            Interlocked.Increment(ref _count);
+        }
     }
 
     private sealed class SchedulerRecorder {
-        private readonly TaskCompletionSource<string> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<string> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public bool HasObserved => _completion.Task.IsCompleted;
 
-        public void Record(string value) => _completion.TrySetResult(value);
+        public void Record(string value) {
+            _completion.TrySetResult(value);
+        }
 
-        public async Task<string> WaitAsync(CancellationToken ct)
-        {
-            using var registration = ct.Register(static state =>
-            {
+        public async Task<string> WaitAsync(CancellationToken ct) {
+            using var registration = ct.Register(static state => {
                 var source = (TaskCompletionSource<string>)state!;
                 source.TrySetCanceled();
             }, _completion);
@@ -1427,8 +1396,7 @@ public sealed class InMemorySchedulerTests
 
     [ScheduledJob("test.runtime")]
     private sealed class TestRuntimeJob(SchedulerRecorder recorder) : IScheduledJob<TestPayload> {
-        public ValueTask ExecuteAsync(TestPayload payload, IScheduledJobContext context, CancellationToken ct)
-        {
+        public ValueTask ExecuteAsync(TestPayload payload, IScheduledJobContext context, CancellationToken ct) {
             recorder.Record(payload.Value);
             return ValueTask.CompletedTask;
         }
@@ -1436,12 +1404,12 @@ public sealed class InMemorySchedulerTests
 
     [ScheduledJob("test.cancellableRuntime")]
     private sealed class CancellableRuntimeJob(CancellationProbe probe) : IScheduledJob<TestPayload> {
-        public async ValueTask ExecuteAsync(TestPayload payload, IScheduledJobContext context, CancellationToken ct)
-        {
+        public async ValueTask ExecuteAsync(TestPayload payload, IScheduledJobContext context, CancellationToken ct) {
             probe.MarkStarted();
             try {
                 await Task.Delay(Timeout.InfiniteTimeSpan, ct);
-            } catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) {
                 probe.MarkCancelled();
                 throw;
             }
@@ -1449,14 +1417,12 @@ public sealed class InMemorySchedulerTests
     }
 
     [ScheduledJob("test.flakyRuntime")]
-    private sealed class FlakyRuntimeJob(SchedulerRecorder recorder, FlakyRuntimeProbe probe) : IScheduledJob<TestPayload> {
-        public ValueTask ExecuteAsync(TestPayload payload, IScheduledJobContext context, CancellationToken ct)
-        {
+    private sealed class FlakyRuntimeJob(SchedulerRecorder recorder, FlakyRuntimeProbe probe)
+        : IScheduledJob<TestPayload> {
+        public ValueTask ExecuteAsync(TestPayload payload, IScheduledJobContext context, CancellationToken ct) {
             var attempt = probe.Record(context.RunId);
             if (attempt <= payload.FailAttempts) {
-                if (payload.NonRetryable) {
-                    throw new NonRetryableException("terminal failure");
-                }
+                if (payload.NonRetryable) throw new NonRetryableException("terminal failure");
 
                 throw new InvalidOperationException("transient failure");
             }
@@ -1469,13 +1435,14 @@ public sealed class InMemorySchedulerTests
     private sealed class FlakyRuntimeProbe {
         private int _attempts;
 
-        public int Record(Guid runId) => Interlocked.Increment(ref _attempts);
+        public int Record(Guid runId) {
+            return Interlocked.Increment(ref _attempts);
+        }
     }
 
     [ScheduledJob("test.disabledRuntime")]
     private sealed class DisabledRuntimeJob(SchedulerRecorder recorder) : IScheduledJob<TestPayload> {
-        public ValueTask ExecuteAsync(TestPayload payload, IScheduledJobContext context, CancellationToken ct)
-        {
+        public ValueTask ExecuteAsync(TestPayload payload, IScheduledJobContext context, CancellationToken ct) {
             recorder.Record(payload.Value);
             return ValueTask.CompletedTask;
         }
@@ -1491,32 +1458,29 @@ public sealed class InMemorySchedulerTests
 
         public int MaxActiveCount => Volatile.Read(ref _maxActiveCount);
 
-        public async ValueTask RunAsync(CancellationToken ct)
-        {
+        public async ValueTask RunAsync(CancellationToken ct) {
             var active = Interlocked.Increment(ref _activeCount);
             UpdateMaxActive(active);
             Interlocked.Increment(ref _startedCount);
 
             try {
                 await _releaseAll.Task.WaitAsync(ct);
-            } finally {
+            }
+            finally {
                 Interlocked.Decrement(ref _activeCount);
             }
         }
 
-        public void ReleaseAll() => _releaseAll.TrySetResult();
+        public void ReleaseAll() {
+            _releaseAll.TrySetResult();
+        }
 
-        private void UpdateMaxActive(int active)
-        {
+        private void UpdateMaxActive(int active) {
             while (true) {
                 var current = Volatile.Read(ref _maxActiveCount);
-                if (active <= current) {
-                    return;
-                }
+                if (active <= current) return;
 
-                if (Interlocked.CompareExchange(ref _maxActiveCount, active, current) == current) {
-                    return;
-                }
+                if (Interlocked.CompareExchange(ref _maxActiveCount, active, current) == current) return;
             }
         }
     }
@@ -1525,13 +1489,21 @@ public sealed class InMemorySchedulerTests
         private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public void MarkStarted() => _started.TrySetResult();
+        public void MarkStarted() {
+            _started.TrySetResult();
+        }
 
-        public void MarkCancelled() => _cancelled.TrySetResult();
+        public void MarkCancelled() {
+            _cancelled.TrySetResult();
+        }
 
-        public async Task WaitStartedAsync(CancellationToken ct) => await _started.Task.WaitAsync(ct);
+        public async Task WaitStartedAsync(CancellationToken ct) {
+            await _started.Task.WaitAsync(ct);
+        }
 
-        public async Task WaitCancelledAsync(CancellationToken ct) => await _cancelled.Task.WaitAsync(ct);
+        public async Task WaitCancelledAsync(CancellationToken ct) {
+            await _cancelled.Task.WaitAsync(ct);
+        }
     }
 
     private sealed class ErrorLogCollector : ILoggerProvider, ILogger {
@@ -1545,11 +1517,17 @@ public sealed class InMemorySchedulerTests
             }
         }
 
-        public ILogger CreateLogger(string categoryName) => this;
+        public ILogger CreateLogger(string categoryName) {
+            return this;
+        }
 
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull {
+            return null;
+        }
 
-        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Error;
+        public bool IsEnabled(LogLevel logLevel) {
+            return logLevel >= LogLevel.Error;
+        }
 
         public void Log<TState>(
             LogLevel logLevel,
@@ -1557,9 +1535,7 @@ public sealed class InMemorySchedulerTests
             TState state,
             Exception? exception,
             Func<TState, Exception?, string> formatter) {
-            if (logLevel < LogLevel.Error) {
-                return;
-            }
+            if (logLevel < LogLevel.Error) return;
 
             lock (_errorMessages) {
                 _errorMessages.Add(formatter(state, exception));

@@ -139,20 +139,19 @@ public sealed class BlobStoreExtensionsTests {
         var store = new FakeBlobStore();
         foreach (var name in new[] { "f1.bin", "f2.bin", "f3.bin", "f4.bin", "f5.bin" }) {
             var blobRef = new BlobRef { Value = name };
-            store.Seed(blobRef, Metadata(blobRef, size: 1) with { Name = name }, [1]);
+            store.Seed(blobRef, Metadata(blobRef, 1) with { Name = name }, [1]);
         }
 
         var names = new List<string>();
         await foreach (var blob in store.ListAllAsync(
-            "documents", pageSize: 2, cancellationToken: TestContext.Current.CancellationToken)) {
+                           "documents", pageSize: 2, cancellationToken: TestContext.Current.CancellationToken))
             names.Add(blob.Name);
-        }
 
         names.Should().Equal("f1.bin", "f2.bin", "f3.bin", "f4.bin", "f5.bin");
     }
 
-    private static BlobMetadata Metadata(BlobRef blobRef, long size) =>
-        new() {
+    private static BlobMetadata Metadata(BlobRef blobRef, long size) {
+        return new BlobMetadata {
             Id = blobRef.Value,
             Container = "documents",
             Name = "report.bin",
@@ -161,4 +160,5 @@ public sealed class BlobStoreExtensionsTests {
             CreatedAt = DateTimeOffset.UnixEpoch,
             State = BlobLifecycleState.Committed
         };
+    }
 }

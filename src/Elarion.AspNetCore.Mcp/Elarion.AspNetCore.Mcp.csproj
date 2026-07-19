@@ -6,15 +6,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Elarion.JsonRpc\Elarion.JsonRpc.csproj" />
+    <ProjectReference Include="..\Elarion.JsonRpc\Elarion.JsonRpc.csproj"/>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore"/>
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Elarion.Tests" />
+    <InternalsVisibleTo Include="Elarion.Tests"/>
   </ItemGroup>
 
 </Project>

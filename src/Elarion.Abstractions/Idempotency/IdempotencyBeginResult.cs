@@ -12,7 +12,7 @@ public enum IdempotencyBeginStatus {
     FingerprintMismatch,
 
     /// <summary>Another request with the same key is still in flight; the caller should return 409.</summary>
-    InProgress,
+    InProgress
 }
 
 /// <summary>
@@ -37,16 +37,22 @@ public readonly record struct IdempotencyBeginResult {
     public bool IsFailurePayload { get; }
 
     /// <summary>The claim succeeded; run the handler.</summary>
-    public static IdempotencyBeginResult Began() => new(IdempotencyBeginStatus.Began, null, false);
+    public static IdempotencyBeginResult Began() {
+        return new IdempotencyBeginResult(IdempotencyBeginStatus.Began, null, false);
+    }
 
     /// <summary>Replay the stored outcome.</summary>
-    public static IdempotencyBeginResult Replay(string payload, bool isFailurePayload = false) =>
-        new(IdempotencyBeginStatus.Replay, payload, isFailurePayload);
+    public static IdempotencyBeginResult Replay(string payload, bool isFailurePayload = false) {
+        return new IdempotencyBeginResult(IdempotencyBeginStatus.Replay, payload, isFailurePayload);
+    }
 
     /// <summary>The key was reused with a different request body.</summary>
-    public static IdempotencyBeginResult FingerprintMismatch() =>
-        new(IdempotencyBeginStatus.FingerprintMismatch, null, false);
+    public static IdempotencyBeginResult FingerprintMismatch() {
+        return new IdempotencyBeginResult(IdempotencyBeginStatus.FingerprintMismatch, null, false);
+    }
 
     /// <summary>Another request with the same key is still in flight.</summary>
-    public static IdempotencyBeginResult InProgress() => new(IdempotencyBeginStatus.InProgress, null, false);
+    public static IdempotencyBeginResult InProgress() {
+        return new IdempotencyBeginResult(IdempotencyBeginStatus.InProgress, null, false);
+    }
 }

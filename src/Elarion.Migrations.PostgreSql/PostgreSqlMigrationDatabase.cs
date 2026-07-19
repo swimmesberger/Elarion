@@ -17,7 +17,8 @@ internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
     private readonly PostgreSqlMigrationOptions _options;
     private readonly ILogger _logger;
 
-    public PostgreSqlMigrationDatabase(string connectionString, PostgreSqlMigrationOptions options, ILogger? logger = null)
+    public PostgreSqlMigrationDatabase(string connectionString, PostgreSqlMigrationOptions options,
+        ILogger? logger = null)
         : this(options, logger) {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         // A genuinely dedicated physical connection: closing it always releases the session advisory
@@ -25,7 +26,8 @@ internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
         _connectionString = new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString;
     }
 
-    public PostgreSqlMigrationDatabase(NpgsqlDataSource dataSource, PostgreSqlMigrationOptions options, ILogger? logger = null)
+    public PostgreSqlMigrationDatabase(NpgsqlDataSource dataSource, PostgreSqlMigrationOptions options,
+        ILogger? logger = null)
         : this(options, logger) {
         ArgumentNullException.ThrowIfNull(dataSource);
         _dataSource = dataSource;
@@ -45,9 +47,7 @@ internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
     public async Task<IMigrationSession> ConnectAsync(bool exclusive, CancellationToken cancellationToken) {
         var connection = await OpenConnectionAsync(cancellationToken);
         try {
-            if (exclusive) {
-                await AcquireLockAsync(connection, cancellationToken);
-            }
+            if (exclusive) await AcquireLockAsync(connection, cancellationToken);
         }
         catch {
             await connection.DisposeAsync();
@@ -58,16 +58,14 @@ internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
             connection,
             _options.HistoryTableName,
             CommandTimeoutSeconds,
-            holdsLock: exclusive,
+            exclusive,
             _options.AdvisoryLockKey,
             LockTimeoutSeconds,
             _logger);
     }
 
     private async Task<NpgsqlConnection> OpenConnectionAsync(CancellationToken cancellationToken) {
-        if (_dataSource is not null) {
-            return await _dataSource.OpenConnectionAsync(cancellationToken);
-        }
+        if (_dataSource is not null) return await _dataSource.OpenConnectionAsync(cancellationToken);
 
         var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -79,12 +77,13 @@ internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
         // dies with the connection — no lock row to clean up after a crash.
         await using var command = new NpgsqlCommand("SELECT pg_advisory_lock($1)", connection) {
             CommandTimeout = LockTimeoutSeconds,
-            Parameters = { new NpgsqlParameter<long> { TypedValue = _options.AdvisoryLockKey } },
+            Parameters = { new NpgsqlParameter<long> { TypedValue = _options.AdvisoryLockKey } }
         };
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     /// <summary>Npgsql command timeouts are integer seconds with 0 as "no timeout"; non-positive spans (e.g. <see cref="Timeout.InfiniteTimeSpan"/>) mean no timeout.</summary>
-    private static int ToSeconds(TimeSpan? timeout) =>
-        timeout is null || timeout.Value <= TimeSpan.Zero ? 0 : Math.Max(1, (int)timeout.Value.TotalSeconds);
+    private static int ToSeconds(TimeSpan? timeout) {
+        return timeout is null || timeout.Value <= TimeSpan.Zero ? 0 : Math.Max(1, (int)timeout.Value.TotalSeconds);
+    }
 }

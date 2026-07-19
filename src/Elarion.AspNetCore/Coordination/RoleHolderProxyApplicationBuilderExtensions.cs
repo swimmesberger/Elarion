@@ -17,8 +17,9 @@ public static class RoleHolderProxyApplicationBuilderExtensions {
         this IApplicationBuilder app,
         string partition,
         Func<HttpContext, string?> affinityKey,
-        params string[] pathPrefixes) =>
-        UseElarionPartitionHolderProxyCore(app, partition, null, affinityKey, pathPrefixes);
+        params string[] pathPrefixes) {
+        return UseElarionPartitionHolderProxyCore(app, partition, null, affinityKey, pathPrefixes);
+    }
 
     /// <summary>
     /// Routes matching requests to the holder of the virtual partition selected by the scoped
@@ -64,9 +65,7 @@ public static class RoleHolderProxyApplicationBuilderExtensions {
         var middleware = new RoleHolderProxyMiddleware(
             context => {
                 var key = affinityKey(context);
-                if (key is null) {
-                    return null;
-                }
+                if (key is null) return null;
 
                 var target = affinityScope is null
                     ? rolePartition.Resolve(key)
@@ -124,22 +123,23 @@ public static class RoleHolderProxyApplicationBuilderExtensions {
     }
 
     private static void ValidatePrefixes(string[] pathPrefixes, string parameterName) {
-        if (pathPrefixes.Length == 0) {
+        if (pathPrefixes.Length == 0)
             throw new ArgumentException(
                 "A role-holder proxy needs at least one path prefix (e.g. \"/quotes\").",
                 parameterName);
-        }
     }
 
-    private static PathString[] ToPrefixes(string[] pathPrefixes) =>
-        pathPrefixes.Select(static prefix => new PathString(prefix)).ToArray();
+    private static PathString[] ToPrefixes(string[] pathPrefixes) {
+        return pathPrefixes.Select(static prefix => new PathString(prefix)).ToArray();
+    }
 
-    private static ILogger CreateLogger(IApplicationBuilder app) =>
-        app.ApplicationServices.GetRequiredService<ILoggerFactory>()
+    private static ILogger CreateLogger(IApplicationBuilder app) {
+        return app.ApplicationServices.GetRequiredService<ILoggerFactory>()
             .CreateLogger("Elarion.AspNetCore.RoleHolderProxy");
+    }
 
-    private static HttpMessageInvoker CreateClient() =>
-        new(new SocketsHttpHandler {
+    private static HttpMessageInvoker CreateClient() {
+        return new HttpMessageInvoker(new SocketsHttpHandler {
             UseCookies = false,
             AllowAutoRedirect = false,
             PooledConnectionLifetime = TimeSpan.FromMinutes(2),
@@ -147,4 +147,5 @@ public static class RoleHolderProxyApplicationBuilderExtensions {
             // documented 503 + Retry-After, not a hang. Time-to-response-headers is bounded in the middleware.
             ConnectTimeout = RoleHolderProxyMiddleware.DefaultConnectTimeout
         });
+    }
 }

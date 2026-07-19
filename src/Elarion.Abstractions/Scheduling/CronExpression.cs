@@ -57,14 +57,11 @@ public sealed class CronExpression {
 
         var fields = expression.Split(' ', '\t');
         fields = Array.FindAll(fields, static field => field.Length > 0);
-        if (fields.Length == 5) {
-            fields = ["0", .. fields];
-        }
+        if (fields.Length == 5) fields = ["0", .. fields];
 
-        if (fields.Length != 6) {
+        if (fields.Length != 6)
             throw new FormatException(
                 $"Cron expression '{expression}' must have 5 or 6 space-separated fields (second minute hour day-of-month month day-of-week).");
-        }
 
         var seconds = ParseField(fields[0], 0, 59, null, expression);
         var minutes = ParseField(fields[1], 0, 59, null, expression);
@@ -74,9 +71,7 @@ public sealed class CronExpression {
         var daysOfWeek = ParseField(fields[5], 0, 7, DayOfWeekNames, expression);
 
         // Both 0 and 7 mean Sunday in day-of-week.
-        if ((daysOfWeek & (1UL << 7)) != 0) {
-            daysOfWeek = (daysOfWeek & ~(1UL << 7)) | 1UL;
-        }
+        if ((daysOfWeek & (1UL << 7)) != 0) daysOfWeek = (daysOfWeek & ~(1UL << 7)) | 1UL;
 
         return new CronExpression(
             seconds,
@@ -85,14 +80,15 @@ public sealed class CronExpression {
             (uint)daysOfMonth,
             (ushort)(months >> 1),
             (byte)daysOfWeek,
-            dayOfMonthRestricted: !IsFullRange(fields[3]),
-            dayOfWeekRestricted: !IsFullRange(fields[5]),
+            !IsFullRange(fields[3]),
+            !IsFullRange(fields[5]),
             expression);
     }
 
     /// <summary>Computes the next UTC occurrence strictly after <paramref name="afterUtc"/>.</summary>
-    public DateTimeOffset GetNextOccurrence(DateTimeOffset afterUtc) =>
-        GetNextOccurrence(afterUtc, TimeZoneInfo.Utc);
+    public DateTimeOffset GetNextOccurrence(DateTimeOffset afterUtc) {
+        return GetNextOccurrence(afterUtc, TimeZoneInfo.Utc);
+    }
 
     /// <summary>
     /// Computes the next occurrence strictly after <paramref name="afterUtc"/>, evaluating
@@ -140,9 +136,7 @@ public sealed class CronExpression {
             }
 
             var result = new DateTimeOffset(candidate, timeZone.GetUtcOffset(candidate));
-            if (result > afterUtc) {
-                return result;
-            }
+            if (result > afterUtc) return result;
 
             candidate = candidate.AddSeconds(1);
         }
@@ -152,27 +146,27 @@ public sealed class CronExpression {
     }
 
     /// <inheritdoc />
-    public override string ToString() => _text;
+    public override string ToString() {
+        return _text;
+    }
 
     private bool DayMatches(DateTime date) {
         var dayOfMonthMatches = (_daysOfMonth & (1u << date.Day)) != 0;
         var dayOfWeekMatches = (_daysOfWeek & (1 << (int)date.DayOfWeek)) != 0;
 
-        if (_dayOfMonthRestricted && _dayOfWeekRestricted) {
-            return dayOfMonthMatches || dayOfWeekMatches;
-        }
+        if (_dayOfMonthRestricted && _dayOfWeekRestricted) return dayOfMonthMatches || dayOfWeekMatches;
 
         return (!_dayOfMonthRestricted || dayOfMonthMatches) &&
                (!_dayOfWeekRestricted || dayOfWeekMatches);
     }
 
-    private static bool IsFullRange(string field) => field is "*" or "?";
+    private static bool IsFullRange(string field) {
+        return field is "*" or "?";
+    }
 
     private static ulong ParseField(string field, int min, int max, string[]? names, string expression) {
         var bits = 0UL;
-        foreach (var part in field.Split(',')) {
-            bits |= ParsePart(part, min, max, names, expression);
-        }
+        foreach (var part in field.Split(',')) bits |= ParsePart(part, min, max, names, expression);
 
         return bits;
     }
@@ -184,9 +178,8 @@ public sealed class CronExpression {
         if (slashIndex >= 0) {
             rangeText = part[..slashIndex];
             var stepText = part[(slashIndex + 1)..];
-            if (!int.TryParse(stepText, out step) || step <= 0) {
+            if (!int.TryParse(stepText, out step) || step <= 0)
                 throw new FormatException($"Cron expression '{expression}' has an invalid step '{part}'.");
-            }
         }
 
         int from;
@@ -194,15 +187,16 @@ public sealed class CronExpression {
         if (rangeText is "*" or "?") {
             from = min;
             to = max;
-        } else {
+        }
+        else {
             var dashIndex = rangeText.IndexOf('-');
             if (dashIndex >= 0) {
                 from = ParseValue(rangeText[..dashIndex], min, max, names, expression);
                 to = ParseValue(rangeText[(dashIndex + 1)..], min, max, names, expression);
-                if (to < from) {
+                if (to < from)
                     throw new FormatException($"Cron expression '{expression}' has an inverted range '{part}'.");
-                }
-            } else {
+            }
+            else {
                 from = ParseValue(rangeText, min, max, names, expression);
                 // "n/step" means from n to the field maximum in steps.
                 to = slashIndex >= 0 ? max : from;
@@ -210,28 +204,22 @@ public sealed class CronExpression {
         }
 
         var bits = 0UL;
-        for (var value = from; value <= to; value += step) {
-            bits |= 1UL << value;
-        }
+        for (var value = from; value <= to; value += step) bits |= 1UL << value;
 
         return bits;
     }
 
     private static int ParseValue(string text, int min, int max, string[]? names, string expression) {
-        if (names is not null) {
-            for (var i = 0; i < names.Length; i++) {
-                if (string.Equals(text, names[i], StringComparison.OrdinalIgnoreCase)) {
+        if (names is not null)
+            for (var i = 0; i < names.Length; i++)
+                if (string.Equals(text, names[i], StringComparison.OrdinalIgnoreCase))
                     // Named values map onto the numeric range starting at its minimum
                     // (months are 1-based, days of week 0-based).
                     return min == 0 ? i : i + min;
-                }
-            }
-        }
 
-        if (!int.TryParse(text, out var value) || value < min || value > max) {
+        if (!int.TryParse(text, out var value) || value < min || value > max)
             throw new FormatException(
                 $"Cron expression '{expression}' has the value '{text}' outside the range {min}-{max}.");
-        }
 
         return value;
     }

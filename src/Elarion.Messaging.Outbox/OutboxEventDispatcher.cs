@@ -9,8 +9,7 @@ using Microsoft.Extensions.Logging;
 namespace Elarion.Messaging.Outbox;
 
 /// <summary>The result of attempting one persisted target-group delivery.</summary>
-public enum OutboxDispatchOutcome
-{
+public enum OutboxDispatchOutcome {
     /// <summary>Every consumer in the target group ran to completion.</summary>
     Delivered,
 
@@ -34,8 +33,7 @@ public enum OutboxDispatchOutcome
 /// consumer would otherwise silently discard every in-flight event), so it is logged at <see cref="LogLevel.Error"/>
 /// and parked for inspection by the delivery worker rather than being silently finalized as delivered.
 /// </remarks>
-public sealed class OutboxEventDispatcher
-{
+public sealed class OutboxEventDispatcher {
     private readonly ILogger<OutboxEventDispatcher> _logger;
     private readonly JsonSerializerOptions _serializerOptions;
     private readonly OutboxConsumerCatalog _consumerCatalog;
@@ -45,8 +43,7 @@ public sealed class OutboxEventDispatcher
         OutboxConsumerCatalog consumerCatalog,
         OutboxOptions options,
         IElarionJsonSerialization jsonSerialization,
-        ILogger<OutboxEventDispatcher> logger)
-    {
+        ILogger<OutboxEventDispatcher> logger) {
         ArgumentNullException.ThrowIfNull(consumerCatalog);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(jsonSerialization);
@@ -67,8 +64,7 @@ public sealed class OutboxEventDispatcher
     public async ValueTask<OutboxDispatchOutcome> DispatchAsync(
         IServiceProvider serviceProvider,
         OutboxMessage message,
-        CancellationToken ct)
-    {
+        CancellationToken ct) {
         EventSubscriptionDescriptor[] consumers;
         Type eventType;
         if (message.ConsumerIdsJson is null) {
@@ -168,22 +164,22 @@ public sealed class OutboxEventDispatcher
 /// Constructs the typed <see cref="IEventContext{TEvent}"/> the generated consumer delegates may cast to, for an event
 /// type known only at runtime.
 /// </summary>
-internal static class OutboxEventContext
-{
-    public static IEventContext Create(object message, Type eventType, Guid correlationId, Guid messageId) =>
+internal static class OutboxEventContext {
+    public static IEventContext Create(object message, Type eventType, Guid correlationId, Guid messageId) {
         // The generated subscriber delegate casts the context to IEventContext<TEvent> when the consumer declares a
         // typed context parameter, so the concrete type argument must match the runtime event type. The type is kept
         // alive by its descriptor, so this generic construction is safe under trimming.
-        (IEventContext)Activator.CreateInstance(
+        return (IEventContext)Activator.CreateInstance(
             typeof(OutboxEventContext<>).MakeGenericType(eventType),
             message,
             correlationId,
             messageId)!;
+    }
 }
 
 /// <summary>The delivery-tier <see cref="IEventContext{TEvent}"/> for an outbox-delivered integration event.</summary>
-internal sealed class OutboxEventContext<TEvent>(TEvent message, Guid correlationId, Guid messageId) : IEventContext<TEvent>
-{
+internal sealed class OutboxEventContext<TEvent>(TEvent message, Guid correlationId, Guid messageId)
+    : IEventContext<TEvent> {
     public TEvent Message { get; } = message;
 
     public Guid CorrelationId { get; } = correlationId;

@@ -35,25 +35,24 @@ public interface IEfCoreSettingsChangeNotifier {
 internal sealed class ChangePublisherSettingsChangeNotifier(SettingsChangeDispatchScope dispatch)
     : IEfCoreSettingsChangeNotifier {
     /// <inheritdoc />
-    public ValueTask NotifyAsync(DbContext dbContext, SettingsScope scope, string key, CancellationToken cancellationToken) {
-        if (dbContext.Database.CurrentTransaction is not null) {
+    public ValueTask NotifyAsync(DbContext dbContext, SettingsScope scope, string key,
+        CancellationToken cancellationToken) {
+        if (dbContext.Database.CurrentTransaction is not null)
             // Inside a caller-owned transaction: defer until commit so a rollback drops the notification rather than
             // announcing a phantom change. The dispatch interceptor flushes the buffer once the transaction commits.
             dispatch.Defer(scope, key);
-        } else if (Transaction.Current is { } ambient) {
+        else if (Transaction.Current is { } ambient)
             // Inside a System.Transactions ambient transaction (TransactionScope): the write is enlisted and not yet
             // durable, but EF exposes no DbTransaction, so the dispatch interceptor would never flush a deferral.
             // Announce on the ambient transaction's own completion instead — committed publishes, aborted drops — so
             // the notification neither fires pre-commit nor survives a rollback.
             ambient.TransactionCompleted += (_, args) => {
-                if (args.Transaction?.TransactionInformation.Status is TransactionStatus.Committed) {
+                if (args.Transaction?.TransactionInformation.Status is TransactionStatus.Committed)
                     dispatch.PublishNow(scope, key);
-                }
             };
-        } else {
+        else
             // No ambient transaction: the ExecuteUpdate/raw INSERT already committed, so announce immediately.
             dispatch.PublishNow(scope, key);
-        }
 
         return ValueTask.CompletedTask;
     }

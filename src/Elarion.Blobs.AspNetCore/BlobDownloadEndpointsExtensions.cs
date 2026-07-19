@@ -41,9 +41,7 @@ public static class BlobDownloadEndpointsExtensions {
         IBlobStore blobStore,
         BlobUploadEndpointOptions options,
         CancellationToken cancellationToken) {
-        if (!currentUser.IsAuthenticated) {
-            return Results.Unauthorized();
-        }
+        if (!currentUser.IsAuthenticated) return Results.Unauthorized();
 
         var blobRef = new BlobRef { Value = blobId };
         var metadata = await blobStore.GetMetadataAsync(blobRef, cancellationToken);
@@ -52,14 +50,11 @@ public static class BlobDownloadEndpointsExtensions {
         // as not found so ownership is never leaked.
         if (metadata is null
             || metadata.Container != options.Container
-            || !BlobEndpointOwnership.IsOwnedBy(metadata, currentUser.UserId)) {
+            || !BlobEndpointOwnership.IsOwnedBy(metadata, currentUser.UserId))
             return Results.NotFound();
-        }
 
         var download = await blobStore.OpenReadAsync(blobRef, cancellationToken);
-        if (download is null) {
-            return Results.NotFound();
-        }
+        if (download is null) return Results.NotFound();
 
         // The download handle (the content stream plus any backend reader it owns) lives exactly until the
         // response completes — streamed end to end, never buffered here.

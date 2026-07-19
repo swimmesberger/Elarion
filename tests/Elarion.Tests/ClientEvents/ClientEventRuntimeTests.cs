@@ -34,8 +34,9 @@ public sealed partial class ClientEventRuntimeTests {
         return services.BuildServiceProvider();
     }
 
-    private static ClientEventSubscription Subscription(string topic, ClientEventScope scope) =>
-        new() { Topic = topic, Scope = scope };
+    private static ClientEventSubscription Subscription(string topic, ClientEventScope scope) {
+        return new ClientEventSubscription { Topic = topic, Scope = scope };
+    }
 
     [Fact]
     public async Task DeliverToAll_ReachesEverySubscriberRegardlessOfSubscriptions() {
@@ -50,7 +51,7 @@ public sealed partial class ClientEventRuntimeTests {
             Id = Guid.CreateVersion7(),
             Topic = ClientEventControlEvents.Connected,
             Scope = ClientEventScope.Global,
-            Payload = "{}",
+            Payload = "{}"
         });
 
         (await userScoped.Events.ReadAsync(ct)).Topic.Should().Be(ClientEventControlEvents.Connected);
@@ -97,9 +98,11 @@ public sealed partial class ClientEventRuntimeTests {
         var source = provider.GetRequiredService<IClientEventSubscriptionSource>();
         var publisher = provider.GetRequiredService<IClientEventPublisher>();
         using var customer42 = source.Subscribe([
-            Subscription("test.invoiceChanged", ClientEventScope.Resource("customer:42"))]);
+            Subscription("test.invoiceChanged", ClientEventScope.Resource("customer:42"))
+        ]);
         using var customer7 = source.Subscribe([
-            Subscription("test.invoiceChanged", ClientEventScope.Resource("customer:7"))]);
+            Subscription("test.invoiceChanged", ClientEventScope.Resource("customer:7"))
+        ]);
 
         await publisher.PublishAsync(
             new InvoiceChanged { InvoiceId = Guid.CreateVersion7() }, ClientEventScope.Resource("customer:42"), ct);
@@ -186,10 +189,9 @@ public sealed partial class ClientEventRuntimeTests {
 
         var firstId = Guid.CreateVersion7();
         await publisher.PublishAsync(new InvoiceChanged { InvoiceId = firstId }, ClientEventScope.Global, ct);
-        for (var i = 0; i < 80; i++) {
+        for (var i = 0; i < 80; i++)
             await publisher.PublishAsync(
                 new InvoiceChanged { InvoiceId = Guid.CreateVersion7() }, ClientEventScope.Global, ct);
-        }
 
         var received = 0;
         var sawFirst = false;

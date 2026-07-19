@@ -61,18 +61,18 @@ public sealed class ClientDunningActor(
         dunning.State = next;
         await dunning.WriteStateAsync(cancellationToken);
 
-        if (next.Escalated && !current.Escalated) {
+        if (next.Escalated && !current.Escalated)
             logger.LogWarning(
                 "Client {ClientId} reached {Count} overdue invoices — escalating to collections.",
                 context.Key, next.OverdueCount);
-        }
     }
 
     /// <summary>A hot, lock-free read of this client's current dunning state — for a dashboard tile or a
     /// handler that resolves <c>IActorSystem.Get&lt;IClientDunning&gt;(clientId)</c> on the actor's home
     /// instance. Off-home queries read the same record through <c>IActorStateReader</c> instead.</summary>
-    public Task<ClientDunningState> GetStateAsync() =>
-        Task.FromResult(dunning.State ?? ClientDunningState.Initial);
+    public Task<ClientDunningState> GetStateAsync() {
+        return Task.FromResult(dunning.State ?? ClientDunningState.Initial);
+    }
 }
 
 /// <summary>
@@ -94,7 +94,9 @@ public sealed record ClientDunningState(int OverdueCount, bool Escalated) {
     /// (<c>IActorStateReader</c>) and the actor can never disagree on it. The actor name is the
     /// facade name: the class name minus the <c>Actor</c> suffix.
     /// </summary>
-    public static ActorSnapshotKey SnapshotKey(Guid clientId) => new("ClientDunning", clientId.ToString());
+    public static ActorSnapshotKey SnapshotKey(Guid clientId) {
+        return new ActorSnapshotKey("ClientDunning", clientId.ToString());
+    }
 
     /// <summary>Derived interpretation, shared by the actor and off-home queries: one more overdue
     /// invoice escalates this client.</summary>

@@ -22,7 +22,7 @@ namespace Billing.Application.Modules.Clients.Handlers;
 [HttpEndpoint("clients")]
 [RequirePermission("clients", Verbs.Write)]
 [CacheInvalidate("clients")]
-[Auditable]   // framework audit trail (ADR-0045): one compliance record per invocation; SetResource below pins the resource
+[Auditable] // framework audit trail (ADR-0045): one compliance record per invocation; SetResource below pins the resource
 [Description("Creates a new client for the current account.")]
 public sealed class CreateClient(
     BillingDbContext db,
@@ -50,9 +50,7 @@ public sealed class CreateClient(
     public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
         var exists = await db.Clients
             .AnyAsync(c => c.OwnerId == user.UserId && c.Email == command.Email, ct);
-        if (exists) {
-            return AppError.Conflict($"A client with email {command.Email} already exists.");
-        }
+        if (exists) return AppError.Conflict($"A client with email {command.Email} already exists.");
 
         var client = new Client {
             Id = Guid.CreateVersion7(),
@@ -60,7 +58,7 @@ public sealed class CreateClient(
             Number = await numbers.NextAsync(user.UserId, ct),
             Name = command.Name,
             Email = command.Email,
-            CreatedAt = clock.GetUtcNow(),
+            CreatedAt = clock.GetUtcNow()
         };
 
         db.Clients.Add(client);

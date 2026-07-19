@@ -36,7 +36,7 @@ public class MigrationRunner : IMigrationRunner {
     public async Task<IReadOnlyList<MigrationScriptInfo>> MigrateAsync(CancellationToken cancellationToken = default) {
         var scripts = DiscoverOrThrow();
 
-        await using var session = await _database.ConnectAsync(exclusive: true, cancellationToken);
+        await using var session = await _database.ConnectAsync(true, cancellationToken);
         await session.EnsureHistoryTableAsync(cancellationToken);
         var rows = await session.LoadHistoryAsync(cancellationToken);
         var plan = MigrationPlanner.Build(scripts, rows);
@@ -47,11 +47,10 @@ public class MigrationRunner : IMigrationRunner {
         var applied = new List<MigrationScriptInfo>();
 
         foreach (var script in plan.PendingVersioned) {
-            if (plan.OutOfOrder.Contains(script)) {
+            if (plan.OutOfOrder.Contains(script))
                 _logger.LogWarning(
                     "Applying migration {ScriptName} out of order: version {Version} is below an already-applied version.",
                     script.ScriptName, script.Version!.Text);
-            }
 
             await ApplyAsync(session, script, nextRank++, cancellationToken);
             applied.Add(script.ToInfo());
@@ -62,12 +61,10 @@ public class MigrationRunner : IMigrationRunner {
             applied.Add(script.ToInfo());
         }
 
-        if (applied.Count == 0) {
+        if (applied.Count == 0)
             _logger.LogInformation("Schema is up to date; no migrations to apply.");
-        }
-        else {
+        else
             _logger.LogInformation("Applied {Count} migration(s).", applied.Count);
-        }
 
         return applied;
     }
@@ -76,40 +73,38 @@ public class MigrationRunner : IMigrationRunner {
     public async Task<MigrationValidationResult> ValidateAsync(CancellationToken cancellationToken = default) {
         var scripts = MigrationScriptDiscovery.Discover(_options.ScriptSources);
 
-        await using var session = await _database.ConnectAsync(exclusive: false, cancellationToken);
+        await using var session = await _database.ConnectAsync(false, cancellationToken);
         var rows = await LoadIfExistsAsync(session, cancellationToken);
 
         var plan = MigrationPlanner.Build(scripts, rows);
         var errors = new List<MigrationValidationError>();
         errors.AddRange(scripts.Errors);
         errors.AddRange(plan.Errors);
-        foreach (var row in plan.FailedRows) {
+        foreach (var row in plan.FailedRows)
             errors.Add(new MigrationValidationError {
                 ScriptName = row.ScriptName,
-                Message = FailedRowMessage(row),
+                Message = FailedRowMessage(row)
             });
-        }
 
-        if (_options.OutOfOrder == OutOfOrderPolicy.Deny) {
-            foreach (var script in plan.OutOfOrder) {
+        if (_options.OutOfOrder == OutOfOrderPolicy.Deny)
+            foreach (var script in plan.OutOfOrder)
                 errors.Add(new MigrationValidationError {
                     ScriptName = script.ScriptName,
-                    Message = OutOfOrderMessage(script),
+                    Message = OutOfOrderMessage(script)
                 });
-            }
-        }
 
         return new MigrationValidationResult {
             Errors = errors,
-            Pending = plan.PendingVersioned.Concat(plan.PendingRepeatable).Select(s => s.ToInfo()).ToList(),
+            Pending = plan.PendingVersioned.Concat(plan.PendingRepeatable).Select(s => s.ToInfo()).ToList()
         };
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<MigrationScriptInfo>> GetPendingAsync(CancellationToken cancellationToken = default) {
+    public async Task<IReadOnlyList<MigrationScriptInfo>>
+        GetPendingAsync(CancellationToken cancellationToken = default) {
         var scripts = DiscoverOrThrow();
 
-        await using var session = await _database.ConnectAsync(exclusive: false, cancellationToken);
+        await using var session = await _database.ConnectAsync(false, cancellationToken);
         var rows = await LoadIfExistsAsync(session, cancellationToken);
 
         var plan = MigrationPlanner.Build(scripts, rows);
@@ -117,20 +112,20 @@ public class MigrationRunner : IMigrationRunner {
     }
 
     /// <inheritdoc />
-    public async Task BaselineAsync(string version, string? description = null, CancellationToken cancellationToken = default) {
+    public async Task BaselineAsync(string version, string? description = null,
+        CancellationToken cancellationToken = default) {
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
-        if (!MigrationVersion.TryParse(version, out var parsed)) {
-            throw new MigrationException($"Baseline version '{version}' is malformed; expected numeric segments separated by '.' or '_'.");
-        }
+        if (!MigrationVersion.TryParse(version, out var parsed))
+            throw new MigrationException(
+                $"Baseline version '{version}' is malformed; expected numeric segments separated by '.' or '_'.");
 
-        await using var session = await _database.ConnectAsync(exclusive: true, cancellationToken);
+        await using var session = await _database.ConnectAsync(true, cancellationToken);
         await session.EnsureHistoryTableAsync(cancellationToken);
         var rows = await session.LoadHistoryAsync(cancellationToken);
-        if (rows.Count > 0) {
+        if (rows.Count > 0)
             throw new MigrationException(
                 $"Cannot baseline at version {parsed.Text}: the history table already has {rows.Count} row(s). "
                 + "Baselining is only for adopting an existing database before its first migration run.");
-        }
 
         await session.InsertHistoryRowAsync(
             new MigrationHistoryRecord {
@@ -140,22 +135,23 @@ public class MigrationRunner : IMigrationRunner {
                 ScriptName = $"baseline {parsed.Text}",
                 Checksum = null,
                 State = MigrationStates.Baseline,
-                DurationMs = 0,
+                DurationMs = 0
             },
             cancellationToken);
         _logger.LogInformation("Baselined schema history at version {Version}.", parsed.Text);
     }
 
     /// <inheritdoc />
-    public async Task ResolveFailedAsync(string version, ResolveAction action, CancellationToken cancellationToken = default) {
+    public async Task ResolveFailedAsync(string version, ResolveAction action,
+        CancellationToken cancellationToken = default) {
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
-        if (!MigrationVersion.TryParse(version, out var parsed)) {
-            throw new MigrationException($"Version '{version}' is malformed; expected numeric segments separated by '.' or '_'.");
-        }
+        if (!MigrationVersion.TryParse(version, out var parsed))
+            throw new MigrationException(
+                $"Version '{version}' is malformed; expected numeric segments separated by '.' or '_'.");
 
         var scripts = MigrationScriptDiscovery.Discover(_options.ScriptSources);
 
-        await using var session = await _database.ConnectAsync(exclusive: true, cancellationToken);
+        await using var session = await _database.ConnectAsync(true, cancellationToken);
         await session.EnsureHistoryTableAsync(cancellationToken);
         var rows = await session.LoadHistoryAsync(cancellationToken);
         var failed = rows.FirstOrDefault(row =>
@@ -163,9 +159,8 @@ public class MigrationRunner : IMigrationRunner {
             && row.Version is not null
             && MigrationVersion.TryParse(row.Version, out var rowVersion)
             && rowVersion.Equals(parsed));
-        if (failed is null) {
+        if (failed is null)
             throw new MigrationException($"No failed migration with version {parsed.Text} exists in the history.");
-        }
 
         if (action == ResolveAction.Retry) {
             await session.DeleteHistoryRowAsync(failed.InstalledRank, cancellationToken);
@@ -182,17 +177,19 @@ public class MigrationRunner : IMigrationRunner {
         }
     }
 
-    private static async Task<IReadOnlyList<AppliedMigrationRow>> LoadIfExistsAsync(IMigrationSession session, CancellationToken cancellationToken) =>
-        await session.HistoryTableExistsAsync(cancellationToken)
+    private static async Task<IReadOnlyList<AppliedMigrationRow>> LoadIfExistsAsync(IMigrationSession session,
+        CancellationToken cancellationToken) {
+        return await session.HistoryTableExistsAsync(cancellationToken)
             ? await session.LoadHistoryAsync(cancellationToken)
             : [];
+    }
 
     private MigrationScriptSet DiscoverOrThrow() {
         var scripts = MigrationScriptDiscovery.Discover(_options.ScriptSources);
-        if (scripts.Errors.Count > 0) {
+        if (scripts.Errors.Count > 0)
             throw new MigrationException(
-                "Migration script validation failed:\n" + string.Join("\n", scripts.Errors.Select(e => "- " + e.Message)));
-        }
+                "Migration script validation failed:\n" +
+                string.Join("\n", scripts.Errors.Select(e => "- " + e.Message)));
 
         return scripts;
     }
@@ -203,30 +200,28 @@ public class MigrationRunner : IMigrationRunner {
             throw new MigrationFailedStateException(row.Version ?? "", row.ScriptName, FailedRowMessage(row));
         }
 
-        if (plan.Errors.Count > 0) {
+        if (plan.Errors.Count > 0)
             throw new MigrationException(
                 "Migration validation failed:\n" + string.Join("\n", plan.Errors.Select(e => "- " + e.Message)));
-        }
 
-        if (_options.OutOfOrder == OutOfOrderPolicy.Deny && plan.OutOfOrder.Count > 0) {
+        if (_options.OutOfOrder == OutOfOrderPolicy.Deny && plan.OutOfOrder.Count > 0)
             throw new MigrationException(
                 "Out-of-order migrations denied (OutOfOrderPolicy.Deny):\n"
                 + string.Join("\n", plan.OutOfOrder.Select(s => "- " + OutOfOrderMessage(s))));
-        }
     }
 
-    private async Task ApplyAsync(IMigrationSession session, MigrationScript script, int installedRank, CancellationToken cancellationToken) {
+    private async Task ApplyAsync(IMigrationSession session, MigrationScript script, int installedRank,
+        CancellationToken cancellationToken) {
         _logger.LogInformation("Applying migration {ScriptName}…", script.ScriptName);
         var stopwatch = Stopwatch.StartNew();
 
-        if (script.NoTransaction) {
+        if (script.NoTransaction)
             await ApplyWithoutTransactionAsync(session, script, installedRank, stopwatch, cancellationToken);
-        }
-        else {
+        else
             await ApplyTransactionalAsync(session, script, installedRank, stopwatch, cancellationToken);
-        }
 
-        _logger.LogInformation("Applied migration {ScriptName} in {DurationMs} ms.", script.ScriptName, stopwatch.ElapsedMilliseconds);
+        _logger.LogInformation("Applied migration {ScriptName} in {DurationMs} ms.", script.ScriptName,
+            stopwatch.ElapsedMilliseconds);
     }
 
     private async Task ApplyTransactionalAsync(
@@ -262,14 +257,13 @@ public class MigrationRunner : IMigrationRunner {
             await session.ExecuteWithoutTransactionAsync(script.Sql, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException) {
-            if (script.IsRepeatable) {
+            if (script.IsRepeatable)
                 // Repeatables are idempotent by doctrine and have no recorded checksum for this content
                 // yet, so the next run simply retries; no failed row, no limbo.
                 throw new MigrationExecutionException(
                     script.ScriptName,
                     $"Repeatable migration '{script.ScriptName}' failed (no-transaction). Fix the script and rerun. Cause: {ex.Message}",
                     ex);
-            }
 
             await RecordFailureAsync(session, script, installedRank, stopwatch, cancellationToken);
             throw new MigrationExecutionException(
@@ -280,7 +274,8 @@ public class MigrationRunner : IMigrationRunner {
                 ex);
         }
 
-        await session.InsertHistoryRowAsync(AppliedRow(script, installedRank, stopwatch.ElapsedMilliseconds), cancellationToken);
+        await session.InsertHistoryRowAsync(AppliedRow(script, installedRank, stopwatch.ElapsedMilliseconds),
+            cancellationToken);
     }
 
     private async Task RecordFailureAsync(
@@ -298,32 +293,38 @@ public class MigrationRunner : IMigrationRunner {
                     ScriptName = script.ScriptName,
                     Checksum = script.Checksum,
                     State = MigrationStates.Failed,
-                    DurationMs = stopwatch.ElapsedMilliseconds,
+                    DurationMs = stopwatch.ElapsedMilliseconds
                 },
                 cancellationToken);
         }
         catch (Exception recordEx) {
             // The connection may be gone entirely; the original failure is the one worth surfacing.
-            _logger.LogError(recordEx, "Failed to record the failed history row for migration {ScriptName}.", script.ScriptName);
+            _logger.LogError(recordEx, "Failed to record the failed history row for migration {ScriptName}.",
+                script.ScriptName);
         }
     }
 
-    private static MigrationHistoryRecord AppliedRow(MigrationScript script, int installedRank, long durationMs) =>
-        new() {
+    private static MigrationHistoryRecord AppliedRow(MigrationScript script, int installedRank, long durationMs) {
+        return new MigrationHistoryRecord {
             InstalledRank = installedRank,
             Version = script.Version?.Text,
             Description = script.Description,
             ScriptName = script.ScriptName,
             Checksum = script.Checksum,
             State = MigrationStates.Applied,
-            DurationMs = durationMs,
+            DurationMs = durationMs
         };
+    }
 
-    private static string FailedRowMessage(AppliedMigrationRow row) =>
-        $"Migration '{row.ScriptName}' (version {row.Version}) previously failed while running outside a transaction "
-        + $"and may be half-applied. Resolve it with IMigrationRunner.ResolveFailedAsync(\"{row.Version}\", "
-        + "ResolveAction.Retry | MarkApplied) before migrating again.";
+    private static string FailedRowMessage(AppliedMigrationRow row) {
+        return
+            $"Migration '{row.ScriptName}' (version {row.Version}) previously failed while running outside a transaction "
+            + $"and may be half-applied. Resolve it with IMigrationRunner.ResolveFailedAsync(\"{row.Version}\", "
+            + "ResolveAction.Retry | MarkApplied) before migrating again.";
+    }
 
-    private static string OutOfOrderMessage(MigrationScript script) =>
-        $"Migration '{script.ScriptName}' (version {script.Version!.Text}) is versioned below an already-applied migration.";
+    private static string OutOfOrderMessage(MigrationScript script) {
+        return
+            $"Migration '{script.ScriptName}' (version {script.Version!.Text}) is versioned below an already-applied migration.";
+    }
 }

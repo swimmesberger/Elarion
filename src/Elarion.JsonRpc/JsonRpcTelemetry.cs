@@ -51,13 +51,14 @@ public static class JsonRpcTelemetry {
     public static readonly Histogram<double> RequestDuration =
         MeterInstance.CreateHistogram<double>(
             "rpc.server.call.duration",
-            unit: "s",
-            description: "Duration of JSON-RPC request handling",
+            "s",
+            "Duration of JSON-RPC request handling",
             advice: DurationAdvice);
 
     /// <summary>Records the common request count and duration metrics for one JSON-RPC outcome.</summary>
-    public static void RecordRequest(string method, string statusCode, TimeSpan elapsed) =>
-        RecordRequest(method, statusCode, elapsed, system: "jsonrpc");
+    public static void RecordRequest(string method, string statusCode, TimeSpan elapsed) {
+        RecordRequest(method, statusCode, elapsed, "jsonrpc");
+    }
 
     /// <summary>
     /// Records the common request count and duration metrics for one RPC outcome, tagged with the given
@@ -74,6 +75,7 @@ public static class JsonRpcTelemetry {
         RequestDuration.Record(elapsed.TotalSeconds, tags);
     }
 
-    internal static string NormalizeMethod(string? method) =>
-        string.IsNullOrWhiteSpace(method) ? "_unknown" : method;
+    internal static string NormalizeMethod(string? method) {
+        return string.IsNullOrWhiteSpace(method) ? "_unknown" : method;
+    }
 }

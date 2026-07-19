@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+
 namespace Elarion.AspNetCore;
 
 /// <summary>
@@ -23,11 +24,10 @@ public static class JsonRpcServiceExtensions {
         this IServiceCollection services,
         Action<JsonRpcOptions>? configure = null
     ) {
-        if (configure is not null) {
+        if (configure is not null)
             services.Configure(configure);
-        } else {
+        else
             services.AddOptions<JsonRpcOptions>();
-        }
 
         services.AddSingleton<IBatchExecutionStrategy, SequentialBatchStrategy>();
 
@@ -83,8 +83,8 @@ public static class JsonRpcServiceExtensions {
     ) {
         ArgumentNullException.ThrowIfNull(register);
 
-        services.AddElarionJsonRpcDispatcher(
-            (dispatcher, sp) => register(dispatcher, sp.GetRequiredService<IConfiguration>()));
+        services.AddElarionJsonRpcDispatcher((dispatcher, sp) =>
+            register(dispatcher, sp.GetRequiredService<IConfiguration>()));
 
         return services.AddElarionJsonRpc(configure);
     }

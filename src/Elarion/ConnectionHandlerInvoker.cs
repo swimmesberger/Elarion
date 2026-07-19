@@ -61,7 +61,7 @@ public sealed class ConnectionHandlerInvoker {
         where TRequest : notnull {
         ArgumentNullException.ThrowIfNull(request);
 
-        var context = CreateContext(_connection.Connection, enrichContext: null);
+        var context = CreateContext(_connection.Connection, null);
         return HandlerInvoker.InvokeAsync<TRequest, TResponse>(_services, request, context, ct);
     }
 
@@ -151,7 +151,7 @@ public sealed class ConnectionHandlerInvoker {
         where TRequest : notnull {
         ArgumentNullException.ThrowIfNull(request);
 
-        var context = CreateContext(_connection.Connection, enrichContext: null);
+        var context = CreateContext(_connection.Connection, null);
         return StreamHandlerInvoker.InvokeAsync<TRequest, TItem>(_services, request, context, ct);
     }
 
@@ -252,8 +252,9 @@ public sealed class ConnectionHandlerInvoker {
         HandlerDispatcher dispatcher,
         string name,
         object request,
-        CancellationToken ct = default) =>
-        InvokeNamedCoreAsync(dispatcher, name, request, enrichContext: null, ct);
+        CancellationToken ct = default) {
+        return InvokeNamedCoreAsync(dispatcher, name, request, null, ct);
+    }
 
     /// <summary>
     /// Invokes an already-decoded named request with adapter-owned metadata added to the dispatch scope; see
@@ -299,12 +300,11 @@ public sealed class ConnectionHandlerInvoker {
         if (!dispatcher.TryGetRoute(name, HandlerTransports.Connection, out var route))
             return AppError.NotFound(NotFoundMessage);
 
-        if (!route.RequestType.IsInstanceOfType(request)) {
+        if (!route.RequestType.IsInstanceOfType(request))
             throw new ArgumentException(
                 $"The decoded request for connection operation '{name}' must be assignable to " +
                 $"'{route.RequestType.FullName}', but the adapter supplied '{request.GetType().FullName}'.",
                 nameof(request));
-        }
 
         var context = CreateContext(snapshot, enrichContext);
         await using var scope = _services.CreateDispatchScope(context);

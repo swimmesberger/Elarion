@@ -29,9 +29,7 @@ public sealed class StockQuoteActorTests {
 
         // A hot burst inside one conflation window: the first tick publishes, the rest only update
         // the in-memory value.
-        for (var seq = 1; seq <= 10; seq++) {
-            await quote.Apply(new QuoteTick(seq, 100m + seq, time.GetUtcNow()), Ct);
-        }
+        for (var seq = 1; seq <= 10; seq++) await quote.Apply(new QuoteTick(seq, 100m + seq, time.GetUtcNow()), Ct);
 
         published.Events.Should().HaveCount(1);
         published.Events[0].Price.Should().Be(101m); // the first tick's value opened the window
@@ -96,7 +94,7 @@ public sealed class StockQuoteActorTests {
         // The generated stream facade (ADR-0052): greeting = latest accepted tick, then every accepted
         // tick in order — no conflation, and the feed's sequence guard still applies before the stream.
         var observed = new List<Quote>();
-        await foreach (var item in quote.Watch(resumeAfter: null, Ct).WithCancellation(Ct)) {
+        await foreach (var item in quote.Watch(null, Ct).WithCancellation(Ct)) {
             observed.Add(item.Value);
             if (observed.Count == 1) {
                 await quote.Apply(new QuoteTick(3, 120m, time.GetUtcNow()), Ct);
@@ -104,9 +102,7 @@ public sealed class StockQuoteActorTests {
                 await quote.Apply(new QuoteTick(4, 130m, time.GetUtcNow()), Ct);
             }
 
-            if (observed.Count == 3) {
-                break;
-            }
+            if (observed.Count == 3) break;
         }
 
         observed.Select(static q => q.Price).Should().Equal(110m, 120m, 130m);
@@ -146,7 +142,9 @@ public sealed class StockQuoteActorTests {
     private sealed class FakeInterest : IClientEventInterest {
         public bool Watched { get; set; }
 
-        public bool HasSubscribers(string topic, ClientEventScope scope) => Watched;
+        public bool HasSubscribers(string topic, ClientEventScope scope) {
+            return Watched;
+        }
     }
 
     private sealed class RecordingPublisher : IClientEventPublisher {

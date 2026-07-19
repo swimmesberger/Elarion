@@ -49,8 +49,8 @@ public static class EventTelemetry {
     public static readonly Histogram<double> ConsumerDuration =
         MeterInstance.CreateHistogram<double>(
             "messaging.consumer.invocation.duration",
-            unit: "s",
-            description: "Duration of event consumer invocations",
+            "s",
+            "Duration of event consumer invocations",
             advice: DurationAdvice);
 
     /// <summary>Counts outbox message deliveries by event type and outcome.</summary>
@@ -63,8 +63,8 @@ public static class EventTelemetry {
     public static readonly Histogram<double> DeliveryDuration =
         MeterInstance.CreateHistogram<double>(
             "messaging.delivery.duration",
-            unit: "s",
-            description: "Duration of after-commit message deliveries",
+            "s",
+            "Duration of after-commit message deliveries",
             advice: DurationAdvice);
 
     /// <summary>Records one published event tagged with bounded event type and plane names.</summary>

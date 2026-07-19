@@ -5,25 +5,25 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj"/>
     <!-- In-memory actors (ADR-0042): the Invoicing module's per-client dunning coordinator is an [Actor]
          fed by the InvoiceOverdue integration event (ADR-0046). -->
-    <ProjectReference Include="..\..\..\src\Elarion.Actors\Elarion.Actors.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.Actors\Elarion.Actors.csproj"/>
     <!-- Actor state snapshotting (ADR-0047): the dunning actor's escalation latch persists as a jsonb
          snapshot row (modelBuilder.UseElarionActorSnapshots() in BillingDbContext), so it survives idle
          passivation and restarts. -->
-    <ProjectReference Include="..\..\..\src\Elarion.Actors.PostgreSql\Elarion.Actors.PostgreSql.csproj" />
-    <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore\Elarion.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.Actors.PostgreSql\Elarion.Actors.PostgreSql.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore\Elarion.EntityFrameworkCore.csproj"/>
     <!-- The persistence layer (DbContext, migrations, outbox table config) lives in the application,
          because the database is application logic, not an infrastructure detail. -->
-    <ProjectReference Include="..\..\..\src\Elarion.Messaging.Outbox\Elarion.Messaging.Outbox.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.Messaging.Outbox\Elarion.Messaging.Outbox.csproj"/>
     <!-- Framework audit trail (ADR-0045): the durable EF sink + the audit-log table config
          (modelBuilder.UseElarionAuditing() in BillingDbContext). Handlers opt in with [Auditable]. -->
-    <ProjectReference Include="..\..\..\src\Elarion.Auditing.EntityFrameworkCore\Elarion.Auditing.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.Auditing.EntityFrameworkCore\Elarion.Auditing.EntityFrameworkCore.csproj"/>
     <!-- Declarative request validation (ADR-0027): referencing Elarion.Validation is what activates the
          resolver generator, which turns the DataAnnotations on handler request DTOs into per-module
          IValidatableInfoResolvers wired through each module's ConfigureDefaultServices. -->
-    <ProjectReference Include="..\..\..\src\Elarion.Validation\Elarion.Validation.csproj" />
+    <ProjectReference Include="..\..\..\src\Elarion.Validation\Elarion.Validation.csproj"/>
   </ItemGroup>
 
   <!-- Building from source, the generators are referenced as analyzers (consuming Elarion from NuGet
@@ -33,19 +33,19 @@
        ConfigureEntities in one place (no cross-assembly manifest needed). -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
-                     OutputItemType="Analyzer"
-                     ReferenceOutputAssembly="false" />
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"/>
     <ProjectReference Include="..\..\..\src\Elarion.EntityFrameworkCore.Generators\Elarion.EntityFrameworkCore.Generators.csproj"
-                     OutputItemType="Analyzer"
-                     ReferenceOutputAssembly="false" />
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"/>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational"/>
     <!-- The concrete DbContext lives here, so the Npgsql provider does too. Provider *registration*
          (UseNpgsql + connection string) stays in the host. This sample builds its schema from the model on
          startup (EnsureCreated), so it needs no EF migrations and no Microsoft.EntityFrameworkCore.Design. -->
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL"/>
   </ItemGroup>
 
 </Project>

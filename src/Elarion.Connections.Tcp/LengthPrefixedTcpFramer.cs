@@ -10,22 +10,18 @@ public sealed class LengthPrefixedTcpFramer : TcpMessageFramer {
     private const int PrefixLength = 4;
 
     /// <inheritdoc />
-    public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed, out ReadOnlyMemory<byte> message) {
+    public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed,
+        out ReadOnlyMemory<byte> message) {
         consumed = 0;
         message = default;
-        if (buffer.Length < PrefixLength) {
-            return false;
-        }
+        if (buffer.Length < PrefixLength) return false;
 
         var length = BinaryPrimitives.ReadUInt32BigEndian(buffer.Span);
-        if (length > int.MaxValue - PrefixLength) {
+        if (length > int.MaxValue - PrefixLength)
             throw new InvalidOperationException($"Length prefix {length} is not a valid message length.");
-        }
 
         var total = PrefixLength + (int)length;
-        if (buffer.Length < total) {
-            return false;
-        }
+        if (buffer.Length < total) return false;
 
         consumed = total;
         message = buffer.Slice(PrefixLength, (int)length);

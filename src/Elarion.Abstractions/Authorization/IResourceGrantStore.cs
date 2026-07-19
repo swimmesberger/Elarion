@@ -31,5 +31,6 @@ public interface IResourceGrantStore {
     ValueTask RevokeAsync(ResourceGrant grant, CancellationToken ct);
 
     /// <summary>Returns every grant on the given resource.</summary>
-    ValueTask<IReadOnlyList<ResourceGrant>> GetGrantsAsync(string resourceType, string resourceId, CancellationToken ct);
+    ValueTask<IReadOnlyList<ResourceGrant>>
+        GetGrantsAsync(string resourceType, string resourceId, CancellationToken ct);
 }

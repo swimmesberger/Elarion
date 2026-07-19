@@ -20,14 +20,12 @@ internal sealed class ElarionIdempotencyOperationTransformer : IOpenApiOperation
         var isIdempotent = context.Description.ActionDescriptor.EndpointMetadata
             .OfType<ElarionIdempotentEndpointMetadata>()
             .Any();
-        if (!isIdempotent) {
-            return Task.CompletedTask;
-        }
+        if (!isIdempotent) return Task.CompletedTask;
 
         operation.Parameters ??= [];
         var alreadyPresent = operation.Parameters.Any(parameter =>
             string.Equals(parameter.Name, IdempotencyKeyNames.HttpHeader, StringComparison.OrdinalIgnoreCase));
-        if (!alreadyPresent) {
+        if (!alreadyPresent)
             operation.Parameters.Add(new OpenApiParameter {
                 Name = IdempotencyKeyNames.HttpHeader,
                 In = ParameterLocation.Header,
@@ -35,9 +33,8 @@ internal sealed class ElarionIdempotencyOperationTransformer : IOpenApiOperation
                 Description =
                     "Optional idempotency key. Repeating a request with the same key returns the original outcome "
                     + "instead of executing again, so a retry after a network failure is safe.",
-                Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+                Schema = new OpenApiSchema { Type = JsonSchemaType.String }
             });
-        }
 
         operation.Extensions ??= new Dictionary<string, IOpenApiExtension>(StringComparer.Ordinal);
         operation.Extensions[ElarionOpenApiExtensionNames.Idempotent] = new JsonNodeExtension(JsonValue.Create(true));

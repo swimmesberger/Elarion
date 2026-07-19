@@ -16,9 +16,8 @@ public readonly record struct ResourceOperation {
     /// <param name="name">The operation name (case-sensitive); compared by ordinal equality.</param>
     /// <exception cref="ArgumentException"><paramref name="name"/> is <see langword="null"/> or whitespace.</exception>
     public ResourceOperation(string name) {
-        if (string.IsNullOrWhiteSpace(name)) {
+        if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Resource operation name must be non-empty.", nameof(name));
-        }
 
         Name = name;
     }
@@ -39,5 +38,7 @@ public readonly record struct ResourceOperation {
     public static ResourceOperation Delete { get; } = new("delete");
 
     /// <inheritdoc />
-    public override string ToString() => Name;
+    public override string ToString() {
+        return Name;
+    }
 }

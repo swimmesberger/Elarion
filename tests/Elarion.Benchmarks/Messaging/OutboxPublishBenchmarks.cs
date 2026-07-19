@@ -18,8 +18,7 @@ namespace Elarion.Benchmarks.Messaging;
 /// </summary>
 [MemoryDiagnoser]
 public class OutboxPublishBenchmarks {
-    [Params(1, 3, 10, 30)]
-    public int ConsumerCount { get; set; }
+    [Params(1, 3, 10, 30)] public int ConsumerCount { get; set; }
 
     private readonly OutboxBenchmarkEvent _event = new(7, "alice");
     private CapturingStore _legacyStore = null!;
@@ -70,13 +69,15 @@ public class OutboxPublishBenchmarks {
         return _targetGroupedStore.Last!;
     }
 
-    private static EventSubscriptionDescriptor Descriptor(string consumerId) => new() {
-        ConsumerId = consumerId,
-        EventType = typeof(OutboxBenchmarkEvent),
-        Plane = EventPlane.Integration,
-        ServiceType = typeof(OutboxPublishBenchmarks),
-        InvokeAsync = static (_, _, _, _) => ValueTask.CompletedTask
-    };
+    private static EventSubscriptionDescriptor Descriptor(string consumerId) {
+        return new EventSubscriptionDescriptor {
+            ConsumerId = consumerId,
+            EventType = typeof(OutboxBenchmarkEvent),
+            Plane = EventPlane.Integration,
+            ServiceType = typeof(OutboxPublishBenchmarks),
+            InvokeAsync = static (_, _, _, _) => ValueTask.CompletedTask
+        };
+    }
 }
 
 /// <summary>
@@ -85,8 +86,7 @@ public class OutboxPublishBenchmarks {
 /// </summary>
 [MemoryDiagnoser]
 public class OutboxConsumerLookupBenchmarks {
-    [Params(16, 128)]
-    public int DescriptorCount { get; set; }
+    [Params(16, 128)] public int DescriptorCount { get; set; }
 
     private EventSubscriptionDescriptor[] _descriptors = null!;
     private OutboxConsumerCatalog _catalog = null!;
@@ -110,8 +110,8 @@ public class OutboxConsumerLookupBenchmarks {
     public int LegacyPerPublishScan() {
         var consumers = _descriptors
             .Where(descriptor => descriptor.Plane is EventPlane.Integration
-                && descriptor.EventType == typeof(OutboxBenchmarkEvent)
-                && descriptor.InvokeAsync is not null)
+                                 && descriptor.EventType == typeof(OutboxBenchmarkEvent)
+                                 && descriptor.InvokeAsync is not null)
             .OrderBy(descriptor => descriptor.Order)
             .ToArray();
         var duplicate = consumers
@@ -123,7 +123,9 @@ public class OutboxConsumerLookupBenchmarks {
     }
 
     [Benchmark]
-    public int IndexedCatalogLookup() => _catalog.GetConsumers(typeof(OutboxBenchmarkEvent)).Count;
+    public int IndexedCatalogLookup() {
+        return _catalog.GetConsumers(typeof(OutboxBenchmarkEvent)).Count;
+    }
 }
 
 public sealed record OutboxBenchmarkEvent(int Id, string Name) : IIntegrationEvent;
@@ -133,43 +135,57 @@ public sealed record UnrelatedBenchmarkEvent(int Id) : IIntegrationEvent;
 internal sealed class CapturingStore : IOutboxStore {
     public OutboxMessage? Last { get; private set; }
 
-    public void Append(OutboxMessage message) => Last = message;
+    public void Append(OutboxMessage message) {
+        Last = message;
+    }
 
     public ValueTask<IReadOnlyList<OutboxMessage>> ClaimPendingAsync(
         Guid lockId,
         DateTimeOffset leaseUntil,
         int batchSize,
         IReadOnlyCollection<string> heldRoles,
-        CancellationToken ct) => throw new NotSupportedException();
-
-    public ValueTask<bool> ReleaseClaimAsync(Guid deliveryId, Guid lockId, CancellationToken ct) =>
+        CancellationToken ct) {
         throw new NotSupportedException();
+    }
+
+    public ValueTask<bool> ReleaseClaimAsync(Guid deliveryId, Guid lockId, CancellationToken ct) {
+        throw new NotSupportedException();
+    }
 
     public ValueTask<bool> MarkProcessedAsync(
         Guid deliveryId,
         Guid lockId,
         DateTimeOffset processedOnUtc,
-        CancellationToken ct) => throw new NotSupportedException();
+        CancellationToken ct) {
+        throw new NotSupportedException();
+    }
 
     public ValueTask<bool> MarkFailedAsync(
         Guid deliveryId,
         Guid lockId,
         string error,
         DateTimeOffset retryVisibleAfterUtc,
-        CancellationToken ct) => throw new NotSupportedException();
+        CancellationToken ct) {
+        throw new NotSupportedException();
+    }
 
     public ValueTask<bool> MarkPermanentlyFailedAsync(
         Guid deliveryId,
         Guid lockId,
         string error,
-        CancellationToken ct) => throw new NotSupportedException();
-
-    public ValueTask<int> PurgeProcessedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) =>
+        CancellationToken ct) {
         throw new NotSupportedException();
+    }
+
+    public ValueTask<int> PurgeProcessedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) {
+        throw new NotSupportedException();
+    }
 }
 
 internal sealed class EmptyProvider : IServiceProvider {
     public static readonly EmptyProvider Instance = new();
 
-    public object? GetService(Type serviceType) => null;
+    public object? GetService(Type serviceType) {
+        return null;
+    }
 }

@@ -32,12 +32,14 @@ namespace Elarion.AspNetCore;
 /// </remarks>
 public static class ElarionHttpResults {
     /// <summary>Returns <c>200 OK</c> with <paramref name="result"/>'s value on success, otherwise a ProblemDetails failure.</summary>
-    public static IResult ToResult<T>(Result<T> result) =>
-        result.IsSuccess ? TypedResults.Ok(result.Value) : ToProblem(result.Error);
+    public static IResult ToResult<T>(Result<T> result) {
+        return result.IsSuccess ? TypedResults.Ok(result.Value) : ToProblem(result.Error);
+    }
 
     /// <summary>Returns <c>204 No Content</c> on success, otherwise a ProblemDetails failure. Used when the response type is empty.</summary>
-    public static IResult ToNoContentResult<T>(Result<T> result) =>
-        result.IsSuccess ? TypedResults.NoContent() : ToProblem(result.Error);
+    public static IResult ToNoContentResult<T>(Result<T> result) {
+        return result.IsSuccess ? TypedResults.NoContent() : ToProblem(result.Error);
+    }
 
     /// <summary>
     /// Returns the file content of a successful <see cref="ElarionFile"/> result as a real file response (the
@@ -45,9 +47,7 @@ public static class ElarionHttpResults {
     /// set), otherwise a ProblemDetails failure. Used when the handler's response type is <see cref="ElarionFile"/>.
     /// </summary>
     public static IResult ToFileResult(Result<ElarionFile> result) {
-        if (!result.IsSuccess) {
-            return ToProblem(result.Error);
-        }
+        if (!result.IsSuccess) return ToProblem(result.Error);
 
         var file = result.Value;
         return TypedResults.Bytes(file.Bytes, file.ContentType, file.FileName);
@@ -64,8 +64,9 @@ public static class ElarionHttpResults {
     /// <typeparam name="TItem">The streamed item type, present in a canonical source-generated JSON context.</typeparam>
     /// <param name="request">The request passed to the generated stream-handler pipeline.</param>
     public static IResult ToStreamResult<TRequest, TItem>(TRequest request)
-        where TRequest : notnull =>
-        new StreamHandlerSseResult<TRequest, TItem>(request);
+        where TRequest : notnull {
+        return new StreamHandlerSseResult<TRequest, TItem>(request);
+    }
 
     /// <summary>Converts an <see cref="AppError"/> into an RFC 7807 ProblemDetails <see cref="IResult"/>.</summary>
     public static IResult ToProblem(AppError error) {
@@ -77,19 +78,19 @@ public static class ElarionHttpResults {
             var errors = validation.FieldErrors is { } fieldErrors
                 ? new Dictionary<string, string[]>(fieldErrors)
                 : new Dictionary<string, string[]> { [string.Empty] = [.. validation.Errors] };
-            return Results.ValidationProblem(errors, detail: error.Message, statusCode: statusCode);
+            return Results.ValidationProblem(errors, error.Message, statusCode: statusCode);
         }
 
         // Leave the title null so ASP.NET fills the canonical reason phrase for the status code.
-        return Results.Problem(detail: error.Message, statusCode: statusCode);
+        return Results.Problem(error.Message, statusCode: statusCode);
     }
 
     /// <summary>
     /// Adds the ProblemDetails response metadata (for OpenAPI) covering every status code an Elarion handler
     /// failure can produce: 400 validation, 401, 403, 404, 409, 422, and 500.
     /// </summary>
-    public static RouteHandlerBuilder ProducesElarionErrors(this RouteHandlerBuilder builder) =>
-        builder
+    public static RouteHandlerBuilder ProducesElarionErrors(this RouteHandlerBuilder builder) {
+        return builder
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -97,6 +98,7 @@ public static class ElarionHttpResults {
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
+    }
 
     private sealed class StreamHandlerSseResult<TRequest, TItem>(TRequest request) : IResult
         where TRequest : notnull {
@@ -118,9 +120,11 @@ public static class ElarionHttpResults {
                         invocation, typeInfo, timeProvider, context.RequestAborted)
                     .ExecuteAsync(context)
                     .ConfigureAwait(false);
-            } catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) {
+            }
+            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) {
                 // Browser disconnects are normal termination; disposing the result releases the stream scope.
-            } catch {
+            }
+            catch {
                 // SSE cannot change to an HTTP problem once items have been written. Abort to make the terminal
                 // fault visible to the client instead of falsely signalling a clean completion.
                 context.Abort();

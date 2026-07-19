@@ -71,17 +71,18 @@ internal sealed class MultiInstanceChangeNotificationWarning(
     ILogger<MultiInstanceChangeNotificationWarning> logger) : IHostedService {
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken) {
-        if (changeSource is InProcessSettingsChangeSource) {
+        if (changeSource is InProcessSettingsChangeSource)
             logger.LogWarning(
                 "Elarion settings use the durable EF Core store with the in-process change source: change " +
                 "notifications are single-instance, so in a multi-node deployment a settings change on one node " +
                 "will not reach other nodes' watchers or scheduler until they restart. Register a cross-instance " +
                 "ISettingsChangeSource (Postgres LISTEN/NOTIFY, Redis) to propagate changes across nodes.");
-        }
 
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken) {
+        return Task.CompletedTask;
+    }
 }

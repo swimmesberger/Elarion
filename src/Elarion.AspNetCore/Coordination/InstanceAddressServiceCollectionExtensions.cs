@@ -24,19 +24,19 @@ public static class InstanceAddressServiceCollectionExtensions {
         this IServiceCollection services,
         string? advertisedAddress = null) {
         ArgumentNullException.ThrowIfNull(services);
-        if (advertisedAddress is not null) {
+        if (advertisedAddress is not null)
             services.TryAddSingleton<IInstanceAddressProvider>(
                 new FixedInstanceAddressProvider(advertisedAddress.TrimEnd('/')));
-        }
-        else {
+        else
             services.TryAddSingleton<IInstanceAddressProvider, ServerAddressInstanceAddressProvider>();
-        }
 
         return services;
     }
 
     private sealed class FixedInstanceAddressProvider(string address) : IInstanceAddressProvider {
-        public string? GetInstanceAddress() => address;
+        public string? GetInstanceAddress() {
+            return address;
+        }
     }
 }
 
@@ -49,14 +49,10 @@ internal sealed class ServerAddressInstanceAddressProvider(IServer server) : IIn
     private volatile string? _resolved;
 
     public string? GetInstanceAddress() {
-        if (_resolved is { } cached) {
-            return cached;
-        }
+        if (_resolved is { } cached) return cached;
 
         var addresses = server.Features.Get<IServerAddressesFeature>()?.Addresses;
-        if (addresses is null || addresses.Count == 0) {
-            return null;
-        }
+        if (addresses is null || addresses.Count == 0) return null;
 
         // Prefer plain http for instance-to-instance traffic on a flat network; the first address is
         // the fallback. Explicit configuration (AddElarionInstanceAddress("…")) overrides all of this.
@@ -65,16 +61,12 @@ internal sealed class ServerAddressInstanceAddressProvider(IServer server) : IIn
         // Wildcard binding hosts are not valid URI hosts; normalize before parsing.
         raw = raw.Replace("://+", "://0.0.0.0", StringComparison.Ordinal)
             .Replace("://*", "://0.0.0.0", StringComparison.Ordinal);
-        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)) {
-            return null;
-        }
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)) return null;
 
         var host = uri.Host;
         if (host is "0.0.0.0" or "::" or "[::]") {
             host = ResolveLocalIPv4();
-            if (host is null) {
-                return null;
-            }
+            if (host is null) return null;
         }
 
         var resolved = new UriBuilder(uri.Scheme, host, uri.Port).Uri.GetLeftPart(UriPartial.Authority);
@@ -85,15 +77,12 @@ internal sealed class ServerAddressInstanceAddressProvider(IServer server) : IIn
     private static string? ResolveLocalIPv4() {
         foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces()) {
             if (networkInterface.OperationalStatus != OperationalStatus.Up ||
-                networkInterface.NetworkInterfaceType == NetworkInterfaceType.Loopback) {
+                networkInterface.NetworkInterfaceType == NetworkInterfaceType.Loopback)
                 continue;
-            }
 
-            foreach (var unicast in networkInterface.GetIPProperties().UnicastAddresses) {
-                if (unicast.Address.AddressFamily == AddressFamily.InterNetwork) {
+            foreach (var unicast in networkInterface.GetIPProperties().UnicastAddresses)
+                if (unicast.Address.AddressFamily == AddressFamily.InterNetwork)
                     return unicast.Address.ToString();
-                }
-            }
         }
 
         return null;

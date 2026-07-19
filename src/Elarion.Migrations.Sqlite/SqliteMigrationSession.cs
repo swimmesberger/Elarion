@@ -13,13 +13,20 @@ internal sealed class SqliteMigrationSession(
     SqliteSchemaHistory history,
     int commandTimeoutSeconds,
     SemaphoreSlim? gate) : IMigrationSession {
-    public Task EnsureHistoryTableAsync(CancellationToken cancellationToken) => history.EnsureTableAsync(cancellationToken);
+    public Task EnsureHistoryTableAsync(CancellationToken cancellationToken) {
+        return history.EnsureTableAsync(cancellationToken);
+    }
 
-    public Task<bool> HistoryTableExistsAsync(CancellationToken cancellationToken) => history.TableExistsAsync(cancellationToken);
+    public Task<bool> HistoryTableExistsAsync(CancellationToken cancellationToken) {
+        return history.TableExistsAsync(cancellationToken);
+    }
 
-    public Task<IReadOnlyList<AppliedMigrationRow>> LoadHistoryAsync(CancellationToken cancellationToken) => history.LoadAsync(cancellationToken);
+    public Task<IReadOnlyList<AppliedMigrationRow>> LoadHistoryAsync(CancellationToken cancellationToken) {
+        return history.LoadAsync(cancellationToken);
+    }
 
-    public async Task ExecuteInTransactionAsync(string sql, Func<MigrationHistoryRecord> historyRowFactory, CancellationToken cancellationToken) {
+    public async Task ExecuteInTransactionAsync(string sql, Func<MigrationHistoryRecord> historyRowFactory,
+        CancellationToken cancellationToken) {
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using (var command = connection.CreateCommand()) {
             command.CommandText = sql;
@@ -43,14 +50,17 @@ internal sealed class SqliteMigrationSession(
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public Task InsertHistoryRowAsync(MigrationHistoryRecord historyRow, CancellationToken cancellationToken) =>
-        history.InsertAsync(historyRow, transaction: null, cancellationToken);
+    public Task InsertHistoryRowAsync(MigrationHistoryRecord historyRow, CancellationToken cancellationToken) {
+        return history.InsertAsync(historyRow, null, cancellationToken);
+    }
 
-    public Task DeleteHistoryRowAsync(int installedRank, CancellationToken cancellationToken) =>
-        history.DeleteAsync(installedRank, cancellationToken);
+    public Task DeleteHistoryRowAsync(int installedRank, CancellationToken cancellationToken) {
+        return history.DeleteAsync(installedRank, cancellationToken);
+    }
 
-    public Task MarkHistoryRowAppliedAsync(int installedRank, string? checksum, CancellationToken cancellationToken) =>
-        history.MarkAppliedAsync(installedRank, checksum, cancellationToken);
+    public Task MarkHistoryRowAppliedAsync(int installedRank, string? checksum, CancellationToken cancellationToken) {
+        return history.MarkAppliedAsync(installedRank, checksum, cancellationToken);
+    }
 
     public async ValueTask DisposeAsync() {
         try {

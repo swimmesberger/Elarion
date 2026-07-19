@@ -83,7 +83,7 @@ public sealed class ElarionHttpResultsTests {
     public void ToProblem_ValidationWithFieldErrors_SurfacesThemAsProblemDetailsErrors() {
         var error = AppError.Validation("invalid", new Dictionary<string, string[]> {
             ["name"] = ["Name is required"],
-            ["address.street"] = ["Street is too long"],
+            ["address.street"] = ["Street is too long"]
         });
 
         var result = ElarionHttpResults.ToProblem(error);

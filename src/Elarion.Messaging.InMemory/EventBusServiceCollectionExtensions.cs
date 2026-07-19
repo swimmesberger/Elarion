@@ -62,7 +62,8 @@ public static class EventBusServiceCollectionExtensions {
         where TContext : DbContext {
         services.AddElarionInMemoryIntegrationEventBus(options);
         services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<IDbContextOptionsConfiguration<TContext>, EventDispatchOptionsConfiguration<TContext>>());
+            ServiceDescriptor
+                .Singleton<IDbContextOptionsConfiguration<TContext>, EventDispatchOptionsConfiguration<TContext>>());
         return services;
     }
 
@@ -73,8 +74,9 @@ public static class EventBusServiceCollectionExtensions {
     public static IServiceCollection AddElarionInMemoryIntegrationEventBus<TContext>(
         this IServiceCollection services,
         IConfiguration configuration)
-        where TContext : DbContext =>
-        services.AddElarionInMemoryIntegrationEventBus<TContext>(ReadOptions(configuration));
+        where TContext : DbContext {
+        return services.AddElarionInMemoryIntegrationEventBus<TContext>(ReadOptions(configuration));
+    }
 
     /// <summary>
     /// Registers the integration-event bus building blocks — the bus, the hosted delivery pump, the per-scope buffer,
@@ -101,8 +103,8 @@ public static class EventBusServiceCollectionExtensions {
         // second reader to the SingleReader channel (undefined behaviour). Every registration below is idempotent
         // so AddElarionInMemoryIntegrationEventBus is safe to call more than once (e.g. via AddElarionInMemoryEventBus).
         services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<IHostedService, EventDispatchPump>(
-                sp => sp.GetRequiredService<EventDispatchPump>()));
+            ServiceDescriptor.Singleton<IHostedService, EventDispatchPump>(sp =>
+                sp.GetRequiredService<EventDispatchPump>()));
         services.TryAddScoped<EventDispatchScope>();
         services.TryAddScoped<IIntegrationEventBus, InMemoryIntegrationEventBus>();
         services.TryAddEnumerable(
@@ -119,37 +121,31 @@ public static class EventBusServiceCollectionExtensions {
     /// </summary>
     public static IServiceCollection AddElarionInMemoryIntegrationEventBus(
         this IServiceCollection services,
-        IConfiguration configuration) =>
-        services.AddElarionInMemoryIntegrationEventBus(ReadOptions(configuration));
+        IConfiguration configuration) {
+        return services.AddElarionInMemoryIntegrationEventBus(ReadOptions(configuration));
+    }
 
-    private static EventBusOptions ReadOptions(IConfiguration configuration) =>
-        new() {
+    private static EventBusOptions ReadOptions(IConfiguration configuration) {
+        return new EventBusOptions {
             Enabled = ReadBool(configuration, "EventBus:Enabled", true),
             DeliveryChannelCapacity = Math.Max(1, ReadInt(configuration, "EventBus:DeliveryChannelCapacity", 1024))
         };
+    }
 
     private static bool ReadBool(IConfiguration configuration, string key, bool defaultValue) {
         var value = configuration[key];
-        if (string.IsNullOrWhiteSpace(value)) {
-            return defaultValue;
-        }
+        if (string.IsNullOrWhiteSpace(value)) return defaultValue;
 
-        if (bool.TryParse(value, out var parsed)) {
-            return parsed;
-        }
+        if (bool.TryParse(value, out var parsed)) return parsed;
 
         throw new InvalidOperationException($"Configuration value '{key}' must be a boolean.");
     }
 
     private static int ReadInt(IConfiguration configuration, string key, int defaultValue) {
         var value = configuration[key];
-        if (string.IsNullOrWhiteSpace(value)) {
-            return defaultValue;
-        }
+        if (string.IsNullOrWhiteSpace(value)) return defaultValue;
 
-        if (int.TryParse(value, out var parsed)) {
-            return parsed;
-        }
+        if (int.TryParse(value, out var parsed)) return parsed;
 
         throw new InvalidOperationException($"Configuration value '{key}' must be an integer.");
     }

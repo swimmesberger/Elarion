@@ -18,8 +18,15 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 public sealed class ListInvoices(BillingDbContext db, ICurrentUser user)
     : IHandler<ListInvoices.Query, Result<ListInvoices.Response>> {
     public sealed record Query : IQuery;
+
     public sealed record Item(
-        Guid Id, string Number, long AmountCents, string Currency, string Status, DateOnly DueDate);
+        Guid Id,
+        string Number,
+        long AmountCents,
+        string Currency,
+        string Status,
+        DateOnly DueDate);
+
     public sealed record Response(IReadOnlyList<Item> Invoices);
 
     public async ValueTask<Result<Response>> HandleAsync(Query query, CancellationToken ct) {

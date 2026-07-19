@@ -14,8 +14,9 @@ namespace Elarion.JsonRpc;
 /// </remarks>
 public static class AppErrorMapper {
     /// <summary>Converts an <see cref="AppError"/> to a JSON-RPC <see cref="RpcError"/>.</summary>
-    public static RpcError ToRpcError(AppError error) =>
-        new() { Code = MapToCode(error.Kind), Message = error.Message, Data = error.Data };
+    public static RpcError ToRpcError(AppError error) {
+        return new RpcError { Code = MapToCode(error.Kind), Message = error.Message, Data = error.Data };
+    }
 
     /// <summary>Maps an <see cref="ErrorKind"/> to its JSON-RPC integer error code.</summary>
     /// <remarks>
@@ -23,14 +24,16 @@ public static class AppErrorMapper {
     /// generator (<c>src/elarion-jsonrpc-client-generator/src/rpc-client-source.ts</c>, <c>ElarionErrorCodes</c>
     /// and the <c>RpcError</c> getters). Keep both in sync — changing a code breaks every generated client.
     /// </remarks>
-    public static int MapToCode(ErrorKind kind) => kind switch {
-        ErrorKind.Validation => -32602,   // Invalid params
-        ErrorKind.NotFound => -32001,
-        ErrorKind.Conflict => -32002,
-        ErrorKind.Forbidden => -32003,
-        ErrorKind.BusinessRule => -32004,
-        ErrorKind.Unauthorized => -32005,
-        ErrorKind.Internal => -32603,      // Internal error
-        _ => -32603,
-    };
+    public static int MapToCode(ErrorKind kind) {
+        return kind switch {
+            ErrorKind.Validation => -32602, // Invalid params
+            ErrorKind.NotFound => -32001,
+            ErrorKind.Conflict => -32002,
+            ErrorKind.Forbidden => -32003,
+            ErrorKind.BusinessRule => -32004,
+            ErrorKind.Unauthorized => -32005,
+            ErrorKind.Internal => -32603, // Internal error
+            _ => -32603
+        };
+    }
 }

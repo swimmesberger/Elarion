@@ -10,6 +10,7 @@ namespace Elarion.Authorization;
 internal sealed class DelegateAuthorizationPolicy(
     Func<AuthorizationContext, CancellationToken, ValueTask<bool>> evaluate) : IAuthorizationPolicy {
     /// <inheritdoc />
-    public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) =>
-        evaluate(context, ct);
+    public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
+        return evaluate(context, ct);
+    }
 }

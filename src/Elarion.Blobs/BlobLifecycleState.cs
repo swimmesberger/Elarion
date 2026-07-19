@@ -21,5 +21,5 @@ public enum BlobLifecycleState {
     /// <summary>
     /// Referenced by a durable entity. Never garbage collected; its expiry is cleared.
     /// </summary>
-    Committed = 1,
+    Committed = 1
 }

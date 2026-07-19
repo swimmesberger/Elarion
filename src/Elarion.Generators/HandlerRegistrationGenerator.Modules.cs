@@ -44,7 +44,8 @@ public sealed partial class HandlerRegistrationGenerator {
         return moduleHandlers;
     }
 
-    private static ModuleScanner.Module? FindBestModule(HandlerInfo handler, EquatableArray<ModuleScanner.Module> modules) {
+    private static ModuleScanner.Module? FindBestModule(HandlerInfo handler,
+        EquatableArray<ModuleScanner.Module> modules) {
         ModuleScanner.Module? bestMatch = null;
         foreach (var module in modules) {
             if (!ModuleScanner.IsInScope(handler.Namespace, module.Namespace))
@@ -75,7 +76,8 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine("    {");
 
         foreach (var handler in handlers.OrderBy(x => x.HandlerName, StringComparer.Ordinal))
-            sb.AppendLine($"        {handler.Namespace}.{handler.HandlerName}Registration.Add{handler.HandlerName}(services, lifetime);");
+            sb.AppendLine(
+                $"        {handler.Namespace}.{handler.HandlerName}Registration.Add{handler.HandlerName}(services, lifetime);");
 
         sb.AppendLine("        return services;");
         sb.AppendLine("    }");
@@ -84,4 +86,3 @@ public sealed partial class HandlerRegistrationGenerator {
         return sb.ToString();
     }
 }
-

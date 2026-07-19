@@ -13,13 +13,16 @@ internal sealed class ApplicationHostLoader(string assemblyPath) : IAsyncDisposa
         try {
             var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(assemblyPath);
             var entryPoint = assembly.EntryPoint
-                ?? throw new InvalidOperationException($"Assembly '{assemblyPath}' does not have an entry point.");
+                             ?? throw new InvalidOperationException(
+                                 $"Assembly '{assemblyPath}' does not have an entry point.");
 
             await InvokeEntryPointAsync(entryPoint, applicationArguments);
-        } catch (TargetInvocationException ex) when (ex.InnerException is HostAbortedException) {
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is HostAbortedException) {
             // Expected: HostingListener throws after it captures the built host so application
             // code after builder.Build() does not run during schema generation.
-        } catch (HostAbortedException) {
+        }
+        catch (HostAbortedException) {
             // Expected for non-reflection paths.
         }
 
@@ -32,11 +35,13 @@ internal sealed class ApplicationHostLoader(string assemblyPath) : IAsyncDisposa
         try {
             result = parameters.Length switch {
                 0 => entryPoint.Invoke(null, null),
-                1 when parameters[0].ParameterType == typeof(string[]) => entryPoint.Invoke(null, [applicationArguments]),
+                1 when parameters[0].ParameterType == typeof(string[]) => entryPoint.Invoke(null,
+                    [applicationArguments]),
                 _ => throw new InvalidOperationException(
-                    $"Application entry point '{entryPoint.DeclaringType?.FullName}.{entryPoint.Name}' has an unsupported signature."),
+                    $"Application entry point '{entryPoint.DeclaringType?.FullName}.{entryPoint.Name}' has an unsupported signature.")
             };
-        } catch (TargetInvocationException ex) when (ex.InnerException is not null and not HostAbortedException) {
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null and not HostAbortedException) {
             // Surface the application's real startup failure instead of reflection's opaque
             // "Exception has been thrown by the target of an invocation."; HostAbortedException stays wrapped so
             // the expected-abort handling in LoadAsync keeps matching it.
@@ -59,5 +64,7 @@ internal sealed class ApplicationHostLoader(string assemblyPath) : IAsyncDisposa
         return ValueTask.CompletedTask;
     }
 
-    public void Dispose() => _dependencyResolver.Dispose();
+    public void Dispose() {
+        _dependencyResolver.Dispose();
+    }
 }

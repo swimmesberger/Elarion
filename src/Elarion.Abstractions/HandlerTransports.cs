@@ -22,5 +22,5 @@ public enum HandlerTransports {
     Connection = 4,
 
     /// <summary>Expose the handler over every name-routed transport. This is the default.</summary>
-    All = JsonRpc | Mcp | Connection,
+    All = JsonRpc | Mcp | Connection
 }

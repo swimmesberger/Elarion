@@ -5,12 +5,12 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="xunit.v3.mtp-v2" />
-    <PackageReference Include="AwesomeAssertions" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
-    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="xunit.v3.mtp-v2"/>
+    <PackageReference Include="AwesomeAssertions"/>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing"/>
+    <PackageReference Include="Testcontainers.PostgreSql"/>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../EdgeTelemetry.Api/EdgeTelemetry.Api.csproj" />
+    <ProjectReference Include="../EdgeTelemetry.Api/EdgeTelemetry.Api.csproj"/>
   </ItemGroup>
 </Project>

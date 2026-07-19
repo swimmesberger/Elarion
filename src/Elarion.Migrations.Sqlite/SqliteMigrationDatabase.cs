@@ -39,10 +39,13 @@ internal sealed class SqliteMigrationDatabase : IMigrationDatabase {
 
     private int CommandTimeoutSeconds => LockTimeoutSeconds;
 
-    private int LockTimeoutSeconds => _options.LockTimeout is not { } t || t <= TimeSpan.Zero ? 0 : Math.Max(1, (int)t.TotalSeconds);
+    private int LockTimeoutSeconds =>
+        _options.LockTimeout is not { } t || t <= TimeSpan.Zero ? 0 : Math.Max(1, (int)t.TotalSeconds);
 
     private long LockTimeoutMilliseconds =>
-        _options.LockTimeout is not { } t || t <= TimeSpan.Zero ? int.MaxValue : (long)Math.Clamp(t.TotalMilliseconds, 1, int.MaxValue);
+        _options.LockTimeout is not { } t || t <= TimeSpan.Zero
+            ? int.MaxValue
+            : (long)Math.Clamp(t.TotalMilliseconds, 1, int.MaxValue);
 
     private TimeSpan LockWait => _options.LockTimeout is { } t && t > TimeSpan.Zero ? t : Timeout.InfiniteTimeSpan;
 
@@ -52,7 +55,9 @@ internal sealed class SqliteMigrationDatabase : IMigrationDatabase {
         try {
             connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
-            await ExecutePragmaAsync(connection, $"PRAGMA busy_timeout = {LockTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture)}", cancellationToken);
+            await ExecutePragmaAsync(connection,
+                $"PRAGMA busy_timeout = {LockTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture)}",
+                cancellationToken);
         }
         catch {
             gate?.Release();
@@ -65,16 +70,16 @@ internal sealed class SqliteMigrationDatabase : IMigrationDatabase {
 
     private async Task<SemaphoreSlim> AcquireGateAsync(CancellationToken cancellationToken) {
         var gate = Locks.GetOrAdd(_lockKey, static _ => new SemaphoreSlim(1, 1));
-        if (!await gate.WaitAsync(LockWait, cancellationToken)) {
+        if (!await gate.WaitAsync(LockWait, cancellationToken))
             throw new MigrationException(
                 $"Timed out waiting {_options.LockTimeout} for the SQLite migration lock on '{_lockKey}'. "
                 + "Another migration runner in this process holds it; increase LockTimeout or serialize startup.");
-        }
 
         return gate;
     }
 
-    private async Task ExecutePragmaAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken) {
+    private async Task ExecutePragmaAsync(SqliteConnection connection, string sql,
+        CancellationToken cancellationToken) {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         command.CommandTimeout = CommandTimeoutSeconds;
@@ -83,9 +88,8 @@ internal sealed class SqliteMigrationDatabase : IMigrationDatabase {
 
     /// <summary>Normalizes the data source to a stable lock key: a full path for file databases, the raw value otherwise.</summary>
     private static string NormalizeLockKey(string dataSource) {
-        if (string.IsNullOrEmpty(dataSource) || dataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase)) {
+        if (string.IsNullOrEmpty(dataSource) || dataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
             return dataSource;
-        }
 
         try {
             return Path.GetFullPath(dataSource);

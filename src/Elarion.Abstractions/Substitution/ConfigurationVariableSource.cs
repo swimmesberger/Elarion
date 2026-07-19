@@ -18,5 +18,7 @@ public sealed class ConfigurationVariableSource(IConfiguration configuration) : 
     }
 
     /// <inheritdoc />
-    public IChangeToken Watch() => configuration.GetReloadToken();
+    public IChangeToken Watch() {
+        return configuration.GetReloadToken();
+    }
 }

@@ -48,9 +48,7 @@ public sealed class PostgreSqlClientEventsFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 }
 
@@ -82,8 +80,9 @@ public sealed partial class PostgreSqlClientEventsIntegrationTests(PostgreSqlCli
     [JsonSerializable(typeof(NoisyChanged))]
     private sealed partial class PostgreSqlClientEventTestContext : JsonSerializerContext;
 
-    private static ClientEventSubscription Subscription(string topic, ClientEventScope scope) =>
-        new() { Topic = topic, Scope = scope };
+    private static ClientEventSubscription Subscription(string topic, ClientEventScope scope) {
+        return new ClientEventSubscription { Topic = topic, Scope = scope };
+    }
 
     [Fact]
     public async Task PublishOnOneNode_ReachesSubscribersOnEveryNode() {

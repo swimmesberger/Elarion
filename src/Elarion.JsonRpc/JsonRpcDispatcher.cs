@@ -76,25 +76,29 @@ public sealed class JsonRpcDispatcher {
 
         if (request.IsInvalidEnvelope) {
             using var invalidEnvelopeActivity = StartRequestActivity(request, "_invalid");
-            RecordError(invalidEnvelopeActivity, "_invalid", "-32600", "Invalid request", "invalid-envelope", startTimestamp);
+            RecordError(invalidEnvelopeActivity, "_invalid", "-32600", "Invalid request", "invalid-envelope",
+                startTimestamp);
             return JsonRpcResponse.InvalidRequest(request);
         }
 
         if (string.IsNullOrWhiteSpace(request.Method)) {
             using var missingMethodActivity = StartRequestActivity(request, "_invalid");
-            RecordError(missingMethodActivity, "_invalid", "-32600", "Invalid request", "missing-method", startTimestamp);
+            RecordError(missingMethodActivity, "_invalid", "-32600", "Invalid request", "missing-method",
+                startTimestamp);
             return JsonRpcResponse.InvalidRequest(request);
         }
 
         if (request.Jsonrpc != "2.0") {
             using var invalidProtocolActivity = StartRequestActivity(request, "_invalid");
-            RecordError(invalidProtocolActivity, "_invalid", "-32600", "Invalid request", "invalid-protocol", startTimestamp);
+            RecordError(invalidProtocolActivity, "_invalid", "-32600", "Invalid request", "invalid-protocol",
+                startTimestamp);
             return JsonRpcResponse.InvalidRequest(request);
         }
 
         if (!_registry.TryGetRoute(request.Method, HandlerTransports.JsonRpc, out var route)) {
             using var unregisteredMethodActivity = StartRequestActivity(request, "_unregistered");
-            RecordError(unregisteredMethodActivity, "_unregistered", "-32601", "Method not found", "method-not-found", startTimestamp);
+            RecordError(unregisteredMethodActivity, "_unregistered", "-32601", "Method not found", "method-not-found",
+                startTimestamp);
             return JsonRpcResponse.MethodNotFound(request);
         }
 
@@ -116,9 +120,8 @@ public sealed class JsonRpcDispatcher {
 
             // Per-call idempotency key: an idempotent operation carries its key at params._meta (batch-correct);
             // seed the scope directly (overriding any transport-boundary key) before dispatch.
-            if (route.Idempotent && TryReadMetaIdempotencyKey(request.Params, out var idempotencyKey)) {
+            if (route.Idempotent && TryReadMetaIdempotencyKey(request.Params, out var idempotencyKey))
                 scopeProvider.GetService<IIdempotencyKeySeed>()?.Seed(idempotencyKey);
-            }
 
             var result = await route.InvokeAsync(requestObject, scopeProvider, ct).ConfigureAwait(false);
 
@@ -128,7 +131,8 @@ public sealed class JsonRpcDispatcher {
                 return JsonRpcResponse.Success(request, result.Value);
             }
 
-            var translator = scopeProvider.GetService<IAppErrorTranslator<RpcError>>() ?? JsonRpcAppErrorTranslator.Default;
+            var translator = scopeProvider.GetService<IAppErrorTranslator<RpcError>>() ??
+                             JsonRpcAppErrorTranslator.Default;
             var rpcError = translator.Translate(result.Error);
             var errorCode = rpcError.Code.ToString();
             _logger?.LogWarning(
@@ -136,21 +140,24 @@ public sealed class JsonRpcDispatcher {
                 request.Method, rpcError.Code, rpcError.Message);
             RecordError(activity, method, errorCode, rpcError.Message, "application-error", startTimestamp);
             return JsonRpcResponse.FromError(request, rpcError);
-        } catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) {
             // The caller aborted (e.g. a client disconnect). This is expected, not an internal error: do not log
             // it as an error and do not fabricate a response — the endpoint will not write into the aborted
             // request. Rethrow so the transport can bail quietly and no telemetry error is recorded.
             _logger?.LogDebug("JSON-RPC {Method} canceled by the caller (request aborted)", request.Method);
             throw;
-        } catch (JsonException ex) {
+        }
+        catch (JsonException ex) {
             _logger?.LogWarning(ex, "JSON-RPC {Method} — invalid params (deserialization failed)", request.Method);
             RecordError(activity, method, "-32602", "Invalid params", "invalid-params", startTimestamp);
             return JsonRpcResponse.FromError(request, RpcError.InvalidParams("Invalid params: could not deserialize"));
-        } catch (Exception ex) {
+        }
+        catch (Exception ex) {
             _logger?.LogError(ex, "Unhandled exception dispatching JSON-RPC method {Method}", request.Method);
             activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
                 { "exception.type", ex.GetType().FullName },
-                { "exception.message", ex.Message },
+                { "exception.message", ex.Message }
             }));
             if (activity?.IsAllDataRequested == true) {
                 activity.SetTag("rpc.response.status_code", "-32603");
@@ -177,14 +184,11 @@ public sealed class JsonRpcDispatcher {
         key = null;
         if (paramsElement is not { ValueKind: JsonValueKind.Object } parameters ||
             !parameters.TryGetProperty("_meta", out var meta) || meta.ValueKind != JsonValueKind.Object ||
-            !meta.TryGetProperty(IdempotencyKeyNames.MetaKey, out var value) || value.ValueKind != JsonValueKind.String) {
+            !meta.TryGetProperty(IdempotencyKeyNames.MetaKey, out var value) || value.ValueKind != JsonValueKind.String)
             return false;
-        }
 
         var candidate = value.GetString();
-        if (string.IsNullOrWhiteSpace(candidate)) {
-            return false;
-        }
+        if (string.IsNullOrWhiteSpace(candidate)) return false;
 
         key = candidate;
         return true;
@@ -201,23 +205,30 @@ public sealed class JsonRpcDispatcher {
         _registry.RoutesFor(HandlerTransports.JsonRpc).Select(static route => route.Name).ToArray();
 
     /// <summary>Returns the request type for a given JSON-RPC method name (for schema export).</summary>
-    public Type? GetRequestType(string methodName) =>
-        _registry.TryGetRoute(methodName, HandlerTransports.JsonRpc, out var route) ? route.RequestType : null;
+    public Type? GetRequestType(string methodName) {
+        return _registry.TryGetRoute(methodName, HandlerTransports.JsonRpc, out var route) ? route.RequestType : null;
+    }
 
     /// <summary>
     /// Returns all JSON-RPC-exposed methods with their request and response types.
     /// Used by schema export to ensure the same methods as the runtime dispatcher.
     /// </summary>
-    public IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent)> GetRegisteredMethods() =>
-        _registry.RoutesFor(HandlerTransports.JsonRpc)
+    public IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent)>
+        GetRegisteredMethods() {
+        return _registry.RoutesFor(HandlerTransports.JsonRpc)
             .OrderBy(static route => route.Name, StringComparer.Ordinal)
             .Select(static route => (route.Name, route.RequestType, route.ResponseType, route.Idempotent))
             .ToList();
+    }
 
-    internal static void RecordEndpointError(Activity? activity, string method, string statusCode, string description, string phase, long startTimestamp) =>
-        RecordEndpointErrorCore(activity, JsonRpcTelemetry.NormalizeMethod(method), statusCode, description, phase, startTimestamp);
+    internal static void RecordEndpointError(Activity? activity, string method, string statusCode, string description,
+        string phase, long startTimestamp) {
+        RecordEndpointErrorCore(activity, JsonRpcTelemetry.NormalizeMethod(method), statusCode, description, phase,
+            startTimestamp);
+    }
 
-    private static void RecordEndpointErrorCore(Activity? activity, string method, string statusCode, string description, string phase, long startTimestamp) {
+    private static void RecordEndpointErrorCore(Activity? activity, string method, string statusCode,
+        string description, string phase, long startTimestamp) {
         if (activity?.IsAllDataRequested == true) {
             activity.SetTag("rpc.system.name", "jsonrpc");
             activity.SetTag("rpc.method", method);
@@ -229,9 +240,7 @@ public sealed class JsonRpcDispatcher {
     private static Activity? StartRequestActivity(JsonRpcRequest request, string method) {
         // Guard before interpolating: with no listener the name string would still be built on every
         // dispatched request (the hot path). Tags already carry the method.
-        if (!JsonRpcTelemetry.Source.HasListeners()) {
-            return null;
-        }
+        if (!JsonRpcTelemetry.Source.HasListeners()) return null;
 
         var activity = JsonRpcTelemetry.Source.StartActivity(
             $"jsonrpc {method}",
@@ -241,24 +250,16 @@ public sealed class JsonRpcDispatcher {
     }
 
     private static void SetCommonActivityTags(Activity? activity, JsonRpcRequest request, string method) {
-        if (activity?.IsAllDataRequested != true) {
-            return;
-        }
+        if (activity?.IsAllDataRequested != true) return;
 
         activity.SetTag("rpc.system.name", "jsonrpc");
         activity.SetTag("rpc.method", method);
         activity.SetTag("jsonrpc.protocol.version", request.Jsonrpc == "2.0" ? "2.0" : "_invalid");
-        if (request.Id is not null) {
-            activity.SetTag("jsonrpc.request.id", request.Id);
-        }
+        if (request.Id is not null) activity.SetTag("jsonrpc.request.id", request.Id);
 
-        if (request.BatchIndex is { } batchIndex) {
-            activity.SetTag("jsonrpc.batch.index", batchIndex);
-        }
+        if (request.BatchIndex is { } batchIndex) activity.SetTag("jsonrpc.batch.index", batchIndex);
 
-        if (request.BatchSize is { } batchSize) {
-            activity.SetTag("jsonrpc.batch.size", batchSize);
-        }
+        if (request.BatchSize is { } batchSize) activity.SetTag("jsonrpc.batch.size", batchSize);
     }
 
     private static void RecordSuccess(Activity? activity, string method, long startTimestamp) {
@@ -270,7 +271,8 @@ public sealed class JsonRpcDispatcher {
         RecordMetrics(method, "OK", startTimestamp);
     }
 
-    private static void RecordError(Activity? activity, string method, string statusCode, string description, string phase, long startTimestamp) {
+    private static void RecordError(Activity? activity, string method, string statusCode, string description,
+        string phase, long startTimestamp) {
         if (activity?.IsAllDataRequested == true) {
             activity.SetTag("rpc.response.status_code", statusCode);
             activity.SetTag("jsonrpc.outcome", "error");

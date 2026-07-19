@@ -4,7 +4,7 @@ import {
   signal,
   type EnvironmentInjector,
 } from "@angular/core"
-import { describe, expect, it } from "vitest"
+import {describe, expect, it} from "vitest"
 import {
   contribute,
   createContributionRegistry,
@@ -13,7 +13,7 @@ import {
   type ContributionRegistry,
   type ModuleManifest,
 } from "../src/index.js"
-import { injectContributions, provideContributions } from "../src/angular.js"
+import {injectContributions, provideContributions} from "../src/angular.js"
 
 function capabilities(granted: boolean): CapabilityReader {
   return {
@@ -27,6 +27,7 @@ function capabilities(granted: boolean): CapabilityReader {
 interface Item {
   readonly label: string
 }
+
 const point = defineExtensionPoint<Item>("demo.point")
 
 function registry(caps: CapabilityReader): ContributionRegistry {
@@ -34,8 +35,8 @@ function registry(caps: CapabilityReader): ContributionRegistry {
     name: "demo",
     contributes: [
       contribute(point, [
-        { id: "b", label: "B", order: 2 },
-        { id: "a", label: "A", order: 1 },
+        {id: "b", label: "B", order: 2},
+        {id: "a", label: "A", order: 1},
       ]),
     ],
   }

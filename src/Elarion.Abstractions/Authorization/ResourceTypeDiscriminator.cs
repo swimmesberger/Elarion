@@ -34,6 +34,7 @@ public static class ResourceTypeDiscriminator {
     /// <param name="resourceType">The resource CLR type.</param>
     /// <param name="explicitName">An explicit override, or <see langword="null"/>/empty to use the default.</param>
     /// <returns>The discriminator string stored and matched in the grants table.</returns>
-    public static string Resolve(Type resourceType, string? explicitName) =>
-        string.IsNullOrEmpty(explicitName) ? For(resourceType) : explicitName;
+    public static string Resolve(Type resourceType, string? explicitName) {
+        return string.IsNullOrEmpty(explicitName) ? For(resourceType) : explicitName;
+    }
 }

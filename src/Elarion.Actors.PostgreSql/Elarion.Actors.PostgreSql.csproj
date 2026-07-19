@@ -5,20 +5,20 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Elarion.Actors\Elarion.Actors.csproj" />
+    <ProjectReference Include="..\Elarion.Actors\Elarion.Actors.csproj"/>
     <!-- The actor home (ADR-0048) is sugar over the generic role lease (ADR-0049). -->
-    <ProjectReference Include="..\Elarion.Coordination.PostgreSql\Elarion.Coordination.PostgreSql.csproj" />
+    <ProjectReference Include="..\Elarion.Coordination.PostgreSql\Elarion.Coordination.PostgreSql.csproj"/>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Elarion.Tests" />
+    <InternalsVisibleTo Include="Elarion.Tests"/>
   </ItemGroup>
 
   <!-- Bundle the source generator's analyzer into this package. NuGet analyzer assets are not
@@ -27,20 +27,20 @@
        becoming a downstream package dependency. -->
   <ItemGroup>
     <ProjectReference Include="..\Elarion.Actors.PostgreSql.Generators\Elarion.Actors.PostgreSql.Generators.csproj"
-                     ReferenceOutputAssembly="false"
-                     PrivateAssets="all" />
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"/>
   </ItemGroup>
 
   <Target Name="_BundleElarionActorSnapshotsGenerator" BeforeTargets="_GetPackageFiles">
     <MSBuild Projects="..\Elarion.Actors.PostgreSql.Generators\Elarion.Actors.PostgreSql.Generators.csproj"
              Targets="GetTargetPath">
-      <Output TaskParameter="TargetOutputs" ItemName="_ElarionActorSnapshotsGeneratorAnalyzer" />
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionActorSnapshotsGeneratorAnalyzer"/>
     </MSBuild>
     <ItemGroup>
       <None Include="@(_ElarionActorSnapshotsGeneratorAnalyzer)"
             Pack="true"
             PackagePath="analyzers/dotnet/cs/"
-            Visible="false" />
+            Visible="false"/>
     </ItemGroup>
   </Target>
 

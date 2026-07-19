@@ -9,8 +9,8 @@ using Elarion.EntityFrameworkCore.UnitOfWork;
 using Elarion.Idempotency.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
-
 using Elarion.Pipeline;
+
 namespace Elarion.Tests.Idempotency;
 
 /// <summary>
@@ -24,7 +24,9 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
     private static readonly JsonSerializerOptions Json = new() { TypeInfoResolver = new DefaultJsonTypeInfoResolver() };
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static string UniqueKey() => $"k-{Guid.NewGuid():N}";
+    private static string UniqueKey() {
+        return $"k-{Guid.NewGuid():N}";
+    }
 
     private IdempotencyDecorator<DemoCommand, Result<string>> BuildDecorator(
         string key,
@@ -85,7 +87,7 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var key = UniqueKey();
 
-        var first = await BuildDecorator(key, conflict: IdempotencyConflictBehavior.Conflict)
+        var first = await BuildDecorator(key, IdempotencyConflictBehavior.Conflict)
             .HandleAsync(new DemoCommand(1), Ct);
         first.IsSuccess.Should().BeTrue();
 
@@ -102,7 +104,7 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
             new EfUnitOfWork<IdempotencyIntegrationDbContext>(context),
             new EfCoreIdempotencyStore<IdempotencyIntegrationDbContext>(context, TimeProvider.System),
             new FixedKeyAccessor(key),
-            new DemoPolicy(IdempotencyConflictBehavior.Conflict, fingerprint: true),
+            new DemoPolicy(IdempotencyConflictBehavior.Conflict, true),
             new AuthenticatedUser(),
             Json);
     }
@@ -140,10 +142,11 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
         handler.ObservedLockTimeout.Should().Be(sessionDefault);
     }
 
-    private static Task<string> CurrentLockTimeoutAsync(IdempotencyIntegrationDbContext context) =>
-        context.Database
+    private static Task<string> CurrentLockTimeoutAsync(IdempotencyIntegrationDbContext context) {
+        return context.Database
             .SqlQueryRaw<string>("SELECT current_setting('lock_timeout') AS \"Value\"")
             .SingleAsync(Ct);
+    }
 
     private sealed class LockTimeoutProbeHandler(IdempotencyIntegrationDbContext context)
         : IHandler<DemoCommand, Result<string>> {
@@ -162,17 +165,17 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
         // claim their own (consumer, message) row, while a redelivery to the same consumer replays.
         var messageId = UniqueKey();
 
-        var firstDelivery = await BuildInboxDecorator(messageId, owner: "App.SendInvoiceEmail")
+        var firstDelivery = await BuildInboxDecorator(messageId, "App.SendInvoiceEmail")
             .HandleAsync(new DemoCommand(1), Ct);
         firstDelivery.IsSuccess.Should().BeTrue();
 
         // The sibling consumer of the same message is NOT blocked by the first consumer's claim.
-        var siblingConsumer = await BuildInboxDecorator(messageId, owner: "App.UpdateStatistics")
+        var siblingConsumer = await BuildInboxDecorator(messageId, "App.UpdateStatistics")
             .HandleAsync(new DemoCommand(1), Ct);
         siblingConsumer.IsSuccess.Should().BeTrue();
 
         // A redelivery to the first consumer replays without re-running its effect.
-        var redelivery = await BuildInboxDecorator(messageId, owner: "App.SendInvoiceEmail")
+        var redelivery = await BuildInboxDecorator(messageId, "App.SendInvoiceEmail")
             .HandleAsync(new DemoCommand(1), Ct);
         redelivery.IsSuccess.Should().BeTrue();
 
@@ -196,7 +199,7 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
             new EfCoreIdempotencyStore<IdempotencyIntegrationDbContext>(context, TimeProvider.System),
             new FixedKeyAccessor(messageId),
             new InboxPolicy(owner),
-            currentUser: null,
+            null,
             Json);
     }
 
@@ -207,9 +210,7 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
         public async ValueTask<Result<string>> HandleAsync(DemoCommand request, CancellationToken ct) {
             context.DemoRows.Add(new DemoRow { Id = Guid.NewGuid().ToString("N"), IdempotencyKey = key });
             await context.SaveChangesAsync(ct);
-            if (delayMs > 0) {
-                await Task.Delay(delayMs, ct);
-            }
+            if (delayMs > 0) await Task.Delay(delayMs, ct);
 
             return Result<string>.Success($"receipt:{key}");
         }
@@ -224,14 +225,15 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
         public IdempotencyFailureStorage StoreFailures => IdempotencyFailureStorage.None;
         public TimeSpan Retention => TimeSpan.FromHours(24);
 
-        public string Serialize(Result<string> response, JsonSerializerOptions options) =>
-            JsonSerializer.Serialize(
+        public string Serialize(Result<string> response, JsonSerializerOptions options) {
+            return JsonSerializer.Serialize(
                 new StoredResult {
                     Ok = response.IsSuccess,
                     Value = response.IsSuccess ? JsonSerializer.SerializeToElement(response.Value, options) : null,
-                    Error = response.IsSuccess ? null : response.Error,
+                    Error = response.IsSuccess ? null : response.Error
                 },
                 options);
+        }
 
         public Result<string> Deserialize(string payload, JsonSerializerOptions options) {
             var stored = JsonSerializer.Deserialize<StoredResult>(payload, options)!;
@@ -254,14 +256,15 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
         public TimeSpan Retention => TimeSpan.FromHours(24);
         public string? Owner => owner;
 
-        public string Serialize(Result<string> response, JsonSerializerOptions options) =>
-            JsonSerializer.Serialize(
+        public string Serialize(Result<string> response, JsonSerializerOptions options) {
+            return JsonSerializer.Serialize(
                 new StoredResult {
                     Ok = response.IsSuccess,
                     Value = response.IsSuccess ? JsonSerializer.SerializeToElement(response.Value, options) : null,
-                    Error = response.IsSuccess ? null : response.Error,
+                    Error = response.IsSuccess ? null : response.Error
                 },
                 options);
+        }
 
         public Result<string> Deserialize(string payload, JsonSerializerOptions options) {
             var stored = JsonSerializer.Deserialize<StoredResult>(payload, options)!;
@@ -284,6 +287,9 @@ public sealed class EfCoreIdempotencyStoreIntegrationTests(PostgreSqlIdempotency
         public string? Email => null;
         public IReadOnlyList<string> Roles => [];
         public bool IsAuthenticated => true;
-        public bool IsInRole(string role) => false;
+
+        public bool IsInRole(string role) {
+            return false;
+        }
     }
 }

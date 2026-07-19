@@ -31,9 +31,7 @@ public sealed class IdempotencyKeyPurgeService(
                 logger.LogError(ex, "Idempotency-key retention purge failed.");
             }
 
-            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) {
-                break;
-            }
+            if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false)) break;
         }
     }
 
@@ -41,8 +39,7 @@ public sealed class IdempotencyKeyPurgeService(
         await using var scope = scopeFactory.CreateAsyncScope();
         var store = scope.ServiceProvider.GetRequiredService<IIdempotencyStore>();
         var purged = await store.PurgeCompletedAsync(timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
-        if (purged > 0) {
+        if (purged > 0)
             logger.LogInformation("Idempotency-key retention purge deleted {Count} expired record(s).", purged);
-        }
     }
 }

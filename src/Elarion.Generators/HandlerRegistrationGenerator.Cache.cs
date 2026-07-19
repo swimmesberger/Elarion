@@ -42,7 +42,7 @@ public sealed partial class HandlerRegistrationGenerator {
         var scopeValue = 0;
         var requestedKeyProperties = ImmutableArray<string>.Empty;
 
-        foreach (var namedArg in attr.NamedArguments) {
+        foreach (var namedArg in attr.NamedArguments)
             switch (namedArg.Key) {
                 case "DurationSeconds" when namedArg.Value.Value is int value:
                     durationSeconds = value;
@@ -54,7 +54,6 @@ public sealed partial class HandlerRegistrationGenerator {
                     requestedKeyProperties = ParseStringArray(namedArg.Value);
                     break;
             }
-        }
 
         var keyProperties = ResolveCacheKeyProperties(
             classDecl, classSymbol, requestType, requestedKeyProperties, fmt, diagnostics);
@@ -82,10 +81,9 @@ public sealed partial class HandlerRegistrationGenerator {
         // generator cannot reference the Abstractions enum, hence the literal. Cacheable stays CurrentUser = 0.)
         var scopeValue = 1;
 
-        foreach (var namedArg in attr.NamedArguments) {
+        foreach (var namedArg in attr.NamedArguments)
             if (namedArg.Key == "Scope" && namedArg.Value.Value is int value)
                 scopeValue = value;
-        }
 
         return new CacheInvalidationInfo(tags, scopeValue);
     }
@@ -97,21 +95,19 @@ public sealed partial class HandlerRegistrationGenerator {
         var builder = ImmutableArray.CreateBuilder<DiagnosticInfo>();
         var location = classSymbol.Locations.FirstOrDefault();
 
-        if (cacheable is not null && cacheInvalidation is not null) {
+        if (cacheable is not null && cacheInvalidation is not null)
             builder.Add(DiagnosticInfo.Create(
                 CacheableAndInvalidatingDescriptor,
                 location,
                 classSymbol.Name));
-        }
 
         if (cacheable is not null) {
             ValidateTags(classSymbol, cacheable.Tags, location, builder);
-            if (cacheable.DurationSeconds <= 0) {
+            if (cacheable.DurationSeconds <= 0)
                 builder.Add(DiagnosticInfo.Create(
                     InvalidCacheDurationDescriptor,
                     location,
                     classSymbol.Name));
-            }
         }
 
         if (cacheInvalidation is not null)
@@ -133,14 +129,12 @@ public sealed partial class HandlerRegistrationGenerator {
             return;
         }
 
-        foreach (var tag in tags) {
-            if (string.IsNullOrWhiteSpace(tag) || tag == "*") {
+        foreach (var tag in tags)
+            if (string.IsNullOrWhiteSpace(tag) || tag == "*")
                 builder.Add(DiagnosticInfo.Create(
                     InvalidCacheTagDescriptor,
                     location,
                     classSymbol.Name, tag));
-            }
-        }
     }
 
     private static ImmutableArray<string> ParseStringArray(TypedConstant typedConstant) {
@@ -148,10 +142,9 @@ public sealed partial class HandlerRegistrationGenerator {
             return ImmutableArray<string>.Empty;
 
         var builder = ImmutableArray.CreateBuilder<string>();
-        foreach (var value in typedConstant.Values) {
+        foreach (var value in typedConstant.Values)
             if (value.Value is string stringValue)
                 builder.Add(stringValue);
-        }
 
         return builder.ToImmutable();
     }
@@ -229,9 +222,8 @@ public sealed partial class HandlerRegistrationGenerator {
     // is rejected so it never silently ToString()-collides.
     private static bool IsSupportedCacheKeyType(ITypeSymbol type) {
         if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable &&
-            nullable.TypeArguments.Length == 1) {
+            nullable.TypeArguments.Length == 1)
             return IsSupportedCacheKeyType(nullable.TypeArguments[0]);
-        }
 
         if (type.TypeKind == TypeKind.Enum)
             return true;
@@ -261,18 +253,16 @@ public sealed partial class HandlerRegistrationGenerator {
             "System.DateOnly" => true,
             "System.TimeOnly" => true,
             "System.TimeSpan" => true,
-            _ => false,
+            _ => false
         };
     }
 
     private static string? TryGetResultValueFqn(ITypeSymbol responseType, SymbolDisplayFormat fmt) {
         if (responseType is not INamedTypeSymbol namedType ||
             namedType.TypeArguments.Length != 1 ||
-            namedType.OriginalDefinition.ToDisplayString() != "Elarion.Abstractions.Result<T>") {
+            namedType.OriginalDefinition.ToDisplayString() != "Elarion.Abstractions.Result<T>")
             return null;
-        }
 
         return namedType.TypeArguments[0].ToDisplayString(fmt);
     }
 }
-

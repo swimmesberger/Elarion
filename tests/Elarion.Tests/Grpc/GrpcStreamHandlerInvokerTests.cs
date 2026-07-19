@@ -10,14 +10,12 @@ using Xunit;
 
 namespace Elarion.Tests.Grpc;
 
-public sealed class GrpcStreamHandlerInvokerTests
-{
+public sealed class GrpcStreamHandlerInvokerTests {
     [Fact]
-    public async Task InvokeServerStreamingAsync_SeedsBoundaryStateFlowsCancellationAndUsesDecoratedHandler()
-    {
+    public async Task InvokeServerStreamingAsync_SeedsBoundaryStateFlowsCancellationAndUsesDecoratedHandler() {
         using var cancellation = new CancellationTokenSource();
         var principal = new ClaimsPrincipal(
-            new ClaimsIdentity([new Claim("sub", "grpc-stream-user")], authenticationType: "grpc"));
+            new ClaimsIdentity([new Claim("sub", "grpc-stream-user")], "grpc"));
         var callContext = new TestServerCallContext(cancellation.Token);
         var capture = new ScopeCapture();
         var calls = new CallLog();
@@ -50,8 +48,7 @@ public sealed class GrpcStreamHandlerInvokerTests
     }
 
     [Fact]
-    public async Task InvokeServerStreamingAsync_FailedStartupUsesRegisteredTranslator()
-    {
+    public async Task InvokeServerStreamingAsync_FailedStartupUsesRegisteredTranslator() {
         var translator = new RecordingTranslator();
         using var provider = new ServiceCollection()
             .AddSingleton<IAppErrorTranslator<RpcException>>(translator)
@@ -70,8 +67,7 @@ public sealed class GrpcStreamHandlerInvokerTests
     }
 
     [Fact]
-    public async Task InvokeServerStreamingAsync_MapsItemsAndWritesResponses()
-    {
+    public async Task InvokeServerStreamingAsync_MapsItemsAndWritesResponses() {
         using var provider = new ServiceCollection()
             .AddScoped<IStreamHandler<ApplicationRequest, ApplicationItem>, MappingHandler>()
             .AddElarionGrpcTransport(_ => new ClaimsPrincipal())
@@ -92,8 +88,7 @@ public sealed class GrpcStreamHandlerInvokerTests
     }
 
     [Fact]
-    public async Task InvokeServerStreamingAsync_PostStartFaultPropagatesWithoutRetranslatingIt()
-    {
+    public async Task InvokeServerStreamingAsync_PostStartFaultPropagatesWithoutRetranslatingIt() {
         var translator = new RecordingTranslator();
         using var provider = new ServiceCollection()
             .AddSingleton<IAppErrorTranslator<RpcException>>(translator)
@@ -116,8 +111,7 @@ public sealed class GrpcStreamHandlerInvokerTests
     }
 
     [Fact]
-    public async Task InvokeServerStreamingAsync_FlowsCallCancellationToEnumerationAndDisposesScope()
-    {
+    public async Task InvokeServerStreamingAsync_FlowsCallCancellationToEnumerationAndDisposesScope() {
         using var cancellation = new CancellationTokenSource();
         StreamScope? streamScope = null;
         using var provider = new ServiceCollection()
@@ -130,9 +124,9 @@ public sealed class GrpcStreamHandlerInvokerTests
             new ApplicationRequest("ignored"),
             new TestServerCallContext(cancellation.Token));
 
-        var enumerate = async () =>
-        {
-            await foreach (var _ in invocation.WithCancellation(cancellation.Token)) { }
+        var enumerate = async () => {
+            await foreach (var _ in invocation.WithCancellation(cancellation.Token)) {
+            }
         };
         cancellation.Cancel();
 
@@ -148,8 +142,7 @@ public sealed class GrpcStreamHandlerInvokerTests
 
     private sealed record ApplicationItem(string Value);
 
-    private sealed class ScopeCapture
-    {
+    private sealed class ScopeCapture {
         public ClaimsPrincipal? Principal { get; set; }
 
         public ServerCallContext? CallContext { get; set; }
@@ -157,22 +150,20 @@ public sealed class GrpcStreamHandlerInvokerTests
         public CancellationToken CancellationToken { get; set; }
     }
 
-    private sealed class StreamScope : IDisposable
-    {
+    private sealed class StreamScope : IDisposable {
         public bool Disposed { get; private set; }
 
-        public void Dispose() => Disposed = true;
+        public void Dispose() {
+            Disposed = true;
+        }
     }
 
-    private sealed class CallLog
-    {
+    private sealed class CallLog {
         public List<string> Calls { get; } = [];
     }
 
-    private sealed class ScopeCaptureInitializer : IDispatchScopeInitializer
-    {
-        public void Initialize(IServiceProvider callScope, DispatchScopeContext context)
-        {
+    private sealed class ScopeCaptureInitializer : IDispatchScopeInitializer {
+        public void Initialize(IServiceProvider callScope, DispatchScopeContext context) {
             var capture = callScope.GetRequiredService<ScopeCapture>();
             context.TryGet(out ClaimsPrincipal? principal).Should().BeTrue();
             context.TryGet(out ServerCallContext? callContext).Should().BeTrue();
@@ -182,21 +173,19 @@ public sealed class GrpcStreamHandlerInvokerTests
     }
 
     private sealed class InnerHandler(ScopeCapture capture, CallLog calls, StreamScope streamScope)
-        : IStreamHandler<ApplicationRequest, ApplicationItem>
-    {
+        : IStreamHandler<ApplicationRequest, ApplicationItem> {
         public ValueTask<Result<IAsyncEnumerable<ApplicationItem>>> HandleAsync(
             ApplicationRequest request,
-            CancellationToken ct)
-        {
+            CancellationToken ct) {
             calls.Calls.Add("handler");
             capture.CancellationToken = ct;
-            return ValueTask.FromResult(Result<IAsyncEnumerable<ApplicationItem>>.Success(Values(request, streamScope)));
+            return ValueTask.FromResult(
+                Result<IAsyncEnumerable<ApplicationItem>>.Success(Values(request, streamScope)));
         }
 
         private static async IAsyncEnumerable<ApplicationItem> Values(
             ApplicationRequest request,
-            StreamScope streamScope)
-        {
+            StreamScope streamScope) {
             yield return new ApplicationItem(request.Value + "-1");
             await Task.Yield();
             streamScope.Disposed.Should().BeFalse();
@@ -206,66 +195,61 @@ public sealed class GrpcStreamHandlerInvokerTests
 
     private sealed class RecordingDecorator(
         IStreamHandler<ApplicationRequest, ApplicationItem> inner,
-        CallLog calls) : IStreamHandler<ApplicationRequest, ApplicationItem>
-    {
+        CallLog calls) : IStreamHandler<ApplicationRequest, ApplicationItem> {
         public async ValueTask<Result<IAsyncEnumerable<ApplicationItem>>> HandleAsync(
             ApplicationRequest request,
-            CancellationToken ct)
-        {
+            CancellationToken ct) {
             calls.Calls.Add("decorator");
             return await inner.HandleAsync(request, ct);
         }
     }
 
-    private sealed class RejectingHandler : IStreamHandler<ApplicationRequest, ApplicationItem>
-    {
+    private sealed class RejectingHandler : IStreamHandler<ApplicationRequest, ApplicationItem> {
         public ValueTask<Result<IAsyncEnumerable<ApplicationItem>>> HandleAsync(
             ApplicationRequest request,
-            CancellationToken ct) =>
-            ValueTask.FromResult<Result<IAsyncEnumerable<ApplicationItem>>>(AppError.NotFound("not here"));
+            CancellationToken ct) {
+            return ValueTask.FromResult<Result<IAsyncEnumerable<ApplicationItem>>>(AppError.NotFound("not here"));
+        }
     }
 
-    private sealed class MappingHandler : IStreamHandler<ApplicationRequest, ApplicationItem>
-    {
+    private sealed class MappingHandler : IStreamHandler<ApplicationRequest, ApplicationItem> {
         public ValueTask<Result<IAsyncEnumerable<ApplicationItem>>> HandleAsync(
             ApplicationRequest request,
-            CancellationToken ct) =>
-            ValueTask.FromResult(Result<IAsyncEnumerable<ApplicationItem>>.Success(Values(request)));
+            CancellationToken ct) {
+            return ValueTask.FromResult(Result<IAsyncEnumerable<ApplicationItem>>.Success(Values(request)));
+        }
 
-        private static async IAsyncEnumerable<ApplicationItem> Values(ApplicationRequest request)
-        {
+        private static async IAsyncEnumerable<ApplicationItem> Values(ApplicationRequest request) {
             yield return new ApplicationItem(request.Value + "-1");
             await Task.Yield();
             yield return new ApplicationItem(request.Value + "-2");
         }
     }
 
-    private sealed class WaitingHandler(StreamScope streamScope) : IStreamHandler<ApplicationRequest, ApplicationItem>
-    {
+    private sealed class WaitingHandler(StreamScope streamScope) : IStreamHandler<ApplicationRequest, ApplicationItem> {
         public ValueTask<Result<IAsyncEnumerable<ApplicationItem>>> HandleAsync(
             ApplicationRequest request,
-            CancellationToken ct) =>
-            ValueTask.FromResult(Result<IAsyncEnumerable<ApplicationItem>>.Success(Wait(streamScope)));
+            CancellationToken ct) {
+            return ValueTask.FromResult(Result<IAsyncEnumerable<ApplicationItem>>.Success(Wait(streamScope)));
+        }
 
         private static async IAsyncEnumerable<ApplicationItem> Wait(
             StreamScope streamScope,
-            [EnumeratorCancellation] CancellationToken ct = default)
-        {
+            [EnumeratorCancellation] CancellationToken ct = default) {
             _ = streamScope;
             await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             yield break;
         }
     }
 
-    private sealed class FaultingHandler : IStreamHandler<ApplicationRequest, ApplicationItem>
-    {
+    private sealed class FaultingHandler : IStreamHandler<ApplicationRequest, ApplicationItem> {
         public ValueTask<Result<IAsyncEnumerable<ApplicationItem>>> HandleAsync(
             ApplicationRequest request,
-            CancellationToken ct) =>
-            ValueTask.FromResult(Result<IAsyncEnumerable<ApplicationItem>>.Success(Fault(request)));
+            CancellationToken ct) {
+            return ValueTask.FromResult(Result<IAsyncEnumerable<ApplicationItem>>.Success(Fault(request)));
+        }
 
-        private static async IAsyncEnumerable<ApplicationItem> Fault(ApplicationRequest request)
-        {
+        private static async IAsyncEnumerable<ApplicationItem> Fault(ApplicationRequest request) {
             yield return new ApplicationItem(request.Value + "-1");
             await Task.Yield();
             throw new InvalidOperationException("stream fault");
@@ -275,32 +259,27 @@ public sealed class GrpcStreamHandlerInvokerTests
         }
     }
 
-    private sealed class RecordingTranslator : IAppErrorTranslator<RpcException>
-    {
+    private sealed class RecordingTranslator : IAppErrorTranslator<RpcException> {
         public AppError? Translated { get; private set; }
 
-        public RpcException Translate(AppError error)
-        {
+        public RpcException Translate(AppError error) {
             Translated = error;
             return new RpcException(new Status(StatusCode.Aborted, "custom translator"));
         }
     }
 
-    private sealed class RecordingWriter : IServerStreamWriter<WireItem>
-    {
+    private sealed class RecordingWriter : IServerStreamWriter<WireItem> {
         public WriteOptions? WriteOptions { get; set; }
 
         public List<WireItem> Items { get; } = [];
 
-        public Task WriteAsync(WireItem message)
-        {
+        public Task WriteAsync(WireItem message) {
             Items.Add(message);
             return Task.CompletedTask;
         }
     }
 
-    private sealed class TestServerCallContext(CancellationToken cancellationToken) : ServerCallContext
-    {
+    private sealed class TestServerCallContext(CancellationToken cancellationToken) : ServerCallContext {
         protected override string MethodCore => "/test.Service/Method";
 
         protected override string HostCore => "localhost";
@@ -321,9 +300,12 @@ public sealed class GrpcStreamHandlerInvokerTests
 
         protected override AuthContext AuthContextCore { get; } = new("insecure", []);
 
-        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options) =>
+        protected override ContextPropagationToken CreatePropagationTokenCore(ContextPropagationOptions? options) {
             throw new NotSupportedException();
+        }
 
-        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders) => Task.CompletedTask;
+        protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders) {
+            return Task.CompletedTask;
+        }
     }
 }

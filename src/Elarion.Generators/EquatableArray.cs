@@ -17,13 +17,14 @@ namespace Elarion.Generators;
 /// <c>IEquatable&lt;T&gt;</c> constraint, which keeps enum element types (e.g. parameter kinds) usable.
 /// An uninitialized (<c>default</c>) value reads as empty so a never-assigned field cannot throw.
 /// </remarks>
-internal readonly struct EquatableArray<T> : IEquatable<EquatableArray<T>>, IReadOnlyList<T>
-{
+internal readonly struct EquatableArray<T> : IEquatable<EquatableArray<T>>, IReadOnlyList<T> {
     public static readonly EquatableArray<T> Empty = new(ImmutableArray<T>.Empty);
 
     private readonly ImmutableArray<T> _array;
 
-    public EquatableArray(ImmutableArray<T> array) => _array = array;
+    public EquatableArray(ImmutableArray<T> array) {
+        _array = array;
+    }
 
     /// <summary>The underlying array, normalized so a <c>default</c> value reads as empty.</summary>
     public ImmutableArray<T> AsImmutableArray => _array.IsDefault ? ImmutableArray<T>.Empty : _array;
@@ -37,34 +38,26 @@ internal readonly struct EquatableArray<T> : IEquatable<EquatableArray<T>>, IRea
 
     public T this[int index] => AsImmutableArray[index];
 
-    public bool Equals(EquatableArray<T> other)
-    {
+    public bool Equals(EquatableArray<T> other) {
         var left = AsImmutableArray;
         var right = other.AsImmutableArray;
-        if (left.Length != right.Length)
-        {
-            return false;
-        }
+        if (left.Length != right.Length) return false;
 
         for (var i = 0; i < left.Length; i++)
-        {
             if (!EqualityComparer<T>.Default.Equals(left[i], right[i]))
-            {
                 return false;
-            }
-        }
 
         return true;
     }
 
-    public override bool Equals(object? obj) => obj is EquatableArray<T> other && Equals(other);
+    public override bool Equals(object? obj) {
+        return obj is EquatableArray<T> other && Equals(other);
+    }
 
-    public override int GetHashCode()
-    {
+    public override int GetHashCode() {
         // Order-sensitive FNV-1a combine over element hashes; empty -> the seed constant.
         var hash = 2166136261u;
-        foreach (var item in AsImmutableArray)
-        {
+        foreach (var item in AsImmutableArray) {
             hash ^= (uint)(item?.GetHashCode() ?? 0);
             hash *= 16777619u;
         }
@@ -72,24 +65,41 @@ internal readonly struct EquatableArray<T> : IEquatable<EquatableArray<T>>, IRea
         return unchecked((int)hash);
     }
 
-    public ImmutableArray<T>.Enumerator GetEnumerator() => AsImmutableArray.GetEnumerator();
+    public ImmutableArray<T>.Enumerator GetEnumerator() {
+        return AsImmutableArray.GetEnumerator();
+    }
 
-    IEnumerator<T> IEnumerable<T>.GetEnumerator() => ((IEnumerable<T>)AsImmutableArray).GetEnumerator();
+    IEnumerator<T> IEnumerable<T>.GetEnumerator() {
+        return ((IEnumerable<T>)AsImmutableArray).GetEnumerator();
+    }
 
-    IEnumerator IEnumerable.GetEnumerator() => ((IEnumerable)AsImmutableArray).GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator() {
+        return ((IEnumerable)AsImmutableArray).GetEnumerator();
+    }
 
-    public static bool operator ==(EquatableArray<T> left, EquatableArray<T> right) => left.Equals(right);
+    public static bool operator ==(EquatableArray<T> left, EquatableArray<T> right) {
+        return left.Equals(right);
+    }
 
-    public static bool operator !=(EquatableArray<T> left, EquatableArray<T> right) => !left.Equals(right);
+    public static bool operator !=(EquatableArray<T> left, EquatableArray<T> right) {
+        return !left.Equals(right);
+    }
 
-    public static implicit operator EquatableArray<T>(ImmutableArray<T> array) => new(array);
+    public static implicit operator EquatableArray<T>(ImmutableArray<T> array) {
+        return new EquatableArray<T>(array);
+    }
 
-    public static implicit operator ImmutableArray<T>(EquatableArray<T> array) => array.AsImmutableArray;
+    public static implicit operator ImmutableArray<T>(EquatableArray<T> array) {
+        return array.AsImmutableArray;
+    }
 }
 
-internal static class EquatableArrayExtensions
-{
-    public static EquatableArray<T> ToEquatableArray<T>(this ImmutableArray<T> array) => new(array);
+internal static class EquatableArrayExtensions {
+    public static EquatableArray<T> ToEquatableArray<T>(this ImmutableArray<T> array) {
+        return new EquatableArray<T>(array);
+    }
 
-    public static EquatableArray<T> ToEquatableArray<T>(this IEnumerable<T> source) => new(source.ToImmutableArray());
+    public static EquatableArray<T> ToEquatableArray<T>(this IEnumerable<T> source) {
+        return new EquatableArray<T>(source.ToImmutableArray());
+    }
 }

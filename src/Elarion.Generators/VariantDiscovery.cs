@@ -10,15 +10,16 @@ namespace Elarion.Generators;
 /// variant without <c>[Service]</c> contributes nothing here — <c>ELVAR007</c> is the registration generator's
 /// report, and an unregistered variant must not appear in the registry.
 /// </summary>
-internal static class VariantDiscovery
-{
+internal static class VariantDiscovery {
     public const string FeatureVariantAttributeMetadataName = "Elarion.Abstractions.Features.FeatureVariantAttribute";
-    public const string ConfigurationVariantAttributeMetadataName = "Elarion.Abstractions.Features.ConfigurationVariantAttribute";
+
+    public const string ConfigurationVariantAttributeMetadataName =
+        "Elarion.Abstractions.Features.ConfigurationVariantAttribute";
 
     public static EquatableArray<ElarionManifest.Variant> CreateVariants(
-        GeneratorAttributeSyntaxContext ctx, bool isConfiguration)
-    {
-        if (ctx.TargetSymbol is not INamedTypeSymbol classSymbol || classSymbol.IsAbstract || ctx.Attributes.Length == 0)
+        GeneratorAttributeSyntaxContext ctx, bool isConfiguration) {
+        if (ctx.TargetSymbol is not INamedTypeSymbol classSymbol || classSymbol.IsAbstract ||
+            ctx.Attributes.Length == 0)
             return EquatableArray<ElarionManifest.Variant>.Empty;
 
         var attribute = ctx.Attributes[0];
@@ -35,8 +36,7 @@ internal static class VariantDiscovery
         var variantPropertyName = isConfiguration ? "Value" : "Variant";
         string? value = null;
         var isDefaultFlag = false;
-        foreach (var named in attribute.NamedArguments)
-        {
+        foreach (var named in attribute.NamedArguments) {
             if (named.Key == variantPropertyName && named.Value.Value is string v && !string.IsNullOrWhiteSpace(v))
                 value = v;
 
@@ -57,8 +57,7 @@ internal static class VariantDiscovery
         var contracts = ResolveContractSymbols(classSymbol, serviceAttr);
         var builder = ImmutableArray.CreateBuilder<ElarionManifest.Variant>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var contract in contracts)
-        {
+        foreach (var contract in contracts) {
             var contractFqn = contract.ToDisplayString(fmt);
             if (!seen.Add(contractFqn))
                 continue;
@@ -77,8 +76,7 @@ internal static class VariantDiscovery
     }
 
     private static ImmutableArray<ITypeSymbol> ResolveContractSymbols(
-        INamedTypeSymbol classSymbol, AttributeData serviceAttr)
-    {
+        INamedTypeSymbol classSymbol, AttributeData serviceAttr) {
         var explicitContracts = ServiceContractResolver.GetExplicitContracts(serviceAttr);
         if (!explicitContracts.IsEmpty)
             return explicitContracts;
@@ -90,13 +88,10 @@ internal static class VariantDiscovery
     }
 
     // Whether typeof(contract) compiles from another assembly: the type and every containing type are public.
-    private static bool IsEffectivelyPublic(ITypeSymbol type)
-    {
-        for (ITypeSymbol? current = type; current is not null; current = current.ContainingType)
-        {
+    private static bool IsEffectivelyPublic(ITypeSymbol type) {
+        for (var current = type; current is not null; current = current.ContainingType)
             if (current.DeclaredAccessibility != Accessibility.Public)
                 return false;
-        }
 
         return true;
     }

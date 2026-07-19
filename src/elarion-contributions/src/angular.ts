@@ -14,7 +14,7 @@ import {
   type EnvironmentProviders,
   type Signal,
 } from "@angular/core"
-import type { Contribution, ContributionRegistry, ExtensionPoint } from "./index.js"
+import type {Contribution, ContributionRegistry, ExtensionPoint} from "./index.js"
 
 // A Signal is held (never a bare registry) so a snapshot refresh — login, context change — re-resolves every
 // slot reactively by setting one signal, the Angular mirror of React swapping the provider value.
@@ -39,7 +39,7 @@ export function provideContributions(
   source: ContributionRegistry | Signal<ContributionRegistry>
 ): EnvironmentProviders {
   const registry = isSignal(source) ? source : signal(source)
-  return makeEnvironmentProviders([{ provide: CONTRIBUTION_REGISTRY, useValue: registry }])
+  return makeEnvironmentProviders([{provide: CONTRIBUTION_REGISTRY, useValue: registry}])
 }
 
 /**
@@ -60,7 +60,7 @@ export function provideContributions(
 export function injectContributions<TItem, TContext>(
   point: ExtensionPoint<TItem, TContext>
 ): Signal<ReadonlyArray<Contribution<TItem>>> {
-  const registry = inject(CONTRIBUTION_REGISTRY, { optional: true })
+  const registry = inject(CONTRIBUTION_REGISTRY, {optional: true})
   if (registry === null) {
     throw new Error("injectContributions requires provideContributions() in the injector tree.")
   }

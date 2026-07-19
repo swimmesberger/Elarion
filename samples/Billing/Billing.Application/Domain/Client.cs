@@ -20,7 +20,7 @@ public sealed class Client {
     public required string Number { get; set; }
     public required string Name { get; set; }
 
-    [AuditIgnore]   // PII: kept out of the audit trail's change capture
+    [AuditIgnore] // PII: kept out of the audit trail's change capture
     public required string Email { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }

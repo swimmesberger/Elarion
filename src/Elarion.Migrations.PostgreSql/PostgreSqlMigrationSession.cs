@@ -35,15 +35,23 @@ internal sealed class PostgreSqlMigrationSession : IMigrationSession {
         _history = new SchemaHistory(connection, historyTableName, commandTimeoutSeconds);
     }
 
-    public Task EnsureHistoryTableAsync(CancellationToken cancellationToken) => _history.EnsureTableAsync(cancellationToken);
+    public Task EnsureHistoryTableAsync(CancellationToken cancellationToken) {
+        return _history.EnsureTableAsync(cancellationToken);
+    }
 
-    public Task<bool> HistoryTableExistsAsync(CancellationToken cancellationToken) => _history.TableExistsAsync(cancellationToken);
+    public Task<bool> HistoryTableExistsAsync(CancellationToken cancellationToken) {
+        return _history.TableExistsAsync(cancellationToken);
+    }
 
-    public Task<IReadOnlyList<AppliedMigrationRow>> LoadHistoryAsync(CancellationToken cancellationToken) => _history.LoadAsync(cancellationToken);
+    public Task<IReadOnlyList<AppliedMigrationRow>> LoadHistoryAsync(CancellationToken cancellationToken) {
+        return _history.LoadAsync(cancellationToken);
+    }
 
-    public async Task ExecuteInTransactionAsync(string sql, Func<MigrationHistoryRecord> historyRowFactory, CancellationToken cancellationToken) {
+    public async Task ExecuteInTransactionAsync(string sql, Func<MigrationHistoryRecord> historyRowFactory,
+        CancellationToken cancellationToken) {
         await using var transaction = await _connection.BeginTransactionAsync(cancellationToken);
-        await using (var command = new NpgsqlCommand(sql, _connection, transaction) { CommandTimeout = _commandTimeoutSeconds }) {
+        await using (var command = new NpgsqlCommand(sql, _connection, transaction)
+                         { CommandTimeout = _commandTimeoutSeconds }) {
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -57,24 +65,26 @@ internal sealed class PostgreSqlMigrationSession : IMigrationSession {
         // PostgreSQL wraps in a single implicit transaction and which therefore breaks
         // CREATE INDEX CONCURRENTLY, the very statement the no-transaction directive exists for.
         foreach (var statement in SqlStatementSplitter.Split(sql)) {
-            await using var command = new NpgsqlCommand(statement, _connection) { CommandTimeout = _commandTimeoutSeconds };
+            await using var command = new NpgsqlCommand(statement, _connection)
+                { CommandTimeout = _commandTimeoutSeconds };
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 
-    public Task InsertHistoryRowAsync(MigrationHistoryRecord historyRow, CancellationToken cancellationToken) =>
-        _history.InsertAsync(historyRow, transaction: null, cancellationToken);
+    public Task InsertHistoryRowAsync(MigrationHistoryRecord historyRow, CancellationToken cancellationToken) {
+        return _history.InsertAsync(historyRow, null, cancellationToken);
+    }
 
-    public Task DeleteHistoryRowAsync(int installedRank, CancellationToken cancellationToken) =>
-        _history.DeleteAsync(installedRank, cancellationToken);
+    public Task DeleteHistoryRowAsync(int installedRank, CancellationToken cancellationToken) {
+        return _history.DeleteAsync(installedRank, cancellationToken);
+    }
 
-    public Task MarkHistoryRowAppliedAsync(int installedRank, string? checksum, CancellationToken cancellationToken) =>
-        _history.MarkAppliedAsync(installedRank, checksum, cancellationToken);
+    public Task MarkHistoryRowAppliedAsync(int installedRank, string? checksum, CancellationToken cancellationToken) {
+        return _history.MarkAppliedAsync(installedRank, checksum, cancellationToken);
+    }
 
     public async ValueTask DisposeAsync() {
-        if (_holdsLock) {
-            await ReleaseLockAsync();
-        }
+        if (_holdsLock) await ReleaseLockAsync();
 
         await _connection.DisposeAsync();
     }
@@ -86,7 +96,7 @@ internal sealed class PostgreSqlMigrationSession : IMigrationSession {
         try {
             await using var command = new NpgsqlCommand("SELECT pg_advisory_unlock($1)", _connection) {
                 CommandTimeout = _lockTimeoutSeconds,
-                Parameters = { new NpgsqlParameter<long> { TypedValue = _advisoryLockKey } },
+                Parameters = { new NpgsqlParameter<long> { TypedValue = _advisoryLockKey } }
             };
             await command.ExecuteNonQueryAsync(CancellationToken.None);
         }

@@ -2,8 +2,8 @@
 // payload shapes and the shell that renders them — are the application's (the no-UI-kit rule of
 // ADR-0032): the shell is the frontend's platform module, and feature modules contribute into it exactly
 // the way they contribute into each other.
-import type { LucideIcon } from "lucide-react"
-import { defineExtensionPoint } from "@/platform/contributions"
+import type {LucideIcon} from "lucide-react"
+import {defineExtensionPoint} from "@/platform/contributions"
 
 /**
  * A main-navigation entry — this app's payload for the sidebar slot. `to` stays a plain string so the

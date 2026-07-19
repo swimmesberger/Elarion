@@ -95,17 +95,29 @@ public sealed class PostgreSqlSettingsChangeRegistrationTests {
     private sealed class CapturingLogger : ILogger {
         public List<LogEntry> Entries { get; } = [];
 
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(LogLevel logLevel) => true;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel) {
+            return true;
+        }
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter) =>
+            Func<TState, Exception?, string> formatter) {
             Entries.Add(new LogEntry(logLevel, formatter(state, exception)));
+        }
     }
 
     private sealed class CapturingLoggerFactory(ILogger logger) : ILoggerFactory {
-        public ILogger CreateLogger(string categoryName) => logger;
-        public void AddProvider(ILoggerProvider provider) { }
-        public void Dispose() { }
+        public ILogger CreateLogger(string categoryName) {
+            return logger;
+        }
+
+        public void AddProvider(ILoggerProvider provider) {
+        }
+
+        public void Dispose() {
+        }
     }
 }

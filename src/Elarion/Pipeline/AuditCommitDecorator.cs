@@ -25,7 +25,7 @@ namespace Elarion.Pipeline;
 /// </remarks>
 public sealed class AuditCommitDecorator<TRequest, TResponse>(
     IHandler<TRequest, TResponse> inner,
-    Auditing.AuditScope scope,
+    AuditScope scope,
     IAuditTrail trail
 ) : IHandler<TRequest, TResponse> {
     /// <inheritdoc />
@@ -37,17 +37,16 @@ public sealed class AuditCommitDecorator<TRequest, TResponse>(
             // The record is handed over as a factory: the sink flushes the handler's pending writes first (so
             // change capture contributes their diffs to the scope) and materializes the record only after.
             var durability = await trail.RecordAsync(
-                () => scope.BuildRecord(AuditOutcome.Succeeded, errorKind: null),
+                () => scope.BuildRecord(AuditOutcome.Succeeded, null),
                 CancellationToken.None).ConfigureAwait(false);
 
             // "Recorded" must mean durable: an enlisted write only counts once its transaction commits (the
             // sink's durability callback promotes the pending mark), so a commit-phase failure still reaches
             // the outer decorator's detached path instead of leaving no audit trace at all.
-            if (durability is AuditRecordDurability.Durable) {
+            if (durability is AuditRecordDurability.Durable)
                 scope.MarkRecorded();
-            } else {
+            else
                 scope.MarkRecordPending();
-            }
         }
 
         return response;

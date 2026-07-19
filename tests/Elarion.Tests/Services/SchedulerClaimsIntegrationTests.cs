@@ -22,7 +22,9 @@ public sealed class SchedulerClaimsIntegrationTests(PostgreSqlSchedulerClaimsFix
     : IClassFixture<PostgreSqlSchedulerClaimsFixture> {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static string UniqueJob() => $"job-{Guid.NewGuid():N}";
+    private static string UniqueJob() {
+        return $"job-{Guid.NewGuid():N}";
+    }
 
     [Fact]
     public async Task ExactClaim_SameOccurrence_WinsExactlyOnceAcrossNodes() {
@@ -31,7 +33,7 @@ public sealed class SchedulerClaimsIntegrationTests(PostgreSqlSchedulerClaimsFix
         using var nodeB = fixture.CreateNode();
         var occurrence = new ScheduledOccurrence {
             JobName = UniqueJob(),
-            DueTimeUtc = DateTimeOffset.UtcNow,
+            DueTimeUtc = DateTimeOffset.UtcNow
         };
 
         var results = await Task.WhenAll(
@@ -64,18 +66,21 @@ public sealed class SchedulerClaimsIntegrationTests(PostgreSqlSchedulerClaimsFix
         var due = DateTimeOffset.UtcNow;
 
         (await nodeA.Coordinator.TryClaimAsync(
-            new ScheduledOccurrence { JobName = jobName, DueTimeUtc = due, DedupeWindow = window }, Ct))
+                new ScheduledOccurrence { JobName = jobName, DueTimeUtc = due, DedupeWindow = window }, Ct))
             .Should().BeTrue();
 
         // A different node fires "the same" interval occurrence a moment later (node-anchored grids never
         // align exactly) — the window suppresses it.
         (await nodeB.Coordinator.TryClaimAsync(
-            new ScheduledOccurrence { JobName = jobName, DueTimeUtc = due.AddMilliseconds(250), DedupeWindow = window }, Ct))
+                new ScheduledOccurrence
+                    { JobName = jobName, DueTimeUtc = due.AddMilliseconds(250), DedupeWindow = window }, Ct))
             .Should().BeFalse();
 
         // The next interval slot is outside the window and claims normally.
         (await nodeB.Coordinator.TryClaimAsync(
-            new ScheduledOccurrence { JobName = jobName, DueTimeUtc = due + window + TimeSpan.FromMilliseconds(1), DedupeWindow = window }, Ct))
+                new ScheduledOccurrence {
+                    JobName = jobName, DueTimeUtc = due + window + TimeSpan.FromMilliseconds(1), DedupeWindow = window
+                }, Ct))
             .Should().BeTrue();
     }
 
@@ -94,7 +99,8 @@ public sealed class SchedulerClaimsIntegrationTests(PostgreSqlSchedulerClaimsFix
             nodeA.Coordinator.TryClaimAsync(
                 new ScheduledOccurrence { JobName = jobName, DueTimeUtc = due, DedupeWindow = window }, Ct).AsTask(),
             nodeB.Coordinator.TryClaimAsync(
-                new ScheduledOccurrence { JobName = jobName, DueTimeUtc = due.AddMilliseconds(50), DedupeWindow = window }, Ct).AsTask());
+                new ScheduledOccurrence
+                    { JobName = jobName, DueTimeUtc = due.AddMilliseconds(50), DedupeWindow = window }, Ct).AsTask());
 
         results.Count(claimed => claimed).Should().Be(1);
     }
@@ -163,9 +169,7 @@ public sealed class PostgreSqlSchedulerClaimsFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) {
-            await _container.DisposeAsync();
-        }
+        if (_container is not null) await _container.DisposeAsync();
     }
 
     /// <summary>Creates one coordinator "node": an isolated container-backed service provider.</summary>
@@ -194,7 +198,7 @@ public sealed class PostgreSqlSchedulerClaimsFixture : IAsyncLifetime {
             InvokeAsync = (_, _, context, _) => {
                 executions.AddOrUpdate(context.DueTimeUtc, 1, static (_, count) => count + 1);
                 return ValueTask.CompletedTask;
-            },
+            }
         });
         services.AddElarionScheduler();
         services.AddElarionSchedulerEntityFrameworkCore<SchedulerClaimsDbContext>();
@@ -213,10 +217,14 @@ public sealed class PostgreSqlSchedulerClaimsFixture : IAsyncLifetime {
     public sealed record CoordinatorNode(
         ServiceProvider Provider,
         EfCoreScheduledOccurrenceCoordinator<SchedulerClaimsDbContext> Coordinator) : IDisposable {
-        public void Dispose() => Provider.Dispose();
+        public void Dispose() {
+            Provider.Dispose();
+        }
     }
 
     public sealed record SchedulerNode(ServiceProvider Provider, InMemoryScheduler Scheduler) : IDisposable {
-        public void Dispose() => Provider.Dispose();
+        public void Dispose() {
+            Provider.Dispose();
+        }
     }
 }

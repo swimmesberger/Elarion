@@ -39,22 +39,21 @@ public static class ActorShardingServiceCollectionExtensions {
         return services;
     }
 
-    internal static string GetRoleName(string rolePrefix, int shard) =>
-        RoleLeaseServiceCollectionExtensions.GetPartitionRole(rolePrefix, shard);
+    internal static string GetRoleName(string rolePrefix, int shard) {
+        return RoleLeaseServiceCollectionExtensions.GetPartitionRole(rolePrefix, shard);
+    }
 
     private static void Validate(PostgreSqlActorShardingOptions options) {
-        if (options.VirtualShardCount <= 0) {
+        if (options.VirtualShardCount <= 0)
             throw new ArgumentOutOfRangeException(
                 nameof(options.VirtualShardCount),
                 options.VirtualShardCount,
                 "VirtualShardCount must be greater than zero.");
-        }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(options.RolePrefix);
-        if (options.RolePrefix.EndsWith(':')) {
+        if (options.RolePrefix.EndsWith(':'))
             throw new ArgumentException(
                 "RolePrefix must not end with ':'; partition names append ':partition-N'.",
                 nameof(options.RolePrefix));
-        }
     }
 }

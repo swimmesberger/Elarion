@@ -79,10 +79,8 @@ internal sealed class ElarionHttpJsonConfigureOptions(IElarionJsonSerialization 
         // Prepend the canonical resolvers so they win first-match over any ASP.NET default resolver, preserving
         // their internal order. The frozen canonical options are only read here.
         var index = 0;
-        foreach (var resolver in canonical.TypeInfoResolverChain) {
-            if (!target.TypeInfoResolverChain.Contains(resolver)) {
+        foreach (var resolver in canonical.TypeInfoResolverChain)
+            if (!target.TypeInfoResolverChain.Contains(resolver))
                 target.TypeInfoResolverChain.Insert(index++, resolver);
-            }
-        }
     }
 }

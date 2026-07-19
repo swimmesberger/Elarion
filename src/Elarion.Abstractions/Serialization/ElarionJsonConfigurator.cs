@@ -8,5 +8,7 @@ namespace Elarion.Abstractions.Serialization;
 internal sealed class ElarionJsonConfigurator(Action<ElarionJsonOptions> configure) {
     private readonly Action<ElarionJsonOptions> _configure = configure;
 
-    public void Apply(ElarionJsonOptions options) => _configure(options);
+    public void Apply(ElarionJsonOptions options) {
+        _configure(options);
+    }
 }

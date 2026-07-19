@@ -38,7 +38,7 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
             ExpiresAt = creation.ExpiresAt,
             CreatedAt = timeProvider.GetUtcNow(),
             BlobId = null,
-            Data = [],
+            Data = []
         };
 
         dbContext.Set<StagedUploadRow>().Add(row);
@@ -62,10 +62,9 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
         CancellationToken cancellationToken) {
         var row = await QueryHeader(uploadId).FirstOrDefaultAsync(cancellationToken);
 
-        if (row is null || row.BlobId is not null || offset != row.Offset) {
+        if (row is null || row.BlobId is not null || offset != row.Offset)
             throw new StagedUploadConflictException(
                 $"Upload session '{uploadId}' does not exist, is complete, or is not at offset {offset}.");
-        }
 
         // A declared length caps the read to the remaining bytes; a deferred length reads the caller's
         // whole (caller-bounded) chunk.
@@ -81,10 +80,9 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
             [bytes, length, uploadId, offset],
             cancellationToken);
 
-        if (affected == 0) {
+        if (affected == 0)
             throw new StagedUploadConflictException(
                 $"Upload session '{uploadId}' is no longer at offset {offset}.");
-        }
 
         return Map(row) with { Offset = offset + length };
     }
@@ -110,18 +108,13 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
                 .AsNoTracking()
                 .FirstOrDefaultAsync(r => r.Id == uploadId, cancellationToken);
 
-            if (row is null) {
-                throw new StagedUploadConflictException($"Upload session '{uploadId}' does not exist.");
-            }
+            if (row is null) throw new StagedUploadConflictException($"Upload session '{uploadId}' does not exist.");
 
-            if (row.BlobId is not null) {
-                return Map(row);
-            }
+            if (row.BlobId is not null) return Map(row);
 
-            if (row.Length is long declared && row.Offset != declared) {
+            if (row.Length is long declared && row.Offset != declared)
                 throw new StagedUploadConflictException(
                     $"Upload session '{uploadId}' declares {declared} bytes but received {row.Offset}.");
-            }
 
             var blobRef = await blobStore.SaveAsync(
                 new BlobUploadRequest {
@@ -131,9 +124,9 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
                     ContentLength = row.Offset,
                     InitialState = BlobLifecycleState.Pending,
                     ExpiresAt = completion.BlobExpiresAt,
-                    OwnerId = row.OwnerId,
+                    OwnerId = row.OwnerId
                 },
-                new MemoryStream(row.Data, writable: false),
+                new MemoryStream(row.Data, false),
                 cancellationToken);
 
             // Mark complete, seal a deferred length at the received byte count, drop the staged bytes (the
@@ -150,17 +143,14 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
                         .SetProperty(r => r.ExpiresAt, completion.SessionExpiresAt),
                     cancellationToken);
 
-            if (affected == 0) {
+            if (affected == 0)
                 // A concurrent completion or append won the race. Rolling back (by not committing the owned
                 // transaction) also discards the duplicate blob write above; under a caller-owned ambient
                 // transaction the duplicate pending blob is reclaimed by garbage collection.
                 throw new StagedUploadConflictException(
                     $"Upload session '{uploadId}' changed concurrently while completing.");
-            }
 
-            if (transaction is not null) {
-                await transaction.CommitAsync(cancellationToken);
-            }
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
 
             // The scan above is AsNoTracking, so mutating the local row only shapes the returned snapshot.
             row.Length = row.Offset;
@@ -169,20 +159,20 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
             return Map(row);
         }
         finally {
-            if (transaction is not null) {
-                await transaction.DisposeAsync();
-            }
+            if (transaction is not null) await transaction.DisposeAsync();
         }
     }
 
     /// <inheritdoc />
-    public async Task DeleteAsync(string uploadId, CancellationToken cancellationToken) =>
+    public async Task DeleteAsync(string uploadId, CancellationToken cancellationToken) {
         await dbContext.Set<StagedUploadRow>()
             .Where(r => r.Id == uploadId)
             .ExecuteDeleteAsync(cancellationToken);
+    }
 
     /// <inheritdoc />
-    public async Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize, CancellationToken cancellationToken) {
+    public async Task<int> DeleteExpiredAsync(DateTimeOffset olderThanUtc, int batchSize,
+        CancellationToken cancellationToken) {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(batchSize);
 
         // Reap both kinds of expired session by their eligibility instant: an incomplete session past its
@@ -198,9 +188,7 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
             .Select(r => r.Id)
             .ToListAsync(cancellationToken);
 
-        if (ids.Count == 0) {
-            return 0;
-        }
+        if (ids.Count == 0) return 0;
 
         return await dbContext.Set<StagedUploadRow>()
             .Where(r => ids.Contains(r.Id) && r.ExpiresAt < olderThanUtc)
@@ -214,20 +202,22 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
 
     private static string BuildAppendSql(DbContext context) {
         var entityType = context.Model.FindEntityType(typeof(StagedUploadRow))
-            ?? throw new InvalidOperationException(
-                "The staged-upload entity is not mapped. Call modelBuilder.UseElarionStagedUploads() in OnModelCreating.");
+                         ?? throw new InvalidOperationException(
+                             "The staged-upload entity is not mapped. Call modelBuilder.UseElarionStagedUploads() in OnModelCreating.");
         var sqlHelper = context.GetService<ISqlGenerationHelper>();
 
         var tableName = entityType.GetTableName()
-            ?? throw new InvalidOperationException("The staged-upload entity is not mapped to a table.");
+                        ?? throw new InvalidOperationException("The staged-upload entity is not mapped to a table.");
         var schema = entityType.GetSchema();
         var storeObject = StoreObjectIdentifier.Table(tableName, schema);
 
         string Column(string propertyName) {
             var property = entityType.FindProperty(propertyName)
-                ?? throw new InvalidOperationException($"The {nameof(StagedUploadRow)}.{propertyName} property is not mapped.");
+                           ?? throw new InvalidOperationException(
+                               $"The {nameof(StagedUploadRow)}.{propertyName} property is not mapped.");
             var columnName = property.GetColumnName(storeObject)
-                ?? throw new InvalidOperationException($"The {nameof(StagedUploadRow)}.{propertyName} property has no column.");
+                             ?? throw new InvalidOperationException(
+                                 $"The {nameof(StagedUploadRow)}.{propertyName} property has no column.");
             return sqlHelper.DelimitIdentifier(columnName);
         }
 
@@ -238,18 +228,19 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
         var blobId = Column(nameof(StagedUploadRow.BlobId));
 
         return $"UPDATE {table} SET {data} = {data} || {{0}}, {offset} = {offset} + {{1}} " +
-            $"WHERE {id} = {{2}} AND {offset} = {{3}} AND {blobId} IS NULL";
+               $"WHERE {id} = {{2}} AND {offset} = {{3}} AND {blobId} IS NULL";
     }
 
     // Status probes and the append pre-check read only the session header — never the staged bytea —
     // so a HEAD/PATCH on a large in-progress upload does not re-transfer everything received so far.
     // Only CompleteAsync materializes Data.
-    private IQueryable<StagedUploadHeader> QueryHeader(string uploadId) =>
-        dbContext.Set<StagedUploadRow>()
+    private IQueryable<StagedUploadHeader> QueryHeader(string uploadId) {
+        return dbContext.Set<StagedUploadRow>()
             .AsNoTracking()
             .Where(r => r.Id == uploadId)
             .Select(r => new StagedUploadHeader(
                 r.Id, r.Length, r.Offset, r.ContentType, r.Metadata, r.OwnerId, r.ExpiresAt, r.BlobId));
+    }
 
     /// <summary>The non-content columns of a staging row: everything a status probe or append pre-check needs.</summary>
     private sealed record StagedUploadHeader(
@@ -262,8 +253,8 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
         DateTimeOffset ExpiresAt,
         string? BlobId);
 
-    private static StagedUpload Map(StagedUploadRow row) =>
-        new() {
+    private static StagedUpload Map(StagedUploadRow row) {
+        return new StagedUpload {
             Id = row.Id,
             Length = row.Length,
             Offset = row.Offset,
@@ -271,11 +262,12 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
             Metadata = row.Metadata,
             OwnerId = row.OwnerId,
             ExpiresAt = row.ExpiresAt,
-            BlobRef = row.BlobId is null ? null : new BlobRef { Value = row.BlobId },
+            BlobRef = row.BlobId is null ? null : new BlobRef { Value = row.BlobId }
         };
+    }
 
-    private static StagedUpload Map(StagedUploadHeader row) =>
-        new() {
+    private static StagedUpload Map(StagedUploadHeader row) {
+        return new StagedUpload {
             Id = row.Id,
             Length = row.Length,
             Offset = row.Offset,
@@ -283,13 +275,12 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
             Metadata = row.Metadata,
             OwnerId = row.OwnerId,
             ExpiresAt = row.ExpiresAt,
-            BlobRef = row.BlobId is null ? null : new BlobRef { Value = row.BlobId },
+            BlobRef = row.BlobId is null ? null : new BlobRef { Value = row.BlobId }
         };
+    }
 
     private static async Task<byte[]> ReadAtMostAsync(Stream source, long max, CancellationToken cancellationToken) {
-        if (max <= 0) {
-            return [];
-        }
+        if (max <= 0) return [];
 
         using var buffer = new MemoryStream();
         var rent = new byte[81920];
@@ -297,9 +288,7 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
         while (total < max) {
             var toRead = (int)Math.Min(rent.Length, max - total);
             var read = await source.ReadAsync(rent.AsMemory(0, toRead), cancellationToken);
-            if (read == 0) {
-                break;
-            }
+            if (read == 0) break;
 
             buffer.Write(rent, 0, read);
             total += read;

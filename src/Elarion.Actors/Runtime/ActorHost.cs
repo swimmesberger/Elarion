@@ -28,10 +28,9 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
     public Type FacadeType => typeof(TFacade);
 
     public object CreateFacade(object key) {
-        if (key is not TKey) {
+        if (key is not TKey)
             throw new InvalidOperationException(
                 $"Actor '{Name}' is keyed by '{typeof(TKey)}' but was resolved with a '{key.GetType()}' key.");
-        }
 
         return _registration.Facade(new ActorHandle<TActor>(
             this, key, _registration.Options, _runtime.TimeProvider, _runtime.CancellationPool, _registration.Name));
@@ -44,30 +43,27 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
         // new work immediately; in-flight turns finish and any conflicting write is caught by the
         // snapshot ETag + transparent retry.
         if (_registration.Options.Placement == ActorPlacementMode.SingleHome &&
-            _runtime.HomeLease is { IsHeld: false } homeLease) {
+            _runtime.HomeLease is { IsHeld: false } homeLease)
             throw new ActorNotHomedException(Name, canonicalKey, homeLease.CurrentHolder);
-        }
 
         if (_registration.Options.Placement == ActorPlacementMode.VirtualShards &&
             _runtime.PlacementResolver is { } placementResolver) {
             var placement = placementResolver.Resolve(Name, canonicalKey);
-            if (!placement.IsHeld) {
+            if (!placement.IsHeld)
                 throw new ActorNotHomedException(
                     Name,
                     canonicalKey,
                     placement.CurrentHolder,
                     placement.Role,
                     placement.CurrentHolderAddress);
-            }
         }
 
         while (true) {
-            if (_stopping) {
+            if (_stopping)
                 throw new InvalidOperationException(
                     $"The actor system is stopping; call to actor '{Name}' ({typedKey}) rejected.");
-            }
 
-            var cell = _cells.GetOrAdd(typedKey, static (k, host) => host.CreateCell(k, predecessorLifecycle: null), this);
+            var cell = _cells.GetOrAdd(typedKey, static (k, host) => host.CreateCell(k, null), this);
             cell.EnsureStarted();
             // Re-check after the GetOrAdd/start: StopAsync may have set _stopping and snapshotted
             // the cell map between the check at the top of the loop and this insert, in which case
@@ -81,9 +77,7 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
                     $"The actor system is stopping; call to actor '{Name}' ({typedKey}) rejected.");
             }
 
-            if (await cell.TryEnqueueAsync(item, cancellationToken).ConfigureAwait(false)) {
-                return;
-            }
+            if (await cell.TryEnqueueAsync(item, cancellationToken).ConfigureAwait(false)) return;
 
             // The cell closed (idle passivation, snapshot conflict, or activation failure) between
             // lookup and enqueue, and its lifecycle (OnDeactivateAsync, scope disposal) may still be
@@ -100,9 +94,7 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
     public async Task StopAsync(CancellationToken cancellationToken) {
         _stopping = true;
         var cells = _cells.ToArray();
-        if (cells.Length == 0) {
-            return;
-        }
+        if (cells.Length == 0) return;
 
         _logger.LogDebug("Stopping {Count} activation(s) of actor {Actor}.", cells.Length, Name);
         await Task.WhenAll(cells.Select(pair => pair.Value.StopAsync(cancellationToken))).ConfigureAwait(false);
@@ -122,8 +114,8 @@ internal sealed class ActorHost<TActor, TKey, TFacade> : IActorHostEntry, IActor
             _runtime.TimeProvider,
             _logger,
             stoppingCts,
-            onClosed: cell => _cells.TryRemove(new KeyValuePair<TKey, ActorCell<TActor>>(key, cell)),
-            reEnqueue: item => EnqueueAsync(key, item, CancellationToken.None),
+            cell => _cells.TryRemove(new KeyValuePair<TKey, ActorCell<TActor>>(key, cell)),
+            item => EnqueueAsync(key, item, CancellationToken.None),
             predecessorLifecycle);
     }
 }

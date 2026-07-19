@@ -24,8 +24,9 @@ public sealed class ResourceGrantStoreTransactionTests(ResourceGrantSharingFixtu
         return services.BuildServiceProvider();
     }
 
-    private static ResourceGrant ReadGrant(string resourceId) =>
-        new("Contact", resourceId, ResourcePrincipal.Role("Hausmeister"), ResourceOperation.Read);
+    private static ResourceGrant ReadGrant(string resourceId) {
+        return new ResourceGrant("Contact", resourceId, ResourcePrincipal.Role("Hausmeister"), ResourceOperation.Read);
+    }
 
     [Fact]
     public async Task GrantAsync_RolledBackWithCallerTransaction_PersistsNothing() {
@@ -79,7 +80,7 @@ public sealed class ResourceGrantStoreTransactionTests(ResourceGrantSharingFixtu
         // no-op via ON CONFLICT DO NOTHING — never a 23505 unique violation that would abort/poison the whole
         // transaction and fail the later commit of the business row.
         var contact = new Contact {
-            Id = Guid.NewGuid(), OwnerId = Guid.NewGuid(), Name = "Committed alongside a duplicate grant",
+            Id = Guid.NewGuid(), OwnerId = Guid.NewGuid(), Name = "Committed alongside a duplicate grant"
         };
         await using (var transaction = await db.Database.BeginTransactionAsync(Ct)) {
             db.Contacts.Add(contact);
@@ -99,7 +100,8 @@ public sealed class ResourceGrantStoreTransactionTests(ResourceGrantSharingFixtu
 
         await using (var seedProvider = BuildProvider(fixture))
         await using (var seedScope = seedProvider.CreateAsyncScope()) {
-            await seedScope.ServiceProvider.GetRequiredService<IResourceGrantStore>().GrantAsync(ReadGrant(resourceId), Ct);
+            await seedScope.ServiceProvider.GetRequiredService<IResourceGrantStore>()
+                .GrantAsync(ReadGrant(resourceId), Ct);
         }
 
         await using (var provider = BuildProvider(fixture))

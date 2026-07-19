@@ -40,8 +40,7 @@ namespace Elarion.Abstractions.Modules;
 /// </code>
 /// </example>
 [AttributeUsage(AttributeTargets.Interface, AllowMultiple = false, Inherited = false)]
-public sealed class GenerateModuleApiAttribute(params string[] scopes) : Attribute
-{
+public sealed class GenerateModuleApiAttribute(params string[] scopes) : Attribute {
     /// <summary>
     /// The scopes this facade selects. Empty means the module's default facade (every non-excluded handler).
     /// </summary>

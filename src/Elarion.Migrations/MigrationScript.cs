@@ -25,10 +25,12 @@ internal sealed record MigrationScript {
 
     public bool IsRepeatable => Version is null;
 
-    public MigrationScriptInfo ToInfo() => new() {
-        ScriptName = ScriptName,
-        Version = Version?.Text,
-        Description = Description,
-        Checksum = Checksum,
-    };
+    public MigrationScriptInfo ToInfo() {
+        return new MigrationScriptInfo {
+            ScriptName = ScriptName,
+            Version = Version?.Text,
+            Description = Description,
+            Checksum = Checksum
+        };
+    }
 }

@@ -32,29 +32,27 @@ public static class BulkInsertTargetResolver {
         ArgumentNullException.ThrowIfNull(entityClrType);
 
         var entityType = model.FindEntityType(entityClrType)
-            ?? throw new InvalidOperationException(
-                $"The type '{entityClrType.Name}' is not part of the EF Core model for this context.");
+                         ?? throw new InvalidOperationException(
+                             $"The type '{entityClrType.Name}' is not part of the EF Core model for this context.");
 
-        if (entityType.ClrType.IsAbstract) {
+        if (entityType.ClrType.IsAbstract)
             throw new InvalidOperationException(
                 $"Cannot bulk insert the abstract type '{entityClrType.Name}'. Insert via a DbSet of a concrete derived type.");
-        }
 
         var tableName = entityType.GetTableName()
-            ?? throw new InvalidOperationException(
-                $"The entity type '{entityType.DisplayName()}' is not mapped to a table; bulk insert requires a table mapping.");
+                        ?? throw new InvalidOperationException(
+                            $"The entity type '{entityType.DisplayName()}' is not mapped to a table; bulk insert requires a table mapping.");
         var storeObject = StoreObjectIdentifier.Table(tableName, entityType.GetSchema());
 
-        if (entityType.GetTableMappings().Take(2).Count() > 1) {
+        if (entityType.GetTableMappings().Take(2).Count() > 1)
             throw new NotSupportedException(
                 $"The entity type '{entityType.DisplayName()}' maps to more than one table (TPT or entity splitting), which bulk insert does not support.");
-        }
 
-        var ownedNavigation = entityType.GetNavigations().FirstOrDefault(n => n.ForeignKey.IsOwnership && !n.IsOnDependent);
-        if (ownedNavigation is not null) {
+        var ownedNavigation = entityType.GetNavigations()
+            .FirstOrDefault(n => n.ForeignKey.IsOwnership && !n.IsOnDependent);
+        if (ownedNavigation is not null)
             throw new NotSupportedException(
                 $"The entity type '{entityType.DisplayName()}' owns '{ownedNavigation.Name}'; owned types are not supported by bulk insert.");
-        }
 
         var columns = new List<BulkInsertColumn>();
         CollectColumns(entityType, entityType, [], storeObject, isProviderStoreGenerated, columns);
@@ -63,7 +61,7 @@ public static class BulkInsertTargetResolver {
             EntityType = entityType,
             StoreObject = storeObject,
             Columns = columns,
-            RequiresExactRuntimeType = entityType.GetDirectlyDerivedTypes().Any(),
+            RequiresExactRuntimeType = entityType.GetDirectlyDerivedTypes().Any()
         };
     }
 
@@ -80,47 +78,42 @@ public static class BulkInsertTargetResolver {
         var discriminatorProperty = entityType.FindDiscriminatorProperty();
         foreach (var property in structuralType.GetProperties()) {
             var columnName = property.GetColumnName(storeObject);
-            if (columnName is null) {
-                continue;
-            }
+            if (columnName is null) continue;
 
             if (property == discriminatorProperty) {
                 columns.Add(new BulkInsertColumn {
                     ColumnName = columnName,
                     Property = property,
                     IsDiscriminator = true,
-                    DiscriminatorValue = entityType.GetDiscriminatorValue(),
+                    DiscriminatorValue = entityType.GetDiscriminatorValue()
                 });
                 continue;
             }
 
-            if (IsStoreGenerated(property, storeObject) || (isProviderStoreGenerated?.Invoke(property, storeObject) ?? false)) {
-                continue;
-            }
+            if (IsStoreGenerated(property, storeObject) ||
+                (isProviderStoreGenerated?.Invoke(property, storeObject) ?? false)) continue;
 
-            if (property.GetBeforeSaveBehavior() == PropertySaveBehavior.Ignore) {
-                continue;
-            }
+            if (property.GetBeforeSaveBehavior() == PropertySaveBehavior.Ignore) continue;
 
-            if (property.IsShadowProperty()) {
+            if (property.IsShadowProperty())
                 throw new NotSupportedException(
                     $"The entity type '{entityType.DisplayName()}' has the insertable shadow property '{property.Name}'; " +
                     "shadow values only exist on tracked entries, which a non-tracking bulk insert does not have. " +
                     "Map the property to a CLR member or exclude the entity type from bulk insert.");
-            }
 
-            columns.Add(new BulkInsertColumn { ColumnName = columnName, Property = property, ComplexPath = complexPath });
+            columns.Add(
+                new BulkInsertColumn { ColumnName = columnName, Property = property, ComplexPath = complexPath });
         }
 
         foreach (var complexProperty in structuralType.GetComplexProperties()) {
-            if (complexProperty.IsCollection) {
+            if (complexProperty.IsCollection)
                 throw new NotSupportedException(
                     $"The entity type '{entityType.DisplayName()}' has the complex collection '{complexProperty.Name}' " +
                     "(JSON-mapped), which bulk insert does not support.");
-            }
 
             IReadOnlyList<IComplexProperty> childPath = [.. complexPath, complexProperty];
-            CollectColumns(entityType, complexProperty.ComplexType, childPath, storeObject, isProviderStoreGenerated, columns);
+            CollectColumns(entityType, complexProperty.ComplexType, childPath, storeObject, isProviderStoreGenerated,
+                columns);
         }
     }
 
@@ -130,15 +123,13 @@ public static class BulkInsertTargetResolver {
     // default is client-generated, and since value generators need tracked entries the caller must
     // have assigned it, so it stays in the column list.
     private static bool IsStoreGenerated(IProperty property, in StoreObjectIdentifier storeObject) {
-        if (property.GetComputedColumnSql(storeObject) is not null) {
-            return true;
-        }
+        if (property.GetComputedColumnSql(storeObject) is not null) return true;
 
         return property.ValueGenerated switch {
             ValueGenerated.OnAddOrUpdate or ValueGenerated.OnUpdate or ValueGenerated.OnUpdateSometimes => true,
             ValueGenerated.OnAdd => property.GetDefaultValueSql(storeObject) is not null
-                || property.TryGetDefaultValue(storeObject, out _),
-            _ => false,
+                                    || property.TryGetDefaultValue(storeObject, out _),
+            _ => false
         };
     }
 }

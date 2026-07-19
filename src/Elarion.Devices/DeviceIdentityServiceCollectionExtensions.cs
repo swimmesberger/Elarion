@@ -26,19 +26,16 @@ public static class DeviceIdentityServiceCollectionExtensions {
         // descriptor fails loud instead of being silently shadowed by a fresh default.
         var descriptor = services.LastOrDefault(candidate =>
             candidate.ServiceType == typeof(DeviceProvisioningOptions) && !candidate.IsKeyedService);
-        if (descriptor is not null && descriptor.ImplementationInstance is not DeviceProvisioningOptions) {
+        if (descriptor is not null && descriptor.ImplementationInstance is not DeviceProvisioningOptions)
             throw new InvalidOperationException(
                 "DeviceProvisioningOptions is already registered with a factory or implementation type. "
                 + "Configure provisioning via AddElarionDeviceIdentity(options => …) instead of registering the options yourself.");
-        }
 
         var existing = descriptor?.ImplementationInstance as DeviceProvisioningOptions;
         var options = existing ?? new DeviceProvisioningOptions();
         configure?.Invoke(options);
         options.Validate();
-        if (existing is null) {
-            services.AddSingleton(options);
-        }
+        if (existing is null) services.AddSingleton(options);
 
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IDevicePairingService, DevicePairingService>();

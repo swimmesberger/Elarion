@@ -30,8 +30,8 @@ public static class TcpConnectionTelemetry {
     public static readonly Histogram<double> TlsHandshakeDuration =
         MeterInstance.CreateHistogram<double>(
             "elarion.tcp.tls.handshake.duration",
-            unit: "s",
-            description: "Duration of TCP TLS handshakes",
+            "s",
+            "Duration of TCP TLS handshakes",
             advice: DurationAdvice);
 
     /// <summary>Counts connections that ended in a failure, by bounded establishment/lifecycle stage.</summary>
@@ -64,31 +64,38 @@ public static class TcpConnectionTelemetry {
             "elarion.tcp.outbound.saturated",
             description: "Outbound TCP sends rejected at full queue capacity");
 
-    internal static void RecordTlsHandshake(string outcome, TimeSpan elapsed) =>
+    internal static void RecordTlsHandshake(string outcome, TimeSpan elapsed) {
         TlsHandshakeDuration.Record(elapsed.TotalSeconds,
             new TagList { { "elarion.tcp.tls.outcome", outcome } });
+    }
 
-    internal static void RecordFailure(string transport, string stage) =>
+    internal static void RecordFailure(string transport, string stage) {
         ConnectionFailures.Add(1, new TagList {
             { "elarion.connection.transport", transport },
             { "elarion.tcp.failure.stage", stage }
         });
+    }
 
-    internal static void RecordClosed(string transport, bool forced) =>
+    internal static void RecordClosed(string transport, bool forced) {
         ConnectionCloses.Add(1, new TagList {
             { "elarion.connection.transport", transport },
             { "elarion.tcp.close.mode", forced ? "forced" : "graceful" }
         });
+    }
 
-    internal static void RecordIdle(string transport) =>
+    internal static void RecordIdle(string transport) {
         IdleEvents.Add(1, new TagList { { "elarion.connection.transport", transport } });
+    }
 
-    internal static void RecordOutboundAdmitted(string transport) =>
+    internal static void RecordOutboundAdmitted(string transport) {
         OutboundPending.Add(1, new TagList { { "elarion.connection.transport", transport } });
+    }
 
-    internal static void RecordOutboundSettled(string transport) =>
+    internal static void RecordOutboundSettled(string transport) {
         OutboundPending.Add(-1, new TagList { { "elarion.connection.transport", transport } });
+    }
 
-    internal static void RecordOutboundSaturated(string transport) =>
+    internal static void RecordOutboundSaturated(string transport) {
         OutboundSaturated.Add(1, new TagList { { "elarion.connection.transport", transport } });
+    }
 }

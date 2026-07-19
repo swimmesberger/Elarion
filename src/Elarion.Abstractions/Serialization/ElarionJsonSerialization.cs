@@ -20,32 +20,30 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
 
     public JsonSerializerOptions Options => _options.Value;
 
-    public JsonTypeInfo<T> GetTypeInfo<T>() => (JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T));
+    public JsonTypeInfo<T> GetTypeInfo<T>() {
+        return (JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T));
+    }
 
-    public JsonTypeInfo GetTypeInfo(Type type) => Options.GetTypeInfo(type);
+    public JsonTypeInfo GetTypeInfo(Type type) {
+        return Options.GetTypeInfo(type);
+    }
 
     private static JsonSerializerOptions Build(IEnumerable<ElarionJsonConfigurator> configurators) {
         var config = new ElarionJsonOptions();
-        foreach (var configurator in configurators) {
-            configurator.Apply(config);
-        }
+        foreach (var configurator in configurators) configurator.Apply(config);
 
         var options = new JsonSerializerOptions {
             PropertyNamingPolicy = config.PropertyNamingPolicy,
             PropertyNameCaseInsensitive = config.PropertyNameCaseInsensitive,
-            DefaultIgnoreCondition = config.DefaultIgnoreCondition,
+            DefaultIgnoreCondition = config.DefaultIgnoreCondition
         };
 
         // Ordered, first-match-wins. Host overrides win over everything the framework and transports
         // contributed; then transport envelopes (contributed first within the ordinary list), then
         // module/host contexts.
-        foreach (var resolver in config.OverrideTypeInfoResolvers) {
-            options.TypeInfoResolverChain.Add(resolver);
-        }
+        foreach (var resolver in config.OverrideTypeInfoResolvers) options.TypeInfoResolverChain.Add(resolver);
 
-        foreach (var resolver in config.TypeInfoResolvers) {
-            options.TypeInfoResolverChain.Add(resolver);
-        }
+        foreach (var resolver in config.TypeInfoResolvers) options.TypeInfoResolverChain.Add(resolver);
 
         // The framework's own types that no app/module context would register (e.g. the ValidationErrorData behind
         // AppError.Data's polymorphic object slot) must always be resolvable, so a failed Result serializes its
@@ -56,9 +54,7 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
         options.TypeInfoResolverChain.Add(ElarionFrameworkJsonContext.Default);
 
         // AOT-strict by default: only append the reflection fallback when explicitly opted in.
-        if (config.EnableReflectionFallback) {
-            options.TypeInfoResolverChain.Add(CreateReflectionFallbackResolver());
-        }
+        if (config.EnableReflectionFallback) options.TypeInfoResolverChain.Add(CreateReflectionFallbackResolver());
 
         config.PostConfigure?.Invoke(options);
         options.MakeReadOnly();
@@ -66,10 +62,14 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
     }
 
     [UnconditionalSuppressMessage("Trimming", "IL2026",
-        Justification = "The reflection fallback is an explicit, documented opt-in via ElarionJsonOptions.EnableReflectionFallback; " +
-                        "AOT/trimmed hosts leave it off and rely on source-generated contexts.")]
+        Justification =
+            "The reflection fallback is an explicit, documented opt-in via ElarionJsonOptions.EnableReflectionFallback; " +
+            "AOT/trimmed hosts leave it off and rely on source-generated contexts.")]
     [UnconditionalSuppressMessage("AOT", "IL3050",
-        Justification = "The reflection fallback is an explicit, documented opt-in via ElarionJsonOptions.EnableReflectionFallback; " +
-                        "AOT/trimmed hosts leave it off and rely on source-generated contexts.")]
-    private static IJsonTypeInfoResolver CreateReflectionFallbackResolver() => new DefaultJsonTypeInfoResolver();
+        Justification =
+            "The reflection fallback is an explicit, documented opt-in via ElarionJsonOptions.EnableReflectionFallback; " +
+            "AOT/trimmed hosts leave it off and rely on source-generated contexts.")]
+    private static IJsonTypeInfoResolver CreateReflectionFallbackResolver() {
+        return new DefaultJsonTypeInfoResolver();
+    }
 }

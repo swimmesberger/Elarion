@@ -42,7 +42,7 @@ public sealed class AwaitableConnectionObserver : IClientConnectionObserver {
         CancellationToken ct = default) {
         _promoted.TrySetResult(new ClientConnectionIdentityPromotion {
             Previous = previous,
-            Current = current,
+            Current = current
         });
         return ValueTask.CompletedTask;
     }
@@ -53,14 +53,18 @@ public sealed class AwaitableConnectionObserver : IClientConnectionObserver {
         return ValueTask.CompletedTask;
     }
 
-    private static TaskCompletionSource<IClientConnectionSink> NewSink() =>
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private static TaskCompletionSource<IClientConnectionSink> NewSink() {
+        return new TaskCompletionSource<IClientConnectionSink>(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 
-    private static TaskCompletionSource<ClientConnectionIdentityPromotion> NewPromotion() =>
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private static TaskCompletionSource<ClientConnectionIdentityPromotion> NewPromotion() {
+        return new TaskCompletionSource<ClientConnectionIdentityPromotion>(TaskCreationOptions
+            .RunContinuationsAsynchronously);
+    }
 
-    private static TaskCompletionSource<ClientConnection> NewConnection() =>
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private static TaskCompletionSource<ClientConnection> NewConnection() {
+        return new TaskCompletionSource<ClientConnection>(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 }
 
 /// <summary>The immutable before/after snapshots of one observed identity promotion.</summary>

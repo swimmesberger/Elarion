@@ -17,8 +17,8 @@ public sealed class VariantServiceRuntimeTests {
         var builds = 0;
         var inner = new CountingHandler();
         var proxy = new AsyncResolvedHandler<ForecastCommand, Result<string>>(
-            scope: null!,
-            build: async (_, _) => {
+            null!,
+            async (_, _) => {
                 builds++;
                 await Task.Yield();
                 return inner;
@@ -38,8 +38,8 @@ public sealed class VariantServiceRuntimeTests {
         var gate = new TaskCompletionSource();
         var inner = new CountingHandler();
         var proxy = new AsyncResolvedHandler<ForecastCommand, Result<string>>(
-            scope: null!,
-            build: async (_, c) => {
+            null!,
+            async (_, c) => {
                 Interlocked.Increment(ref builds);
                 // Hold both concurrent builders inside build() so they overlap on the first call.
                 await gate.Task.WaitAsync(c);
@@ -114,7 +114,8 @@ public sealed class VariantServiceRuntimeTests {
             scope.ServiceProvider.GetRequiredService<IAlgorithm>().Should().BeOfType<LinearAlgorithm>();
         }
 
-        using var unknown = BuildConfigurationVariantServices(BuildConfiguration("does-not-exist")).BuildServiceProvider();
+        using var unknown = BuildConfigurationVariantServices(BuildConfiguration("does-not-exist"))
+            .BuildServiceProvider();
         using (var scope = unknown.CreateScope()) {
             scope.ServiceProvider.GetRequiredService<IAlgorithm>().Should().BeOfType<LinearAlgorithm>();
         }
@@ -163,7 +164,7 @@ public sealed class VariantServiceRuntimeTests {
         var ct = TestContext.Current.CancellationToken;
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(BuildConfiguration(null));
-        services.AddElarionConfigurationVariantService<IAlgorithm>("Forecast:Algorithm", defaultKey: null);
+        services.AddElarionConfigurationVariantService<IAlgorithm>("Forecast:Algorithm", null);
         services.AddKeyedScoped<IAlgorithm, NeuralAlgorithm>("neural");
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -220,17 +221,16 @@ public sealed class VariantServiceRuntimeTests {
 
     private static IConfiguration BuildConfiguration(string? algorithm) {
         var values = new Dictionary<string, string?>();
-        if (algorithm is not null) {
-            values["Forecast:Algorithm"] = algorithm;
-        }
+        if (algorithm is not null) values["Forecast:Algorithm"] = algorithm;
 
         return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
     }
 
     // Allocates "neural" only to user u-A; everyone else gets no variant (→ default fallback).
     private sealed class FakeVariantService(ICurrentUser currentUser) : IFeatureVariantService {
-        public ValueTask<string?> GetVariantAsync(string feature, CancellationToken ct = default) =>
-            new(currentUser.UserId == "u-A" ? "neural" : null);
+        public ValueTask<string?> GetVariantAsync(string feature, CancellationToken ct = default) {
+            return new ValueTask<string?>(currentUser.UserId == "u-A" ? "neural" : null);
+        }
     }
 
     private interface IAlgorithm {
@@ -248,8 +248,9 @@ public sealed class VariantServiceRuntimeTests {
     private sealed record ForecastCommand;
 
     private sealed class RunForecast(IAlgorithm algorithm) : IHandler<ForecastCommand, Result<string>> {
-        public ValueTask<Result<string>> HandleAsync(ForecastCommand request, CancellationToken ct) =>
-            new(Result<string>.Success(algorithm.Name));
+        public ValueTask<Result<string>> HandleAsync(ForecastCommand request, CancellationToken ct) {
+            return new ValueTask<Result<string>>(Result<string>.Success(algorithm.Name));
+        }
     }
 
     private sealed class CountingVariantProvider : IVariantServiceProvider<IAlgorithm> {
@@ -265,8 +266,9 @@ public sealed class VariantServiceRuntimeTests {
             return Instance;
         }
 
-        public async ValueTask<IAlgorithm?> GetOrDefaultAsync(CancellationToken ct = default) =>
-            await GetAsync(ct);
+        public async ValueTask<IAlgorithm?> GetOrDefaultAsync(CancellationToken ct = default) {
+            return await GetAsync(ct);
+        }
     }
 
     private sealed class CountingHandler : IHandler<ForecastCommand, Result<string>> {

@@ -32,14 +32,12 @@ public sealed class IdempotencyKeyMiddleware(RequestDelegate next) {
 
     private static string? ReadKey(HttpRequest request) {
         if (request.Headers.TryGetValue(IdempotencyKeyNames.HttpHeader, out var value) &&
-            value.Count > 0 && !string.IsNullOrWhiteSpace(value[0])) {
+            value.Count > 0 && !string.IsNullOrWhiteSpace(value[0]))
             return value[0];
-        }
 
         if (request.Headers.TryGetValue(IdempotencyKeyNames.LegacyHttpHeader, out var legacy) &&
-            legacy.Count > 0 && !string.IsNullOrWhiteSpace(legacy[0])) {
+            legacy.Count > 0 && !string.IsNullOrWhiteSpace(legacy[0]))
             return legacy[0];
-        }
 
         return null;
     }

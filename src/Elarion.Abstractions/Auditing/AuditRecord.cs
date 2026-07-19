@@ -54,5 +54,5 @@ public sealed record AuditRecord {
     public IReadOnlyDictionary<string, string> Details { get; init; } = EmptyDetails;
 
     private static readonly IReadOnlyDictionary<string, string> EmptyDetails =
-        new Dictionary<string, string>(capacity: 0);
+        new Dictionary<string, string>(0);
 }

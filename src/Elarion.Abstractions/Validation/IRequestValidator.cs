@@ -23,5 +23,6 @@ public interface IRequestValidator {
     /// <see langword="null"/> when the request is valid — including when <paramref name="requestType"/> has no
     /// validation metadata at all — otherwise the field-keyed violations.
     /// </returns>
-    ValueTask<RequestValidationErrors?> ValidateAsync(Type requestType, object request, CancellationToken cancellationToken);
+    ValueTask<RequestValidationErrors?> ValidateAsync(Type requestType, object request,
+        CancellationToken cancellationToken);
 }

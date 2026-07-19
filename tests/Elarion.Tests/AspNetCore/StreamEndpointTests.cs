@@ -32,7 +32,7 @@ public sealed class StreamEndpointTests {
         await PublishAsync(hub, 100m, 101m, 102m);
         await using var host = await StartAsync(hub);
 
-        var events = await ReadEventsAsync(host, "/stream/ELN", count: 3);
+        var events = await ReadEventsAsync(host, "/stream/ELN", 3);
 
         events.Select(static e => e.Id).Should().Equal("1", "2", "3");
         events[0].Data.Should().Contain("\"price\":100").And.Contain("\"symbol\":\"ELN\"");
@@ -45,7 +45,7 @@ public sealed class StreamEndpointTests {
         await PublishAsync(hub, 100m, 101m, 102m, 103m, 104m);
         await using var host = await StartAsync(hub);
 
-        var events = await ReadEventsAsync(host, "/stream/ELN", count: 2, lastEventId: "3");
+        var events = await ReadEventsAsync(host, "/stream/ELN", 2, "3");
 
         events.Select(static e => e.Id).Should().Equal("4", "5");
     }
@@ -56,7 +56,7 @@ public sealed class StreamEndpointTests {
         await PublishAsync(hub, 100m, 101m, 102m);
         await using var host = await StartAsync(hub);
 
-        var events = await ReadEventsAsync(host, "/stream/ELN?after=2", count: 1);
+        var events = await ReadEventsAsync(host, "/stream/ELN?after=2", 1);
 
         events.Select(static e => e.Id).Should().Equal("3");
     }
@@ -88,7 +88,7 @@ public sealed class StreamEndpointTests {
 
     [Fact]
     public async Task RequestDrivenStream_MapsUpfrontFailureBeforeSseHeaders() {
-        await using var host = await StartRequestDrivenAsync(reject: true);
+        await using var host = await StartRequestDrivenAsync(true);
 
         using var response = await host.Client.GetAsync("/export", Ct);
 
@@ -98,7 +98,7 @@ public sealed class StreamEndpointTests {
 
     [Fact]
     public async Task RequestDrivenStream_WritesCanonicalItemsAndCompletes() {
-        await using var host = await StartRequestDrivenAsync(reject: false);
+        await using var host = await StartRequestDrivenAsync(false);
 
         using var response = await host.Client.GetAsync("/export", Ct);
         var body = await response.Content.ReadAsStringAsync(Ct);
@@ -110,7 +110,7 @@ public sealed class StreamEndpointTests {
 
     [Fact]
     public async Task RequestDrivenStream_IndentedCanonicalJsonPrefixesEverySseDataLine() {
-        await using var host = await StartRequestDrivenAsync(reject: false, writeIndented: true);
+        await using var host = await StartRequestDrivenAsync(false, true);
 
         using var response = await host.Client.GetAsync("/export", Ct);
         var body = await response.Content.ReadAsStringAsync(Ct);
@@ -169,7 +169,8 @@ public sealed class StreamEndpointTests {
             (await enumerator.MoveNextAsync()).Should().BeFalse();
             gate.MoveNextCount.Should().Be(1);
             gate.DisposeCount.Should().Be(1);
-        } finally {
+        }
+        finally {
             // Always release the blocked source so a failed assertion cannot leave the writer running.
             gate.Release.TrySetResult();
         }
@@ -230,9 +231,7 @@ public sealed class StreamEndpointTests {
     }
 
     private static async Task PublishAsync(StreamHub<TestQuote> hub, params decimal[] prices) {
-        foreach (var price in prices) {
-            await hub.PublishAsync(new TestQuote { Symbol = "ELN", Price = price }, Ct);
-        }
+        foreach (var price in prices) await hub.PublishAsync(new TestQuote { Symbol = "ELN", Price = price }, Ct);
     }
 
     private static async Task<TestHost> StartAsync(StreamHub<TestQuote> hub) {
@@ -248,7 +247,7 @@ public sealed class StreamEndpointTests {
         app.MapElarionStream<TestQuote>("/stream/{symbol}", (context, after) =>
             context.Request.RouteValues["symbol"] as string == "ELN"
                 ? hub.SubscribeSequenced(new StreamSubscribeOptions {
-                    Replay = StreamReplay.Available, ResumeAfterSequence = after,
+                    Replay = StreamReplay.Available, ResumeAfterSequence = after
                 })
                 : null);
         await app.StartAsync(Ct);
@@ -277,9 +276,7 @@ public sealed class StreamEndpointTests {
     private static async Task<List<(string Id, string Data)>> ReadEventsAsync(
         TestHost host, string path, int count, string? lastEventId = null) {
         using var request = new HttpRequestMessage(HttpMethod.Get, path);
-        if (lastEventId is not null) {
-            request.Headers.TryAddWithoutValidation("Last-Event-ID", lastEventId);
-        }
+        if (lastEventId is not null) request.Headers.TryAddWithoutValidation("Last-Event-ID", lastEventId);
 
         using var response = await host.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, Ct);
         response.EnsureSuccessStatusCode();
@@ -290,7 +287,7 @@ public sealed class StreamEndpointTests {
         using var reader = new StreamReader(stream);
         string? id = null;
         string? data = null;
-        while (events.Count < count && await reader.ReadLineAsync(Ct) is { } line) {
+        while (events.Count < count && await reader.ReadLineAsync(Ct) is { } line)
             if (line.StartsWith("id: ", StringComparison.Ordinal)) {
                 id = line["id: ".Length..];
             }
@@ -301,26 +298,24 @@ public sealed class StreamEndpointTests {
                 events.Add((id, data));
                 (id, data) = (null, null);
             }
-        }
 
         return events;
     }
 
     public sealed record TestQuote {
-        [JsonPropertyName("symbol")]
-        public required string Symbol { get; init; }
+        [JsonPropertyName("symbol")] public required string Symbol { get; init; }
 
-        [JsonPropertyName("price")]
-        public required decimal Price { get; init; }
+        [JsonPropertyName("price")] public required decimal Price { get; init; }
     }
 
     private sealed record ExportRequest;
 
     private sealed class ExportHandler(bool reject) : IStreamHandler<ExportRequest, TestQuote> {
-        public ValueTask<Result<IAsyncEnumerable<TestQuote>>> HandleAsync(ExportRequest request, CancellationToken ct) =>
-            reject
+        public ValueTask<Result<IAsyncEnumerable<TestQuote>>> HandleAsync(ExportRequest request, CancellationToken ct) {
+            return reject
                 ? ValueTask.FromResult<Result<IAsyncEnumerable<TestQuote>>>(AppError.NotFound("missing"))
                 : ValueTask.FromResult(Result<IAsyncEnumerable<TestQuote>>.Success(Items()));
+        }
 
         private static async IAsyncEnumerable<TestQuote> Items() {
             yield return new TestQuote { Symbol = "ELN", Price = 100m };
@@ -331,7 +326,10 @@ public sealed class StreamEndpointTests {
     private sealed class HandlerStarts {
         private int _count;
         public int Count => Volatile.Read(ref _count);
-        public void Record() => Interlocked.Increment(ref _count);
+
+        public void Record() {
+            Interlocked.Increment(ref _count);
+        }
     }
 
     private sealed class CountingExportHandler(HandlerStarts starts) : IStreamHandler<ExportRequest, TestQuote> {
@@ -355,15 +353,23 @@ public sealed class StreamEndpointTests {
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int DisposeCount => _disposeCount;
         public int MoveNextCount => _moveNextCount;
-        public void MoveNextCalled() => Interlocked.Increment(ref _moveNextCount);
-        public void Disposed() => Interlocked.Increment(ref _disposeCount);
+
+        public void MoveNextCalled() {
+            Interlocked.Increment(ref _moveNextCount);
+        }
+
+        public void Disposed() {
+            Interlocked.Increment(ref _disposeCount);
+        }
     }
 
     private sealed class BlockingExportStream(BlockingExportGate gate) : IAsyncEnumerable<TestQuote> {
-        public IAsyncEnumerator<TestQuote> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
-            new Enumerator(gate, cancellationToken);
+        public IAsyncEnumerator<TestQuote> GetAsyncEnumerator(CancellationToken cancellationToken = default) {
+            return new Enumerator(gate, cancellationToken);
+        }
 
-        private sealed class Enumerator(BlockingExportGate gate, CancellationToken cancellationToken) : IAsyncEnumerator<TestQuote> {
+        private sealed class Enumerator(BlockingExportGate gate, CancellationToken cancellationToken)
+            : IAsyncEnumerator<TestQuote> {
             public TestQuote Current => throw new InvalidOperationException("The blocked stream does not yield items.");
 
             public async ValueTask<bool> MoveNextAsync() {
@@ -389,12 +395,17 @@ public sealed class StreamEndpointTests {
         public int ConcurrentDisposeCount => _concurrentDisposeCount;
         public int DisposeCount => _disposeCount;
         public int MoveNextCount => _moveNextCount;
+
         public void MoveStarted() {
             Interlocked.Increment(ref _moveNextCount);
             Interlocked.Increment(ref _activeMoves);
             Entered.TrySetResult();
         }
-        public void MoveEnded() => Interlocked.Decrement(ref _activeMoves);
+
+        public void MoveEnded() {
+            Interlocked.Decrement(ref _activeMoves);
+        }
+
         public void Disposed() {
             if (Volatile.Read(ref _activeMoves) != 0)
                 Interlocked.Increment(ref _concurrentDisposeCount);
@@ -403,10 +414,12 @@ public sealed class StreamEndpointTests {
     }
 
     private sealed class SerializedCleanupStream(SerializedCleanupGate gate) : IAsyncEnumerable<TestQuote> {
-        public IAsyncEnumerator<TestQuote> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
-            new Enumerator(gate, cancellationToken);
+        public IAsyncEnumerator<TestQuote> GetAsyncEnumerator(CancellationToken cancellationToken = default) {
+            return new Enumerator(gate, cancellationToken);
+        }
 
-        private sealed class Enumerator(SerializedCleanupGate gate, CancellationToken cancellationToken) : IAsyncEnumerator<TestQuote> {
+        private sealed class Enumerator(SerializedCleanupGate gate, CancellationToken cancellationToken)
+            : IAsyncEnumerator<TestQuote> {
             public TestQuote Current => throw new InvalidOperationException("The blocked stream does not yield items.");
 
             public async ValueTask<bool> MoveNextAsync() {
@@ -414,7 +427,8 @@ public sealed class StreamEndpointTests {
                 try {
                     await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
                     return false;
-                } finally {
+                }
+                finally {
                     gate.MoveEnded();
                 }
             }
@@ -427,17 +441,27 @@ public sealed class StreamEndpointTests {
     }
 
     private sealed class ThrowingTimeProvider : TimeProvider {
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) {
             throw new InvalidOperationException("timer failure");
+        }
     }
 
     private sealed class NotifyingFakeTimeProvider : TimeProvider {
         private readonly FakeTimeProvider _inner = new();
         public TaskCompletionSource TimerCreated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public void Advance(TimeSpan delta) => _inner.Advance(delta);
-        public override DateTimeOffset GetUtcNow() => _inner.GetUtcNow();
-        public override long GetTimestamp() => _inner.GetTimestamp();
+        public void Advance(TimeSpan delta) {
+            _inner.Advance(delta);
+        }
+
+        public override DateTimeOffset GetUtcNow() {
+            return _inner.GetUtcNow();
+        }
+
+        public override long GetTimestamp() {
+            return _inner.GetTimestamp();
+        }
+
         public override TimeZoneInfo LocalTimeZone => _inner.LocalTimeZone;
         public override long TimestampFrequency => _inner.TimestampFrequency;
 

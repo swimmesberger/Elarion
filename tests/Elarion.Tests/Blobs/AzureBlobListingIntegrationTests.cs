@@ -31,7 +31,7 @@ public sealed class AzureBlobListingIntegrationTests(AzuriteFixture fixture) : I
 
         var second = await store.ListAsync(
             new BlobListRequest {
-                Container = container, Prefix = "docs/", PageSize = 2, ContinuationToken = first.ContinuationToken,
+                Container = container, Prefix = "docs/", PageSize = 2, ContinuationToken = first.ContinuationToken
             },
             ct);
 
@@ -64,7 +64,7 @@ public sealed class AzureBlobListingIntegrationTests(AzuriteFixture fixture) : I
         var container = $"c{Guid.NewGuid():N}";
         await store.SaveAsync(
             new BlobUploadRequest {
-                Container = container, Name = "doc.pdf", ContentType = "application/pdf", OwnerId = "user-1",
+                Container = container, Name = "doc.pdf", ContentType = "application/pdf", OwnerId = "user-1"
             },
             new MemoryStream([1, 2, 3]),
             ct);
@@ -86,7 +86,8 @@ public sealed class AzureBlobListingIntegrationTests(AzuriteFixture fixture) : I
         var store = CreateStore();
         var container = $"c{Guid.NewGuid():N}";
         await store.SaveAsync(
-            new BlobUploadRequest { Container = container, Name = "kept.bin", ContentType = "application/octet-stream" },
+            new BlobUploadRequest
+                { Container = container, Name = "kept.bin", ContentType = "application/octet-stream" },
             new MemoryStream([1]),
             ct);
         await store.SaveAsync(
@@ -95,7 +96,7 @@ public sealed class AzureBlobListingIntegrationTests(AzuriteFixture fixture) : I
                 Name = "staged.bin",
                 ContentType = "application/octet-stream",
                 InitialState = BlobLifecycleState.Pending,
-                ExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(1),
+                ExpiresAt = DateTimeOffset.UtcNow + TimeSpan.FromHours(1)
             },
             new MemoryStream([2]),
             ct);
@@ -140,15 +141,16 @@ public sealed class AzureBlobListingIntegrationTests(AzuriteFixture fixture) : I
 
     private static async Task<string> SeedTreeAsync(AzureBlobStore store, CancellationToken ct) {
         var container = $"c{Guid.NewGuid():N}";
-        foreach (var name in new[] { "a.txt", "docs/1.txt", "docs/2.txt", "docs/sub/3.txt", "z.txt" }) {
+        foreach (var name in new[] { "a.txt", "docs/1.txt", "docs/2.txt", "docs/sub/3.txt", "z.txt" })
             await store.SaveAsync(
                 new BlobUploadRequest { Container = container, Name = name, ContentType = "application/octet-stream" },
                 new MemoryStream([1]),
                 ct);
-        }
 
         return container;
     }
 
-    private AzureBlobStore CreateStore() => new(fixture.Client, NullLogger<AzureBlobStore>.Instance);
+    private AzureBlobStore CreateStore() {
+        return new AzureBlobStore(fixture.Client, NullLogger<AzureBlobStore>.Instance);
+    }
 }

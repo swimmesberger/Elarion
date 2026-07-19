@@ -34,20 +34,24 @@ public interface IClientConnectionProtocol {
     /// </remarks>
     /// <param name="connection">The registered connection identity.</param>
     /// <param name="ct">The connection's lifetime token.</param>
-    ValueTask OnOpenedAsync(ClientConnection connection, CancellationToken ct) => ValueTask.CompletedTask;
+    ValueTask OnOpenedAsync(ClientConnection connection, CancellationToken ct) {
+        return ValueTask.CompletedTask;
+    }
 
     /// <summary>Handles one complete inbound text message.</summary>
     /// <param name="message">The reassembled message.</param>
     /// <param name="ct">The connection's lifetime token.</param>
-    ValueTask OnTextAsync(string message, CancellationToken ct) =>
+    ValueTask OnTextAsync(string message, CancellationToken ct) {
         throw new NotSupportedException("This protocol does not accept text messages.");
+    }
 
     /// <summary>Handles one complete inbound binary message. The memory is only valid for the duration of
     /// the call — copy it if the codec defers work.</summary>
     /// <param name="message">The reassembled message.</param>
     /// <param name="ct">The connection's lifetime token.</param>
-    ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) =>
+    ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
         throw new NotSupportedException("This protocol does not accept binary messages.");
+    }
 
     /// <summary>
     /// Called when no inbound message arrived within the adapter's configured idle window (and again per
@@ -56,7 +60,9 @@ public interface IClientConnectionProtocol {
     /// called unless the adapter's idle option is set; the default is a no-op.
     /// </summary>
     /// <param name="ct">The connection's lifetime token.</param>
-    ValueTask OnIdleAsync(CancellationToken ct) => ValueTask.CompletedTask;
+    ValueTask OnIdleAsync(CancellationToken ct) {
+        return ValueTask.CompletedTask;
+    }
 
     /// <summary>
     /// Called once when the connection ends, after the receive loop has exited and before the connection is
@@ -71,13 +77,15 @@ public interface IClientConnectionProtocol {
     /// peer ended the connection in an orderly way).</param>
     /// <param name="ct">A teardown-scoped token — never the connection's lifetime token, which is already
     /// cancelled on shutdown paths.</param>
-    ValueTask OnClosedAsync(ClientConnection connection, Exception? reason, CancellationToken ct) =>
-        ValueTask.CompletedTask;
+    ValueTask OnClosedAsync(ClientConnection connection, Exception? reason, CancellationToken ct) {
+        return ValueTask.CompletedTask;
+    }
 
     /// <summary>The codec behind <see cref="IClientConnectionSink.SendAsync"/> — encode and send a named
     /// payload. Codecs without a named-payload concept keep the fail-loud default.</summary>
-    ValueTask SendAsync<TPayload>(string name, TPayload payload, CancellationToken ct) where TPayload : class =>
+    ValueTask SendAsync<TPayload>(string name, TPayload payload, CancellationToken ct) where TPayload : class {
         throw new NotSupportedException("This protocol does not support named payload sends.");
+    }
 
     /// <summary>The codec behind <see cref="IClientConnectionSink.InvokeAsync"/> — encode, correlate, and
     /// await the client's reply, honoring <see cref="ClientInvokeOptions.Timeout"/>. The sink resolves the
@@ -86,6 +94,7 @@ public interface IClientConnectionProtocol {
     /// does — a <see langword="null"/> timeout here means the invoke is deliberately unbounded. Codecs
     /// without request/reply keep the fail-loud default.</summary>
     ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
-        string name, TRequest request, ClientInvokeOptions? options, CancellationToken ct) where TRequest : class =>
+        string name, TRequest request, ClientInvokeOptions? options, CancellationToken ct) where TRequest : class {
         throw new NotSupportedException("This protocol does not support client invocation.");
+    }
 }

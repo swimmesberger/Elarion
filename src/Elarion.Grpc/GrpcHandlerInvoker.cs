@@ -20,8 +20,7 @@ namespace Elarion.Grpc;
 public sealed class GrpcHandlerInvoker(
     IServiceProvider services,
     IGrpcPrincipalFactory principalFactory,
-    IAppErrorTranslator<RpcException> errorTranslator)
-{
+    IAppErrorTranslator<RpcException> errorTranslator) {
     /// <summary>
     /// Invokes an application request directly, returning its successful application response or throwing the
     /// translated <see cref="RpcException"/> for a failed <see cref="Result{T}"/>.
@@ -35,8 +34,7 @@ public sealed class GrpcHandlerInvoker(
     public async Task<TResponse> InvokeUnaryAsync<TRequest, TResponse>(
         TRequest request,
         ServerCallContext callContext)
-        where TRequest : notnull
-    {
+        where TRequest : notnull {
         ArgumentNullException.ThrowIfNull(callContext);
 
         var principal = principalFactory.CreatePrincipal(callContext);
@@ -52,10 +50,7 @@ public sealed class GrpcHandlerInvoker(
             context,
             callContext.CancellationToken).ConfigureAwait(false);
 
-        if (result.IsSuccess)
-        {
-            return result.Value;
-        }
+        if (result.IsSuccess) return result.Value;
 
         throw errorTranslator.Translate(result.Error);
     }
@@ -74,8 +69,7 @@ public sealed class GrpcHandlerInvoker(
     public Task<TResponse> InvokeUnaryAsync<TRequest, TResponse>(
         IRequest<TRequest, TResponse> request,
         ServerCallContext callContext)
-        where TRequest : notnull, IRequest<TRequest, TResponse>
-    {
+        where TRequest : notnull, IRequest<TRequest, TResponse> {
         ArgumentNullException.ThrowIfNull(request);
 
         return InvokeUnaryAsync<TRequest, TResponse>((TRequest)request, callContext);
@@ -100,8 +94,7 @@ public sealed class GrpcHandlerInvoker(
         ServerCallContext callContext,
         Func<TWireRequest, TRequest> mapRequest,
         Func<TResponse, TWireResponse> mapResponse)
-        where TRequest : notnull
-    {
+        where TRequest : notnull {
         ArgumentNullException.ThrowIfNull(callContext);
         ArgumentNullException.ThrowIfNull(mapRequest);
         ArgumentNullException.ThrowIfNull(mapResponse);

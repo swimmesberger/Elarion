@@ -16,7 +16,8 @@ public sealed class PostgreSqlBlobStorageModelBuilderExtensionsTests {
         var storedBlob = model.FindEntityType(typeof(StoredBlob));
         storedBlob.Should().NotBeNull();
         storedBlob!.GetTableName().Should().Be("stored_blobs");
-        storedBlob.FindPrimaryKey()!.Properties.Should().ContainSingle(property => property.Name == nameof(StoredBlob.Id));
+        storedBlob.FindPrimaryKey()!.Properties.Should()
+            .ContainSingle(property => property.Name == nameof(StoredBlob.Id));
         storedBlob.FindProperty(nameof(StoredBlob.ContentType))!.GetColumnName().Should().Be("content_type");
         var uniqueIndex = storedBlob.GetIndexes().Should().ContainSingle(index => index.IsUnique).Subject;
         uniqueIndex.Properties.Select(property => property.Name).Should().Equal(

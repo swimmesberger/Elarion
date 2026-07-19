@@ -10,10 +10,10 @@ namespace Elarion.Generators;
 /// the compile-time <c>ElarionPermissions</c> static). Keeping it in one place means the two generators can never
 /// drift on how a requirement is read or how the permission string is composed.
 /// </summary>
-internal static class PermissionDiscovery
-{
+internal static class PermissionDiscovery {
     public const string RequirePermissionAttributeMetadataName =
         "Elarion.Abstractions.Authorization.RequirePermissionAttribute";
+
     public const string RequireRoleAttributeMetadataName =
         "Elarion.Abstractions.Authorization.RequireRoleAttribute";
 
@@ -37,21 +37,16 @@ internal static class PermissionDiscovery
         EquatableArray<string> Values,
         LocationInfo Location);
 
-    public static PermissionGuard? ReadPermissions(GeneratorAttributeSyntaxContext ctx)
-    {
+    public static PermissionGuard? ReadPermissions(GeneratorAttributeSyntaxContext ctx) {
         if (ctx.TargetSymbol is not INamedTypeSymbol type)
             return null;
 
         var values = ImmutableArray.CreateBuilder<PermissionValue>();
         foreach (var attribute in ctx.Attributes)
-        {
             if (attribute.ConstructorArguments.Length >= 2 &&
                 attribute.ConstructorArguments[0].Value is string resource && !string.IsNullOrWhiteSpace(resource) &&
                 attribute.ConstructorArguments[1].Value is string verb && !string.IsNullOrWhiteSpace(verb))
-            {
                 values.Add(new PermissionValue(resource, verb, resource + Separator + verb));
-            }
-        }
 
         if (values.Count == 0)
             return null;
@@ -63,21 +58,16 @@ internal static class PermissionDiscovery
             LocationInfo.From(type));
     }
 
-    public static RoleGuard? ReadRoles(GeneratorAttributeSyntaxContext ctx)
-    {
+    public static RoleGuard? ReadRoles(GeneratorAttributeSyntaxContext ctx) {
         if (ctx.TargetSymbol is not INamedTypeSymbol type)
             return null;
 
         var values = ImmutableArray.CreateBuilder<string>();
         foreach (var attribute in ctx.Attributes)
-        {
             if (attribute.ConstructorArguments.Length > 0 &&
                 attribute.ConstructorArguments[0].Value is string value &&
                 !string.IsNullOrWhiteSpace(value))
-            {
                 values.Add(value);
-            }
-        }
 
         if (values.Count == 0)
             return null;
@@ -89,6 +79,7 @@ internal static class PermissionDiscovery
             LocationInfo.From(type));
     }
 
-    private static string Namespace(INamedTypeSymbol type) =>
-        type.ContainingNamespace is { IsGlobalNamespace: false } containing ? containing.ToDisplayString() : "";
+    private static string Namespace(INamedTypeSymbol type) {
+        return type.ContainingNamespace is { IsGlobalNamespace: false } containing ? containing.ToDisplayString() : "";
+    }
 }

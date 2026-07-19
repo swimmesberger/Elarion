@@ -21,16 +21,18 @@ namespace Elarion.Tests.Blobs;
 public sealed class BlobDownloadEndpointsTests {
     private static readonly BlobRef ExportRef = new() { Value = "export-1" };
 
-    private static BlobMetadata ExportMetadata(string? ownerId = "user-1", string container = "uploads") => new() {
-        Id = ExportRef.Value,
-        Container = container,
-        Name = $"{ownerId ?? "nobody"}/abc123/clients.xlsx",
-        ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        Size = 3,
-        CreatedAt = DateTimeOffset.UnixEpoch,
-        State = BlobLifecycleState.Pending,
-        OwnerId = ownerId,
-    };
+    private static BlobMetadata ExportMetadata(string? ownerId = "user-1", string container = "uploads") {
+        return new BlobMetadata {
+            Id = ExportRef.Value,
+            Container = container,
+            Name = $"{ownerId ?? "nobody"}/abc123/clients.xlsx",
+            ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            Size = 3,
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            State = BlobLifecycleState.Pending,
+            OwnerId = ownerId
+        };
+    }
 
     [Fact]
     public async Task Download_OwnersBlob_StreamsContentWithTypeAndLeafName() {
@@ -52,7 +54,7 @@ public sealed class BlobDownloadEndpointsTests {
     public async Task Download_OtherUsersBlob_Returns404() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(ct);
-        host.Store.Seed(ExportRef, ExportMetadata(ownerId: "user-2"), [1]);
+        host.Store.Seed(ExportRef, ExportMetadata("user-2"), [1]);
 
         var response = await host.Client.GetAsync($"/_elarion/blobs/{ExportRef.Value}", ct);
 
@@ -64,7 +66,7 @@ public sealed class BlobDownloadEndpointsTests {
         // Fail closed: a blob with no recorded owner is readable by no one.
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(ct);
-        host.Store.Seed(ExportRef, ExportMetadata(ownerId: null), [1]);
+        host.Store.Seed(ExportRef, ExportMetadata(null), [1]);
 
         var response = await host.Client.GetAsync($"/_elarion/blobs/{ExportRef.Value}", ct);
 
@@ -95,7 +97,7 @@ public sealed class BlobDownloadEndpointsTests {
     [Fact]
     public async Task Download_Unauthenticated_Returns401() {
         var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartAsync(ct, user: new FakeCurrentUser("user-1", isAuthenticated: false));
+        await using var host = await StartAsync(ct, new FakeCurrentUser("user-1", false));
         host.Store.Seed(ExportRef, ExportMetadata(), [1]);
 
         var response = await host.Client.GetAsync($"/_elarion/blobs/{ExportRef.Value}", ct);
@@ -112,7 +114,7 @@ public sealed class BlobDownloadEndpointsTests {
 
         var store = new FakeBlobStore();
         builder.Services.AddSingleton<IBlobStore>(store);
-        builder.Services.AddScoped<ICurrentUser>(_ => user ?? new FakeCurrentUser("user-1", isAuthenticated: true));
+        builder.Services.AddScoped<ICurrentUser>(_ => user ?? new FakeCurrentUser("user-1", true));
         builder.Services.AddProblemDetails();
         builder.Services.AddElarionBlobUploads();
 
@@ -146,6 +148,8 @@ public sealed class BlobDownloadEndpointsTests {
 
         public bool IsAuthenticated { get; } = isAuthenticated;
 
-        public bool IsInRole(string role) => false;
+        public bool IsInRole(string role) {
+            return false;
+        }
     }
 }

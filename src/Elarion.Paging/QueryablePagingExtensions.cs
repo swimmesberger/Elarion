@@ -9,8 +9,7 @@ namespace Elarion.Paging;
 /// producing the transport-neutral <see cref="Page{T}"/> envelope. Keyset is the default for feeds
 /// and large lists; offset adds a total count and random page access where a UI needs them.
 /// </summary>
-public static class QueryablePagingExtensions
-{
+public static class QueryablePagingExtensions {
     /// <summary>The default maximum page size applied when a caller does not specify one.</summary>
     public const int DefaultMaxSize = 100;
 
@@ -34,8 +33,7 @@ public static class QueryablePagingExtensions
         Expression<Func<TEntity, TDto>> selector,
         int maxSize = DefaultMaxSize,
         CancellationToken cancellationToken = default)
-        where TEntity : class
-    {
+        where TEntity : class {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(keyset);
@@ -48,8 +46,7 @@ public static class QueryablePagingExtensions
         var pagedFromCursor = !string.IsNullOrEmpty(cursor);
 
         IQueryable<TEntity> query = keyset.ApplyOrder(source, forward);
-        if (pagedFromCursor)
-        {
+        if (pagedFromCursor) {
             // A malformed or wrong-keyset cursor throws MalformedCursorException; it is a client error,
             // never a silent fallback to the first page (which would return unrelated rows).
             var seek = keyset.BuildSeek(cursor!, forward);
@@ -65,29 +62,19 @@ public static class QueryablePagingExtensions
         var taken = hasMore ? entries.Take(size).ToList() : [.. entries];
 
         // Backward pages are read in reversed order; restore natural order for the caller.
-        if (backward)
-        {
-            taken.Reverse();
-        }
+        if (backward) taken.Reverse();
 
-        if (taken.Count == 0)
-        {
-            return Page<TDto>.Empty;
-        }
+        if (taken.Count == 0) return Page<TDto>.Empty;
 
         var items = new TDto[taken.Count];
-        for (var i = 0; i < taken.Count; i++)
-        {
-            items[i] = taken[i].Item;
-        }
+        for (var i = 0; i < taken.Count; i++) items[i] = taken[i].Item;
 
-        return new Page<TDto>
-        {
+        return new Page<TDto> {
             Items = items,
             StartCursor = taken[0].Cursor,
             EndCursor = taken[^1].Cursor,
             HasNext = forward ? hasMore : pagedFromCursor,
-            HasPrevious = backward ? hasMore : pagedFromCursor,
+            HasPrevious = backward ? hasMore : pagedFromCursor
         };
     }
 
@@ -102,8 +89,7 @@ public static class QueryablePagingExtensions
         SortMap<TEntity> sort,
         int maxSize = DefaultMaxSize,
         CancellationToken cancellationToken = default)
-        where TEntity : class
-    {
+        where TEntity : class {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(selector);
@@ -124,26 +110,18 @@ public static class QueryablePagingExtensions
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return new Page<TDto>
-        {
+        return new Page<TDto> {
             Items = items,
             Total = total,
             HasPrevious = page > 1,
-            HasNext = (long)skip + items.Count < total,
+            HasNext = (long)skip + items.Count < total
         };
     }
 
-    private static int NormalizeSize(int requested, int maxSize)
-    {
-        if (maxSize < 1)
-        {
-            maxSize = 1;
-        }
+    private static int NormalizeSize(int requested, int maxSize) {
+        if (maxSize < 1) maxSize = 1;
 
-        if (requested < 1)
-        {
-            return Math.Min(FallbackSize, maxSize);
-        }
+        if (requested < 1) return Math.Min(FallbackSize, maxSize);
 
         return Math.Min(requested, maxSize);
     }

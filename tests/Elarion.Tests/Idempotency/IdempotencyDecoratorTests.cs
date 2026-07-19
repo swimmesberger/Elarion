@@ -10,9 +10,9 @@ using Elarion.Abstractions.Idempotency;
 using Elarion.Abstractions.Pipeline;
 using Elarion.Tests.Services;
 using Xunit;
-
 using Elarion.Pipeline;
 using Elarion.Diagnostics;
+
 namespace Elarion.Tests.Idempotency;
 
 public sealed class IdempotencyDecoratorTests {
@@ -24,15 +24,16 @@ public sealed class IdempotencyDecoratorTests {
         RecordingUnitOfWork unitOfWork,
         string? key,
         TestPolicy? policy = null,
-        ICurrentUser? user = null) =>
-        new(
+        ICurrentUser? user = null) {
+        return new IdempotencyDecorator<TestCommand, Result<string>>(
             inner,
             unitOfWork,
             store,
             new FakeKeyAccessor(key),
             policy ?? new TestPolicy(),
-            user ?? new FakeCurrentUser(authenticated: true),
+            user ?? new FakeCurrentUser(true),
             Json);
+    }
 
     [Fact]
     public async Task FirstCall_RunsHandler_Completes_AndCommits() {
@@ -87,7 +88,8 @@ public sealed class IdempotencyDecoratorTests {
     public async Task FingerprintMismatch_Returns422() {
         var store = new RecordingStore(IdempotencyBeginResult.FingerprintMismatch());
 
-        var result = await Decorate(new RecordingHandler(Result<string>.Success("x")), store, new RecordingUnitOfWork(), "k1")
+        var result = await Decorate(new RecordingHandler(Result<string>.Success("x")), store, new RecordingUnitOfWork(),
+                "k1")
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
         result.Error.Kind.Should().Be(ErrorKind.BusinessRule);
@@ -116,7 +118,7 @@ public sealed class IdempotencyDecoratorTests {
         var inner = new RecordingHandler(Result<string>.Success("done"));
         var store = new RecordingStore(IdempotencyBeginResult.Began());
 
-        var result = await Decorate(inner, store, new RecordingUnitOfWork(), key: null)
+        var result = await Decorate(inner, store, new RecordingUnitOfWork(), null)
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
         result.Error.Kind.Should().Be(ErrorKind.Validation);
@@ -130,7 +132,7 @@ public sealed class IdempotencyDecoratorTests {
         var store = new RecordingStore(IdempotencyBeginResult.Began());
         var policy = new TestPolicy(keyRequired: false);
 
-        var result = await Decorate(inner, store, new RecordingUnitOfWork(), key: null, policy)
+        var result = await Decorate(inner, store, new RecordingUnitOfWork(), null, policy)
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
         result.Value.Should().Be("done");
@@ -143,7 +145,7 @@ public sealed class IdempotencyDecoratorTests {
         var inner = new RecordingHandler(Result<string>.Success("done"));
         var store = new RecordingStore(IdempotencyBeginResult.Began());
 
-        var result = await Decorate(inner, store, new RecordingUnitOfWork(), key: null)
+        var result = await Decorate(inner, store, new RecordingUnitOfWork(), null)
             .HandleAsync(new TestCommand(1, "in-band"), TestContext.Current.CancellationToken);
 
         result.Value.Should().Be("done");
@@ -218,9 +220,10 @@ public sealed class IdempotencyDecoratorTests {
     public async Task DefinitiveFailureReplay_ReturnsStoredFailure() {
         var payload = JsonSerializer.Serialize(
             new StoredResult { Ok = false, Error = AppError.BusinessRule("declined") }, Json);
-        var store = new RecordingStore(IdempotencyBeginResult.Replay(payload, isFailurePayload: true));
+        var store = new RecordingStore(IdempotencyBeginResult.Replay(payload, true));
 
-        var result = await Decorate(new RecordingHandler(Result<string>.Success("x")), store, new RecordingUnitOfWork(), "k1")
+        var result = await Decorate(new RecordingHandler(Result<string>.Success("x")), store, new RecordingUnitOfWork(),
+                "k1")
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeFalse();
@@ -230,12 +233,12 @@ public sealed class IdempotencyDecoratorTests {
 
     [Fact]
     public async Task CurrentUserScope_Unauthenticated_Returns401() {
-        var policy = new TestPolicy(scope: IdempotencyScope.CurrentUser);
+        var policy = new TestPolicy(IdempotencyScope.CurrentUser);
         var store = new RecordingStore(IdempotencyBeginResult.Began());
 
         var result = await Decorate(
                 new RecordingHandler(Result<string>.Success("x")), store, new RecordingUnitOfWork(), "k1", policy,
-                user: new FakeCurrentUser(authenticated: false))
+                new FakeCurrentUser(false))
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
         result.Error.Kind.Should().Be(ErrorKind.Unauthorized);
@@ -249,9 +252,9 @@ public sealed class IdempotencyDecoratorTests {
         var inner = new RecordingHandler(Result<string>.Success("done"));
         var store = new RecordingStore(IdempotencyBeginResult.Began());
         var uow = new RecordingUnitOfWork();
-        var policy = new TestPolicy(scope: IdempotencyScope.Consumer, owner: "Sample.App.SendInvoiceEmail");
+        var policy = new TestPolicy(IdempotencyScope.Consumer, owner: "Sample.App.SendInvoiceEmail");
         var decorator = new IdempotencyDecorator<TestCommand, Result<string>>(
-            inner, uow, store, new FakeKeyAccessor("message-1"), policy, currentUser: null, Json);
+            inner, uow, store, new FakeKeyAccessor("message-1"), policy, null, Json);
 
         var result = await decorator.HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
@@ -269,9 +272,9 @@ public sealed class IdempotencyDecoratorTests {
             new StoredResult { Ok = true, Value = JsonSerializer.SerializeToElement("first", Json) }, Json);
         var inner = new RecordingHandler(Result<string>.Success("second"));
         var store = new RecordingStore(IdempotencyBeginResult.Replay(payload));
-        var policy = new TestPolicy(scope: IdempotencyScope.Consumer, owner: "Sample.App.SendInvoiceEmail");
+        var policy = new TestPolicy(IdempotencyScope.Consumer, owner: "Sample.App.SendInvoiceEmail");
         var decorator = new IdempotencyDecorator<TestCommand, Result<string>>(
-            inner, new RecordingUnitOfWork(), store, new FakeKeyAccessor("message-1"), policy, currentUser: null, Json);
+            inner, new RecordingUnitOfWork(), store, new FakeKeyAccessor("message-1"), policy, null, Json);
 
         var result = await decorator.HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
@@ -284,11 +287,11 @@ public sealed class IdempotencyDecoratorTests {
     public async Task ConsumerScope_MissingPolicyOwner_FailsLoud() {
         // A Consumer-scope policy without an owner would collapse every consumer of an event onto one claim —
         // the second consumer would skip its own distinct work. That is a policy bug, not a runtime condition.
-        var policy = new TestPolicy(scope: IdempotencyScope.Consumer, owner: null);
+        var policy = new TestPolicy(IdempotencyScope.Consumer, owner: null);
         var decorator = new IdempotencyDecorator<TestCommand, Result<string>>(
             new RecordingHandler(Result<string>.Success("x")), new RecordingUnitOfWork(),
             new RecordingStore(IdempotencyBeginResult.Began()), new FakeKeyAccessor("message-1"), policy,
-            currentUser: null, Json);
+            null, Json);
 
         var act = async () => await decorator.HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
@@ -301,9 +304,9 @@ public sealed class IdempotencyDecoratorTests {
         // KeyRequired=false so the consumer runs un-deduped instead of failing with a 400.
         var inner = new RecordingHandler(Result<string>.Success("done"));
         var store = new RecordingStore(IdempotencyBeginResult.Began());
-        var policy = new TestPolicy(scope: IdempotencyScope.Consumer, keyRequired: false, owner: "Sample.App.SendInvoiceEmail");
+        var policy = new TestPolicy(IdempotencyScope.Consumer, false, owner: "Sample.App.SendInvoiceEmail");
         var decorator = new IdempotencyDecorator<TestCommand, Result<string>>(
-            inner, new RecordingUnitOfWork(), store, new FakeKeyAccessor(null), policy, currentUser: null, Json);
+            inner, new RecordingUnitOfWork(), store, new FakeKeyAccessor(null), policy, null, Json);
 
         var result = await decorator.HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
@@ -316,11 +319,11 @@ public sealed class IdempotencyDecoratorTests {
     public async Task CurrentUserScope_NullCurrentUser_Returns401() {
         // A CurrentUser-scoped policy resolving in a scope without any ICurrentUser registration (the decorator's
         // currentUser parameter is nullable for delivery scopes) must fail closed as unauthenticated, not throw.
-        var policy = new TestPolicy(scope: IdempotencyScope.CurrentUser);
+        var policy = new TestPolicy(IdempotencyScope.CurrentUser);
         var store = new RecordingStore(IdempotencyBeginResult.Began());
         var decorator = new IdempotencyDecorator<TestCommand, Result<string>>(
             new RecordingHandler(Result<string>.Success("x")), new RecordingUnitOfWork(), store,
-            new FakeKeyAccessor("k1"), policy, currentUser: null, Json);
+            new FakeKeyAccessor("k1"), policy, null, Json);
 
         var result = await decorator.HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
@@ -331,7 +334,8 @@ public sealed class IdempotencyDecoratorTests {
     [Fact]
     public async Task BothConflictModes_SetALockTimeout_ConflictShorterThanWait() {
         var conflictUow = new RecordingUnitOfWork();
-        await Decorate(new RecordingHandler(Result<string>.Success("x")), new RecordingStore(IdempotencyBeginResult.Began()), conflictUow, "k1",
+        await Decorate(new RecordingHandler(Result<string>.Success("x")),
+                new RecordingStore(IdempotencyBeginResult.Began()), conflictUow, "k1",
                 new TestPolicy(conflict: IdempotencyConflictBehavior.Conflict))
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
         conflictUow.Scope!.LockTimeout.Should().NotBeNull();
@@ -339,7 +343,8 @@ public sealed class IdempotencyDecoratorTests {
         // WaitThenReplay still bounds the wait (M3): a stuck winner must not pin the duplicate's connection
         // forever. Its ceiling is longer than the fast-fail conflict timeout but is not unbounded.
         var waitUow = new RecordingUnitOfWork();
-        await Decorate(new RecordingHandler(Result<string>.Success("x")), new RecordingStore(IdempotencyBeginResult.Began()), waitUow, "k1",
+        await Decorate(new RecordingHandler(Result<string>.Success("x")),
+                new RecordingStore(IdempotencyBeginResult.Began()), waitUow, "k1",
                 new TestPolicy(conflict: IdempotencyConflictBehavior.WaitThenReplay))
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
         waitUow.Scope!.LockTimeout.Should().NotBeNull();
@@ -382,12 +387,13 @@ public sealed class IdempotencyDecoratorTests {
         public TimeSpan Retention => TimeSpan.FromHours(24);
         public string? Owner => owner;
 
-        public string Serialize(Result<string> response, JsonSerializerOptions options) =>
-            JsonSerializer.Serialize(
+        public string Serialize(Result<string> response, JsonSerializerOptions options) {
+            return JsonSerializer.Serialize(
                 response.IsSuccess
                     ? new StoredResult { Ok = true, Value = JsonSerializer.SerializeToElement(response.Value, options) }
                     : new StoredResult { Ok = false, Error = response.Error },
                 options);
+        }
 
         public Result<string> Deserialize(string payload, JsonSerializerOptions options) {
             var stored = JsonSerializer.Deserialize<StoredResult>(payload, options)!;
@@ -408,8 +414,9 @@ public sealed class IdempotencyDecoratorTests {
     }
 
     private sealed class ThrowingHandler : IHandler<TestCommand, Result<string>> {
-        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) =>
+        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) {
             throw new InvalidOperationException("boom");
+        }
     }
 
     private sealed class CancelAfterSuccessHandler(CancellationTokenSource cts, Result<string> response)
@@ -429,12 +436,14 @@ public sealed class IdempotencyDecoratorTests {
         public IdempotencyStoreKey LastKey { get; private set; }
 
         public ValueTask<IdempotencyBeginResult> TryBeginAsync(
-            IdempotencyStoreKey key, string fingerprint, IdempotencyConflictBehavior conflictBehavior, CancellationToken ct) {
+            IdempotencyStoreKey key, string fingerprint, IdempotencyConflictBehavior conflictBehavior,
+            CancellationToken ct) {
             LastKey = key;
             return new ValueTask<IdempotencyBeginResult>(begin);
         }
 
-        public ValueTask CompleteAsync(IdempotencyStoreKey key, string payload, bool isFailure, TimeSpan retention, CancellationToken ct) {
+        public ValueTask CompleteAsync(IdempotencyStoreKey key, string payload, bool isFailure, TimeSpan retention,
+            CancellationToken ct) {
             ct.ThrowIfCancellationRequested();
             CompleteCount++;
             CompletedIsFailure = isFailure;
@@ -446,7 +455,9 @@ public sealed class IdempotencyDecoratorTests {
             return default;
         }
 
-        public ValueTask<int> PurgeCompletedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) => new(0);
+        public ValueTask<int> PurgeCompletedAsync(DateTimeOffset olderThanUtc, CancellationToken ct) {
+            return new ValueTask<int>(0);
+        }
     }
 
     private sealed class RecordingUnitOfWork : IUnitOfWork {
@@ -464,11 +475,31 @@ public sealed class IdempotencyDecoratorTests {
             public int Savepoints { get; private set; }
             public int SavepointRollbacks { get; private set; }
 
-            public ValueTask CommitAsync(CancellationToken ct) { ct.ThrowIfCancellationRequested(); Commits++; return default; }
-            public ValueTask RollbackAsync(CancellationToken ct) { ct.ThrowIfCancellationRequested(); Rollbacks++; return default; }
-            public ValueTask CreateSavepointAsync(string name, CancellationToken ct) { Savepoints++; return default; }
-            public ValueTask RollbackToSavepointAsync(string name, CancellationToken ct) { SavepointRollbacks++; return default; }
-            public ValueTask DisposeAsync() => default;
+            public ValueTask CommitAsync(CancellationToken ct) {
+                ct.ThrowIfCancellationRequested();
+                Commits++;
+                return default;
+            }
+
+            public ValueTask RollbackAsync(CancellationToken ct) {
+                ct.ThrowIfCancellationRequested();
+                Rollbacks++;
+                return default;
+            }
+
+            public ValueTask CreateSavepointAsync(string name, CancellationToken ct) {
+                Savepoints++;
+                return default;
+            }
+
+            public ValueTask RollbackToSavepointAsync(string name, CancellationToken ct) {
+                SavepointRollbacks++;
+                return default;
+            }
+
+            public ValueTask DisposeAsync() {
+                return default;
+            }
         }
     }
 
@@ -484,6 +515,9 @@ public sealed class IdempotencyDecoratorTests {
         public string? Email => null;
         public IReadOnlyList<string> Roles => [];
         public bool IsAuthenticated => authenticated;
-        public bool IsInRole(string role) => false;
+
+        public bool IsInRole(string role) {
+            return false;
+        }
     }
 }

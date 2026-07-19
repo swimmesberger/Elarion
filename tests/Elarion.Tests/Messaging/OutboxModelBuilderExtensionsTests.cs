@@ -31,7 +31,7 @@ public sealed class OutboxModelBuilderExtensionsTests {
         var message = model.FindEntityType(typeof(OutboxMessage))!;
         var purgeIndex = message.GetIndexes()
             .Single(index => index.Properties.Count == 1
-                && index.Properties[0].Name == nameof(OutboxMessage.ProcessedOnUtc));
+                             && index.Properties[0].Name == nameof(OutboxMessage.ProcessedOnUtc));
         purgeIndex.GetDatabaseName().Should().Be("ix_elarion_outbox_messages_purge");
         purgeIndex.GetFilter().Should().Be("processed_on_utc IS NOT NULL");
     }
@@ -81,7 +81,7 @@ public sealed class OutboxModelBuilderExtensionsTests {
         outboxMessage.FindProperty(nameof(OutboxMessage.ProcessedOnUtc))!.GetColumnName().Should().Be("ProcessedOnUtc");
         var purgeIndex = outboxMessage.GetIndexes()
             .Single(index => index.Properties.Count == 1
-                && index.Properties[0].Name == nameof(OutboxMessage.ProcessedOnUtc));
+                             && index.Properties[0].Name == nameof(OutboxMessage.ProcessedOnUtc));
         purgeIndex.GetDatabaseName().Should().Be("IX_ElarionOutboxMessages_Purge");
         purgeIndex.GetFilter().Should().Be("\"ProcessedOnUtc\" IS NOT NULL");
     }
