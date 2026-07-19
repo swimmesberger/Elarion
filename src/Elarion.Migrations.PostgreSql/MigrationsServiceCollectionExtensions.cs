@@ -55,6 +55,26 @@ public static class MigrationsServiceCollectionExtensions {
             dataSource, options, provider.GetService<ILogger<PostgreSqlMigrationRunner>>()));
     }
 
+    /// <summary>
+    /// The container-resolved overload of
+    /// <see cref="AddElarionPostgreSqlMigrations(IServiceCollection, NpgsqlDataSource, Action{PostgreSqlMigrationOptions})"/>:
+    /// the runner borrows connections from the <see cref="NpgsqlDataSource"/> already registered in the container
+    /// — for example the central source from <c>AddElarionPostgreSqlDataSource</c> — so migrations and the SQL
+    /// access tier share one data source (EF Core's <c>DbContext</c> analogue) and the database is configured once.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">Configures the options; must add at least one script source via <see cref="MigrationOptions.AddScripts"/>.</param>
+    /// <returns>The same service collection for chaining.</returns>
+    public static IServiceCollection AddElarionPostgreSqlMigrations(
+        this IServiceCollection services,
+        Action<PostgreSqlMigrationOptions> configure) {
+        ArgumentNullException.ThrowIfNull(services);
+
+        return AddCore(services, configure, (options, provider) => new PostgreSqlMigrationRunner(
+            provider.GetRequiredService<NpgsqlDataSource>(), options,
+            provider.GetService<ILogger<PostgreSqlMigrationRunner>>()));
+    }
+
     private static IServiceCollection AddCore(
         IServiceCollection services,
         Action<PostgreSqlMigrationOptions> configure,

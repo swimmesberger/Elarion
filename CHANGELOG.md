@@ -22,8 +22,15 @@ minor releases may include breaking changes.
   the EF tier's `AddDbContext` + `AddElarionUnitOfWork<TDbContext>`): `AddElarionSqlDataSource(sp => …)` builds
   and owns a `DbDataSource`, `AddElarionSqlDataSource()` wraps one already in the container, and
   `AddElarionSqlDataSourceProvider<T>()` routes per request (tenant database, read replica). The tier resolves
-  the provider and nothing else, so there is no ambient `DbDataSource` it assumes. No new package — `IUnitOfWork`
-  already lives in `Elarion.Abstractions`. Covered by Docker-gated integration tests against real PostgreSQL.
+  the provider and nothing else, so there is no ambient `DbDataSource` it assumes. Covered by Docker-gated
+  integration tests against real PostgreSQL.
+- **`Elarion.Sql.PostgreSql` — PostgreSQL provider for the EF-free SQL tier.** New package mirroring
+  `Elarion.Migrations.PostgreSql`. `AddElarionPostgreSqlDataSource(connectionString, configure?)` registers one
+  central `NpgsqlDataSource` (the shared core, EF Core's `DbContext` analogue — command logging wired from DI)
+  plus the `IElarionSqlDataSourceProvider` the session opens from; an `NpgsqlDataSource` overload wraps a
+  host-built source. `Elarion.Migrations.PostgreSql` gains a data-source-from-DI overload
+  (`AddElarionPostgreSqlMigrations(configure)`) that borrows that same source, so the SQL access tier and
+  migrations share one data source and the database is configured once. `Elarion.Sql` itself stays Npgsql-free.
 - **Self-typed request markers and inferred dispatch (ADR-0065).** `Elarion.Abstractions` adds optional
   generic marker forms — `IRequest<TSelf, TResponse>`, `ICommand<TSelf, TResponse>`,
   `IQuery<TSelf, TResponse>`, and `IStreamRequest<TSelf, TItem>` — that declare a request's response type

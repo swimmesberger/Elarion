@@ -43,7 +43,8 @@ See [transport capabilities](/docs/capabilities/transports) and
 ## Persistence, SQL, and transactions
 
 Choose the EF Core tier or the NativeAOT SQL tier per host. EF applications keep EF migrations; EF-free
-AOT hosts pair `Elarion.Sql` with the database-neutral `Elarion.Migrations` engine and exactly one provider.
+AOT hosts pair `Elarion.Sql` (with its `Elarion.Sql.PostgreSql` provider) and the database-neutral
+`Elarion.Migrations` engine with exactly one migration provider — a single `NpgsqlDataSource` backs both.
 
 | Package | Add it when |
 | --- | --- |
@@ -52,7 +53,8 @@ AOT hosts pair `Elarion.Sql` with the database-neutral `Elarion.Migrations` engi
 | `Elarion.Paging` | EF queries need keyset/offset execution, opaque cursors, sort maps, or authorization-aware list filtering. |
 | `Elarion.EntityFrameworkCore.BulkOperations` | EF code needs provider-neutral streaming `ExecuteInsertAsync` and the bulk provider seam. |
 | `Elarion.BulkOperations.PostgreSql` | EF bulk inserts should use PostgreSQL binary `COPY` on the context connection. |
-| `Elarion.Sql` | An EF-free NativeAOT host needs generated row mappers and injection-safe SQL interpolation with no reflection fallback. Also supplies the EF-free `IUnitOfWork` — `AddElarionSqlUnitOfWork()` registers a scoped `ISqlSession` so handler transactions commit atomically without EF. |
+| `Elarion.Sql` | An EF-free NativeAOT host needs generated row mappers and injection-safe SQL interpolation with no reflection fallback. Also supplies the EF-free `IUnitOfWork` — `AddElarionSqlUnitOfWork()` registers a scoped `ISqlSession` so handler transactions commit atomically without EF. Stays Npgsql-free; the data source is the `IElarionSqlDataSourceProvider` seam. |
+| `Elarion.Sql.PostgreSql` | The EF-free SQL tier should run on PostgreSQL: `AddElarionPostgreSqlDataSource(connectionString)` registers one central `NpgsqlDataSource` (the shared core, EF Core's `DbContext` analogue) plus the provider the session opens from, and `Elarion.Migrations.PostgreSql` borrows the same source so the database is configured once. |
 | `Elarion.Migrations` | An EF-free NativeAOT host needs embedded versioned/repeatable SQL discovery, checksums, planning, and roll-forward execution without a database driver. |
 | `Elarion.Migrations.PostgreSql` | The migration engine should run on PostgreSQL with a session advisory lock across roughly 1–10 nodes. |
 | `Elarion.Migrations.Sqlite` | The migration engine should run on a single-node or edge SQLite file with per-file process coordination. |
@@ -138,6 +140,6 @@ Read the [actor decision guide](/docs/concepts/actors) before adding the actor p
 | --- | --- |
 | Application/module assembly | `Elarion`; optionally `Elarion.Validation` and provider-neutral capability packages |
 | EF persistence assembly | `Elarion.EntityFrameworkCore` plus the exact EF-backed capability packages it maps |
-| EF-free NativeAOT host | `Elarion.Sql` + `Elarion.Migrations` + `Elarion.Migrations.PostgreSql` or `Elarion.Migrations.Sqlite` |
+| EF-free NativeAOT host | `Elarion.Sql` + `Elarion.Sql.PostgreSql` + `Elarion.Migrations` + `Elarion.Migrations.PostgreSql` or `Elarion.Migrations.Sqlite` |
 | ASP.NET Core host | `Elarion`, `Elarion.JsonRpc`, `Elarion.AspNetCore`; opt in to OpenAPI, MCP, schema generation, Identity, SSE, and blob transports as needed |
 | Frontend | `@swimmesberger/elarion-jsonrpc-client-generator`; optionally `@swimmesberger/elarion-contributions` |

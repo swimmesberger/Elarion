@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\..\src\Elarion\Elarion.csproj"/>
     <ProjectReference Include="..\..\..\src\Elarion.AspNetCore\Elarion.AspNetCore.csproj"/>
     <ProjectReference Include="..\..\..\src\Elarion.Sql\Elarion.Sql.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.Sql.PostgreSql\Elarion.Sql.PostgreSql.csproj"/>
     <ProjectReference Include="..\..\..\src\Elarion.Migrations.PostgreSql\Elarion.Migrations.PostgreSql.csproj"/>
   </ItemGroup>
 

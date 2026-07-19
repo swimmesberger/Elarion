@@ -250,6 +250,15 @@ or `AddElarionSqlDataSourceProvider<T>()` (a scoped provider that routes per req
 read replica). This is consistent with the migration runner, which also takes an explicit data source rather
 than resolving a global one, and the seam is designed for that strongest (per-scope routing) implementation.
 
+`Elarion.Sql` keeps no Npgsql reference (ADR-0058); the Npgsql binding is a provider sibling,
+**`Elarion.Sql.PostgreSql`**, mirroring `Elarion.Migrations.PostgreSql`. Its
+`AddElarionPostgreSqlDataSource(connectionString)` registers **one central `NpgsqlDataSource`** — the shared
+core, EF Core's `DbContext` analogue — plus the `IElarionSqlDataSourceProvider` over it, with command logging
+wired from the container's logger factory. `Elarion.Migrations.PostgreSql` gains a data-source-from-DI overload
+(`AddElarionPostgreSqlMigrations(configure)`) that borrows the same source, so the access tier and migrations
+draw from one data source and the host configures the database once — the SQL-tier parallel to how a single
+`DbContext` is central to an EF host.
+
 Preferring API design over pre-1.0 compatibility, the `DbDataSource` receiver was **removed**, not kept
 alongside: the query/write surface now lives on `ISqlSession` (the handler entry point) and the
 `DbConnection` primitive it delegates to (DI-free / NativeAOT hosts, tooling, tests that own their

@@ -184,14 +184,17 @@ Because a handler injects `ISqlSession` — one connection pinned for the reques
 statements can run in one transaction. That is what makes a command that writes more than once atomic.
 This tier supplies the same `IUnitOfWork` seam the EF tier does, so the framework
 [`TransactionDecorator`](/docs/capabilities/entity-framework) wraps a command handler in one
-commit/rollback with no per-handler transaction code. Wiring is two steps, mirroring the EF tier
-(`AddDbContext` then `AddElarionUnitOfWork<TDbContext>`) — register the data source, then the tier:
+commit/rollback with no per-handler transaction code. On PostgreSQL, `Elarion.Sql.PostgreSql` registers
+one **central data source** — the shared core, EF Core's `DbContext` analogue — that the access tier and
+[migrations](/docs/capabilities/sql-migrations) both draw from, so the database is configured once:
 
 ```csharp
-// 1. The data source is the IElarionSqlDataSourceProvider — the single source of truth. Build and own it here:
-builder.Services.AddElarionSqlDataSource(sp => NpgsqlDataSource.Create(connectionString));
-// 2. The scoped ISqlSession + SqlUnitOfWork:
+// The shared core: one NpgsqlDataSource + the provider the session opens from (command logging auto-wired).
+builder.Services.AddElarionPostgreSqlDataSource(connectionString);
+// The access tier over it:
 builder.Services.AddElarionSqlUnitOfWork();
+// Migrations borrow the same source (no connection string repeated):
+builder.Services.AddElarionPostgreSqlMigrations(o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
 ```
 
 `AddElarionSqlUnitOfWork()` registers the scoped `ISqlSession` and replaces the default no-op
@@ -201,13 +204,15 @@ enlists the open transaction automatically. (A read-only host that never writes 
 `AddElarionSqlSession()` — the session with per-call auto-commit, no transaction machinery.)
 
 **The data source is the `IElarionSqlDataSourceProvider` seam — the session resolves the provider and
-nothing else, so there is no ambient `DbDataSource` the tier assumes.** Register the provider with one of:
+nothing else, so there is no ambient `DbDataSource` the tier assumes.** `Elarion.Sql` itself stays
+Npgsql-free; the Npgsql binding lives in `Elarion.Sql.PostgreSql`. Register the provider with one of:
 
-| Registration | Use it when |
-| --- | --- |
-| `AddElarionSqlDataSource(sp => …)` | build and own the `DbDataSource` here (the container disposes it) |
-| `AddElarionSqlDataSource()` | a `DbDataSource` is already in the container (Npgsql's `AddNpgsqlDataSource`) |
-| `AddElarionSqlDataSourceProvider<T>()` | route per scope — a tenant's database, a read replica: `T.GetDataSource()` reads the current tenant from `ICurrentUser` and returns its pooled source |
+| Registration | Package | Use it when |
+| --- | --- | --- |
+| `AddElarionPostgreSqlDataSource(connectionString)` | `Elarion.Sql.PostgreSql` | the common PostgreSQL host — one central `NpgsqlDataSource` shared with migrations |
+| `AddElarionSqlDataSource(sp => …)` | `Elarion.Sql` | build and own a `DbDataSource` yourself (any provider) |
+| `AddElarionSqlDataSource()` | `Elarion.Sql` | a `DbDataSource` is already in the container (`AddNpgsqlDataSource`) |
+| `AddElarionSqlDataSourceProvider<T>()` | `Elarion.Sql` | route per scope — a tenant's database, a read replica: `T.GetDataSource()` reads the current tenant from `ICurrentUser` |
 
 ```csharp
 [Handler]

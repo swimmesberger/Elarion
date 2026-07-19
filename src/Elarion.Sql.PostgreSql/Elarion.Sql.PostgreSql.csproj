@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>PostgreSQL provider for the Elarion.Sql EF-free access tier (ADR-0058): AddElarionPostgreSqlDataSource(connectionString) registers one central NpgsqlDataSource — the shared core, EF Core's DbContext analogue — plus the IElarionSqlDataSourceProvider the scoped ISqlSession opens from, with command logging wired from DI. The same data source is shared with Elarion.Migrations.PostgreSql, so the host configures the database once. Keeps Elarion.Sql itself free of any Npgsql reference. NativeAOT-friendly via the Npgsql slim builder.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Sql\Elarion.Sql.csproj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+  </ItemGroup>
+
+</Project>

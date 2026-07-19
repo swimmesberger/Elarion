@@ -6,7 +6,7 @@ using Elarion.AspNetCore;
 using Elarion.Diagnostics;
 using Elarion.Migrations.PostgreSql;
 using Elarion.Sql;
-using Npgsql;
+using Elarion.Sql.PostgreSql;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -31,24 +31,20 @@ var builder = WebApplication.CreateSlimBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("Telemetry")
                        ?? throw new InvalidOperationException("Missing connection string 'Telemetry'.");
 
-// One pooled data source for the host. The slim builder maps exactly the PostgreSQL types this app
-// uses (uuid, text, timestamptz, double precision, jsonb-as-string); `Max Auto Prepare` turns the
-// hot INSERT and SELECTs into prepared statements automatically after a few executions.
-// Command LOGGING — the EF Core `LogTo`/`Database.Command` equivalent — lives in Npgsql: wire the
-// host's logger factory and every command logs its SQL under the "Npgsql.Command" category (visible
-// in the Aspire dashboard's structured logs). Parameter VALUES stay out of logs unless
-// EnableParameterLogging is set — the EnableSensitiveDataLogging analog, so development only.
-// The SQL tier's single source of truth for its data source: AddElarionSqlDataSource wraps the built
-// DbDataSource in the default IElarionSqlDataSourceProvider (the container owns and disposes the source).
-// The Npgsql slim builder is just how this AOT host configures it (command logging, dev-only parameter
-// logging). A multi-tenant host would AddElarionSqlDataSourceProvider<T>() instead.
-builder.Services.AddElarionSqlDataSource(sp => {
-    var db = new NpgsqlSlimDataSourceBuilder(connectionString);
-    db.UseLoggerFactory(sp.GetRequiredService<ILoggerFactory>());
-    if (builder.Environment.IsDevelopment()) db.EnableParameterLogging();
-
-    return db.Build();
-});
+// One central PostgreSQL data source for the EF-free tier — the shared core, EF Core's DbContext analogue:
+// AddElarionPostgreSqlDataSource registers a single pooled NpgsqlDataSource plus the
+// IElarionSqlDataSourceProvider the ISqlSession opens from, and the migration runner below borrows the same
+// source, so the database is configured once. The slim builder maps exactly the PostgreSQL types this app
+// uses (uuid, text, timestamptz, double precision, jsonb-as-string). Command LOGGING — the EF Core
+// `LogTo`/`Database.Command` equivalent — is wired from the host's logger factory automatically, so every
+// command logs its SQL under the "Npgsql.Command" category (visible in the Aspire dashboard's structured
+// logs). Parameter VALUES stay out of logs unless EnableParameterLogging is set (the EnableSensitiveDataLogging
+// analog, development only). A multi-tenant host would register its own IElarionSqlDataSourceProvider instead.
+builder.Services.AddElarionPostgreSqlDataSource(
+    connectionString,
+    db => {
+        if (builder.Environment.IsDevelopment()) db.EnableParameterLogging();
+    });
 builder.Services.AddSingleton(TimeProvider.System);
 
 // The generated bootstrapper: registers the Telemetry module's handlers as typed
@@ -75,10 +71,9 @@ builder.Services.AddElarionSqlUnitOfWork();
 
 // Schema before traffic: the hosted service applies pending embedded migrations and fails startup on
 // error — an edge node serving against a half-migrated schema is worse than one that does not start.
-// (Connection-string overload: the runner uses its own dedicated connection anyway, and the pooled
-// data source above is registered as a lazy DI factory.)
+// The data-source-from-DI overload borrows the central NpgsqlDataSource registered above, so migrations
+// and the access tier share one source (the runner borrows a connection and never disposes the source).
 builder.Services.AddElarionPostgreSqlMigrations(
-    connectionString,
     options => options.AddScripts(typeof(Program).Assembly, "EdgeTelemetry.Api.Migrations."));
 
 // Observability is composition too: when an OTLP endpoint is configured (the Aspire launcher injects

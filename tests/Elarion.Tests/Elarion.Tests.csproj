@@ -71,6 +71,7 @@
     <ProjectReference Include="../../src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj"/>
     <ProjectReference Include="../../src/Elarion.Settings.PostgreSql/Elarion.Settings.PostgreSql.csproj"/>
     <ProjectReference Include="../../src/Elarion.Sql/Elarion.Sql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Sql.PostgreSql/Elarion.Sql.PostgreSql.csproj"/>
     <ProjectReference Include="../../src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj"/>
     <!-- Also applied as an analyzer so the Sql integration tests exercise REAL generated mappers
          compiled into this assembly, not driver-emitted text. -->
