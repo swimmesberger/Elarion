@@ -2,7 +2,7 @@ using Elarion.Migrations;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Sql.PostgreSql;
 
 /// <summary>
 /// A PostgreSQL migration session over one dedicated connection (ADR-0057). When it holds the

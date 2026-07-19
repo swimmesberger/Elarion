@@ -189,12 +189,11 @@ one **central data source** — the shared core, EF Core's `DbContext` analogue 
 [migrations](/docs/capabilities/sql-migrations) both draw from, so the database is configured once:
 
 ```csharp
-// The shared core: one NpgsqlDataSource + the provider the session opens from (command logging auto-wired).
-builder.Services.AddElarionPostgreSqlDataSource(connectionString);
-// The access tier over it:
+// Pick the provider once — one NpgsqlDataSource shared by every subsystem (command logging auto-wired):
+builder.Services.AddElarionPostgreSql(connectionString);
+// ...then the neutral registrations name no provider:
 builder.Services.AddElarionSqlUnitOfWork();
-// Migrations borrow the same source (no connection string repeated):
-builder.Services.AddElarionPostgreSqlMigrations(o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
+builder.Services.AddElarionMigrations(o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
 ```
 
 `AddElarionSqlUnitOfWork()` registers the scoped `ISqlSession` and replaces the default no-op
@@ -209,7 +208,7 @@ Npgsql-free; the Npgsql binding lives in `Elarion.Sql.PostgreSql`. Register the 
 
 | Registration | Package | Use it when |
 | --- | --- | --- |
-| `AddElarionPostgreSqlDataSource(connectionString)` | `Elarion.Sql.PostgreSql` | the common PostgreSQL host — one central `NpgsqlDataSource` shared with migrations |
+| `AddElarionPostgreSql(connectionString)` | `Elarion.Sql.PostgreSql` | the common PostgreSQL host — one central `NpgsqlDataSource` shared by the access tier and migrations |
 | `AddElarionSqlDataSource(sp => …)` | `Elarion.Sql` | build and own a `DbDataSource` yourself (any provider) |
 | `AddElarionSqlDataSource()` | `Elarion.Sql` | a `DbDataSource` is already in the container (`AddNpgsqlDataSource`) |
 | `AddElarionSqlDataSourceProvider<T>()` | `Elarion.Sql` | route per scope — a tenant's database, a read replica: `T.GetDataSource()` reads the current tenant from `ICurrentUser` |

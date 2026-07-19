@@ -18,10 +18,10 @@ public sealed class SqlPostgreSqlServiceCollectionExtensionsTests {
     private const string ConnectionString = "Host=localhost;Database=test;Username=test;Password=test";
 
     [Fact]
-    public void AddElarionPostgreSqlDataSource_SharesOneCoreSourceBetweenProviderAndDi() {
+    public void AddElarionPostgreSql_SharesOneCoreSourceBetweenProviderAndDi() {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddElarionPostgreSqlDataSource(ConnectionString);
+        services.AddElarionPostgreSql(ConnectionString);
         services.AddElarionSqlUnitOfWork();
 
         using var provider = services.BuildServiceProvider();
@@ -32,10 +32,10 @@ public sealed class SqlPostgreSqlServiceCollectionExtensionsTests {
     }
 
     [Fact]
-    public async Task AddElarionPostgreSqlDataSource_RegistersAResolvableSession() {
+    public async Task AddElarionPostgreSql_RegistersAResolvableSession() {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddElarionPostgreSqlDataSource(ConnectionString);
+        services.AddElarionPostgreSql(ConnectionString);
         services.AddElarionSqlUnitOfWork();
 
         await using var provider = services.BuildServiceProvider();
@@ -47,10 +47,10 @@ public sealed class SqlPostgreSqlServiceCollectionExtensionsTests {
     }
 
     [Fact]
-    public void AddElarionPostgreSqlDataSource_InstanceOverload_WrapsTheGivenSource() {
+    public void AddElarionPostgreSql_InstanceOverload_WrapsTheGivenSource() {
         var dataSource = NpgsqlDataSource.Create(ConnectionString);
         var services = new ServiceCollection();
-        services.AddElarionPostgreSqlDataSource(dataSource);
+        services.AddElarionPostgreSql(dataSource);
         services.AddElarionSqlSession();
 
         using var provider = services.BuildServiceProvider();

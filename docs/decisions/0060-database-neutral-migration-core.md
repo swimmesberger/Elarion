@@ -112,3 +112,24 @@ semantics and documents the deltas:
   `dotnet test`; the PostgreSQL provider keeps its Testcontainers integration tests.
 - `docs/reference/packages.mdx`, the `AGENTS.md` package table, `docs/capabilities/sql-migrations.mdx`, and
   the decisions index gain the two new packages.
+
+## Addendum (2026-07): neutral registration and PostgreSQL consolidation
+
+The runner engine was neutral from the start, but the *registration* was still provider-named
+(`AddElarionPostgreSqlMigrations`) and the PostgreSQL provider lived in its own package. Two changes finish the
+neutrality so a host picks its database in exactly one place:
+
+- **Neutral `AddElarionMigrations(configure)`.** The migration core adds an `IMigrationDatabaseFactory` seam
+  (a provider registers one, capturing its data source and engine settings) and a neutral
+  `AddElarionMigrations` that resolves it to build the runner. `MigrationOptions` became a concrete type so the
+  neutral registration can instantiate it, and the PostgreSQL advisory-lock key moved from
+  `PostgreSqlMigrationOptions` (deleted) to an `AddElarionPostgreSql` argument — options carry only neutral
+  concerns now.
+- **PostgreSQL consolidated into `Elarion.Sql.PostgreSql`.** `Elarion.Migrations.PostgreSql` is retired; its
+  migration database, session, history, and statement splitter moved into `Elarion.Sql.PostgreSql`, which is
+  now the one package holding every PostgreSQL-specific piece of the EF-free tier. Its single
+  `AddElarionPostgreSql(connectionString)` registers the shared `NpgsqlDataSource`, the access-tier provider,
+  and the migration-database factory at once (ADR-0058 addendum). The trade-off accepted: PostgreSQL and SQLite
+  migration packaging is now asymmetric (SQLite keeps `Elarion.Migrations.Sqlite` + `AddElarionSqliteMigrations`),
+  and a migration-only PostgreSQL host references `Elarion.Sql.PostgreSql` (it pulls in the small neutral
+  `Elarion.Sql`). The `PostgreSqlMigrationRunner` façade remains for direct/non-DI construction.

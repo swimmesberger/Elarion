@@ -250,14 +250,18 @@ or `AddElarionSqlDataSourceProvider<T>()` (a scoped provider that routes per req
 read replica). This is consistent with the migration runner, which also takes an explicit data source rather
 than resolving a global one, and the seam is designed for that strongest (per-scope routing) implementation.
 
-`Elarion.Sql` keeps no Npgsql reference (ADR-0058); the Npgsql binding is a provider sibling,
-**`Elarion.Sql.PostgreSql`**, mirroring `Elarion.Migrations.PostgreSql`. Its
-`AddElarionPostgreSqlDataSource(connectionString)` registers **one central `NpgsqlDataSource`** — the shared
-core, EF Core's `DbContext` analogue — plus the `IElarionSqlDataSourceProvider` over it, with command logging
-wired from the container's logger factory. `Elarion.Migrations.PostgreSql` gains a data-source-from-DI overload
-(`AddElarionPostgreSqlMigrations(configure)`) that borrows the same source, so the access tier and migrations
-draw from one data source and the host configures the database once — the SQL-tier parallel to how a single
-`DbContext` is central to an EF host.
+`Elarion.Sql` and `Elarion.Migrations` keep no Npgsql reference; the Npgsql binding is a single provider
+package, **`Elarion.Sql.PostgreSql`**, that consolidates *all* PostgreSQL-specific code for the EF-free tier —
+the data source and the migration engine (session advisory lock, history table, statement splitter, moved here
+from the retired `Elarion.Migrations.PostgreSql`). Its single `AddElarionPostgreSql(connectionString)` picks the
+provider for **every** subsystem at once: it registers one central `NpgsqlDataSource` (the shared core, EF
+Core's `DbContext` analogue, command logging wired from DI), the `IElarionSqlDataSourceProvider` the session
+opens from, and the `IMigrationDatabaseFactory` the migration runner resolves. The subsequent registrations are
+provider-neutral — `AddElarionSqlUnitOfWork` (access) and the migration core's `AddElarionMigrations` (schema)
+name no database — so swapping providers is a one-line change. This is how a single `DbContext` is central to
+an EF host, applied to the EF-free tier: one data source, one provider choice, neutral wiring on top. To make
+the migration registration neutral, `MigrationOptions` became a concrete type and the PostgreSQL advisory-lock
+key moved from options to an `AddElarionPostgreSql` argument (see [ADR-0060](0060-database-neutral-migration-core.md)).
 
 Preferring API design over pre-1.0 compatibility, the `DbDataSource` receiver was **removed**, not kept
 alongside: the query/write surface now lives on `ISqlSession` (the handler entry point) and the

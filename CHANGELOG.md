@@ -24,13 +24,16 @@ minor releases may include breaking changes.
   `AddElarionSqlDataSourceProvider<T>()` routes per request (tenant database, read replica). The tier resolves
   the provider and nothing else, so there is no ambient `DbDataSource` it assumes. Covered by Docker-gated
   integration tests against real PostgreSQL.
-- **`Elarion.Sql.PostgreSql` — PostgreSQL provider for the EF-free SQL tier.** New package mirroring
-  `Elarion.Migrations.PostgreSql`. `AddElarionPostgreSqlDataSource(connectionString, configure?)` registers one
-  central `NpgsqlDataSource` (the shared core, EF Core's `DbContext` analogue — command logging wired from DI)
-  plus the `IElarionSqlDataSourceProvider` the session opens from; an `NpgsqlDataSource` overload wraps a
-  host-built source. `Elarion.Migrations.PostgreSql` gains a data-source-from-DI overload
-  (`AddElarionPostgreSqlMigrations(configure)`) that borrows that same source, so the SQL access tier and
-  migrations share one data source and the database is configured once. `Elarion.Sql` itself stays Npgsql-free.
+- **`Elarion.Sql.PostgreSql` — one provider package for the whole EF-free PostgreSQL tier.** The single
+  `AddElarionPostgreSql(connectionString, configure?, advisoryLockKey?)` picks PostgreSQL for **every**
+  subsystem at once: it registers one central `NpgsqlDataSource` (the shared core, EF Core's `DbContext`
+  analogue — command logging wired from DI), the `IElarionSqlDataSourceProvider` the session opens from, and
+  the `IMigrationDatabaseFactory` the migration runner resolves; an `NpgsqlDataSource` overload wraps a
+  host-built source. The subsequent registrations are provider-neutral — `AddElarionSqlUnitOfWork()` (access)
+  and the migration core's new `AddElarionMigrations(configure)` (schema) — so swapping databases is a
+  one-line change. This package now contains all PostgreSQL-specific code for the tier, including the migration
+  engine (session advisory lock, history table, statement splitter). `Elarion.Sql` and `Elarion.Migrations`
+  stay Npgsql-free.
 - **Self-typed request markers and inferred dispatch (ADR-0065).** `Elarion.Abstractions` adds optional
   generic marker forms — `IRequest<TSelf, TResponse>`, `ICommand<TSelf, TResponse>`,
   `IQuery<TSelf, TResponse>`, and `IStreamRequest<TSelf, TItem>` — that declare a request's response type
@@ -44,6 +47,15 @@ minor releases may include breaking changes.
   (warnings) when a handler's response or stream item drifts from the marker's declared type.
 
 ### Changed
+- **`Elarion.Migrations.PostgreSql` is retired; its code moved into `Elarion.Sql.PostgreSql` (breaking).** The
+  provider-named `AddElarionPostgreSqlMigrations(connectionString | dataSource, configure)` is replaced by the
+  single `AddElarionPostgreSql(connectionString)` (provider choice) plus the neutral
+  `AddElarionMigrations(configure)`. The migration core adds an `IMigrationDatabaseFactory` seam and the neutral
+  `AddElarionMigrations`; `MigrationOptions` became a concrete type, and the PostgreSQL advisory-lock key moved
+  from `PostgreSqlMigrationOptions` (deleted) to an `AddElarionPostgreSql` argument. The `PostgreSqlMigrationRunner`
+  façade remains for direct/non-DI construction (now taking `MigrationOptions`). SQLite is unchanged
+  (`Elarion.Migrations.Sqlite` + `AddElarionSqliteMigrations`). Migration: `AddElarionPostgreSql(cs)` +
+  `AddElarionMigrations(o => o.AddScripts(...))`.
 - **`Elarion.Sql` data access is now `ISqlSession`-based; the `DbDataSource` query/write extensions are
   removed (breaking).** The query/write convenience surface (`QueryAsync`, `QueryFirstOrDefaultAsync`,
   `QuerySingleOrDefaultAsync`, `QueryUnbufferedAsync`, `ExecuteAsync`, `ExecuteScalarAsync`, `InsertAsync`,

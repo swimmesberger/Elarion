@@ -3,40 +3,43 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
-namespace Elarion.Migrations.PostgreSql;
+namespace Elarion.Sql.PostgreSql;
 
 /// <summary>
 /// The PostgreSQL <see cref="IMigrationDatabase"/> (ADR-0057): opens one dedicated connection per
 /// migration operation and, for exclusive sessions, acquires a <em>session-level</em>
 /// <c>pg_advisory_lock</c> — session scope means a crashed runner releases the lock with its connection,
-/// and a transaction-scoped lock would hang <c>CREATE INDEX CONCURRENTLY</c> scripts.
+/// and a transaction-scoped lock would hang <c>CREATE INDEX CONCURRENTLY</c> scripts. The advisory-lock key is
+/// a provider-registration argument (see <c>AddElarionPostgreSql</c>), not a migration option.
 /// </summary>
 internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
     private readonly string? _connectionString;
     private readonly NpgsqlDataSource? _dataSource;
-    private readonly PostgreSqlMigrationOptions _options;
+    private readonly MigrationOptions _options;
+    private readonly long _advisoryLockKey;
     private readonly ILogger _logger;
 
-    public PostgreSqlMigrationDatabase(string connectionString, PostgreSqlMigrationOptions options,
-        ILogger? logger = null)
-        : this(options, logger) {
+    public PostgreSqlMigrationDatabase(string connectionString, MigrationOptions options,
+        long advisoryLockKey, ILogger? logger = null)
+        : this(options, advisoryLockKey, logger) {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         // A genuinely dedicated physical connection: closing it always releases the session advisory
         // lock server-side, so no error path can park a pooled connector that still holds the lock.
         _connectionString = new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString;
     }
 
-    public PostgreSqlMigrationDatabase(NpgsqlDataSource dataSource, PostgreSqlMigrationOptions options,
-        ILogger? logger = null)
-        : this(options, logger) {
+    public PostgreSqlMigrationDatabase(NpgsqlDataSource dataSource, MigrationOptions options,
+        long advisoryLockKey, ILogger? logger = null)
+        : this(options, advisoryLockKey, logger) {
         ArgumentNullException.ThrowIfNull(dataSource);
         _dataSource = dataSource;
     }
 
-    private PostgreSqlMigrationDatabase(PostgreSqlMigrationOptions options, ILogger? logger) {
+    private PostgreSqlMigrationDatabase(MigrationOptions options, long advisoryLockKey, ILogger? logger) {
         ArgumentNullException.ThrowIfNull(options);
         MigrationTableName.Validate(options.HistoryTableName);
         _options = options;
+        _advisoryLockKey = advisoryLockKey;
         _logger = logger ?? NullLogger.Instance;
     }
 
@@ -59,7 +62,7 @@ internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
             _options.HistoryTableName,
             CommandTimeoutSeconds,
             exclusive,
-            _options.AdvisoryLockKey,
+            _advisoryLockKey,
             LockTimeoutSeconds,
             _logger);
     }
@@ -77,7 +80,7 @@ internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
         // dies with the connection — no lock row to clean up after a crash.
         await using var command = new NpgsqlCommand("SELECT pg_advisory_lock($1)", connection) {
             CommandTimeout = LockTimeoutSeconds,
-            Parameters = { new NpgsqlParameter<long> { TypedValue = _options.AdvisoryLockKey } }
+            Parameters = { new NpgsqlParameter<long> { TypedValue = _advisoryLockKey } }
         };
         await command.ExecuteNonQueryAsync(cancellationToken);
     }

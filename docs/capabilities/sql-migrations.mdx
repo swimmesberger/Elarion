@@ -12,14 +12,16 @@ hole (Evolve is dormant, Flyway is a JVM tool). `Elarion.Migrations` is that tie
 minimal, AOT-compatible, and designed explicitly against Flyway's documented production failure modes.
 The engine is **database-neutral**; a provider package supplies the SQL and locking:
 
-| Provider package | Use it for | Driver |
-| --- | --- | --- |
-| `Elarion.Migrations.PostgreSql` | Multi-node PostgreSQL AOT hosts (session advisory lock serializes 1–10 nodes) | `Npgsql` |
-| `Elarion.Migrations.Sqlite` | Single-node / edge hosts on a local file (one file per node) | `Microsoft.Data.Sqlite` |
+| Provider package | Registration | Use it for | Driver |
+| --- | --- | --- | --- |
+| `Elarion.Sql.PostgreSql` | `AddElarionPostgreSql` + `AddElarionMigrations` | Multi-node PostgreSQL AOT hosts (session advisory lock serializes 1–10 nodes) | `Npgsql` |
+| `Elarion.Migrations.Sqlite` | `AddElarionSqliteMigrations` | Single-node / edge hosts on a local file (one file per node) | `Microsoft.Data.Sqlite` |
 
-The same tier's **access half** — generated row mappers over hand-written SQL — is
-[SQL mapping](/docs/capabilities/sql-mapping) (ADR-0058); neither package requires the other. Both run
-together in the [`samples/EdgeTelemetry`](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry)
+On PostgreSQL the migration engine ships in **`Elarion.Sql.PostgreSql`** alongside the tier's **access
+half** — generated row mappers over hand-written SQL, [SQL mapping](/docs/capabilities/sql-mapping)
+(ADR-0058) — so the single `AddElarionPostgreSql(connectionString)` picks the provider for both and they
+share one `NpgsqlDataSource`. `AddElarionMigrations` itself is provider-neutral. Both run together in the
+[`samples/EdgeTelemetry`](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry)
 NativeAOT host.
 
 Pick the row that matches your app:
@@ -27,7 +29,7 @@ Pick the row that matches your app:
 | Your app | Schema tool |
 | --- | --- |
 | Uses EF Core | EF migrations (`UseElarion*` model hooks ride your `DbContext`) — see [Entity Framework Core](/docs/capabilities/entity-framework) |
-| EF-free / NativeAOT, multi-node on PostgreSQL, no deploy pipeline | **This runner** (`Elarion.Migrations.PostgreSql`), applied at startup |
+| EF-free / NativeAOT, multi-node on PostgreSQL, no deploy pipeline | **This runner** (`Elarion.Sql.PostgreSql`), applied at startup |
 | EF-free / NativeAOT, single-node / edge on a local file | **This runner** (`Elarion.Migrations.Sqlite`), applied at startup |
 | Either, with real deploy infrastructure | Bundles / `migrations script --idempotent` / Flyway in CI — replace the tool, don't grow the default |
 
@@ -46,9 +48,9 @@ apart from the registration method:
 ```
 
 ```csharp
-// PostgreSQL
-builder.Services.AddElarionPostgreSqlMigrations(
-    builder.Configuration.GetConnectionString("Default")!,
+// PostgreSQL — pick the provider once (shared with the SQL access tier), then register migrations neutrally:
+builder.Services.AddElarionPostgreSql(builder.Configuration.GetConnectionString("Default")!);
+builder.Services.AddElarionMigrations(
     o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
 
 // SQLite (single-node / edge)
