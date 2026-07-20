@@ -149,7 +149,8 @@ removes. How you obtain the session states the semantics:
 - **In a handler**, inject the scoped `ISqlSession` — writes join the framework unit of work
   ([Transactions](#transactions-unit-of-work)).
 - **In a singleton-eligible handler** (no scoped dependencies, deliberately no unit of work), inject the
-  singleton `ISqlDatabase` handle and open an owning one-shot session per operation.
+  singleton `ISqlDatabase` handle: `OpenSessionAsync` for per-call auto-commit, `BeginTransactionAsync`
+  when several statements must commit together.
 - **Owning your own connection** — DI-free / NativeAOT hosts, tooling, tests — bridge with
   `AsSqlSession`, deciding the transaction **once at wrap time**:
 
@@ -163,9 +164,15 @@ public sealed class ListOpenOrders(ISqlDatabase db) {
     }
 }
 
-// Tooling that owns a connection and transaction: wrap once — every write below enlists it.
-await using var transaction = await connection.BeginTransactionAsync(ct);
-var tx = connection.AsSqlSession(transaction);
+// Atomic multi-write outside the unit of work: an owning transactional session — commit on it,
+// dispose without commit rolls back. No hand-assembled connection/transaction/wrap.
+await using var tx = await db.BeginTransactionAsync(ct);
+await tx.ExecuteAsync($"UPDATE {Account.Table} SET session_key = {key} WHERE id = {id}", ct);
+await tx.ExecuteAsync($"UPDATE {Ticket.Table} SET ticket = NULL WHERE account_id = {id}", ct);
+await tx.CommitAsync(ct);
+
+// Only when you already own the connection (and maybe its transaction): wrap once — every write enlists.
+var owned = connection.AsSqlSession(transaction);
 ```
 
 **Migrating a handler that injected `NpgsqlDataSource`/`DbDataSource` directly:** the whole change is the
@@ -173,9 +180,12 @@ injected type — replace it with `ISqlDatabase` and open sessions instead of co
 (`dataSource.OpenConnectionAsync` → `db.OpenSessionAsync`). `OpenSessionAsync` deliberately does not exist
 on `DbDataSource`: going through the handle is what lets tenant/replica routing apply.
 
-The wrap is a cheap non-owning view (disposing it disposes nothing); because the transaction is bound at
-wrap, there is no per-call `transaction:` parameter anywhere — a write can never accidentally run outside
-the transaction its scope declared.
+The wrap is a cheap non-owning view (disposing it disposes nothing); because the transaction is bound when
+the session is created — wrap, `BeginTransactionAsync`, or the framework unit of work — there is no
+per-call `transaction:` parameter anywhere: a write can never accidentally run outside the transaction its
+scope declared. Commit lives only on `ISqlTransaction` (and the unit-of-work scope), never on
+`ISqlSession` itself, so a scoped handler cannot commit the framework's transaction out from under the
+decorator.
 
 | Call | Shape |
 | --- | --- |
@@ -246,7 +256,9 @@ Register it with one of:
 
 Beyond feeding the scoped session, the handle is directly usable: `db.OpenSessionAsync(ct)` opens an
 **owning** one-shot session over a fresh pooled connection (autonomous per-call semantics, disposed with
-the session) — which upgrades the singleton-eligible pattern from three steps to one:
+the session), and `db.BeginTransactionAsync(ct)` opens the transactional variant — an `ISqlTransaction`
+whose statements commit or roll back together (commit explicitly; dispose without commit rolls back) —
+which upgrades the singleton-eligible pattern from three steps to one:
 
 ```csharp
 public sealed class WorldTick(ISqlDatabase db) {          // singleton-eligible: no scoped dependencies

@@ -25,7 +25,11 @@ minor releases may include breaking changes.
   the handle and nothing else, so there is no ambient `DbDataSource` it assumes. Beyond feeding the scoped
   session, the handle is directly usable: `db.OpenSessionAsync(ct)` opens an owning one-shot session
   (autonomous per-call semantics) — the one-call path for singleton-eligible handlers, which cannot inject
-  the scoped `ISqlSession`. Migration for handlers that injected `NpgsqlDataSource`/`DbDataSource` directly:
+  the scoped `ISqlSession` — and `db.BeginTransactionAsync(ct)` opens the transactional variant, an
+  `ISqlTransaction : ISqlSession` whose statements commit or roll back together (commit explicitly; dispose
+  without commit rolls back, mirroring the unit-of-work scope; optional isolation level). Commit deliberately
+  lives only on `ISqlTransaction`, never on `ISqlSession`, so a scoped handler cannot commit the framework's
+  transaction out from under the decorator. Migration for handlers that injected `NpgsqlDataSource`/`DbDataSource` directly:
   the whole change is the injected type — replace it with `ISqlDatabase` and open sessions instead of
   connections (`OpenSessionAsync` deliberately lives on the handle, not on `DbDataSource`, so tenant/replica
   routing applies). (For preview-package consumers: `ISqlDatabase`/`AddElarionSqlDatabase` were briefly
