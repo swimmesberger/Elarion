@@ -25,8 +25,11 @@ minor releases may include breaking changes.
   the handle and nothing else, so there is no ambient `DbDataSource` it assumes. Beyond feeding the scoped
   session, the handle is directly usable: `db.OpenSessionAsync(ct)` opens an owning one-shot session
   (autonomous per-call semantics) — the one-call path for singleton-eligible handlers, which cannot inject
-  the scoped `ISqlSession`. (For preview-package consumers: `ISqlDatabase`/`AddElarionSqlDatabase` were
-  briefly published as `IElarionSqlDataSourceProvider`/`AddElarionSqlDataSource*`.) Covered by Docker-gated
+  the scoped `ISqlSession`. Migration for handlers that injected `NpgsqlDataSource`/`DbDataSource` directly:
+  the whole change is the injected type — replace it with `ISqlDatabase` and open sessions instead of
+  connections (`OpenSessionAsync` deliberately lives on the handle, not on `DbDataSource`, so tenant/replica
+  routing applies). (For preview-package consumers: `ISqlDatabase`/`AddElarionSqlDatabase` were briefly
+  published as `IElarionSqlDataSourceProvider`/`AddElarionSqlDataSource*`.) Covered by Docker-gated
   integration tests against real PostgreSQL.
 - **`Elarion.Sql.PostgreSql` — one provider package for the whole EF-free PostgreSQL tier.** The single
   `AddElarionPostgreSql(connectionString, configure?, advisoryLockKey?)` picks PostgreSQL for **every**

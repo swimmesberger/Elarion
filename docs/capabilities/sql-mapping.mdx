@@ -155,13 +155,23 @@ removes. How you obtain the session states the semantics:
 
 ```csharp
 // Singleton-eligible handler: one call through the seam, autonomous per-call semantics.
-await using var session = await db.OpenSessionAsync(ct);           // db is the injected ISqlDatabase
-var rows = await session.QueryAsync<Order>($"{Order.Select} WHERE status = {status}", ct);
+// The receiver is ISqlDatabase — OpenSessionAsync lives on the handle, NOT on a data source.
+public sealed class ListOpenOrders(ISqlDatabase db) {
+    public async ValueTask<Result<List<Order>>> HandleAsync(Query query, CancellationToken ct) {
+        await using var session = await db.OpenSessionAsync(ct);
+        return await session.QueryAsync<Order>($"{Order.Select} WHERE status = {query.Status}", ct);
+    }
+}
 
 // Tooling that owns a connection and transaction: wrap once — every write below enlists it.
 await using var transaction = await connection.BeginTransactionAsync(ct);
 var tx = connection.AsSqlSession(transaction);
 ```
+
+**Migrating a handler that injected `NpgsqlDataSource`/`DbDataSource` directly:** the whole change is the
+injected type — replace it with `ISqlDatabase` and open sessions instead of connections
+(`dataSource.OpenConnectionAsync` → `db.OpenSessionAsync`). `OpenSessionAsync` deliberately does not exist
+on `DbDataSource`: going through the handle is what lets tenant/replica routing apply.
 
 The wrap is a cheap non-owning view (disposing it disposes nothing); because the transaction is bound at
 wrap, there is no per-call `transaction:` parameter anywhere — a write can never accidentally run outside
