@@ -24,9 +24,13 @@ the framer owns the header/prefix/delimiter, the codec never sees or supplies it
 
 - `TryReadMessage` reports `consumed` = the *whole* wire span it advances past (reserved prologue + payload
   + any trailer), but hands back `message` = the **payload slice alone**. Don't subtract the header length
-  from `message` — it already excludes the header; `consumed` is what accounts for it.
-- `WriteMessage` receives `payload` = the codec's bytes only, and **prepends its own framing** onto the
-  output. Don't expect `payload` to already contain a reserved prologue.
+  from `message` — it already excludes the header; `consumed` is what accounts for it. A transforming
+  framer (a negotiated cipher) returns the decoded payload from its own buffer instead of a slice.
+- Outbound there is **one emit path**: `BeginMessage` emits/reserves the frame's prologue and returns its
+  length; the payload is then serialized in place; `CompleteMessage` backfills the prologue (length,
+  checksum, auth tag), may transform the payload in place (same length), and appends any epilogue. The
+  base class provides `WriteMessage(payload, output)` as a convenience over the same pair — framing and
+  any cipher logic are written exactly once.
 
 ```csharp
 // A 2-byte reserved prologue (e.g. a type tag) before the body:
@@ -42,23 +46,83 @@ public sealed class VendorFramer : TcpMessageFramer {
         return true;
     }
 
-    public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
-        WriteProlog(output);      // the framer adds the reserved prologue...
-        output.Write(payload);    // ...then the codec's payload, unchanged
+    public override int BeginMessage(IBufferWriter<byte> output) {
+        ReserveProlog(output);    // emit or zero-reserve the prologue...
+        return Prologue;          // ...and report its length for the backfill
+    }
+
+    public override void CompleteMessage(Span<byte> prologue, Span<byte> payload, IBufferWriter<byte> output) {
+        FillProlog(prologue, payload);   // the payload is serialized — backfill length/type/checksum
     }
 }
 ```
 
 `LengthPrefixedTcpFramer` is the shipped reference for exactly this shape (4-byte length prefix as the
-prologue). The codec's `OnBinaryAsync` then receives that payload slice — never the framing bytes.
+prologue, backfilled in `CompleteMessage`). The codec's `OnBinaryAsync` then receives that payload
+slice — never the framing bytes.
 
 **Establishment order is fixed**: raw TCP → optional TLS → framer → framed application authentication →
 registration → `OnOpenedAsync` → messages. Frame limits count **total unconsumed wire bytes** —
 prefix, variable header, body, and trailer included — so `MaxInboundFrameBytes` bounds what a peer can
 make the endpoint buffer before a single message completes, and `MaxOutboundFrameBytes` bounds what a
 codec can frame outward; both are validated before allocation and apply to the handshake too. Shared
-endpoint framers must be stateless and thread-safe; a framer carrying negotiated state belongs in a
-per-connection override from `ConfigureConnectionAsync`.
+endpoint framers must be stateless and thread-safe; a framer carrying negotiated state is created per
+connection by the session and returned via `Settings`.
+
+## Sessions
+
+The handler you register is a **factory**: `CreateSessionAsync(peer, ct)` runs before any byte is
+exchanged, does the binding-configuration lookup (or rejects the link by returning `null` — the socket
+closes, nothing is registered), and creates one `TcpConnectionSession` for the connection. The session
+owns everything per-connection: its `Settings` override the endpoint options (and its framer governs the
+handshake itself), `AuthenticateAsync` runs the framed handshake, and `CreateProtocol` builds the codec.
+Per-connection state — the binding row, a stateful framer, key material derived during authentication —
+lives in typed session fields and flows into the codec's constructor; the handler stays a stateless
+singleton serving every connection concurrently.
+
+## Negotiated framing state (encryption toggles)
+
+A session's framer may carry **negotiated state** — the classic case is a protocol whose handshake
+derives a session key and then switches the link into encrypted framing. The session creates the framer,
+returns it through `Settings`, and hands it (typed) to the codec it creates; the codec flips the state at
+the exact protocol point the wire format defines:
+
+```csharp
+sealed class CipherSession : TcpConnectionSession {
+    private readonly CipherFramer _framer = new();
+
+    public override TcpConnectionSettings? Settings => new() { Framer = _framer };
+
+    public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+        TcpHandshakeContext handshake, CancellationToken ct) { /* challenge/response */ }
+
+    public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) =>
+        new CipherProtocol(connection, _framer);
+}
+
+// In the codec:
+public async ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+    if (TryCompleteKeyExchange(message, out var sessionKey, out var reply)) {
+        // A completed send means the frame was physically written, so awaiting the plaintext
+        // mode-switch reply puts the flip exactly between it and the next outbound frame.
+        await connection.SendBinaryAsync(reply, ct);
+        framer.EnableEncryption(sessionKey);
+        return;
+    }
+    // ... normal dispatch
+}
+```
+
+The adapter does not synchronize framer state: mutate inbound-affecting state only on the codec's inbound
+path (it runs on the receive loop, so no read is in flight) and outbound-affecting state only after the
+mode-switch send completed with no concurrent sends admitted. Two contract points make a cipher framer
+implementable: `TryReadMessage` may return **framer-owned memory** (the decrypted payload from the
+framer's own buffer — a slice of the receive buffer is impossible once bytes are transformed), and
+`CompleteMessage` receives the payload as a **writable span** for same-length in-place transforms —
+encrypt the serialized payload where it lies and backfill the tag into the reserved prologue. Because
+`WriteMessage` is a convenience over the same pair, the cipher is written once and applies on every send
+route. In simulated links, give the client side its own framer instance (`InMemoryTcpLink.Start(…,
+clientFramer: new CipherFramer())`) — the two ends of a real link never share framing state.
 
 ## Listeners and dialers
 
@@ -80,8 +144,9 @@ builder.Services.AddElarionTcpConnectionDialer<DeviceLinkHandler>(o => {
 
 Each `Add…` call is one endpoint — listen on several ports (one per device channel type) or dial
 several devices, each with its own handler, framer, and options. The handler subclasses
-`TcpConnectionHandler`; device protocols with no credential exchange ticket straight from
-`handshake.RemoteEndPoint`/binding configuration.
+`TcpConnectionHandler` and creates one session per link; device protocols with no credential exchange
+ticket straight from what the handler's binding-configuration lookup handed the session (which port,
+which peer).
 
 ## Runtime endpoint management
 
@@ -115,12 +180,12 @@ bound is `Faulted` with the reason; a dialer between attempts is `Dialing` carry
 and `endpoints.StatusChanged` fires on every transition, ready to be projected onto a client event so
 an admin UI shows binding state live.
 
-Settings can also vary **per connection on one endpoint**: override
-`ConfigureConnectionAsync(TcpConnectionPeer, …)` and return `TcpConnectionSettings` (framer, size caps,
-send capacity, TLS policy, idle window, transport tag — nulls inherit the endpoint options). It runs
-before any byte is exchanged, so a binding-configuration lookup keyed on the peer can pick the wire
-framing — or the TLS certificate — that governs the handshake itself — the shape gateways need when
-differently-speaking device families share one ingress port.
+Settings can also vary **per connection on one endpoint**: the session's `Settings` returns
+`TcpConnectionSettings` (framer, size caps, send capacity, TLS policy, idle window, transport tag —
+nulls inherit the endpoint options). `CreateSessionAsync` runs before any byte is exchanged, so a
+binding-configuration lookup keyed on the peer can pick the wire framing — or the TLS certificate — that
+governs the handshake itself — the shape gateways need when differently-speaking device families share
+one ingress port.
 
 ## TLS
 

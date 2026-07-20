@@ -6,7 +6,8 @@ namespace Elarion.Connections.Tcp;
 /// Accumulates the byte stream and extracts complete messages through the framer, with a hard cap on the
 /// total wire bytes of one unconsumed frame (prefix/header/body/trailer included). The same reader serves
 /// handshake IO and the main receive loop, so both enforce the same limit. A returned message's payload
-/// slices the internal buffer and is only valid until the next read.
+/// slices the internal buffer — or is framer-owned memory when the framer transforms (e.g. decrypts) the
+/// wire bytes — and is only valid until the next read either way.
 /// </summary>
 internal sealed class TcpMessageReader {
     private readonly Stream _stream;
@@ -95,16 +96,19 @@ internal sealed class TcpMessageReader {
         if (consumed == 0)
             throw new TcpMessageFramingException("The TCP framer completed a message without consuming any bytes.");
 
-        // Memory.Equals cannot establish that one memory is a slice of another. The reader always presents
-        // an array-backed slice, so require the returned memory to reference that exact array and prove its
-        // offset/range lie inside both the presented data and the reported consumed region.
-        if (!MemoryMarshal.TryGetArray(presented, out var presentedSegment)
-            || !MemoryMarshal.TryGetArray(message, out var messageSegment)
-            || !ReferenceEquals(presentedSegment.Array, messageSegment.Array)
-            || messageSegment.Offset < presentedSegment.Offset
-            || (long)messageSegment.Offset + messageSegment.Count > (long)presentedSegment.Offset + consumed)
+        // A framer may return either a slice of the presented buffer or memory it owns — a transforming
+        // (e.g. decrypting) framer yields the decoded payload from its own buffer, and "valid until the
+        // next read" is then the framer's contract to uphold. Only a slice of the reader's own array can
+        // be invalidated by compaction and the next stream read, so bounds are enforced exactly there: the
+        // slice must lie inside the reported consumed region. Memory.Equals cannot establish slice-ness;
+        // the backing-array identity check can (the reader always presents an array-backed slice).
+        if (MemoryMarshal.TryGetArray(presented, out var presentedSegment)
+            && MemoryMarshal.TryGetArray(message, out var messageSegment)
+            && ReferenceEquals(presentedSegment.Array, messageSegment.Array)
+            && (messageSegment.Offset < presentedSegment.Offset
+                || (long)messageSegment.Offset + messageSegment.Count > (long)presentedSegment.Offset + consumed))
             throw new TcpMessageFramingException(
-                "The TCP framer returned a complete message outside the presented consumed buffer region.");
+                "The TCP framer returned a slice of the receive buffer outside the reported consumed region.");
     }
 }
 

@@ -9,11 +9,11 @@ namespace Elarion.Connections.Tcp;
 /// (serial-bridge reality); without one, the message starts where the last one ended.
 /// </summary>
 /// <remarks>
-/// Delimiters are structural, so a payload cannot contain them: <see cref="WriteMessage"/> throws
-/// <see cref="ArgumentException"/> when the payload contains the end delimiter (or the start delimiter,
-/// when one is configured) — silently emitting it would make the peer parse one message as two, a silent
-/// framing desync. A codec whose payloads may carry those bytes must escape/encode them (e.g. base64 or
-/// hex on a line-framed link) or use <see cref="LengthPrefixedTcpFramer"/>.
+/// Delimiters are structural, so a payload cannot contain them: framing a payload that contains the end
+/// delimiter (or the start delimiter, when one is configured) throws <see cref="ArgumentException"/> —
+/// silently emitting it would make the peer parse one message as two, a silent framing desync. A codec
+/// whose payloads may carry those bytes must escape/encode them (e.g. base64 or hex on a line-framed
+/// link) or use <see cref="LengthPrefixedTcpFramer"/>.
 /// </remarks>
 /// <param name="end">The byte that terminates every message — must never occur inside a payload.</param>
 /// <param name="start">The optional byte that opens every message (telegram envelope); when set, it must
@@ -52,36 +52,6 @@ public sealed class DelimitedTcpFramer(byte end, byte? start = null) : TcpMessag
     }
 
     /// <inheritdoc />
-    /// <exception cref="ArgumentException">The payload contains the end delimiter (or the configured start
-    /// delimiter) — unframeable without desyncing the peer; escape it in the codec instead.</exception>
-    public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
-        if (payload.IndexOf(end) >= 0)
-            throw new ArgumentException(
-                $"The payload contains the end delimiter 0x{end:X2} — delimiter framing cannot represent it "
-                + "(the peer would parse one message as two). Escape/encode the payload in the codec, or use "
-                + "length-prefixed framing.",
-                nameof(payload));
-
-        if (start is { } forbiddenStart && payload.IndexOf(forbiddenStart) >= 0)
-            throw new ArgumentException(
-                $"The payload contains the start delimiter 0x{forbiddenStart:X2} — delimiter framing cannot "
-                + "represent it (a resynchronizing peer would misparse the message boundary). Escape/encode "
-                + "the payload in the codec, or use length-prefixed framing.",
-                nameof(payload));
-
-        if (start is { } startByte) {
-            var head = output.GetSpan(1);
-            head[0] = startByte;
-            output.Advance(1);
-        }
-
-        output.Write(payload);
-        var tail = output.GetSpan(1);
-        tail[0] = end;
-        output.Advance(1);
-    }
-
-    /// <inheritdoc />
     public override int BeginMessage(IBufferWriter<byte> output) {
         if (start is not { } startByte) return 0;
 
@@ -95,7 +65,7 @@ public sealed class DelimitedTcpFramer(byte end, byte? start = null) : TcpMessag
     /// <exception cref="ArgumentException">The payload contains the end delimiter (or the configured start
     /// delimiter) — unframeable without desyncing the peer; escape it in the codec instead. The send fails,
     /// the connection lives.</exception>
-    public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
+    public override void CompleteMessage(Span<byte> prologue, Span<byte> payload, IBufferWriter<byte> output) {
         // Validation must happen before the epilogue write invalidates the payload view.
         if (payload.IndexOf(end) >= 0)
             throw new ArgumentException(

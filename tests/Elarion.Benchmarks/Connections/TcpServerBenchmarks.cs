@@ -218,6 +218,13 @@ public class TcpServerBenchmarks {
 
     /// <summary>No-handshake ticket (identity by binding) and a codec that only counts.</summary>
     public sealed class CountingConnectionHandler(MessageCounter counter) : TcpConnectionHandler {
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new CountingConnectionSession(counter));
+        }
+    }
+
+    private sealed class CountingConnectionSession(MessageCounter counter) : TcpConnectionSession {
         public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) {
             // Authenticated tickets require a principal id — id-less ones are rejected at registration.
@@ -235,6 +242,13 @@ public class TcpServerBenchmarks {
     /// <summary>Same, but the codec decodes each message to a string first — the priced text convenience,
     /// now living where it belongs (in the codec).</summary>
     public sealed class DecodingConnectionHandler(MessageCounter counter) : TcpConnectionHandler {
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new DecodingConnectionSession(counter));
+        }
+    }
+
+    private sealed class DecodingConnectionSession(MessageCounter counter) : TcpConnectionSession {
         public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) {
             return ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {

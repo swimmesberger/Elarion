@@ -271,17 +271,29 @@ public sealed class TcpTlsConnectionTests {
     }
 
     private class TlsChallengeHandler : TcpConnectionHandler {
-        public int AuthenticationCalls { get; private set; }
+        public int AuthenticationCalls { get; set; }
 
-        public int FramedResponses { get; private set; }
+        public int FramedResponses { get; set; }
+
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer,
+            CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new TlsChallengeSession(this, null));
+        }
+    }
+
+    private sealed class TlsChallengeSession(
+        TlsChallengeHandler handler,
+        TcpConnectionSettings? settings) : TcpConnectionSession {
+        public override TcpConnectionSettings? Settings => settings;
 
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake,
             CancellationToken ct) {
-            AuthenticationCalls++;
+            handler.AuthenticationCalls++;
             await handshake.SendTextAsync("challenge", ct);
             var response = await handshake.ReceiveTextAsync(ct);
-            if (response is not null) FramedResponses++;
+            if (response is not null) handler.FramedResponses++;
 
             if (response is null || !response.StartsWith("device:", StringComparison.Ordinal)) return null;
 
@@ -298,29 +310,30 @@ public sealed class TcpTlsConnectionTests {
     }
 
     private sealed class PerConnectionTlsHandler(TcpServerTlsOptions tls) : TlsChallengeHandler {
-        public override ValueTask<TcpConnectionSettings?> ConfigureConnectionAsync(
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
             TcpConnectionPeer peer,
             CancellationToken ct) {
-            return ValueTask.FromResult<TcpConnectionSettings?>(new TcpConnectionSettings { Tls = tls });
+            return ValueTask.FromResult<TcpConnectionSession?>(
+                new TlsChallengeSession(this, new TcpConnectionSettings { Tls = tls }));
         }
     }
 
     private sealed class InvalidDirectionHandler : TlsChallengeHandler {
-        public int ConfigureCalls { get; private set; }
-        public int FactoryCalls { get; private set; }
+        public int ConfigureCalls { get; set; }
+        public int FactoryCalls { get; set; }
 
-        public override ValueTask<TcpConnectionSettings?> ConfigureConnectionAsync(
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
             TcpConnectionPeer peer,
             CancellationToken ct) {
             ConfigureCalls++;
-            return ValueTask.FromResult<TcpConnectionSettings?>(new TcpConnectionSettings {
+            return ValueTask.FromResult<TcpConnectionSession?>(new TlsChallengeSession(this, new TcpConnectionSettings {
                 Tls = new TcpClientTlsOptions {
                     CreateAuthenticationOptionsAsync = (_, _) => {
                         FactoryCalls++;
                         return ValueTask.FromResult(new SslClientAuthenticationOptions { TargetHost = "localhost" });
                     }
                 }
-            });
+            }));
         }
     }
 

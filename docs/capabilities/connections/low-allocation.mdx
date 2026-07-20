@@ -61,8 +61,12 @@ await connection.SendBinaryAsync(reply, static (reply, output) => {
 
 Admission, backpressure (`MaxPendingSends`), oversize handling, and completed-send meaning are identical
 to the memory-based overload. The callback runs synchronously exactly once; a throwing callback (or a
-payload the framer rejects) faults only that send. Custom `TcpMessageFramer` implementations implement
-`BeginMessage`/`CompleteMessage` (reserve/backfill the prologue) alongside `WriteMessage`.
+payload the framer rejects) faults only that send. `BeginMessage`/`CompleteMessage` (reserve/backfill
+the prologue) is the framer's <b>only</b> abstract emit path — every send route, including the base
+`WriteMessage` convenience, frames through it, so framing logic exists once. `CompleteMessage` receives
+the payload as a writable span, so a framer carrying negotiated cipher state can apply a same-length
+in-place transform — encrypt the serialized payload where it lies and backfill the tag into the
+prologue.
 
 **Inbound buffers are pooled and call-scoped** on every adapter: TCP and WebSocket both hand
 `OnBinaryAsync` a slice of a reused per-connection buffer that the next read overwrites. Copy the memory

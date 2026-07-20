@@ -16,9 +16,13 @@ handshakes.
 
 The default for codec/handler-level work is **fully in-memory** — no OS sockets, ports, or firewall
 prompts: `InMemoryTcpLink.Start(handler, registry, o => o.Framer = …)` runs the complete connection
-lifecycle (per-connection settings, handshake, framing, registry, codec, idle hook) over an in-memory
+lifecycle (per-connection sessions, handshake, framing, registry, codec, idle hook) over an in-memory
 duplex pair, hands you the simulator-side `Client`, a deterministic `ServerConnection` await (the
 registered sink — no polling, no handshake races), and a `ServerCompletion` for teardown assertions.
+By default the client speaks the endpoint framer instance (fine for stateless framers); when the
+handler's sessions create a **stateful** framer (negotiated framing, encryption toggles), pass the
+client its **own** instance via the `clientFramer` parameter — the two ends of a real link never share
+framing state.
 Reserve real sockets (loopback TCP, Kestrel + `ClientWebSocket`) for integration tests of the adapters
 themselves — the separate `Elarion.Connections.AspNetCore.Simulation` package's `WebSocketTestHost`
 covers a real Kestrel upgrade, handshake, codec, and close path. `InMemoryDuplexStream.CreatePair()`

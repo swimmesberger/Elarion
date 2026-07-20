@@ -79,9 +79,13 @@ internal static class TcpConnectionRunner {
         Exception? registrationRejection = null;
         var transportTag = options.Transport;
         try {
-            // Per-connection configuration (the binding-config lookup point): resolved before any byte is
-            // exchanged so the chosen framer governs the handshake too; nulls inherit the endpoint options.
-            var overrides = await handler.ConfigureConnectionAsync(peer, lifetime.ReceiveToken);
+            // The per-connection session (the binding-config lookup point): created before any byte is
+            // exchanged so the session's framer governs the handshake too; a null session is an early
+            // reject — the socket closes and nothing was ever registered.
+            var session = await handler.CreateSessionAsync(peer, lifetime.ReceiveToken);
+            if (session is null) return;
+
+            var overrides = session.Settings;
             var framer = overrides?.Framer ?? options.Framer!;
             var maxMessageBytes = overrides?.MaxInboundFrameBytes ?? options.MaxInboundFrameBytes;
             var maxOutboundMessageBytes = overrides?.MaxOutboundFrameBytes ?? options.MaxOutboundFrameBytes;
@@ -105,7 +109,7 @@ internal static class TcpConnectionRunner {
                 var handshake = new TcpHandshakeContext(
                     stream, framer, reader, peer.RemoteEndPoint, peer.LocalEndPoint);
                 try {
-                    ticket = await handler.AuthenticateAsync(handshake, handshakeCts.Token);
+                    ticket = await session.AuthenticateAsync(handshake, handshakeCts.Token);
                 }
                 catch (OperationCanceledException) when (!lifetime.ReceiveToken.IsCancellationRequested) {
                     // The handshake deadline, not host shutdown — a slow/silent peer is rejected quietly,
@@ -132,7 +136,7 @@ internal static class TcpConnectionRunner {
                 identity.ConnectionId, transportTag, lifetime);
             lifetime.AttachWriter(writer);
             var connection = new TcpClientConnection(identity, writer, lifetime, defaultInvokeTimeout);
-            connection.AttachProtocol(handler.CreateProtocol(connection));
+            connection.AttachProtocol(session.CreateProtocol(connection));
 
             var ownsRegistration = false;
             try {

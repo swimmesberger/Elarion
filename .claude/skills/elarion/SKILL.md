@@ -230,7 +230,11 @@ subscriptions over the connection with the exact same topic catalog + fail-close
 The WebSocket endpoint means you write two things — an authenticator and a codec:
 
 ```csharp
-public sealed class GatewayHandler(...) : WebSocketConnectionHandler {
+public sealed class GatewayHandler(...) : WebSocketConnectionHandler {      // factory: one session per link
+    public override ValueTask<WebSocketConnectionSession?> CreateSessionAsync(
+        HttpContext context, CancellationToken ct) => ...new GatewaySession(...);  // null = reject (403)
+}
+public sealed class GatewaySession(...) : WebSocketConnectionSession {      // per-connection state lives here
     public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
         WebSocketHandshakeContext handshake, CancellationToken ct) { ... }   // null = reject
     public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection c) =>

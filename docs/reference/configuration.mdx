@@ -280,7 +280,7 @@ The layering is per-call `Timeout` > `DefaultInvokeTimeout` > unbounded; pass
 
 Each `AddElarionTcpConnectionListener`/`Dialer` call (and each runtime `Apply…`) configures one
 endpoint in code via `ElarionTcpListenerOptions`/`ElarionTcpDialerOptions`; per-connection overrides
-come from `ConfigureConnectionAsync` returning `TcpConnectionSettings`:
+come from the session's `Settings` returning `TcpConnectionSettings`:
 
 | Option | Default |
 | --- | --- |

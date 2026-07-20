@@ -8,6 +8,30 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Changed
+- **Per-connection sessions and a single framer emit path (ADR-0067, breaking).** Both connection
+  adapters' handlers are now factories: `TcpConnectionHandler`/`WebSocketConnectionHandler` have one
+  member, `CreateSessionAsync`, which runs before any byte is exchanged, performs the
+  binding-configuration lookup, and creates a per-connection `TcpConnectionSession`/
+  `WebSocketConnectionSession` owning `Settings`, `AuthenticateAsync`, and `CreateProtocol`. Returning
+  `null` is a new early reject (TCP closes the socket; WebSocket answers `403` before accepting).
+  Per-connection state — the binding row, a stateful framer, key material derived during the
+  handshake — lives in typed session fields instead of racing on the singleton handler, which is what a
+  mid-stream **encryption toggle** needs: the session creates its cipher framer, returns it via
+  `Settings`, hands it typed to the codec, and the codec flips it after awaiting the mode-switch send.
+  `TcpMessageFramer` now has a single abstract emit path: `BeginMessage`/`CompleteMessage` (payload is a
+  writable span for same-length in-place transforms — encrypt in place, backfill the tag into the
+  reserved prologue); `WriteMessage` became a non-virtual base convenience over the same pair, so
+  framing/cipher logic is written exactly once and applies on every send route (the uncontended send
+  paths remain 0 B/op at raw-write parity, re-measured). `TryReadMessage` may return framer-owned
+  memory (a decrypted payload cannot slice the receive buffer); the reader's malformed-framer guard now
+  bounds only slices aliasing its own array. `InMemoryTcpLink.Start` gained a `clientFramer` parameter —
+  stateful framers need per-end instances; the two ends of a link never share framing state.
+  Migration: split each handler into a factory + session (move `ConfigureConnectionAsync`'s result to
+  the session's `Settings`), and delete `WriteMessage` overrides whose bytes match the
+  `BeginMessage`/`CompleteMessage` pair (length-changing framings such as byte-stuffing are no longer
+  expressible — escape in the codec, as delimiter framing already required).
+
 ### Added
 - **EF-free unit of work for the SQL tier (ADR-0058 addendum).** `Elarion.Sql` now implements the
   provider-neutral `IUnitOfWork` seam, so the framework `TransactionDecorator` wraps a command handler's
