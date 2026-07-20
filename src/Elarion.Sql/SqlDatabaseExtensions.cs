@@ -7,12 +7,14 @@ namespace Elarion.Sql;
 /// </summary>
 public static class SqlDatabaseExtensions {
     /// <summary>
-    /// Opens an <b>owning</b> one-shot <see cref="ISqlSession"/> over a fresh pooled connection from the
-    /// database — disposing the session returns the connection. Calls run autonomously (per-call auto-commit,
-    /// no unit of work): the pattern for singleton-eligible handlers, which cannot inject the scoped
-    /// <see cref="ISqlSession"/> — hold the singleton <see cref="ISqlDatabase"/> and open a session per
-    /// operation. Inside a scoped handler, inject <see cref="ISqlSession"/> instead so writes join the framework
-    /// unit of work.
+    /// Opens an <b>owning</b> one-shot session over a fresh pooled connection from the database — disposing
+    /// the session returns the connection. Calls run autonomously (per-call auto-commit, no unit of work): the
+    /// pattern for singleton-eligible handlers, which cannot inject the scoped <see cref="ISqlSession"/> —
+    /// hold the singleton <see cref="ISqlDatabase"/> and open a session per operation. Because the session owns
+    /// its connection, it can also begin a deferred transaction later on the <b>same</b> connection —
+    /// <see cref="ISqlOwnedSession.BeginTransactionAsync"/> — for the read-first-then-commit-atomically shape.
+    /// Inside a scoped handler, inject <see cref="ISqlSession"/> instead so writes join the framework unit of
+    /// work.
     /// </summary>
     /// <example>
     /// <code>
@@ -25,11 +27,11 @@ public static class SqlDatabaseExtensions {
     /// }
     /// </code>
     /// </example>
-    public static async ValueTask<ISqlSession> OpenSessionAsync(
+    public static async ValueTask<ISqlOwnedSession> OpenSessionAsync(
         this ISqlDatabase database, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(database);
         var connection = await database.GetDataSource().OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        return new ConnectionSqlSession(connection, transaction: null, ownsConnection: true);
+        return new OwnedSqlSession(connection);
     }
 
     /// <summary>

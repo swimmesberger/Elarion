@@ -1,11 +1,12 @@
 namespace Elarion.Sql;
 
 /// <summary>
-/// An owning, transactional one-shot session opened by
-/// <see cref="SqlDatabaseExtensions.BeginTransactionAsync"/>: a fresh pooled connection with a transaction
-/// already begun, so every call on it — the full <see cref="SqlSessionExtensions"/> surface — runs inside that
-/// transaction. Commit is explicit; disposing without a commit rolls back (the same contract as the framework
-/// unit-of-work scope), and disposal returns the connection either way.
+/// A transactional session: every call on it — the full <see cref="SqlSessionExtensions"/> surface — runs
+/// inside its transaction. Commit is explicit; disposing without a commit rolls back (the same contract as the
+/// framework unit-of-work scope). Disposal releases what the transaction owns: opened directly from the
+/// database handle (<see cref="SqlDatabaseExtensions.BeginTransactionAsync"/>) it owns and returns its pooled
+/// connection; begun on an owned session (<see cref="ISqlOwnedSession.BeginTransactionAsync"/>) it ends only
+/// the transaction — the session and its connection remain usable.
 /// </summary>
 /// <remarks>
 /// This is the atomic multi-write path for code <b>outside</b> the framework unit of work — singleton-eligible

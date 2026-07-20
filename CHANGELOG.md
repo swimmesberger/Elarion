@@ -27,9 +27,12 @@ minor releases may include breaking changes.
   (autonomous per-call semantics) — the one-call path for singleton-eligible handlers, which cannot inject
   the scoped `ISqlSession` — and `db.BeginTransactionAsync(ct)` opens the transactional variant, an
   `ISqlTransaction : ISqlSession` whose statements commit or roll back together (commit explicitly; dispose
-  without commit rolls back, mirroring the unit-of-work scope; optional isolation level). Commit deliberately
-  lives only on `ISqlTransaction`, never on `ISqlSession`, so a scoped handler cannot commit the framework's
-  transaction out from under the decorator. Migration for handlers that injected `NpgsqlDataSource`/`DbDataSource` directly:
+  without commit rolls back, mirroring the unit-of-work scope; optional isolation level). `OpenSessionAsync`
+  returns `ISqlOwnedSession : ISqlSession`, which can also begin a **deferred** transaction later on the
+  **same** connection (`session.BeginTransactionAsync(...)`) — read first, then commit atomically, no second
+  connection; after commit/rollback the session continues autonomously. Commit and begin-transaction
+  deliberately live only on `ISqlTransaction`/`ISqlOwnedSession`, never on `ISqlSession` itself, so a scoped
+  handler can neither commit nor open transactions out from under the framework decorator. Migration for handlers that injected `NpgsqlDataSource`/`DbDataSource` directly:
   the whole change is the injected type — replace it with `ISqlDatabase` and open sessions instead of
   connections (`OpenSessionAsync` deliberately lives on the handle, not on `DbDataSource`, so tenant/replica
   routing applies). (For preview-package consumers: `ISqlDatabase`/`AddElarionSqlDatabase` were briefly

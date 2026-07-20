@@ -193,6 +193,16 @@ await tx.ExecuteAsync($"UPDATE {Account.Table} SET session_key = {key} WHERE id 
 await tx.ExecuteAsync($"UPDATE {Ticket.Table} SET ticket = NULL WHERE account_id = {id}", ct);
 await tx.CommitAsync(ct);
 
+// Read first, then transact — on the SAME connection: OpenSessionAsync returns an ISqlOwnedSession,
+// and only that owning session can begin a deferred transaction (the scoped session's belong to the
+// unit of work). After commit/rollback the session continues autonomously.
+await using var session = await db.OpenSessionAsync(ct);
+var account = await session.QueryFirstOrDefaultAsync<Account>($"{Account.Select} WHERE id = {id}", ct);
+await using (var deferred = await session.BeginTransactionAsync(cancellationToken: ct)) {
+    await deferred.ExecuteAsync($"UPDATE {Account.Table} SET session_key = {key} WHERE id = {id}", ct);
+    await deferred.CommitAsync(ct);
+}
+
 // Only when you already own the connection (and maybe its transaction): wrap once — every write enlists.
 var owned = connection.AsSqlSession(transaction);
 ```

@@ -162,6 +162,51 @@ public sealed class SqliteSqlSessionIntegrationTests : IDisposable {
     }
 
     [Fact]
+    public async Task DeferredTransaction_OnAnOpenSession_ReusesTheConnection() {
+        var db = new DataSourceSqlDatabase(new SqliteDataSource(ConnectionString));
+        var id = Guid.NewGuid();
+
+        // Read-first-then-transact on ONE connection: open the session, read autonomously, then begin the
+        // transaction mid-session — no second connection is opened.
+        await using var session = await db.OpenSessionAsync(Ct);
+        var connectionBefore = await session.GetConnectionAsync(Ct);
+        (await session.QueryFirstOrDefaultAsync<SqlWidget>(
+            $"SELECT id, name FROM sql_widgets WHERE id = {id}", Ct)).Should().BeNull();
+
+        await using (var tx = await session.BeginTransactionAsync(cancellationToken: Ct)) {
+            (await tx.GetConnectionAsync(Ct)).Should().BeSameAs(connectionBefore);
+            // While the transaction is open it is the session's CurrentTransaction — calls on either enlist.
+            session.CurrentTransaction.Should().BeSameAs(tx.CurrentTransaction);
+            await session.InsertAsync(new SqlWidget { Id = id, Name = "deferred" }, Ct);
+            await tx.CommitAsync(Ct);
+        }
+
+        // After commit the session is autonomous again and may begin another transaction.
+        session.CurrentTransaction.Should().BeNull();
+        (await ExistsAsync(id)).Should().BeTrue();
+        await using (var second = await session.BeginTransactionAsync(cancellationToken: Ct)) {
+            await second.ExecuteAsync($"DELETE FROM sql_widgets WHERE id = {id}", Ct);
+            // No commit: dispose rolls back only the transaction; the session's connection stays open.
+        }
+
+        session.CurrentTransaction.Should().BeNull();
+        (await ExistsAsync(id)).Should().BeTrue();
+        (await session.QueryFirstOrDefaultAsync<SqlWidget>(
+            $"SELECT id, name FROM sql_widgets WHERE id = {id}", Ct))!.Name.Should().Be("deferred");
+    }
+
+    [Fact]
+    public async Task DeferredTransaction_SecondBeginWhileOpen_Throws() {
+        var db = new DataSourceSqlDatabase(new SqliteDataSource(ConnectionString));
+
+        await using var session = await db.OpenSessionAsync(Ct);
+        await using var tx = await session.BeginTransactionAsync(cancellationToken: Ct);
+
+        var act = async () => await session.BeginTransactionAsync(cancellationToken: Ct);
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*already open*");
+    }
+
+    [Fact]
     public async Task BeginTransactionAsync_DisposeWithoutCommit_RollsBackBothWrites() {
         var db = new DataSourceSqlDatabase(new SqliteDataSource(ConnectionString));
         var first = Guid.NewGuid();
