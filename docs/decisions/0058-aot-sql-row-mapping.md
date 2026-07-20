@@ -260,9 +260,13 @@ the seam in one call instead of injecting a raw `DbDataSource` and hand-wrapping
 routing applies to singleton handlers on scoped hosts too. Its transactional sibling
 `db.BeginTransactionAsync(ct)` returns an `ISqlTransaction : ISqlSession` — an owning session whose
 statements commit or roll back together, with the unit-of-work scope's contract (explicit commit; dispose
-without commit rolls back) — the atomic multi-write path outside the framework unit of work. Commit lives
-only on `ISqlTransaction`, never on `ISqlSession`: a scoped handler must not be able to commit the
-framework's transaction out from under the decorator. `IMigrationDatabase` deliberately does *not* fold
+without commit rolls back) — the atomic multi-write path outside the framework unit of work. And because the
+one-shot session owns its connection exclusively, `OpenSessionAsync` returns `ISqlOwnedSession`, which can
+begin a **deferred** transaction later on the same connection (read first, then transact — the same move
+`SqlUnitOfWork` performs on the scoped session, exposed on the owning tier). Transaction control — commit
+and begin — lives only on `ISqlTransaction`/`ISqlOwnedSession`, never on `ISqlSession` itself: a scoped
+handler must not be able to commit or open transactions out from under the decorator, so the capability
+split is enforced at compile time by interface, not by runtime guard. `IMigrationDatabase` deliberately does *not* fold
 into this handle: it is the migration engine's provider SPI (dialect, exclusive locking, dedicated unpooled
 connections) — polymorphic behavior extensions over a neutral handle cannot express — and applications never
 touch it; the app-facing unification already happens at registration (`AddElarionPostgreSql` registers both)

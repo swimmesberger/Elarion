@@ -35,6 +35,6 @@ public static class SqlConnectionSessionExtensions {
     /// </example>
     public static ISqlSession AsSqlSession(this DbConnection connection, DbTransaction? transaction = null) {
         ArgumentNullException.ThrowIfNull(connection);
-        return new ConnectionSqlSession(connection, transaction, ownsConnection: false);
+        return new ConnectionSqlSession(connection, transaction);
     }
 }
