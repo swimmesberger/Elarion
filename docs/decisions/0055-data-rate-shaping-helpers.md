@@ -1,6 +1,7 @@
 # ADR-0055: Data-rate shaping helpers — write-behind buffer and keyed conflater
 
-- Status: Accepted (implemented 2026-07-13)
+- Status: Accepted (implemented 2026-07-13); amended by [ADR-0069](0069-producer-owned-hot-state-buffering.md)
+  (two producer-owned hot-state siblings join the family; the "two shapes and no more" rule becomes four)
 - Date: 2026-07-13
 - Related: [ADR-0051](0051-postgresql-bulk-insert.md) (the natural flush target),
   [ADR-0043](0043-client-events.md) (the natural publish target),
