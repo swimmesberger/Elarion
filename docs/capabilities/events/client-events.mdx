@@ -155,7 +155,7 @@ internal sealed class CustomerScopeAuthorizer(AppDbContext db, ICurrentUser user
     : IClientEventSubscriptionAuthorizer {
     public async ValueTask<bool> AuthorizeAsync(ClientEventSubscription subscription, CancellationToken ct) =>
         TryParseCustomerKey(subscription.Scope.Value, out var customerId)
-        && await db.CustomerMembers.AnyAsync(m => m.CustomerId == customerId && m.UserId == user.Id, ct);
+        && await db.CustomerMembers.AnyAsync(m => m.CustomerId == customerId && m.UserId == user.UserId, ct);
 }
 ```
 
@@ -264,7 +264,7 @@ there is no committed fact yet and hints about the ongoing attempt are exactly w
 ```csharp
 await clientEvents.PublishAsync(
     new ImportProgress { Processed = processed, Total = total },
-    ClientEventScope.User(user.Id), ct);
+    ClientEventScope.User(user.UserId), ct);
 ```
 
 If the command later rolls back, the progress events were still sent — fine for status, wrong for facts.

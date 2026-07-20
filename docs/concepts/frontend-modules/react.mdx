@@ -1,0 +1,225 @@
+---
+title: React & app shells
+description: The React bindings and composition root — glob-discovered manifests, ContributionProvider, useContributions, plain and shadcn/ui sidebars, and the Vite dedupe config.
+---
+
+The `/react` sub-export binds the [contribution model](/docs/concepts/frontend-modules) to React:
+`ContributionProvider` supplies the registry, `useContributions(point)` returns the resolved list, and
+`<ExtensionSlot>` renders a point with typed context.
+
+<Callout type="warn" title="Vite: dedupe React before anything else">
+The `/react` bindings call hooks, so they must resolve to **your app's single React instance**. Vite's
+dependency optimizer can pre-bundle the package's subpath exports against a second React copy (they are
+discovered late, deep in the module graph), and the failure reads like an app bug, not a config gap:
+
+```
+Invalid hook call. Hooks can only be called inside of the body of a function component
+TypeError: Cannot read properties of null (reading 'useContext')
+    at useContributions (@swimmesberger_elarion-contributions_react.js)
+```
+
+If you see this, add both hints to `vite.config.ts` (and clear `node_modules/.vite`):
+
+```ts title="vite.config.ts"
+resolve: { dedupe: ["react", "react-dom"] },
+optimizeDeps: {
+  include: [
+    "@swimmesberger/elarion-contributions",
+    "@swimmesberger/elarion-contributions/react",
+    "@swimmesberger/elarion-contributions/tanstack-router",
+  ],
+},
+```
+
+There is no package-side lever that prevents this — Vite does not consult peer-dependency metadata when
+pre-bundling — so the sample ships this config and so should you.
+</Callout>
+
+## The composition root: discover manifests, register routes
+
+Two different jobs meet at the composition root, and the recommended split treats them differently:
+
+- **Manifests are discovered** with a Vite glob. The high-frequency change — a new sidebar item, tab,
+  section, or a route-less module — appears with zero central edits.
+- **Routes are registered statically**, one typed line per route-owning module — the same grain as a
+  backend host adding a `ProjectReference`. This keeps TanStack Router's full inference; a glob-composed
+  tree types as `AnyRoute[]` and silently degrades far more than navigation (see the callout below).
+
+The file layout matters because modules call `getParentRoute: () => rootRoute` while the composition root
+imports the modules — so `rootRoute` must live in its **own** file or the two form an import cycle:
+
+```ts title="platform/router.tsx — owns the root route, imported by every module"
+import { createRootRouteWithContext } from "@tanstack/react-router"
+import { createRouteGuards } from "@swimmesberger/elarion-contributions/tanstack-router"
+
+export interface RouterContext {
+  readonly caps: SessionCapabilities
+}
+export const rootRoute = createRootRouteWithContext<RouterContext>()({ component: AppShell })
+export const { redirectUnless } = createRouteGuards<AppVocabulary>()
+```
+
+```ts title="platform/modules.ts — what a module's public entry default-exports"
+import type { AnyRoute } from "@tanstack/react-router"
+import type { AppManifest } from "@/platform/contributions"
+
+export interface AppModule {
+  readonly manifest: AppManifest
+  /** The route subtrees this module owns; empty for a UI-only module. */
+  readonly routes: readonly AnyRoute[]
+}
+```
+
+A module bundles its manifest with the routes it owns — `satisfies` (not a type annotation, which would
+widen to `AnyRoute[]`) keeps the routes' concrete types for the static registration:
+
+```ts title="modules/invoicing/index.ts"
+const invoicingModule = { manifest: invoicingManifest, routes: [invoicingRoute] } satisfies AppModule
+export default invoicingModule
+```
+
+```tsx title="app.tsx — the composition root"
+import { createRouter } from "@tanstack/react-router"
+import clients from "@/modules/clients"
+import invoicing from "@/modules/invoicing"
+import { rootRoute } from "@/platform/router"
+import type { AppModule } from "@/platform/modules"
+
+// Manifest discovery: compile-time (Vite expands the glob into static imports), deterministic, zero
+// central edits for new contributions.
+const discovered = import.meta.glob<AppModule>("./modules/*/index.ts", { eager: true, import: "default" })
+export const appModules: ReadonlyArray<AppModule> = Object.values(discovered)
+
+// Route registration: one typed line per route-owning module.
+const routeTree = rootRoute.addChildren([indexRoute, ...clients.routes, ...invoicing.routes])
+
+export const router = createRouter({ routeTree, context: { caps: undefined! } })
+declare module "@tanstack/react-router" {
+  interface Register { router: typeof router }
+}
+```
+
+The entry point then wires **both** consumers of the capability snapshot in one place — the registry (for
+slots) and the router context (for `redirectUnless` guards):
+
+```tsx title="main.tsx — one snapshot gates contributions and routes alike"
+import { createContributionRegistry } from "@swimmesberger/elarion-contributions"
+import { ContributionProvider } from "@swimmesberger/elarion-contributions/react"
+import { loadCapabilities } from "@/platform/session"
+import { appModules, router } from "./app"
+
+const caps = await loadCapabilities()          // the /session snapshot (see Client capabilities)
+const registry = createContributionRegistry(appModules.map((m) => m.manifest), caps)
+
+createRoot(document.getElementById("root")!).render(
+  <ContributionProvider registry={registry}>
+    <RouterProvider router={router} context={{ caps }} />
+  </ContributionProvider>
+)
+```
+
+<Callout type="info" title="The glob-routes alternative, and its full cost">
+You *can* compose routes from the glob too — `rootRoute.addChildren(appModules.flatMap((m) =>
+m.routes))` — and get zero-edit route discovery. Know the full price: the tree types as `AnyRoute[]`, so
+**`Link to` loses its literal union, and `useLoaderData`/`useParams` collapse to untyped fallbacks** —
+every consumer of route data, not just navigation, and under `noImplicitAny` a loader-using app surfaces
+dozens of errors. The workable escape is registering the router as `AnyRouter` (so `to`/`params` fall back
+to `string` instead of erroring), which trades away typed routing app-wide. Teams that don't use route
+loaders sometimes accept this deliberately; make it a decision, not a surprise.
+</Callout>
+
+## The approach: a modular sidebar
+
+The division of labor for any shell surface: the **framework** ships the mechanics (the registry, `when`
+filtering, the slot bindings), the **app** owns the point's payload shape and one file of look, and
+**modules** supply data. The shell renders whatever resolved — it never knows the contributors, so it
+never changes when a module is added, and a disabled module's entries are simply absent. The integration
+is always the same single move, whatever the UI kit: **wherever your shell would map a hard-coded array
+of nav items, map `useContributions(point)` instead.**
+
+With plain elements:
+
+```tsx title="platform/AppShell.tsx"
+import { Link, Outlet } from "@tanstack/react-router"
+import { useContributions } from "@swimmesberger/elarion-contributions/react"
+import { sidebarItems } from "@/platform/points"
+
+export function AppShell() {
+  const items = useContributions(sidebarItems)   // filtered by `when`, deterministically ordered
+  return (
+    <div className="flex min-h-screen">
+      <aside className="w-56 border-r px-3 py-6">
+        <nav className="flex flex-col gap-1">
+          {items.map((item) => (
+            <Link key={item.id} to={item.to} activeProps={{ className: "bg-accent font-medium" }}>
+              <item.icon className="h-4 w-4" />
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </aside>
+      <main className="flex-1 px-8 py-10">
+        <Outlet />
+      </main>
+    </div>
+  )
+}
+```
+
+## With shadcn/ui's Sidebar
+
+[shadcn/ui's Sidebar](https://ui.shadcn.com/docs/components/sidebar) renders its menu from an items array
+in every one of its examples — that array is exactly where the contributions go. Add the component
+(`npx shadcn@latest add sidebar`), keep its structure, and swap the hard-coded `const items = [...]` for
+the resolved contributions:
+
+```tsx title="platform/AppSidebar.tsx"
+import { Link } from "@tanstack/react-router"
+import { useContributions } from "@swimmesberger/elarion-contributions/react"
+import {
+  Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem,
+} from "@/components/ui/sidebar"
+import { sidebarItems } from "@/platform/points"
+
+export function AppSidebar() {
+  const items = useContributions(sidebarItems)   // was: a hard-coded items constant
+  return (
+    <Sidebar>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Application</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {items.map((item) => (
+                <SidebarMenuItem key={item.id}>
+                  <SidebarMenuButton asChild>
+                    <Link to={item.to}>
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </Sidebar>
+  )
+}
+```
+
+The shell wraps it exactly as shadcn documents — `<SidebarProvider><AppSidebar /><main><SidebarTrigger />
+<Outlet /></main></SidebarProvider>` as the root route's component — and collapsing, the mobile sheet,
+and theming all come from shadcn untouched. Sidebar *sections* are the same idea one level up: either
+group by a field your payload carries (`group: "main" | "admin"` on the item type, one `<SidebarGroup>`
+per group), or define one extension point per section when the sections themselves are the contract
+between shell and modules.
+
+A module's sidebar entry is then one manifest item (the Invoicing example on the
+[concept page](/docs/concepts/frontend-modules)) — label, icon, target, `order`, `when` — and nothing
+else: no shell edit, no registration call. The same pattern serves any shell surface (top nav, settings
+sections, dashboards, command palettes): define a point, render `useContributions`/`<ExtensionSlot>`
+where it lives. The shell's *look* is deliberately yours — copy the sample's `AppShell` or shadcn's
+blocks as a starting point rather than importing one from Elarion (the no-UI-kit non-goal).

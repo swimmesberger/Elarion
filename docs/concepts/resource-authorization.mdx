@@ -108,10 +108,21 @@ or `ElarionResourceGrants` with `snakeCase: false`; the principal index name is 
 
 ```csharp
 services.AddElarionResourceAuthorization<AppDbContext>();   // grants source, store, and the point-check authorizer
+```
 
-// Share one contact with the "Hausmeister" role for read — every user in that role can now see it.
-await grants.GrantAsync(
-    new ResourceGrant("Contact", contactId.ToString(), ResourcePrincipal.Role("Hausmeister"), ResourceOperation.Read), ct);
+Shares are managed through the injected `IResourceGrantStore`:
+
+```csharp
+[Handler]
+public sealed class ShareContact(IResourceGrantStore grants) {
+    public async ValueTask<Result> HandleAsync(ShareContactCommand command, CancellationToken ct) {
+        // Share one contact with the "Hausmeister" role for read — every user in that role can now see it.
+        await grants.GrantAsync(
+            new ResourceGrant("Contact", command.ContactId.ToString(),
+                ResourcePrincipal.Role("Hausmeister"), ResourceOperation.Read), ct);
+        return Result.Success();
+    }
+}
 ```
 
 The `Shared` filter turns this into an indexed correlated `EXISTS` over the caller's user id **or any of their

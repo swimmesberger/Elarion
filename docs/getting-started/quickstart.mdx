@@ -14,7 +14,7 @@ The data-model step uses two packages beyond the base installation: the applicat
 the EF Core integration/generator, and the host needs the demo-only in-memory provider.
 
 ```bash
-dotnet add MyApp.Application package Elarion.EntityFrameworkCore --version 0.2.4
+dotnet add MyApp.Application package Elarion.EntityFrameworkCore --version 0.2.5
 dotnet add MyApp.Api package Microsoft.EntityFrameworkCore.InMemory --version 10.0.9
 ```
 
@@ -58,8 +58,21 @@ public static partial class ClientsModule {
 That is the whole module declaration. You don't register its handlers or services by hand —
 under `[GenerateModuleBootstrapper]` (added below) the generators emit a `ConfigureDefaultServices` that
 the host bootstrapper calls for you, gated by `Modules:Clients:Enabled`. The optional `ConfigureServices`
-hook is reserved for additional, non-generated wiring (options binding, third-party libraries). See
-[Conventions](/docs/reference/conventions).
+hook is reserved for additional, non-generated wiring (options binding, third-party libraries):
+
+```csharp
+[AppModule("Clients")]
+public static partial class ClientsModule {
+    public static IJsonTypeInfoResolver GetJsonTypeInfoResolver() => ClientsJsonContext.Default;
+
+    // Optional hook — only for wiring the generators can't emit (options, third-party services):
+    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration) {
+        services.Configure<ClientsOptions>(configuration.GetSection("Clients"));
+    }
+}
+```
+
+See [Conventions](/docs/reference/conventions).
 
 </Step>
 
@@ -206,8 +219,9 @@ owns infrastructure (here, the database provider); modules own application logic
 `AppDbContext` is registered once and injected into handlers directly.
 
 ```csharp title="MyApp.Api/Program.cs"
+using Elarion.AspNetCore;
 using Microsoft.EntityFrameworkCore;
-using MyApp.Api.Hosting;
+using MyApp.Api;                 // the generated ElarionBootstrapper lives in the host's root namespace
 using MyApp.Application;
 using MyApp.Application.Data;
 

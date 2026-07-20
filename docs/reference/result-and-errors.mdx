@@ -127,6 +127,7 @@ public sealed record AppError {
 | `AppError.Validation(string message, IReadOnlyDictionary<string, string[]> fieldErrors)` | `Validation` | Wraps messages keyed by wire-named field path (e.g. `"address.street"`; empty key = not field-specific) in `ValidationErrorData`, deriving the flat `Errors` list by flattening in ordinal key order. |
 | `AppError.NotFound(string message)` | `NotFound` | |
 | `AppError.Conflict(string message)` | `Conflict` | |
+| `AppError.Unauthorized(string message)` | `Unauthorized` | |
 | `AppError.Forbidden(string message)` | `Forbidden` | |
 | `AppError.BusinessRule(string message, object? data = null)` | `BusinessRule` | Optional structured `Data` payload. |
 | `AppError.Internal(string message, object? data = null)` | `Internal` | Optional structured `Data` payload. |
@@ -163,7 +164,8 @@ protocol-specific codes.
 | `Validation` | Invalid input or constraint violation. |
 | `NotFound` | The requested resource does not exist. |
 | `Conflict` | The operation conflicts with existing state (duplicate, concurrent modification). |
-| `Forbidden` | The caller is not authorized to perform this operation. |
+| `Unauthorized` | The caller is not authenticated (missing or invalid credentials). |
+| `Forbidden` | The caller is authenticated but not authorized to perform this operation. |
 | `BusinessRule` | A domain business rule was violated. |
 | `Internal` | An unexpected internal error occurred. |
 
@@ -186,6 +188,7 @@ codes; the remaining application kinds use the reserved server range (`-32000` t
 | `Conflict` | `-32002` | Server range. |
 | `Forbidden` | `-32003` | Server range. |
 | `BusinessRule` | `-32004` | Server range. |
+| `Unauthorized` | `-32005` | Server range. |
 | `Internal` | `-32603` | Spec "Internal error". |
 | *(default)* | `-32603` | Falls back to internal error. |
 
@@ -199,6 +202,7 @@ when translating a failed `Result<T>` into an RFC 7807 ProblemDetails response.
 | `Validation` | `400 Bad Request` |
 | `NotFound` | `404 Not Found` |
 | `Conflict` | `409 Conflict` |
+| `Unauthorized` | `401 Unauthorized` |
 | `Forbidden` | `403 Forbidden` |
 | `BusinessRule` | `422 Unprocessable Entity` |
 | `Internal` | `500 Internal Server Error` |

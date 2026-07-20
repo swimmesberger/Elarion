@@ -1,0 +1,185 @@
+---
+title: TCP endpoints
+description: Raw-socket listeners and dialers over the same handler/codec seams — framing, runtime endpoint management, TLS, bounded outbound backpressure, deterministic close.
+---
+
+`Elarion.Connections.Tcp` runs the same handler/codec seams over raw sockets (BCL only, no ASP.NET) —
+the shape for devices that speak a proprietary protocol and can't do WebSockets. Because TCP has no
+message boundaries, the adapter owns a **framing seam** — and framing is boundaries only: pick
+`LengthPrefixedTcpFramer`, `DelimitedTcpFramer` (line/telegram framing — an optional start delimiter
+skips serial-bridge line noise), or implement `TcpMessageFramer` for the vendor's format. Bytes are
+bytes on TCP, so every inbound message reaches the codec's `OnBinaryAsync` as a raw slice; a text
+protocol's codec decodes with one `Encoding.UTF8.GetString` — the string is paid for only where it is
+wanted. The pipeline is benchmarked at **raw-socket parity** in both directions — receive (framer slice
+→ codec) and send (`SendBinaryAsync` frames into a pooled, budget-capped per-connection buffer that is
+trimmed after oversized frames, so a proxy that forwards between links stays allocation-light and never
+retains its largest frame) — and an armed-but-quiet idle window costs nothing on the hot path. Sockets
+default to `NoDelay` (Nagle stalls serial request/reply telegrams); override per endpoint or per
+connection for bulk one-way streams.
+
+## Custom framers
+
+When you implement `TcpMessageFramer` for a vendor format, the contract is **payload only on both sides** —
+the framer owns the header/prefix/delimiter, the codec never sees or supplies it:
+
+- `TryReadMessage` reports `consumed` = the *whole* wire span it advances past (reserved prologue + payload
+  + any trailer), but hands back `message` = the **payload slice alone**. Don't subtract the header length
+  from `message` — it already excludes the header; `consumed` is what accounts for it.
+- `WriteMessage` receives `payload` = the codec's bytes only, and **prepends its own framing** onto the
+  output. Don't expect `payload` to already contain a reserved prologue.
+
+```csharp
+// A 2-byte reserved prologue (e.g. a type tag) before the body:
+public sealed class VendorFramer : TcpMessageFramer {
+    private const int Prologue = 2;
+
+    public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed,
+        out ReadOnlyMemory<byte> message) {
+        consumed = 0; message = default;
+        if (buffer.Length < Prologue + BodyLength) return false;   // need more bytes
+        consumed = Prologue + BodyLength;                          // advance past prologue AND body
+        message = buffer.Slice(Prologue, BodyLength);              // payload only — prologue excluded
+        return true;
+    }
+
+    public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
+        WriteProlog(output);      // the framer adds the reserved prologue...
+        output.Write(payload);    // ...then the codec's payload, unchanged
+    }
+}
+```
+
+`LengthPrefixedTcpFramer` is the shipped reference for exactly this shape (4-byte length prefix as the
+prologue). The codec's `OnBinaryAsync` then receives that payload slice — never the framing bytes.
+
+**Establishment order is fixed**: raw TCP → optional TLS → framer → framed application authentication →
+registration → `OnOpenedAsync` → messages. Frame limits count **total unconsumed wire bytes** —
+prefix, variable header, body, and trailer included — so `MaxInboundFrameBytes` bounds what a peer can
+make the endpoint buffer before a single message completes, and `MaxOutboundFrameBytes` bounds what a
+codec can frame outward; both are validated before allocation and apply to the handshake too. Shared
+endpoint framers must be stateless and thread-safe; a framer carrying negotiated state belongs in a
+per-connection override from `ConfigureConnectionAsync`.
+
+## Listeners and dialers
+
+```csharp
+// Devices dial in:
+builder.Services.AddElarionTcpConnectionListener<GatewaySocketHandler2>(o => {
+    o.ListenEndPoint = new IPEndPoint(IPAddress.Any, 7010);
+    o.Framer = new DelimitedTcpFramer(end: (byte)'>', start: (byte)'<');
+    o.IdleTimeout = TimeSpan.FromSeconds(60);
+});
+
+// Or the gateway dials the device and keeps the link alive (jittered exponential reconnect):
+builder.Services.AddElarionTcpConnectionDialer<DeviceLinkHandler>(o => {
+    o.Host = "10.0.40.17";
+    o.Port = 2101;
+    o.Framer = new LengthPrefixedTcpFramer();
+});
+```
+
+Each `Add…` call is one endpoint — listen on several ports (one per device channel type) or dial
+several devices, each with its own handler, framer, and options. The handler subclasses
+`TcpConnectionHandler`; device protocols with no credential exchange ticket straight from
+`handshake.RemoteEndPoint`/binding configuration.
+
+## Runtime endpoint management
+
+Bindings that live as **data** (an admin configures which device is dialed or listened for, on which
+port, with which framing) use the runtime manager instead of composition-time registrations: add
+`AddElarionTcpConnectionEndpoints()` and apply named endpoints whenever configuration changes —
+`Apply…` is an upsert that tears the old endpoint down first, so **changing a binding means a
+reconnect under the new settings**, including flipping its direction:
+
+```csharp
+var endpoints = provider.GetRequiredService<TcpConnectionEndpoints>();
+
+// Startup: apply every binding row; on admin change: re-apply just that row.
+await endpoints.ApplyDialerAsync<DeviceLinkHandler>("device-7:mgmt", o => {
+    o.Host = row.Host; o.Port = row.Port;
+    o.Framer = row.Protocol == "telegram" ? telegramFramer : new LengthPrefixedTcpFramer();
+}, ct);
+
+// The same binding later becomes server-based (the device now dials us):
+await endpoints.ApplyListenerAsync<GatewayListenHandler>("device-7:mgmt", o => {
+    o.ListenEndPoint = new IPEndPoint(IPAddress.Any, row.Port);
+    o.Framer = telegramFramer;
+}, ct);
+
+await endpoints.RemoveAsync("device-7:mgmt", ct);   // unbind: connections unregister
+```
+
+Every managed endpoint **advertises its binding health**: `endpoints.Statuses` / `GetStatus(name)`
+answer "which bindings are serving, which failed to bind, and why" — a listener whose port couldn't be
+bound is `Faulted` with the reason; a dialer between attempts is `Dialing` carrying the last failure —
+and `endpoints.StatusChanged` fires on every transition, ready to be projected onto a client event so
+an admin UI shows binding state live.
+
+Settings can also vary **per connection on one endpoint**: override
+`ConfigureConnectionAsync(TcpConnectionPeer, …)` and return `TcpConnectionSettings` (framer, size caps,
+send capacity, TLS policy, idle window, transport tag — nulls inherit the endpoint options). It runs
+before any byte is exchanged, so a binding-configuration lookup keyed on the peer can pick the wire
+framing — or the TLS certificate — that governs the handshake itself — the shape gateways need when
+differently-speaking device families share one ingress port.
+
+## TLS
+
+Set `Tls` on any TCP endpoint (or per connection) and the adapter authenticates the stream **before
+the framer, the application authenticator, the registry, or any observer sees a byte** — a TLS failure
+rejects the socket with nothing registered, and a TLS-configured dialer never falls back to plaintext.
+Policy stays explicit BCL configuration (`SslServerAuthenticationOptions` /
+`SslClientAuthenticationOptions`, minted **fresh per connection**); platform certificate validation is
+fail-closed and Elarion never bypasses it — a development bypass is test configuration, not a
+production convenience. The recommended server setup:
+
+```csharp
+builder.Services.AddElarionTcpConnectionListener<GatewayListenHandler>(o => {
+    o.ListenEndPoint = new IPEndPoint(IPAddress.Any, 7010);
+    o.Framer = new LengthPrefixedTcpFramer();
+    o.Tls = new TcpServerTlsOptions {
+        CreateAuthenticationOptionsAsync = (peer, ct) => ValueTask.FromResult(
+            new SslServerAuthenticationOptions { ServerCertificate = gatewayCertificate }),
+    };
+});
+
+// Dialer side: TargetHost names the certificate identity this binding expects.
+builder.Services.AddElarionTcpConnectionDialer<DeviceLinkHandler>(o => {
+    o.Host = "10.0.40.17"; o.Port = 2101;
+    o.Framer = new LengthPrefixedTcpFramer();
+    o.Tls = new TcpClientTlsOptions {
+        CreateAuthenticationOptionsAsync = (peer, ct) => ValueTask.FromResult(
+            new SslClientAuthenticationOptions { TargetHost = "device-7.gateway.internal" }),
+    };
+});
+```
+
+`TcpTlsOptions.HandshakeTimeout` (10 s default) bounds the TLS exchange separately from the framed
+application `HandshakeTimeout` that follows it.
+
+## Outbound backpressure and send completion
+
+Each connection's outbound leg is a **bounded FIFO pipeline**: up to `MaxPendingSends` (256 default)
+sends may be admitted at once — queued *plus* in-progress — and at capacity a send fails immediately
+with `TcpSendQueueFullException` before any frame memory is allocated. Admitted sends are never
+silently dropped; saturation is always that deterministic fault, so a slow device produces visible
+backpressure instead of an unbounded waiter population. A send that **completes** means its complete
+frame was physically written to the stream — never merely queued. Under contention the drainer
+**coalesces queued frames into one physical write** (up to a 64 KiB flush threshold): FIFO order is
+unchanged, syscalls amortize, and over TLS a batch costs one record instead of one per frame — the
+uncontended send stays inline and allocation-free at raw-socket parity. Cancellation before a frame is
+picked up withdraws it (nothing is emitted, the slot frees); a frame the drainer has already activated
+completes regardless (the batch write is connection-owned — like bytes already on the wire);
+cancellation or an I/O failure *during* an inline physical write aborts the connection, because a
+partial frame may have corrupted stream boundaries — at-most-once covers loss, never corruption.
+
+## Deterministic close and endpoint shutdown
+
+One internal lifetime controller owns every connection's `Open → Closing → Closed` transition: peer
+EOF, `CloseAsync`, codec failures, endpoint reconfiguration, and host shutdown all funnel into one
+first-reason-wins close that quiesces I/O, settles every admitted send exactly once (drain on a clean
+close, fault on failure), runs the codec's `OnClosedAsync` once with the first reason and the latest
+identity, unregisters once, and disposes the transport once. Endpoint stop — hosted shutdown,
+`RemoveAsync`, or a reconfiguring `Apply…` — stops accepting/redialing, requests graceful close
+everywhere, waits the endpoint's `ShutdownGracePeriod` (5 s default), force-aborts the stragglers' raw
+transports, and then **awaits every connection task**: no connection is ever silently abandoned, and
+the registry holds none of the endpoint's connections when stop returns.

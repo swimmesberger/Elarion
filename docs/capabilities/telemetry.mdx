@@ -94,7 +94,7 @@ module class, or the assembly, nearest wins — makes the generator skip the dec
 affected handlers: no span, execution metric, enrichment, or log scope, and no wrapper object per call
 (ADR-0066). Failures are unaffected. This is a compile-time composition decision, distinct from the
 host-side "registered but unobserved" default above — see [the low-allocation dispatch
-profile](/docs/capabilities/connections#the-low-allocation-dispatch-profile) for the full recipe.
+profile](/docs/capabilities/connections/low-allocation) for the full recipe.
 
 The span carries `elarion.handler`, `elarion.handler.request_type`, `elarion.handler.outcome`
 (`ok`/`error`/`exception`), and **`elarion.handler.pipeline`** — the decorators actually wrapping this

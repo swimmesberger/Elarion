@@ -25,8 +25,10 @@ so each can evolve independently — see [ADR-0011](https://github.com/swimmesbe
   the backing store is swappable: the in-process default ships today; database and other backends
   implement the same contracts.
 - **The consuming side** — how your code reads settings. The native `ISettingsManager` is an AOT-clean
-  typed accessor. (Adapters to `IConfiguration` and `IOptionsMonitor<T>` are planned, so existing code
-  that already speaks those abstractions can consume settings without change.)
+  typed accessor. Adapters to `IConfiguration` and `IOptionsMonitor<T>` ship in
+  `Elarion.Settings.Configuration`, so existing code that already speaks those abstractions consumes
+  settings without change — see
+  [Consuming as IConfiguration / IOptionsMonitor](#consuming-as-iconfiguration--ioptionsmonitor).
 
 ## Scopes
 

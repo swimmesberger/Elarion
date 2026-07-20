@@ -1,0 +1,93 @@
+---
+title: WebSocket endpoint
+description: The ASP.NET Core connection adapter — subclass one handler for the authenticator and codec; accept, framing, lifecycle, and teardown are framework.
+---
+
+`Elarion.Connections.AspNetCore` ships the first adapter, shaped for device gateways: the endpoint
+owns accept, message reassembly (size-capped), registry lifecycle, and teardown; the app supplies an
+**authenticator** and a **codec** by subclassing `WebSocketConnectionHandler`. For device links, the
+provisioning chain behind the authenticator — pairing codes, per-device keys, the HMAC
+challenge/response — is [device identity](/docs/capabilities/devices) (`Elarion.Devices`).
+
+```csharp
+// HmacChallengeVerifier + DevicePrincipal come from Elarion.Devices — pairing codes, key storage,
+// and the constant-time verification are covered on the device identity page.
+public sealed class GatewaySocketHandler(IActorSystem actors, HmacChallengeVerifier verifier)
+    : WebSocketConnectionHandler {
+
+    // In-socket challenge/response (HTTP-level token auth works too — the HttpContext is available).
+    public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+        WebSocketHandshakeContext handshake, CancellationToken ct) {
+        var nonce = HmacChallengeVerifier.CreateNonce();
+        await handshake.SendTextAsync($"challenge:{Convert.ToBase64String(nonce)}", ct);
+        var answer = await handshake.ReceiveTextAsync(ct);         // "deviceId:base64(mac)"
+        if (answer?.Split(':', 2) is not [var deviceId, var mac]) {
+            return null;                                   // → PolicyViolation close, nothing registered
+        }
+
+        var principal = await verifier.VerifyAsync(deviceId, nonce, Convert.FromBase64String(mac), ct);
+        if (principal is null) {
+            return null;
+        }
+
+        return new ClientConnectionTicket {
+            Principal = principal,
+            PrincipalId = deviceId,                        // the registry indexes by this
+            Metadata = new Dictionary<string, string> { ["channel"] = "telemetry" },
+        };
+    }
+
+    public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) =>
+        new GatewayCodec(connection, actors);
+}
+
+// The codec: parse the device's frames, route into the digital-twin actor, answer over raw sends.
+internal sealed class GatewayCodec(WebSocketClientConnection connection, IActorSystem actors)
+    : IClientConnectionProtocol {
+    public async ValueTask OnTextAsync(string message, CancellationToken ct) {
+        var frame = GatewayFrame.Parse(message);           // your wire format
+        var twin = actors.Get<IDeviceTwin>(connection.Connection.PrincipalId!);
+        await twin.ApplyAsync(frame);                      // the actor serializes all channels + UI actions
+    }
+}
+```
+
+```csharp
+builder.Services.AddSingleton<GatewaySocketHandler>();
+
+var app = builder.Build();
+app.UseWebSockets();
+app.MapElarionConnectionSocket<GatewaySocketHandler>("/gateway/ws",
+    o => o.MaxMessageBytes = 64 * 1024);
+```
+
+Everything after the handshake is framework: the connection is minted (v7 id, `Transport =
+"websocket"`), registered, observed, pumped, and unregistered on every exit path — client close,
+abrupt death, oversized message (`MessageTooBig`), codec exception (logged, closed), host shutdown.
+
+## Required opening work
+
+`IClientConnectionObserver.OnConnectedAsync` remains best-effort: observers are deliberately
+failure-isolated and suit presence/client-event projections. A codec that cannot process frames until
+it has completed required work (for example, attaching the authenticated link to a keyed device actor)
+implements `IClientConnectionProtocol.OnOpenedAsync`. It runs exactly once **after registry
+registration and observer visibility, before the first inbound frame**. It is awaited; a failure or
+cancellation closes the link, calls `OnClosedAsync`, and unregisters it without delivering a frame.
+
+For tests, choose the lowest faithful tier: `SimulatedClientConnection` for kernel/observer work,
+`InMemoryTcpLink` (or loopback TCP) for a framed TCP lifecycle, and the separate
+`Elarion.Connections.AspNetCore.Simulation` package's `WebSocketTestHost` for a real Kestrel upgrade,
+handshake, codec, and close path — see [Simulation & testing](/docs/capabilities/connections/testing).
+
+## Per-connection settings and bindings
+
+Settings can vary **per connection on one route**: override
+`ConfigureConnectionAsync(HttpContext, …)` and return `WebSocketConnectionSettings` (size cap, idle
+window, keep-alive interval, transport tag — nulls inherit the endpoint options), resolved from the
+upgrade request (route values, query, headers) before the socket is accepted. And where the
+[TCP adapter](/docs/capabilities/connections/tcp) needs a runtime endpoint manager (ports are OS
+resources), WebSocket **bindings-as-data are just routing**: map one wildcard route
+(`/gateway/{binding}/ws`) and let the authenticator + `ConfigureConnectionAsync` consult the binding
+row per connection — an unknown or disabled binding returns `null` from the authenticator and the
+socket closes with nothing registered; a changed binding takes effect the next time the device
+connects (close its current connections via the registry to force it).
