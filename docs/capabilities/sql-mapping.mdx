@@ -235,7 +235,8 @@ ADR-0051). That path is EF-only (its entry is `DbSet<T>`, its metadata comes fro
 **not** AOT-compatible (it compiles per-column writers at runtime via `System.Linq.Expressions`), so the
 EF-free/AOT tier has no binary-COPY path today. A **source-generated** COPY for this tier — the
 `[SqlRecord]` generator emitting per-column `NpgsqlBinaryImporter` writes the same way it emits
-`BindParameters`, AOT-clean and reflection-free — is a considered future addition (see ADR-0058).
+`BindParameters`, AOT-clean and reflection-free, with the EF tier's upsert vocabulary — is proposed in
+[ADR-0068](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0068-aot-sql-binary-copy.md).
 
 `QueryUnbufferedAsync` streams **client-side**: Npgsql reads rows off the socket incrementally, so
 client memory stays bounded (roughly one row at a time) regardless of result size — there is no
