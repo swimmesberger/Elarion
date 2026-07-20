@@ -37,7 +37,10 @@ An actor earns its place in exactly three shapes:
 | Act once after a sequence of events | Actor + snapshot, or a versioned state row |
 
 For common loss-tolerant batching and latest-wins publishing, prefer the ready-made
-[data-rate shaping helpers](/docs/capabilities/data-rate-shaping) before writing an actor.
+[data-rate shaping helpers](/docs/capabilities/data-rate-shaping) before writing an actor. For
+allocation-sensitive simulation state where only the latest value per entity matters, use the
+[dirty-flag-and-sweep shape](/docs/capabilities/data-rate-shaping#below-the-helpers-dirty-flag-and-sweep-for-simulation-state)
+with the actor as the state owner.
 
 ## The basic shape
 

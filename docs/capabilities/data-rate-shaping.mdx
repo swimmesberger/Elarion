@@ -93,3 +93,81 @@ These two shapes are deliberately the whole surface — windows, joins, or repla
 real reactive/streaming library, not for growing these helpers. For ordered, gap-visible streams where
 element identity matters, use [ordered streams](/docs/capabilities/events/streams) instead of
 conflation.
+
+## Below the helpers: dirty-flag-and-sweep for simulation state
+
+Both helpers assume an **append-shaped sample stream**: every reading is a new fact, produced at
+gateway rates — hundreds of keys, a few hertz each. A simulation loop is a different workload:
+thousands of entities mutating at tick rate, where only the *latest* state of each entity matters and
+the update path is allocation-sensitive. At that tier, even latest-wins helper machinery is overhead —
+`WriteBehindBuffer` queues every update, and `KeyedConflater` pays a dictionary hit and timer
+scheduling per key per window. Keep both off a per-update hot path.
+
+The standard shape there is **dirty-flag-and-sweep**, in application code:
+
+1. An update mutates the entity the loop already owns and sets `Dirty = true` — field writes, zero
+   allocation, no per-update queue entry.
+2. A periodic sweep (tick-aligned or interval) walks a stable iteration structure — a preallocated
+   list or bitset of dirty indices, not LINQ — copies dirty state into a reused batch buffer, clears
+   the flags, and issues **one batched write**.
+3. Explicit save points (a session ending, an entity unloading) call the same sweep directly.
+
+The sweep itself allocates (rows, command, parameters) — at flush frequency, not update frequency,
+which is the point. A crash loses at most one interval: the same loss-tolerant contract as the
+helpers, so the same rule applies — state that must not be lost belongs in a handler transaction and
+[the outbox](/docs/capabilities/events/backends), not in this loop.
+
+An [actor](/docs/concepts/actors) is the natural owner of the hot state: updates and the sweep are
+both turns on one mailbox, so the sweep sees a consistent view with no locking, and the flush trigger
+is a facade call from whatever tick the application already has — the simulation loop, a
+[scheduled job](/docs/capabilities/scheduling), or a hosted service:
+
+```csharp
+[SqlRecord("entity_positions")]
+public sealed partial record EntityPositionRow {
+    public required Guid Id { get; init; }
+    public required float X { get; init; }
+    public required float Y { get; init; }
+}
+
+[Actor]
+public sealed class ZoneActor(ISqlDatabase db) {
+    // Mutable by design: hot per-entity state, owned and serialized by the mailbox.
+    private sealed class EntitySlot { public Guid Id; public float X; public float Y; public bool Dirty; }
+
+    private readonly Dictionary<Guid, EntitySlot> _entities = [];
+    private readonly List<EntityPositionRow> _batch = [];   // reused flush buffer
+
+    public Task Move(Guid id, float x, float y) {           // hot path: field writes only
+        var slot = _entities[id];
+        slot.X = x; slot.Y = y; slot.Dirty = true;
+        return Task.CompletedTask;
+    }
+
+    public async Task FlushAsync(CancellationToken ct) {    // tick-aligned, e.g. every 30 s
+        _batch.Clear();
+        foreach (var slot in _entities.Values) {
+            if (!slot.Dirty) continue;
+            slot.Dirty = false;
+            _batch.Add(new EntityPositionRow { Id = slot.Id, X = slot.X, Y = slot.Y });
+        }
+        if (_batch.Count == 0) return;
+
+        await using var session = await db.OpenSessionAsync(ct);
+        await session.InsertManyAsync(_batch,
+            " ON CONFLICT (id) DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y", ct);
+    }
+}
+```
+
+The framework's contribution is the flush target, per host tier:
+
+| Tier | Batched upsert path |
+| --- | --- |
+| EF | [`ExecuteInsertAsync`](/docs/capabilities/bulk-operations) with `OnConflict = BulkInsertConflictBehavior.Update` — binary COPY staged through a temp table, merged with native `ON CONFLICT` |
+| EF-free / AOT | [`InsertManyAsync`](/docs/capabilities/sql-mapping#reads-and-writes) with an `ON CONFLICT …` suffix — one reused prepared command per flush; source-generated binary COPY for this tier is proposed in [ADR-0068](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0068-aot-sql-binary-copy.md) |
+
+There is deliberately no `DirtySweep<T>` helper. The dirty bit and the iteration structure belong to
+the application's entity representation, and any framework intermediary between the update and the
+flag would reintroduce exactly the per-update bookkeeping this shape exists to avoid. The framework's
+seams are the mailbox that serializes the hot state and the batched write the sweep flushes into.
