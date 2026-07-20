@@ -93,7 +93,18 @@ typically issued as a `permission` claim (the default
 [`AuthorizationOptions.PermissionClaimType`](/docs/concepts/authorization)) on roles, and enforced on handlers
 with `[RequirePermission]`. You no longer hand-maintain the *list* of permissions, though: inject
 [`IPermissionCatalog`](/docs/concepts/authorization#permission-catalog) to enumerate every `[RequirePermission]`/`[RequireRole]`
-across your modules when seeding.
+across your modules when seeding:
+
+```csharp
+// Seeding: every [RequirePermission] across enabled modules, no hand-kept Permissions.All list.
+public sealed class RoleSeeder(IPermissionCatalog catalog, RoleManager<ApplicationRole> roles) {
+    public async Task SeedAdminAsync(ApplicationRole adminRole) {
+        foreach (var permission in catalog.Permissions) {   // "{resource}.{verb}", e.g. "clients.read"
+            await roles.AddClaimAsync(adminRole, new Claim("permission", permission));
+        }
+    }
+}
+```
 
 ## See also
 

@@ -1,0 +1,255 @@
+---
+title: Frontend modules
+description: The contribution model — typed extension points, declarative module manifests, and capability-gated resolution — extends "a module only touches its own code" to the web app.
+---
+
+Elarion's backend has a hard review-isolation property: adding a feature to a module touches only that
+module's code. The **frontend contribution model**
+([ADR-0032](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0032-frontend-contribution-model.md),
+shipped as [`@swimmesberger/elarion-contributions`](https://www.npmjs.com/package/@swimmesberger/elarion-contributions))
+extends that rule to the TypeScript app: a new sidebar item is one edit in the owning module's manifest, a
+new module is a new folder (its manifest glob-discovered; its routes one typed registration line — the
+`ProjectReference` grain), and a cross-module action is a manifest entry plus one token import — the shell
+never changes.
+
+```bash
+npm install @swimmesberger/elarion-contributions
+```
+
+This page is the framework-agnostic model: points, manifests, `when` clauses, and the registry. The
+framework bindings and routing recipes are their own pages:
+
+<Cards>
+  <Card title="React & app shells" href="/docs/concepts/frontend-modules/react">
+    The composition root, `useContributions`/`ExtensionSlot`, plain and shadcn/ui sidebars, Vite config.
+  </Card>
+  <Card title="Routing" href="/docs/concepts/frontend-modules/routing">
+    Module-owned route subtrees, the `redirectUnless` guard, and the TanStack Start SSR shim.
+  </Card>
+  <Card title="Angular" href="/docs/concepts/frontend-modules/angular">
+    `provideContributions`, signal-based slots, and a self-owned `*extensionSlot` directive.
+  </Card>
+</Cards>
+
+## The model in one pass
+
+- A frontend **module** is a folder that ships a **manifest** — plain data plus lazy component references —
+  from its public entry. There is no import-time `registry.register(...)`: manifests are inspectable
+  without executing module code, deterministic, and testable as plain arrays.
+- An **extension point** is a typed token (`defineExtensionPoint<TItem, TContext>`). Exporting one from a
+  module's public entry is the frontend [`[ModuleContract]`](/docs/concepts/cross-module-communication):
+  contributors import the token — an explicit, compile-checked, correctly-directed dependency — without
+  pulling the owner's components into their chunk.
+- Every contribution carries a **`when` clause** (`{ module?, permission?, flag?, role? }`) evaluated
+  against the [client-capability snapshot](/docs/concepts/client-capabilities). The vocabulary is the
+  generated literal unions, and clauses are checked **strictly** against it: `when: { permission:
+  "invocies.read" }` fails to compile instead of silently hiding the item. Declare only the axes your app
+  has — an omitted axis rejects every use, so a [no-auth app](#no-auth-no-session-snapshot-yet) binding
+  `{ module: ModuleName }` gets a compile error on any stray permission/flag/role clause.
+- The **registry** resolves once per snapshot: filter by `when` (a manifest-level `when` is ANDed into
+  every contribution), then sort deterministically by `order`, then id. Contribution ids double as render
+  keys, so resolution **throws if two co-visible contributions to one point share an id** — prefix ids
+  with the module name (`"invoicing.create-invoice"`) to stay collision-free. A slot renders the resolved
+  list; server render and client hydration see identical trees.
+
+<Callout type="warn">
+Contribution visibility is a **read-only UX projection, never an enforcement boundary**. A hidden sidebar
+item is not a secured operation — the handler's own `[RequirePermission]`/`[FeatureGate]` gates every call
+server-side (see [Authorization](/docs/concepts/authorization)).
+</Callout>
+
+## What you import vs. what you own
+
+The package ships the *machinery* with fixed semantics; the application owns the *points* and the shell —
+Elarion deliberately ships no UI kit and no router integration:
+
+| You import (fixed semantics) | You own (copy from the sample) |
+| --- | --- |
+| `defineExtensionPoint`, `defineModule`, `contribute`, `ItemOf`/`ContextOf` | Your extension points (`sidebarItems`, …) and payload types |
+| The `when` evaluator and its strict AND semantics | The kit instantiation binding your (generated or hand-authored) vocabulary |
+| `createContributionRegistry` (filter + deterministic order + id validation) | The app shell that renders each slot |
+| `createStaticCapabilities` (the no-snapshot `CapabilityReader`) | The real snapshot wiring once `elarion.session` exists |
+| `ContributionProvider`, `useContributions`, `<ExtensionSlot context=…>` (`/react`) | Route composition and module discovery (the glob) |
+| `provideContributions`, `injectContributions`→`Signal` (`/angular`) | Slot rendering — an `@for` block, or a self-owned `*extensionSlot` directive |
+| `redirectUnless` route guard (`/tanstack-router`) | Everything else routing — TanStack's own API |
+
+Keeping the machinery imported is what preserves review isolation: the semantics live in the framework and
+are not re-reviewed (or silently forked) in every application. Keeping the points app-owned is the same
+rule as the backend: Elarion ships the `[ModuleContract]` mechanism, never your contracts.
+
+## Wiring it up
+
+Bind the kernel once to the generated capability vocabulary, in the app's platform folder:
+
+```ts title="platform/contributions.ts"
+import { createContributionKit, type ModuleManifest } from "@swimmesberger/elarion-contributions"
+import type { FlagName, ModuleName, PermissionName, RoleName } from "@/generated/session-client"
+
+export interface AppVocabulary {
+  module: ModuleName
+  permission: PermissionName
+  flag: FlagName
+  role: RoleName
+}
+export type AppManifest = ModuleManifest<AppVocabulary>
+export const { defineModule, defineExtensionPoint, contribute } = createContributionKit<AppVocabulary>()
+```
+
+Declare only the axes your application has: `when` clauses are checked strictly, and an omitted axis
+rejects every value. A backend without permissions/flags/roles binds `{ module: ModuleName }` and any
+stray `when: { permission: … }` is a compile error — see
+[No auth, no session snapshot yet](#no-auth-no-session-snapshot-yet) for the full recipe.
+
+Declare points where the slot's owner lives — the shell for a sidebar, a module for its own surface. The
+payload shape is deliberately **yours**: whatever your shell needs to render an entry (keep `to` a plain
+string so the point stays router-agnostic data — the shell is the one place that hands it to a router
+link):
+
+```ts title="platform/points.ts"
+import type { LucideIcon } from "lucide-react"
+import { defineExtensionPoint } from "@/platform/contributions"
+
+export interface SidebarItem {
+  readonly label: string
+  readonly icon: LucideIcon
+  readonly to: string
+}
+export const sidebarItems = defineExtensionPoint<SidebarItem>("platform.sidebar")
+```
+
+A module declares everything it adds in its manifest. A backend-paired module gates itself once at the
+manifest level, so disabling the backend module removes the whole frontend module:
+
+```ts title="modules/invoicing/module.tsx"
+export const invoicingManifest = defineModule({
+  name: Modules.Invoicing,
+  when: { module: Modules.Invoicing },
+  contributes: [
+    contribute(sidebarItems, [{
+      id: "invoices", label: "Invoices", icon: ReceiptText, to: "/invoices", order: 20,
+      when: { permission: Permissions.invoices.read },
+    }]),
+  ],
+})
+```
+
+How manifests are discovered and handed to the registry is the composition root's job — see
+[React & app shells](/docs/concepts/frontend-modules/react) (and the same wiring in
+[Angular](/docs/concepts/frontend-modules/angular)).
+
+## No auth, no session snapshot yet
+
+A common adoption shape — self-hosted apps behind an authenticating reverse proxy, or a backend that has
+not shipped the `elarion.session` operation yet — has **no generated `session-client.ts`**. The model
+supports this first-class; nothing about it requires the generator.
+
+Hand-author the vocabulary with only the axes you have (module names mirroring the backend's
+`[AppModule]` markers), and use the shipped static reader instead of a hand-rolled one:
+
+```ts title="platform/session.ts — no snapshot yet"
+import { createStaticCapabilities } from "@swimmesberger/elarion-contributions"
+
+/** Mirrors the backend [AppModule] names. Replace with the generated ModuleName when the snapshot lands. */
+export const Modules = { Core: "core", AiAgent: "ai-agent" } as const
+export type ModuleName = (typeof Modules)[keyof typeof Modules]
+
+// Modules/permissions/roles default to "all"; flags default to none (fail-closed, like the evaluator).
+// Env-driven module toggles are one map away:
+export const caps = createStaticCapabilities({
+  modules: { core: true, "ai-agent": import.meta.env.VITE_MODULE_AI_AGENT_ENABLED !== "false" },
+})
+```
+
+```ts title="platform/contributions.ts — module-only vocabulary"
+export interface AppVocabulary {
+  module: ModuleName
+  // No permission/flag/role axes: any `when: { permission: … }` anywhere is now a compile error,
+  // so the vocabulary can't silently rot ahead of the backend.
+}
+export const { defineModule, defineExtensionPoint, contribute } = createContributionKit<AppVocabulary>()
+```
+
+The migration seam is the point of this shape: `createStaticCapabilities` returns the same structural
+`CapabilityReader` the generated `SessionCapabilities` satisfies. When the backend ships the session
+operation, regenerate the client, re-export `Modules`/`ModuleName` from the generated file, widen
+`AppVocabulary` with the new axes, and swap `caps` for `createSessionCapabilities(snapshot)` — no module
+or manifest changes.
+
+## Cross-module contribution
+
+A module publishes a point from its public entry; another module imports the token and contributes.
+Payloads carry **lazy component references**, so the contributed UI stays in the contributor's chunk and
+downloads on first use:
+
+```ts title="modules/invoicing/module.tsx"
+import { clientRowActions } from "@/modules/clients"   // the Clients module's published token
+
+contribute(clientRowActions, [{
+  id: "invoicing.create-invoice",   // module-prefixed: ids must be unique within the point
+  label: "New invoice for this client",
+  icon: FilePlus2,
+  component: lazy(() => import("./components/CreateInvoiceForClient")
+    .then((m) => ({ default: m.CreateInvoiceForClient }))),
+  when: { permission: Permissions.invoices.write },
+}])
+```
+
+The slot owner renders whatever resolved — if Invoicing is disabled, the action simply never appears; if
+Clients is disabled, its slot never renders and the contribution is inert. Neither module sees the other's
+internals: the boundary is the public entry (`modules/{name}/index.ts` by convention; workspace packages
+with `exports` maps enforce the same rule at scale — the `ELMOD002` analog).
+
+### Slot context: delivering what the point promises (`TContext`)
+
+A point's second type parameter declares what the slot site supplies to every contribution — `void` for
+context-free slots like a sidebar. It is not advisory: reference it from the payload with `ContextOf`, and
+supply it through the slot's `context` prop, and the payload's signature, the point's declaration, and the
+slot site can never drift apart:
+
+```tsx title="modules/stacks/points.ts — a detail page's tab strip"
+import type { ContextOf } from "@swimmesberger/elarion-contributions"
+
+export interface StackTabContext {
+  readonly stack: Stack
+}
+export interface StackTab {
+  readonly value: string
+  readonly label: string
+  /** ContextOf pins this signature to the point's declaration — the two cannot diverge. */
+  readonly component: (context: ContextOf<typeof stackDetailTabs>) => ReactNode
+}
+export const stackDetailTabs = defineExtensionPoint<StackTab, StackTabContext>("stacks.detailTabs")
+```
+
+```tsx title="modules/stacks/StackDetailPage.tsx — the tab host"
+<Tabs value={activeTab} onValueChange={setTab}>
+  <ExtensionSlot
+    point={stackDetailTabs}
+    context={{ stack }}                    // type-checked against StackTabContext
+    render={(tab, context) => (
+      <TabsContent key={tab.id} value={tab.value}>{tab.component(context)}</TabsContent>
+    )}
+  />
+</Tabs>
+```
+
+Everything a contribution needs from its host belongs **in the context — callbacks included**. When the
+host later has more to offer (say a "view log" callback beside `stack`), widen `TContext` at the point:
+every slot site and every `ContextOf`-typed payload follows by compile error, instead of the extra value
+being smuggled through a separate React context beside the model.
+
+Slots that render only inert parts (buttons, menu entries) and mount the payload's component later — at
+invocation — keep the context-free `render={(item) => …}` form and hand the context over at the call
+site; the Billing sample's client row actions do exactly that.
+
+## Reference usage
+
+The [Billing sample's web app](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing/web) is
+the living reference: module folders, the shell-owned sidebar point, the cross-module row-action point,
+snapshot-gated routes, and the composition root — start a new app by copying its app-owned half.
+
+## See also
+
+- [Client capabilities](/docs/concepts/client-capabilities) — the snapshot and typed vocabulary `when` clauses evaluate against.
+- [Cross-module communication](/docs/concepts/cross-module-communication) — the backend boundary model this mirrors.
+- [ADR-0032](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0032-frontend-contribution-model.md) — decisions and non-goals (no micro-frontends, no C#-declared UI, no UI kit, no bespoke router).

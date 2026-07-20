@@ -1,0 +1,25 @@
+---
+title: Simulation & testing
+description: Socket-less simulated connections, awaitable observers, in-memory TCP links, and the WebSocket test host — pick the lowest faithful tier.
+---
+
+`Elarion.Connections.Simulation` ships the pieces every gateway test suite — and every runnable
+dev/demo device simulator — otherwise hand-rolls. `SimulatedClientConnection` is an in-memory sink
+double — register it with the real registry and drive twins, observers, and presence logic
+deterministically: await its `Sent` channel for outbound messages, answer `InvokeAsync` via
+`InvokeResponder`, and `Close()` it to assert your code survives `ClientConnectionClosedException`.
+`AwaitableConnectionObserver` turns lifecycle edges into awaitable completions (with `Reset()` for
+reconnect scenarios). `TcpSimulatorClient` is the framed client for simulated devices/peers:
+connect it to a listener (or wrap the accepted side of a fake device an Elarion dialer reached) and
+speak whole messages through the endpoint's own framer, with text helpers for challenge/response
+handshakes.
+
+The default for codec/handler-level work is **fully in-memory** — no OS sockets, ports, or firewall
+prompts: `InMemoryTcpLink.Start(handler, registry, o => o.Framer = …)` runs the complete connection
+lifecycle (per-connection settings, handshake, framing, registry, codec, idle hook) over an in-memory
+duplex pair, hands you the simulator-side `Client`, a deterministic `ServerConnection` await (the
+registered sink — no polling, no handshake races), and a `ServerCompletion` for teardown assertions.
+Reserve real sockets (loopback TCP, Kestrel + `ClientWebSocket`) for integration tests of the adapters
+themselves — the separate `Elarion.Connections.AspNetCore.Simulation` package's `WebSocketTestHost`
+covers a real Kestrel upgrade, handshake, codec, and close path. `InMemoryDuplexStream.CreatePair()`
+is public for anything else that wants a socket pair without the socket.

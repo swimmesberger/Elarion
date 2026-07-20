@@ -117,11 +117,10 @@ public sealed class CreateClient
 }
 ```
 
-The handler generator expects:
-
-- a nested request type named `Command` or `Query`,
-- a nested response type named `Response`,
-- an `IHandler<TRequest, Result<TResponse>>` implementation.
+The handler generator reads the request and response types from the
+`IHandler<TRequest, Result<TResponse>>` implementation. Nesting the DTOs inside the handler (as above)
+is a tidy convention, not a requirement — request and response types may be nested or top-level, and
+their names carry no semantic weight.
 
 ### The operation name is optional
 

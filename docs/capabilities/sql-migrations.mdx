@@ -129,6 +129,9 @@ on its own). Only a non-transactional script can leave a mid-applied state on fa
 an explicit **failed** history row and subsequent runs fail closed, naming the script and the recovery API:
 
 ```csharp
+// AddElarionMigrations registers IMigrationRunner — inject/resolve it where you handle recovery:
+IMigrationRunner runner = app.Services.GetRequiredService<IMigrationRunner>();
+
 await runner.ResolveFailedAsync("20260713093000", ResolveAction.Retry);       // rerun the fixed script
 await runner.ResolveFailedAsync("20260713093000", ResolveAction.MarkApplied); // schema was completed by hand
 ```
@@ -155,7 +158,19 @@ treated as applied and never run. It is explicit only (allowed solely while the 
 there is no `baselineOnMigrate` auto-magic.
 
 `ValidateAsync` (checksum + pending report, no writes) and `GetPendingAsync` back health checks and
-deploy gates; everything ships in the box, no feature tiers.
+deploy gates; everything ships in the box, no feature tiers:
+
+```csharp
+IMigrationRunner runner = app.Services.GetRequiredService<IMigrationRunner>();
+
+// One-time adoption of an existing database (history must be empty):
+await runner.BaselineAsync("20260713093000", "adopt existing schema", ct);
+
+// Health check / deploy gate — read-only:
+MigrationValidationResult validation = await runner.ValidateAsync(ct);
+if (!validation.IsValid) Report(validation.Errors);          // checksum drift, malformed scripts
+IReadOnlyList<MigrationScriptInfo> pending = await runner.GetPendingAsync(ct);
+```
 
 ## Options
 

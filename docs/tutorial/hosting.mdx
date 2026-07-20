@@ -67,13 +67,14 @@ Compose the host. Each block is a platform capability the modules consume throug
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-using Billing.Api.Hosting;
+using Billing.Api;               // the generated ElarionBootstrapper lives in the host's root namespace
 using Billing.Application;
 using Billing.Application.Modules.Invoicing.Services;
 using Billing.Application.Persistence;
 using Billing.Infrastructure.Email;
 using Elarion.Abstractions.Diagnostics;
 using Elarion.Abstractions.Messaging;
+using Elarion.Diagnostics;
 using Elarion.Abstractions.Scheduling;
 using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
@@ -114,8 +115,9 @@ builder.Services.AddScoped<IInvoiceEmailSender, SmtpInvoiceEmailSender>();
 // services.AddElarion(...) call below — there is no explicit Add…ScheduledJobs call.
 builder.Services.AddElarionScheduler(builder.Configuration);
 
-// Resilience: generated policy metadata + the Microsoft/Polly-backed runtime.
-builder.Services.AddBillingApplicationResiliencePolicies();
+// Resilience: generated policy metadata + the Microsoft/Polly-backed runtime. The generated method
+// name is Add{AssemblyName}ResiliencePolicies with dots replaced by underscores.
+builder.Services.AddBilling_ApplicationResiliencePolicies();
 builder.Services.AddElarionResilience();
 
 // Per-user handler caching, backed by HybridCache.
@@ -203,6 +205,19 @@ app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
 
 app.Run();
 ```
+
+`MapElarionEndpoints` publishes every handler that carries `[HttpEndpoint]` as a minimal-API REST
+route — the same handler, pipeline, and `Result` mapping as JSON-RPC, just a different projection.
+None of the Billing handlers opt in so far; making one RESTful is a single attribute:
+
+```csharp
+[HttpEndpoint("clients/{id}")]   // verb inferred from the IQuery marker → GET /clients/{id}
+[Handler("clients.get")]         // …and still exposed over JSON-RPC/MCP — one handler, two transports
+public sealed class GetClient(BillingDbContext db)
+    : IHandler<GetClient.Query, Result<GetClient.Response>> { /* … */ }
+```
+
+See [HTTP endpoints](/docs/capabilities/transports/http-endpoints) for routing, binding, and verb rules.
 
 <Callout type="info">
   The JSON-RPC dispatcher, the MCP server, and schema export all read the **one** canonical

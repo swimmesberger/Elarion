@@ -1,0 +1,88 @@
+---
+title: Angular
+description: The signal-first Angular bindings — provideContributions, injectContributions, and a self-owned *extensionSlot structural directive.
+---
+
+The same [contribution kernel](/docs/concepts/frontend-modules) drives an Angular app through the
+`/angular` sub-export — idiomatic for Angular 20–22: signal-first, standalone, no NgModule.
+`provideContributions` is an environment provider (shaped like `provideRouter`); `injectContributions`
+returns a `Signal` your template tracks, so refreshing the snapshot re-resolves every slot by setting one
+signal. The bindings are deliberately decorator- and template-free, so they ship in the one package with
+no separate Angular build.
+
+```ts title="main.ts"
+import { createContributionRegistry } from "@swimmesberger/elarion-contributions"
+import { provideContributions } from "@swimmesberger/elarion-contributions/angular"
+
+const registry = createContributionRegistry(appModules.map((m) => m.manifest), caps)
+bootstrapApplication(AppComponent, { providers: [provideContributions(registry)] })
+// snapshot can change at runtime? provideContributions(signal(registry)) and .set(...) on login.
+```
+
+The sidebar is the same move as in React — wherever you'd `@for` over a hard-coded array, read the point
+instead:
+
+```ts title="platform/app-sidebar.component.ts"
+import { Component } from "@angular/core"
+import { RouterLink, RouterLinkActive } from "@angular/router"
+import { injectContributions } from "@swimmesberger/elarion-contributions/angular"
+import { sidebarItems } from "@/platform/points"
+
+@Component({
+  selector: "app-sidebar",
+  standalone: true,
+  imports: [RouterLink, RouterLinkActive],
+  template: `
+    <nav class="flex flex-col gap-1">
+      @for (item of items(); track item.id) {
+        <a [routerLink]="item.to" routerLinkActive="bg-accent font-medium">{{ item.label }}</a>
+      }
+    </nav>
+  `,
+})
+export class AppSidebar {
+  readonly items = injectContributions(sidebarItems)   // filtered by `when`, deterministically ordered
+}
+```
+
+## A self-owned `*extensionSlot` directive
+
+Prefer slot sugar over an inline `@for`? The package ships **no** directive — that would need the Angular
+compiler and a separate build. A `*extensionSlot` structural directive is instead a few lines you own on
+top of `injectContributions`, and because it's yours the rendering stays in your app while the kernel
+stays framework-agnostic:
+
+```ts title="platform/extension-slot.directive.ts"
+import {
+  Directive, effect, inject, Injector, input, runInInjectionContext, TemplateRef, ViewContainerRef,
+} from "@angular/core"
+import { injectContributions } from "@swimmesberger/elarion-contributions/angular"
+import type { Contribution, ExtensionPoint } from "@swimmesberger/elarion-contributions"
+
+@Directive({ selector: "[extensionSlot]", standalone: true })
+export class ExtensionSlotDirective<TItem> {
+  // *extensionSlot="point" — the point token to render.
+  readonly point = input.required<ExtensionPoint<TItem, unknown>>({ alias: "extensionSlot" })
+
+  private readonly tpl = inject<TemplateRef<{ $implicit: Contribution<TItem> }>>(TemplateRef)
+  private readonly vcr = inject(ViewContainerRef)
+  private readonly injector = inject(Injector)
+
+  constructor() {
+    // Re-render when the point changes or the snapshot refreshes; each item is the template's $implicit.
+    // injectContributions() calls inject(), so it must run in an injection context — hence runInInjectionContext.
+    effect(() => {
+      const items = runInInjectionContext(this.injector, () => injectContributions(this.point())())
+      this.vcr.clear()
+      for (const item of items) this.vcr.createEmbeddedView(this.tpl, { $implicit: item })
+    })
+  }
+}
+```
+
+The slot site then reads like TanStack's `<ExtensionSlot>`, with the contribution as the template's
+implicit value:
+
+```html
+<a *extensionSlot="sidebarItems; let item" [routerLink]="item.to">{{ item.label }}</a>
+```

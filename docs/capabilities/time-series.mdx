@@ -79,7 +79,7 @@ public sealed class IngestSamples(AppDbContext db, IIntegrationEventBus events)
 
     public sealed record Point(DateTimeOffset RecordedAt, double Value);
 
-    public async ValueTask<Result<Unit>> HandleAsync(Command command, CancellationToken ct) {
+    public async ValueTask<Result> HandleAsync(Command command, CancellationToken ct) {
         var rows = command.Points.Select(p => new DeviceSample {
             DeviceId = command.DeviceId,
             RecordedAt = p.RecordedAt,
@@ -91,7 +91,7 @@ public sealed class IngestSamples(AppDbContext db, IIntegrationEventBus events)
 
         await events.PublishAsync(new SamplesIngested { DeviceId = command.DeviceId }, ct);
         await db.SaveChangesAsync(ct);   // COPY bypasses SaveChanges — this flushes only the outbox row
-        return Unit.Value;
+        return Result.Success();
     }
 }
 

@@ -88,10 +88,21 @@ builder.Services.AddElarionPostgreSqlRolePartition<AppDbContext>(partition => {
 });
 ```
 
-Resolve the keyed `IRolePartition` and call `Resolve(key)` (or `Resolve(scope, key)`) for the locally
-cached role/holder/address view. Roles are named `devices:partition-0` through
-`devices:partition-15`. `IRoleLeaseRegistry` exposes all configured leases to infrastructure such as
-role-affine outbox claiming.
+Resolve the keyed `IRolePartition` (keyed by the partition name) and call `Resolve(key)` (or
+`Resolve(scope, key)`) for the locally cached role/holder/address view — no I/O on the hot path:
+
+```csharp
+public sealed class DeviceRouter([FromKeyedServices("devices")] IRolePartition partition) {
+    public bool OwnsDevice(string deviceId) {
+        RolePartitionTarget target = partition.Resolve(deviceId);   // stable hash → one of 16 roles
+        return target.IsHeld;   // this process holds the partition's role lease
+        // target.Role is e.g. "devices:partition-7"; target.CurrentHolderAddress routes elsewhere.
+    }
+}
+```
+
+Roles are named `devices:partition-0` through `devices:partition-15`. `IRoleLeaseRegistry` exposes all
+configured leases to infrastructure such as role-affine outbox claiming.
 
 ## Gate every cycle
 

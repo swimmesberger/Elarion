@@ -1,0 +1,127 @@
+---
+title: Device gateways
+description: Keepalives, codec conversation helpers, and the full device-gateway loop — connections as the carrier, actors as the concurrency gate, handlers as the authorization gate.
+---
+
+## Keepalives and conversations
+
+Two optional pieces cover what every device codec otherwise hand-rolls:
+
+- **The idle hook.** Set `IdleTimeout` on any adapter and the codec's `OnIdleAsync` fires per elapsed
+  window without inbound traffic — send the protocol's poll/heartbeat there, or throw to declare the
+  link dead. Default is off; the hook never abandons the pending read.
+- **Conversation helpers** (in the kernel, use only if they fit):
+  `ConnectionPendingRequests<TKey, TResponse>` is the sequence-number → completion map behind a codec's
+  `InvokeAsync` — register the key, send, await the correlated reply with a timeout, `FailAll` on
+  teardown. `SendAndWaitAsync(key, send, …)` is the safe correlation pattern in one call: it registers
+  **before** invoking your send (a fast reply can never race its own registration), and a failed send
+  withdraws its own pending entry — the key is immediately reusable and nothing awaits a reply that can
+  never come. `ConnectionInbox<TMessage>` serves multi-message flows: the receive path `Post`s every
+  parsed message, flow code awaits the next message matching a predicate ("the ready frame or the abort
+  frame"), buffered so a fast reply beats its waiter safely, and `Complete` faults everything when the
+  connection ends.
+
+```csharp
+internal sealed class DeviceCodec(TcpClientConnection connection) : IClientConnectionProtocol {
+    private readonly ConnectionPendingRequests<ushort, DeviceFrame> _pending = new();
+
+    public ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+        var frame = DeviceFrame.Parse(message.Span);
+        return _pending.TryComplete(frame.Sequence, frame)
+            ? ValueTask.CompletedTask
+            : HandleUnsolicitedAsync(frame, ct);              // telemetry, events, …
+    }
+
+    public async ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
+        string name, TRequest request, ClientInvokeOptions? options, CancellationToken ct)
+        where TRequest : class {
+        var sequence = NextSequence();
+        // Register-then-send in one call: the sink already resolved the default invoke timeout into
+        // options (a null Timeout here means the invoke is deliberately unbounded), and a send that
+        // faults withdraws its own registration so the sequence number is immediately reusable.
+        var reply = await _pending.SendAndWaitAsync(sequence,
+            sendCt => connection.SendBinaryAsync(DeviceFrame.Encode(sequence, name, request), sendCt),
+            options?.Timeout, ct);
+        return Decode<TResponse>(reply);
+    }
+
+    public ValueTask OnIdleAsync(CancellationToken ct) =>
+        connection.SendBinaryAsync(DeviceFrame.Poll(), ct);   // the 60 s keepalive
+}
+```
+
+## Putting it together — the device-gateway loop
+
+Connections are deliberately **not a fourth invocation model** — they're a carrier with identity.
+Actors stay the concurrency gate for device state, handlers stay the authorization gate for anything
+command-shaped, client events stay the one fan-out. The whole loop, end to end:
+
+**Connect/disconnect → the twin.** An observer (the one piece of hand-written glue) routes lifecycle
+into the digital twin's public facade; the twin marks presence and captures the sink — an actor owning
+a stateful connection is exactly actor use-case&nbsp;#1, and the mailbox serializes a device's parallel
+channels against user-triggered commands for free:
+
+```csharp
+internal sealed class DeviceTwinAttachment(IActorSystem actors) : IClientConnectionObserver {
+    public ValueTask OnConnectedAsync(IClientConnectionSink connection, CancellationToken ct = default) =>
+        new(actors.Get<IDeviceTwin>(connection.Connection.PrincipalId!).ChannelUp(connection));
+
+    public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) =>
+        new(actors.Get<IDeviceTwin>(connection.PrincipalId!).ChannelDown(connection.ConnectionId));
+}
+
+// services.TryAddEnumerable(ServiceDescriptor.Singleton<IClientConnectionObserver, DeviceTwinAttachment>());
+```
+
+**Inbound frames → the twin, pipeline-free.** Telemetry isn't a command; the codec parses and hands the
+frame to the mailbox (see the codec examples on the [WebSocket](/docs/capabilities/connections/websocket)
+and [TCP](/docs/capabilities/connections/tcp) pages). The codec's one routing decision is *which frames
+are commands* — those go through the dispatch rail instead:
+
+```csharp
+// Inside a codec, for command-shaped messages: ConnectionHandlerInvoker rides the same per-call scope
+// rail JSON-RPC and MCP use. Bind it once per connection; every call then runs authorization,
+// validation, [Idempotent], transaction, and audit per message, evaluated against the connection's
+// captured identity snapshot (seeded as ICurrentUser by the standard initializer) — a promotion racing
+// a dispatch affects the next message, never the scope underneath the current one, and adapter
+// metadata can never overwrite the framework identity entries.
+var invoker = new ConnectionHandlerInvoker(services, connection);
+
+// A request with a self-typed marker (StartCommand : ICommand<StartCommand, StartAck>) infers both
+// generic arguments; marker-free requests use the explicit InvokeAsync<StartCommand, StartAck> form.
+var result = await invoker.InvokeAsync(decoded, ct);
+// encode the result back over the sink — your framing; a failed Result stays a value
+
+// Decoded-by-name traffic goes through the filtered named rail instead: only routes exposed with
+// HandlerTransports.Connection are reachable, and unknown/other-transport names return the same
+// generic NotFound so exposure is never leaked.
+var named = await invoker.InvokeNamedAsync(dispatcher, name, decodedRequest, ct);
+```
+
+**User → device.** A UI action arrives as a normal `[Handler]` (over HTTP/JSON-RPC — `[RequirePermission]`,
+ownership check, `[Auditable]`) and calls the twin facade; the twin talks to the device through its
+captured sink, serialized with everything else in its mailbox:
+
+```csharp
+[Handler("robots.start")]
+internal sealed class StartRobot(IActorSystem actors) : IHandler<StartRobot.Command, Result<Unit>> {
+    public sealed record Command : ICommand { public required Guid RobotId { get; init; } }
+
+    public async ValueTask<Result<Unit>> HandleAsync(Command request, CancellationToken ct) =>
+        await actors.Get<IDeviceTwin>(request.RobotId.ToString("N")).StartAsync(ct);
+}
+
+// inside the twin: one request/reply into the device, bounded by a timeout
+var ack = await _channel.InvokeAsync<StartCommand, StartAck>(
+    "start", new StartCommand(), new ClientInvokeOptions { Timeout = TimeSpan.FromSeconds(5) }, ct);
+```
+
+**Live state → every UI.** The twin publishes client events from its hot state (the ephemeral tier), or
+projects committed facts via a method-form `[ConsumeEvent]`; SSE browsers and connection-carried
+subscribers receive identically through the bridge. Durable facts flow as integration events — which can
+come back *into* actors via `[ConsumeEvent]` on actor methods.
+
+The hand-written glue per app is the observer (~10 lines) and the codec's routing decision; the
+handshake, registry, lifecycle, per-message scopes, mailbox, and fan-out are all framework. For the
+hot-path allocation profile of this loop, see
+[Low-allocation dispatch](/docs/capabilities/connections/low-allocation).

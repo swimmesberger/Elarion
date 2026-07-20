@@ -43,19 +43,30 @@ public sealed partial record Order {
 ```
 
 The generator emits `OrderSqlMapper : ISqlRowMapper<Order>` **and** makes `Order` self-mapping, so the
-query extensions resolve its mapper from the type — **no mapper argument**. In a handler you inject
-`ISqlSession` (`db` below — the scoped, transaction-aware entry point, see
+query extensions resolve its mapper from the type — **no mapper argument**. In a handler, inject the
+scoped **`ISqlSession`** — the transaction-aware entry point (see
 [Transactions](#transactions-unit-of-work)); interpolated values become parameters, and `Order.Select`
 splices the generated `SELECT`-list with no `:raw`:
 
 ```csharp
-var orders = await db.QueryAsync<Order>(
-    $"{Order.Select} WHERE status = {status} AND customer_name IN {names}", ct);
+[Handler]
+public sealed class ListOrders(ISqlSession db) {
+    public async ValueTask<Result<List<Order>>> HandleAsync(ListOrdersQuery query, CancellationToken ct) {
+        List<Order> orders = await db.QueryAsync<Order>(
+            $"{Order.Select} WHERE status = {query.Status} AND customer_name IN {query.Names}", ct);
+        return orders;
+    }
+}
+```
 
+The other read shapes take the same interpolated SQL on the same session:
+
+```csharp
 Order? one = await db.QueryFirstOrDefaultAsync<Order>($"{Order.Select} WHERE id = {id}", ct);
 ```
 
-Write with the same self-mapping — no command/transaction/`BindParameters` ceremony:
+Write with the same self-mapping on the same injected session — no
+command/transaction/`BindParameters` ceremony:
 
 ```csharp
 await db.InsertAsync(order, ct);                                   // one row
@@ -155,6 +166,17 @@ removes. How you obtain the session states the semantics:
   `AsSqlSession`, deciding the transaction **once at wrap time**:
 
 ```csharp
+// The default: a scoped handler injects ISqlSession — every read and write below runs on the
+// request's connection and joins its unit of work; the decorator commits or rolls back by Result.
+[Handler]
+public sealed class CloseOrder(ISqlSession db) {
+    public async ValueTask<Result> HandleAsync(CloseOrderCommand command, CancellationToken ct) {
+        await db.ExecuteAsync(
+            $"UPDATE {Order.Table} SET status = {OrderStatus.Closed} WHERE id = {command.Id}", ct);
+        return Result.Success();
+    }
+}
+
 // Singleton-eligible handler: one call through the seam, autonomous per-call semantics.
 // The receiver is ISqlDatabase — OpenSessionAsync lives on the handle, NOT on a data source.
 public sealed class ListOpenOrders(ISqlDatabase db) {

@@ -1,0 +1,71 @@
+---
+title: Routing
+description: Module-owned route subtrees with the router's own API, the redirectUnless guard that shares contribution `when` semantics, and the TanStack Start SSR shim.
+---
+
+Routes are **module-owned router subtrees**, composed with the router's own API — Elarion adds no routing
+machinery (an ADR-0032 non-goal). With TanStack Router, each module exports the routes it owns (`routes:
+readonly AnyRoute[]` — real modules usually own several) and the composition root registers them
+statically, as shown on the
+[React & app shells page](/docs/concepts/frontend-modules/react#the-composition-root-discover-manifests-register-routes).
+Each module's pages are their own chunk (`lazyRouteComponent`); a disabled module's chunk never downloads.
+
+## The `redirectUnless` guard
+
+The one piece the framework does own is the guard semantics: the `/tanstack-router` sub-export ships
+`redirectUnless`, a `beforeLoad` guard that evaluates **the same `when` clause** as a contribution — same
+AND, same fail-closed behavior — so a route and its sidebar item can never gate differently. Bind it to
+your vocabulary once, next to the root route:
+
+```ts title="platform/router.tsx"
+import { createRouteGuards } from "@swimmesberger/elarion-contributions/tanstack-router"
+
+export const { redirectUnless } = createRouteGuards<AppVocabulary>()
+```
+
+```ts title="modules/invoicing/module.tsx"
+export const invoicingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/invoices",
+  // The route-level mirror of the sidebar item's `when`: a deep link into a hidden module bounces home.
+  beforeLoad: redirectUnless({ module: Modules.Invoicing, permission: Permissions.invoices.read }, "/"),
+  component: lazyRouteComponent(() => import("./InvoicesPage"), "InvoicesPage"),
+})
+```
+
+## TanStack Start (SSR)
+
+The sample is a plain Vite SPA. On TanStack **Start**, two of its build steps assume file-based routing
+and fail against a purely code-composed tree:
+
+- the router-generator errors without a `src/routes/` directory (`ENOENT: scandir '…/src/routes'`), and
+- the SSR-manifest plugin builds from the *generated* route tree
+  (`start-manifest-plugin: Cannot convert undefined or null to object`).
+
+The production-proven shim: keep a **minimal file root** to satisfy the generator and the manifest,
+compose the real module tree in code inside the router factory, and gitignore the generated
+`routeTree.gen.ts`:
+
+```tsx title="src/routes/__root.tsx — satisfies Start's generator; not used at runtime"
+import { createRootRoute } from "@tanstack/react-router"
+export const Route = createRootRoute()
+```
+
+```ts title="src/router.tsx — the real, module-composed tree"
+export function getRouter() {
+  const routeTree = rootRoute.addChildren([indexRoute, ...clients.routes, ...invoicing.routes])
+  return createRouter({ routeTree, context: { caps, queryClient, registry } })
+}
+```
+
+On Start, the *real* root route (`platform/router.tsx`) also owns the SSR document shell — `<html>`,
+`HeadContent`, `Scripts`, and the `<ContributionProvider>` around the outlet — since no file route renders
+it. The shim is sound while the app ships as a single bundle: the root-only manifest carries no route
+chunks, so it has no practical effect. An app that wants Start's per-route code-splitting should instead
+describe the module-owned route files to the generator with TanStack's virtual file routes
+(`virtualRouteConfig`), so the generated tree and the SSR manifest stay real.
+
+Registry resolution is deliberately SSR-pure: the same (manifests, snapshot) input yields the same
+resolved lists, so a server render and the client hydration paint identical trees — build the registry
+once per request from that request's snapshot and hand it to both the provider and the router context.
+`redirectUnless` guards run in `beforeLoad` on the server exactly as in the SPA.

@@ -238,9 +238,13 @@ public sealed class ClientNumberGenerator(BillingDbContext db) : IClientNumberGe
 ### Write the command handler
 
 `CreateClient` is a state change, so its request is a nested `Command`. It runs through the pipeline
-(the framework's validation gate, then logging → transaction), scopes the row to the current user, invalidates the
-clients cache on success, and is exposed over JSON-RPC. `[Auditable]` records the compliance audit trail
-automatically (`audit.SetResource` just pins *which* client was acted on). `[Handler]` names the operation; the name is
+(the framework's validation gate, then authorization, then logging → transaction), scopes the row to the current
+user, invalidates the clients cache on success, and is exposed over JSON-RPC.
+`[RequirePermission("clients", "create")]` enforces the `clients.create` permission claim in the handler
+pipeline — transport-neutral, so the same gate protects the JSON-RPC and MCP surfaces alike
+([Authorization](/docs/concepts/authorization)). `[Auditable]` records the compliance audit trail
+automatically (`audit.SetResource` just pins *which* client was acted on, using the same `clients` resource
+vocabulary). `[Handler]` names the operation; the name is
 optional, and when omitted Elarion infers `{module}.{operation}` by convention (here `clients.createClient`
 from module `Clients` and the handler type name minus its `Handler`/`Command`/`Query`/`Request` suffix,
 camelCased). An explicit name like `"clients.create"` is recommended for stable public/wire contracts. The
@@ -254,6 +258,7 @@ using Billing.Application.Modules.Clients.Services;
 using Billing.Application.Persistence;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Auditing;
+using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -261,6 +266,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Billing.Application.Modules.Clients.Handlers;
 
 [Handler("clients.create")]
+[RequirePermission("clients", "create")]   // pipeline-enforced: caller needs the "clients.create" permission claim
 [CacheInvalidate("clients")]
 [Auditable]   // framework audit trail: one compliance record per invocation (SetResource pins which client)
 [Description("Creates a new client for the current account.")]
@@ -312,6 +318,11 @@ public sealed class CreateClient(
 The handler returns a value, never throws for expected failures: a duplicate email becomes
 `AppError.Conflict`, which the host later maps to a JSON-RPC error code. Only a **successful** result
 triggers the `clients` cache invalidation.
+
+Runtime feature gating uses the same declarative shape: `[FeatureGate("client-portal")]` on a handler
+makes it return the generic not-found outcome while the flag is off — the feature's existence is never
+leaked ([Feature flags](/docs/concepts/feature-flags)). The Billing tutorial doesn't gate any handler,
+so the attribute appears here only for completeness.
 
 </Step>
 

@@ -52,7 +52,8 @@ public sealed record AppError {
 | `Validation` | Invalid input or constraint violation. |
 | `NotFound` | The requested resource does not exist. |
 | `Conflict` | The operation conflicts with existing state (duplicate, concurrent modification). |
-| `Forbidden` | The caller is not authorized to perform this operation. |
+| `Unauthorized` | The caller is not authenticated (missing or invalid credentials). Maps to HTTP 401. |
+| `Forbidden` | The caller is authenticated but not authorized to perform this operation. |
 | `BusinessRule` | A domain business rule was violated. |
 | `Internal` | An unexpected internal error occurred. |
 
@@ -68,6 +69,7 @@ AppError.Validation("Invalid command.", new Dictionary<string, string[]> {   // 
 });
 AppError.NotFound($"Client {id} was not found.");
 AppError.Conflict("Invoice number is already reserved.");
+AppError.Unauthorized("Authentication required.");
 AppError.Forbidden("You cannot modify this resource.");
 AppError.BusinessRule("Credit limit exceeded.", data: limitInfo);
 AppError.Internal("Failed to render the document.");
@@ -88,6 +90,7 @@ var code = error.Kind switch {
     ErrorKind.Conflict     => -32002,        // server range
     ErrorKind.Forbidden    => -32003,        // server range
     ErrorKind.BusinessRule => -32004,        // server range
+    ErrorKind.Unauthorized => -32005,        // server range
     _                      => -32603,        // spec "Internal error"
 };
 ```
