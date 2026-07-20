@@ -259,7 +259,120 @@ public sealed class SqlRecordMapperGeneratorTests {
         var selfMapping = GetGenerated(result, "Sample_Domain_Order.SqlRecord.g.cs");
         var registration = GetGenerated(result, "ElarionSqlMapperRegistration.g.cs");
 
-        CompileErrors(OrderSource, generated, selfMapping, registration).Should().BeEmpty();
+        CompileErrors(false, OrderSource, generated, selfMapping, registration).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SqlRecord_UnderNpgsqlCopyTrigger_EmitsCopyMembersAndInterface() {
+        var result = Generate(OrderSource, NpgsqlAssemblyAttribute, includePostgreSql: true);
+
+        NoErrors(result);
+        var mapper = GetGenerated(result, "Sample_Domain_Order.SqlMapper.g.cs");
+        var selfMapping = GetGenerated(result, "Sample_Domain_Order.SqlRecord.g.cs");
+
+        mapper.Should().Contain(
+            "public const string Copy = \"COPY orders (id, customer_name, note_text, quantity, status, previous_status, created_at) FROM STDIN (FORMAT BINARY)\";");
+        mapper.Should().Contain("public async global::System.Threading.Tasks.Task WriteRowAsync(");
+        mapper.Should().Contain("await importer.StartRowAsync(cancellationToken).ConfigureAwait(false);");
+        // Columns write in declaration order with the same value semantics as BindParameters:
+        // plain inference for scalars, underlying-type casts for enums, WriteNull for nulls.
+        mapper.Should().Contain("await importer.WriteAsync(row.Id, cancellationToken).ConfigureAwait(false);");
+        mapper.Should().Contain(
+            "await importer.WriteAsync((int)row.Status, cancellationToken).ConfigureAwait(false);");
+        mapper.Should().Contain(
+            "if (row.PreviousStatus is null) await importer.WriteNullAsync(cancellationToken).ConfigureAwait(false);");
+        mapper.Should().Contain(
+            "else await importer.WriteAsync((int)row.PreviousStatus.Value, cancellationToken).ConfigureAwait(false);");
+        mapper.Should().Contain(
+            "if (row.Note is null) await importer.WriteNullAsync(cancellationToken).ConfigureAwait(false);");
+
+        selfMapping.Should().Contain(
+            "partial record Order : global::Elarion.Sql.ISqlRecord<Order>, global::Elarion.Sql.INpgsqlCopyRecord<Order> {");
+        selfMapping.Should().Contain("public static string CopyCommandText => global::Sample.Domain.OrderSqlMapper.Copy;");
+        selfMapping.Should().Contain(
+            "public static string CopyTableName => global::Sample.Domain.OrderSqlMapper.TableName;");
+        selfMapping.Should().Contain(
+            "public static string CopyColumnList => global::Sample.Domain.OrderSqlMapper.Columns.All;");
+        selfMapping.Should().Contain(
+            "global::Sample.Domain.OrderSqlMapper.Instance.WriteRowAsync(importer, row, cancellationToken);");
+    }
+
+    [Fact]
+    public void SqlRecord_JsonColumn_UnderNpgsqlCopyTrigger_CopyWritesJsonb() {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed record Profile { public int Weight { get; init; } }
+
+                [Elarion.Sql.SqlRecord]
+                public sealed partial record Client {
+                    public required System.Guid Id { get; init; }
+                    [Elarion.Sql.SqlJson]
+                    public Profile? Settings { get; init; }
+                }
+            }
+            """,
+            NpgsqlAssemblyAttribute,
+            includePostgreSql: true);
+
+        NoErrors(result);
+        var mapper = GetGenerated(result, "Sample_Domain_Client.SqlMapper.g.cs");
+
+        mapper.Should().Contain(
+            "else await importer.WriteAsync(global::System.Text.Json.JsonSerializer.Serialize(row.Settings, JsonTypeInfoSettings), global::NpgsqlTypes.NpgsqlDbType.Jsonb, cancellationToken).ConfigureAwait(false);");
+    }
+
+    [Fact]
+    public void SqlRecord_NpgsqlTriggerWithoutPostgreSqlReference_EmitsNoCopyMembers() {
+        var result = Generate(OrderSource, NpgsqlAssemblyAttribute);
+
+        NoErrors(result);
+        GetGenerated(result, "Sample_Domain_Order.SqlMapper.g.cs").Should().NotContain("WriteRowAsync");
+        GetGenerated(result, "Sample_Domain_Order.SqlRecord.g.cs").Should().NotContain("INpgsqlCopyRecord");
+    }
+
+    [Fact]
+    public void SqlRecord_PortableProviderWithPostgreSqlReference_EmitsNoCopyMembers() {
+        var result = Generate(OrderSource, assemblyAttribute: null, includePostgreSql: true);
+
+        NoErrors(result);
+        GetGenerated(result, "Sample_Domain_Order.SqlMapper.g.cs").Should().NotContain("WriteRowAsync");
+        GetGenerated(result, "Sample_Domain_Order.SqlRecord.g.cs").Should().NotContain("INpgsqlCopyRecord");
+    }
+
+    [Fact]
+    public void SqlRecord_CopyReservedMemberName_ReportsElsql011_OnlyUnderCopyTrigger() {
+        const string source =
+            """
+            namespace Sample.Domain {
+                [Elarion.Sql.SqlRecord]
+                public sealed partial record Row {
+                    public required System.Guid Id { get; init; }
+                    public static string CopyColumnList => "clash";
+                }
+            }
+            """;
+
+        // Without the COPY capability the name is free — a portable assembly may declare it.
+        var portable = Generate(source);
+        portable.Diagnostics.Should().NotContain(d => d.Id == "ELSQL011");
+
+        var copy = Generate(source, NpgsqlAssemblyAttribute, includePostgreSql: true);
+        copy.Diagnostics.Should().ContainSingle(d => d.Id == "ELSQL011");
+        GetGenerated(copy, "Sample_Domain_Row.SqlRecord.g.cs").Should().NotContain("INpgsqlCopyRecord");
+    }
+
+    [Fact]
+    public void SqlRecord_GeneratedCopySource_Compiles() {
+        var result = Generate(OrderSource, NpgsqlAssemblyAttribute, includePostgreSql: true);
+
+        NoErrors(result);
+        var generated = GetGenerated(result, "Sample_Domain_Order.SqlMapper.g.cs");
+        var selfMapping = GetGenerated(result, "Sample_Domain_Order.SqlRecord.g.cs");
+        var registration = GetGenerated(result, "ElarionSqlMapperRegistration.g.cs");
+
+        CompileErrors(true, OrderSource, NpgsqlAssemblyAttribute, generated, selfMapping, registration)
+            .Should().BeEmpty();
     }
 
     [Fact]
@@ -396,7 +509,8 @@ public sealed class SqlRecordMapperGeneratorTests {
             new SqlRecordMapperGenerator(), OrderSource, "SqlRecords");
     }
 
-    private static GeneratorDriverRunResult Generate(string source, string? assemblyAttribute = null) {
+    private static GeneratorDriverRunResult Generate(
+        string source, string? assemblyAttribute = null, bool includePostgreSql = false) {
         var trees = new List<SyntaxTree> {
             CSharpSyntaxTree.ParseText(source, ParseOptions)
         };
@@ -405,7 +519,7 @@ public sealed class SqlRecordMapperGeneratorTests {
         var compilation = CSharpCompilation.Create(
             "SqlRecordMapperGeneratorTests",
             trees,
-            CreateMetadataReferences(),
+            CreateMetadataReferences(includePostgreSql),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new SqlRecordMapperGenerator());
@@ -427,23 +541,28 @@ public sealed class SqlRecordMapperGeneratorTests {
             .ToString();
     }
 
-    private static IReadOnlyList<Diagnostic> CompileErrors(params string[] sources) {
+    private static IReadOnlyList<Diagnostic> CompileErrors(bool includePostgreSql, params string[] sources) {
         var compilation = CSharpCompilation.Create(
             "SqlRecordMapperGeneratedCompile",
             [.. sources.Select(source => CSharpSyntaxTree.ParseText(source, ParseOptions))],
-            CreateMetadataReferences(),
+            CreateMetadataReferences(includePostgreSql),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         return [.. compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error)];
     }
 
-    private static IReadOnlyList<MetadataReference> CreateMetadataReferences() {
+    private static IReadOnlyList<MetadataReference> CreateMetadataReferences(bool includePostgreSql = false) {
         var trustedPlatformAssemblies = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         trustedPlatformAssemblies.Should().NotBeNull();
 
-        return [
+        // The TPA list contains the whole test-app closure — including Elarion.Sql.PostgreSql.dll,
+        // whose presence IS the COPY capability gate. Filter it so the default reference set genuinely
+        // lacks the capability; the opt-in branch below adds it back explicitly.
+        IReadOnlyList<MetadataReference> references = [
             .. trustedPlatformAssemblies!
                 .Split(Path.PathSeparator)
+                .Where(static path => !string.Equals(
+                    Path.GetFileName(path), "Elarion.Sql.PostgreSql.dll", StringComparison.OrdinalIgnoreCase))
                 .Select(path => MetadataReference.CreateFromFile(path)),
             MetadataReference.CreateFromFile(typeof(Sql.SqlRecordAttribute).Assembly.Location),
             MetadataReference.CreateFromFile(typeof(Elarion.Abstractions.Serialization.IElarionJsonSerialization)
@@ -453,6 +572,15 @@ public sealed class SqlRecordMapperGeneratorTests {
             MetadataReference.CreateFromFile(
                 typeof(Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions)
                     .Assembly.Location)
+        ];
+        if (!includePostgreSql) return references;
+
+        // The COPY capability gate (ADR-0068): the generator only emits INpgsqlCopyRecord members when
+        // this assembly (and Npgsql, for the generated code to compile) is referenced.
+        return [
+            .. references,
+            MetadataReference.CreateFromFile(typeof(Sql.SqlBulkInsertOptions).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Npgsql.NpgsqlConnection).Assembly.Location)
         ];
     }
 }

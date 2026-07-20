@@ -135,6 +135,11 @@ public sealed class ZoneActor(ISqlDatabase db) {
     // Mutable by design: hot per-entity state, owned and serialized by the mailbox.
     private sealed class EntitySlot { public Guid Id; public float X; public float Y; public bool Dirty; }
 
+    private static readonly SqlBulkInsertOptions FlushUpsert = new() {
+        OnConflict = SqlBulkInsertConflictBehavior.Update,
+        ConflictColumns = ["id"],
+    };
+
     private readonly Dictionary<Guid, EntitySlot> _entities = [];
     private readonly List<EntityPositionRow> _batch = [];   // reused flush buffer
 
@@ -154,8 +159,7 @@ public sealed class ZoneActor(ISqlDatabase db) {
         if (_batch.Count == 0) return;
 
         await using var session = await db.OpenSessionAsync(ct);
-        await session.InsertManyAsync(_batch,
-            " ON CONFLICT (id) DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y", ct);
+        await session.ExecuteInsertAsync(_batch, FlushUpsert, ct);   // binary COPY + ON CONFLICT merge
     }
 }
 ```
@@ -165,7 +169,7 @@ The framework's contribution is the flush target, per host tier:
 | Tier | Batched upsert path |
 | --- | --- |
 | EF | [`ExecuteInsertAsync`](/docs/capabilities/bulk-operations) with `OnConflict = BulkInsertConflictBehavior.Update` — binary COPY staged through a temp table, merged with native `ON CONFLICT` |
-| EF-free / AOT | [`InsertManyAsync`](/docs/capabilities/sql-mapping#reads-and-writes) with an `ON CONFLICT …` suffix — one reused prepared command per flush; source-generated binary COPY for this tier is proposed in [ADR-0068](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0068-aot-sql-binary-copy.md) |
+| EF-free / AOT | [`ExecuteInsertAsync`](/docs/capabilities/sql-mapping#bulk-insert-binary-copy) with `OnConflict = SqlBulkInsertConflictBehavior.Update` — the same COPY-staged merge, source-generated for `[SqlRecord]` rows ([ADR-0068](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0068-aot-sql-binary-copy.md)); `InsertManyAsync` remains the small-batch convenience |
 
 There is deliberately no `DirtySweep<T>` helper. The dirty bit and the iteration structure belong to
 the application's entity representation, and any framework intermediary between the update and the

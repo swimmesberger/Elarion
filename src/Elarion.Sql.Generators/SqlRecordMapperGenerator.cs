@@ -103,6 +103,12 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
     // The static members the generated ISqlRecord<T> partial adds to the row type.
     private static readonly string[] ReservedMemberNames = ["SqlMapper", "Table", "Select"];
 
+    // The additional members the INpgsqlCopyRecord<T> partial adds under the Npgsql COPY trigger
+    // (ADR-0068). Collisions are collected unconditionally (the transform cannot see the provider) and
+    // reported only when COPY emission is actually on.
+    private static readonly string[] CopyReservedMemberNames =
+        ["CopyCommandText", "CopyTableName", "CopyColumnList", "WriteRowAsync"];
+
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var records = context.SyntaxProvider
             .ForAttributeWithMetadataName(
@@ -113,18 +119,24 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
             .Where(static model => model is not null)
             .WithTrackingName("SqlRecords");
 
-        // A compilation-derived scalar (value-equatable enum), so downstream nodes stay cached across
-        // edits that do not change the assembly attribute (the KeysetGenerator provider precedent).
+        // A compilation-derived scalar (a value-equatable record struct), so downstream nodes stay
+        // cached across edits that do not change the assembly attribute or the referenced-package set
+        // (the KeysetGenerator provider precedent).
         var provider = context.CompilationProvider
-            .Select(static (compilation, _) => ReadProvider(compilation));
+            .Select(static (compilation, _) => ReadProviderModel(compilation));
 
         context.RegisterSourceOutput(records.Combine(provider), static (spc, pair) => {
             var model = pair.Left!;
+            var provider = pair.Right;
             foreach (var diagnostic in model.Diagnostics) spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
-            if (model.Emit) EmitMapper(spc, model, pair.Right);
+            if (provider.NpgsqlCopy)
+                foreach (var diagnostic in model.CopyDiagnostics)
+                    spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
-            if (model.EmitSelfMapping) EmitSelfMapping(spc, model);
+            if (model.Emit) EmitMapper(spc, model, provider);
+
+            if (model.EmitSelfMapping) EmitSelfMapping(spc, model, provider);
         });
 
         var registration = records.Collect().WithTrackingName("SqlMapperRegistration");
@@ -138,6 +150,14 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
         Portable,
         Npgsql
     }
+
+    /// <summary>
+    /// The provider decision plus whether binary-COPY members can be emitted: the Npgsql trigger is on
+    /// AND the compilation references <c>Elarion.Sql.PostgreSql</c> (home of
+    /// <c>INpgsqlCopyRecord&lt;T&gt;</c>). Without the package the emitted implementation could not
+    /// compile, so the members simply do not exist and the bulk extensions fail at compile time.
+    /// </summary>
+    private readonly record struct ProviderModel(SqlProviderKind Kind, bool NpgsqlCopy);
 
     private enum ColumnKind {
         Scalar,
@@ -173,9 +193,13 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
         string SelectSql,
         bool Emit,
         bool EmitSelfMapping,
+        // COPY members are additionally gated on the provider at output time (ProviderModel.NpgsqlCopy).
+        bool EmitCopyMapping,
         bool RequiresJson,
         EquatableArray<ColumnModel> Columns,
-        EquatableArray<DiagnosticInfo> Diagnostics);
+        EquatableArray<DiagnosticInfo> Diagnostics,
+        // Reported only when COPY emission is on — a portable assembly may freely declare these names.
+        EquatableArray<DiagnosticInfo> CopyDiagnostics);
 
     private static string TypeKeyword(INamedTypeSymbol type) {
         return (type.IsRecord, type.TypeKind) switch {
@@ -206,6 +230,13 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
         }
 
         return SqlProviderKind.Portable;
+    }
+
+    private static ProviderModel ReadProviderModel(Compilation compilation) {
+        var kind = ReadProvider(compilation);
+        var npgsqlCopy = kind == SqlProviderKind.Npgsql
+                         && compilation.GetTypeByMetadataName("Elarion.Sql.INpgsqlCopyRecord`1") is not null;
+        return new ProviderModel(kind, npgsqlCopy);
     }
 
     private static SqlRecordModel? GetModel(GeneratorAttributeSyntaxContext ctx) {
@@ -261,6 +292,12 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
                 diagnostics.Add(DiagnosticInfo.Create(ReservedMemberName, LocationInfo.From(type), typeFqn, reserved));
             }
 
+        var copyDiagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+        foreach (var reserved in CopyReservedMemberNames)
+            if (!type.GetMembers(reserved).IsEmpty)
+                copyDiagnostics.Add(
+                    DiagnosticInfo.Create(ReservedMemberName, LocationInfo.From(type), typeFqn, reserved));
+
         return new SqlRecordModel(
             ns,
             typeName,
@@ -274,16 +311,19 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
             selectSql,
             true,
             isPartial && !hasReservedCollision,
+            isPartial && !hasReservedCollision && copyDiagnostics.Count == 0,
             bound.Any(static column => column.Kind == ColumnKind.Json),
             bound.ToEquatableArray(),
-            diagnostics.ToImmutable().ToEquatableArray());
+            diagnostics.ToImmutable().ToEquatableArray(),
+            copyDiagnostics.ToImmutable().ToEquatableArray());
 
         SqlRecordModel Invalid() {
             return new SqlRecordModel(
                 ns, typeName, typeFqn, mapperName, hintName, accessibility, TypeKeyword(type), IsDeclaredPartial(type),
                 tableName ?? ToSnakeCase(typeName), "",
-                false, false, false, EquatableArray<ColumnModel>.Empty,
-                diagnostics.ToImmutable().ToEquatableArray());
+                false, false, false, false, EquatableArray<ColumnModel>.Empty,
+                diagnostics.ToImmutable().ToEquatableArray(),
+                EquatableArray<DiagnosticInfo>.Empty);
         }
     }
 

@@ -50,6 +50,12 @@ public sealed class PostgreSqlSqlMapperFixture : IAsyncLifetime {
                     label text NOT NULL,
                     count int NOT NULL
                 );
+
+                CREATE TABLE sql_struct_points (
+                    id uuid PRIMARY KEY,
+                    x real NOT NULL,
+                    y real NOT NULL
+                );
                 """, connection);
             await command.ExecuteNonQueryAsync();
 
