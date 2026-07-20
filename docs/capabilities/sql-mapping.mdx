@@ -228,15 +228,50 @@ decorator.
 | `ExecuteAsync($"…")` / `ExecuteScalarAsync<T>($"…")` | affected rows / first scalar |
 | `InsertAsync(row)` | one full-row insert |
 | `InsertManyAsync(rows, sqlSuffix?)` | batch insert in one transaction (a reused prepared command; `sqlSuffix` appends `ON CONFLICT …`) |
+| `ExecuteInsertAsync(rows, options?)` | bulk insert/upsert via binary COPY ([below](#bulk-insert-binary-copy)) |
 
-`InsertManyAsync` is a *convenience* batch (Npgsql auto-prepare), not bulk COPY — for high-throughput
-bulk load on the **EF tier**, use the binary-COPY path ([bulk operations](/docs/capabilities/bulk-operations),
-ADR-0051). That path is EF-only (its entry is `DbSet<T>`, its metadata comes from the EF model) and is
-**not** AOT-compatible (it compiles per-column writers at runtime via `System.Linq.Expressions`), so the
-EF-free/AOT tier has no binary-COPY path today. A **source-generated** COPY for this tier — the
-`[SqlRecord]` generator emitting per-column `NpgsqlBinaryImporter` writes the same way it emits
-`BindParameters`, AOT-clean and reflection-free, with the EF tier's upsert vocabulary — is proposed in
-[ADR-0068](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0068-aot-sql-binary-copy.md).
+`InsertManyAsync` is a *convenience* batch (Npgsql auto-prepare, one round trip per row) for
+tens-to-hundreds of rows. For volume, use the binary-COPY path below.
+
+## Bulk insert (binary COPY)
+
+Under the Npgsql provider trigger, referencing **`Elarion.Sql.PostgreSql`** upgrades every
+`[SqlRecord]` type with source-generated binary-COPY members (`INpgsqlCopyRecord<T>`,
+[ADR-0068](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0068-aot-sql-binary-copy.md)):
+the generator emits per-column `NpgsqlBinaryImporter` writes the same way it emits `BindParameters` —
+compile-time, reflection-free, AOT-clean, identical value semantics. The session gains the EF tier's
+bulk verb ([bulk operations](/docs/capabilities/bulk-operations), ADR-0051), with the same conflict
+vocabulary:
+
+```csharp
+// Straight COPY into the table — fastest, all-or-nothing on any conflict.
+long written = await db.ExecuteInsertAsync(rows, cancellationToken: ct);
+
+// Upsert: stage through a temp table, merge with native ON CONFLICT. This tier has no key
+// metadata, so Update names its conflict target explicitly (a unique constraint must cover it).
+written = await db.ExecuteInsertAsync(rows, new SqlBulkInsertOptions {
+    OnConflict = SqlBulkInsertConflictBehavior.Update,   // or DoNothing
+    ConflictColumns = ["id"],
+}, ct);
+
+// Streaming input — rows are written to the COPY stream as they are produced.
+await db.ExecuteInsertAsync(ReadRowsAsync(file, ct), cancellationToken: ct);
+```
+
+Semantics to know:
+
+- Runs on the session's connection inside its ambient transaction; a closed connection is opened for
+  the call and closed afterwards (the same Dapper semantics as the other session helpers).
+- `Update` sets every mapped column outside the conflict target to the incoming value; conflict
+  columns are validated against the mapped column list before the database is touched.
+- An `IReadOnlyList<T>` input (a reused batch buffer) is written by index — no boxed enumerator —
+  and `record struct` rows write without boxing, so a
+  [dirty-flag-and-sweep flush](/docs/capabilities/data-rate-shaping#below-the-helpers-dirty-flag-and-sweep-for-simulation-state)
+  allocates at flush frequency only.
+- The capability is deliberately per-provider: without the Npgsql trigger and the
+  `Elarion.Sql.PostgreSql` reference the members do not exist, and calling the extension is a compile
+  error — never a runtime probe. The EF tier keeps its own COPY implementation (runtime-compiled from
+  the EF model); the two share vocabulary, not code.
 
 `QueryUnbufferedAsync` streams **client-side**: Npgsql reads rows off the socket incrementally, so
 client memory stays bounded (roughly one row at a time) regardless of result size — there is no

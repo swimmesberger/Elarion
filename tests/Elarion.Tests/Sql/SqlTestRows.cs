@@ -60,3 +60,7 @@ public sealed partial record SqlItem {
 /// <summary>Positional-record shape: mapped through the primary constructor, no parameterless ctor.</summary>
 [SqlRecord]
 public sealed partial record SqlPositionalRow(Guid Id, string Label, int Count);
+
+/// <summary>Struct-row shape (ADR-0068): the COPY batch path writes a reused buffer without boxing.</summary>
+[SqlRecord("sql_struct_points")]
+public readonly partial record struct SqlStructPoint(Guid Id, float X, float Y);

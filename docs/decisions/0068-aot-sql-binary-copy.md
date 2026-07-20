@@ -1,6 +1,6 @@
 # ADR-0068: Source-generated binary COPY and staged upsert for the AOT SQL tier
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-20
 - Related: [ADR-0058](0058-aot-sql-row-mapping.md) (the "considered future addition" this executes;
   generated mapper mechanics), [ADR-0051](0051-postgresql-bulk-insert.md) (the EF-tier COPY seam whose
@@ -82,20 +82,21 @@ from ADR-0058 holds — enlistment in the session's ambient transaction is non-n
 long written = await session.ExecuteInsertAsync(rows, ct);                  // straight COPY
 long written = await session.ExecuteInsertAsync(rows, new SqlBulkInsertOptions {
     OnConflict = SqlBulkInsertConflictBehavior.Update,                      // …or DoNothing
-    ConflictColumns = ["id"],                                               // column names; default: omitted → constraint inference
+    ConflictColumns = ["id"],                                               // column names; required for Update (no key metadata on this tier)
 }, ct);
 ```
 
 - The name mirrors the EF tier's `ExecuteInsertAsync` deliberately: same verb, same non-tracking
-  set-based semantics, same conflict vocabulary (`None`/`DoNothing`/`Update`), so moving a workload
+  set-based semantics, same conflict vocabulary (`Throw`/`DoNothing`/`Update`), so moving a workload
   between tiers is a receiver change, not a redesign. The options bag is tier-local
   (`SqlBulkInsertOptions`) because its members speak SQL (column names), not EF model properties.
 - Input shapes: `IEnumerable<T>` and `IAsyncEnumerable<T>` (rows stream into COPY as produced), plus
   an `IReadOnlyList<T>` fast path that iterates by index — a swept, reused `List<T>` of struct rows
   flushes without a boxed enumerator.
-- `OnConflict = None` (default) streams straight into the target table — fastest, all-or-nothing on
-  any error. `DoNothing`/`Update` stage through a `TEMP` table (`CREATE TEMP TABLE … (LIKE target
-  INCLUDING DEFAULTS) ON COMMIT DROP`), COPY into it, then merge with one
+- `OnConflict = Throw` (default) streams straight into the target table — fastest, all-or-nothing on
+  any error. `DoNothing`/`Update` stage through a per-call `TEMP` table cloning only the mapped
+  columns' definitions (`CREATE TEMP TABLE … AS SELECT {columns} FROM {target} WITH NO DATA`, dropped
+  best-effort in a `finally`), COPY into it, then merge with one
   `INSERT INTO target SELECT … FROM temp ON CONFLICT (…) DO UPDATE SET col = EXCLUDED.col, …`. The
   merge statement is composed once per (type, options) from the generated `Columns` fragments and
   cached — composition is string assembly over generated constants, never reflection.
@@ -128,6 +129,48 @@ Ships only at measured parity with a hand-written `NpgsqlBinaryImporter` loop. T
   the number that decides whether the docs recommend it per flush interval;
 - an allocation column: the flush path for `record struct` rows allocates at flush frequency
   (command, staging SQL), never per row.
+
+## Implementation notes (what shipped, where it deviates from the sketch above)
+
+- **Conflict vocabulary matches the EF tier exactly**: `SqlBulkInsertConflictBehavior.Throw` (default)
+  / `DoNothing` / `Update` — the sketch's `None` was renamed to `Throw` because ADR-0051 already
+  shipped that name and cross-tier vocabulary was the point.
+- **Interface shape**: `CopyCommandText` + `CopyTableName` + `CopyColumnList` (staging needs table and
+  column list separately; generic code cannot reach the mapper's consts) +
+  `WriteRowAsync(NpgsqlBinaryImporter, TSelf row, CancellationToken)`. The row passes by value, not
+  `in` — C# forbids `in` parameters on async methods, and a struct copy per row is noise against a
+  network write. The static member delegates to an instance method on the generated mapper, which owns
+  the lazy `JsonTypeInfo` fields for `[SqlJson]` columns.
+- **No generation-time `NpgsqlDbType` table.** Column writes use `importer.WriteAsync(value)` CLR-type
+  inference — the exact semantics of the generated `BindParameters` — with an explicit `NpgsqlDbType`
+  only where the parameter path is explicit (`Jsonb`). This guarantees COPY/INSERT value parity by
+  construction and eliminates the anticipated unmappable-column diagnostic: any type that passes
+  ELSQL001 is COPY-writable. ELSQL011 instead gained the four reserved copy member names, collected
+  provider-independently in the transform and reported only when COPY emission is on.
+- **`Update` requires explicit `ConflictColumns`** — this tier has no key metadata to infer a conflict
+  target from, and PostgreSQL requires one for `DO UPDATE`. `DoNothing` may omit it (skips on any
+  unique constraint). Conflict columns validate against the mapped column list before the database is
+  touched; unique-constraint coverage is the database's check.
+- **Connection semantics** follow the tier's other session helpers (Dapper-style): a closed connection
+  is opened for the call and closed afterwards; an open one — the scoped session's — is left open, and
+  everything runs inside `ISqlSession.CurrentTransaction`.
+- **Benchmarks** (`--filter "*SqlCopy*"`, real PostgreSQL 17 via Testcontainers; monitoring strategy,
+  10 iterations, 2026-07-20 on an M-series laptop): the generated path sits at raw parity, and the
+  gate holds.
+
+  | Rows | Raw importer | Generated `ExecuteInsertAsync` | `InsertManyAsync` |
+  | --- | --- | --- | --- |
+  | 1k | 6.9 ms | 6.1 ms (0.97×) | 192 ms (30×) |
+  | 10k | 37.3 ms | 42.5 ms (1.14×) | 1 817 ms (49×) |
+  | 100k | 138.6 ms | 121.5 ms (0.89×) | 19 200 ms (140×) |
+
+  Upsert-shaped (staged merge into a fully populated table, conflict target `id`), against a
+  hand-written staged loop: 14.4 ms vs 13.4 ms at 1k (1.07×), 92.0 ms vs 81.6 ms at 10k (1.13×),
+  379.0 ms vs 381.4 ms at 50k (0.99×) — and 15–26× faster than the prepared `ON CONFLICT`
+  `InsertManyAsync` alternative. Managed allocations are at raw parity (~1.0×) on every COPY path;
+  `InsertManyAsync` allocates ~60× more (289 MB vs 4.6 MB at 100k rows). The staging overhead is a
+  near-constant ~2× of the direct COPY at these sizes — cheap enough that the docs recommend the
+  upsert path for every sweep-flush size.
 
 ## Consequences
 
