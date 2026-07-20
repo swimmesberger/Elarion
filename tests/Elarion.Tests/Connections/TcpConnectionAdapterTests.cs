@@ -151,7 +151,6 @@ public sealed class TcpConnectionAdapterTests {
     [InlineData(FramerViolation.NegativeConsumed)]
     [InlineData(FramerViolation.ConsumedPastAvailable)]
     [InlineData(FramerViolation.ZeroConsumedComplete)]
-    [InlineData(FramerViolation.MessageOutsidePresentedMemory)]
     [InlineData(FramerViolation.MessageBeyondConsumed)]
     public async Task Reader_RejectsMalformedCustomFramerResults(FramerViolation violation) {
         await using var stream = new ChunkedReadStream([1, 2]);
@@ -159,6 +158,16 @@ public sealed class TcpConnectionAdapterTests {
 
         var read = async () => await reader.ReadAsync(TestContext.Current.CancellationToken);
         await read.Should().ThrowAsync<TcpMessageFramingException>();
+    }
+
+    [Fact]
+    public async Task Reader_AcceptsFramerOwnedMessageMemory() {
+        // A transforming (e.g. decrypting) framer cannot return a slice of the receive buffer — its
+        // message is the decoded payload from its own memory. That is contract, not a violation.
+        await using var stream = new ChunkedReadStream([1, 2]);
+        var reader = new TcpMessageReader(stream, new MalformedTcpFramer(FramerViolation.None), 8, 2);
+
+        (await reader.ReadAsync(TestContext.Current.CancellationToken))!.Value.ToArray().Should().Equal(9);
     }
 
     [Fact]
@@ -279,6 +288,35 @@ public sealed class TcpConnectionAdapterTests {
 
         await pipeStream.WriteAsync(Encoding.UTF8.GetBytes("ping|"), ct);
         (await ReadUntilAsync(pipeStream, (byte)'|', ct)).Should().Be("echo:ping");
+    }
+
+    [Fact]
+    public async Task PerConnectionFramer_NegotiatedSwitch_IsReachableFromHandshakeAndProtocol() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartListenerHostAsync<NegotiatedScramblingHandler>(ct);
+        using var client = await host.ConnectAsync(ct);
+        var stream = client.GetStream();
+
+        // Handshake and mode negotiation run in plaintext framing (the session's framer, unswitched).
+        (await ReadLineAsync(stream, ct)).Should().Be("challenge");
+        await WriteLineAsync(stream, "device:secure-1", ct);
+        (await ReadLineAsync(stream, ct)).Should().Be("welcome");
+        await host.Observer.Connected.Task.WaitAsync(ct);
+
+        // "go-secure" is acknowledged in plaintext, then the codec flips the session's stateful framer:
+        // every later frame's payload is transformed on the wire in both directions, while the delimiter
+        // stays structural.
+        await WriteLineAsync(stream, "go-secure", ct);
+        (await ReadLineAsync(stream, ct)).Should().Be("ok");
+
+        await stream.WriteAsync(Scramble("ping"), ct);
+        var reply = await ReadRawUntilAsync(stream, (byte)'\n', ct);
+        if (reply is null) {
+            var reason = await host.Handler<NegotiatedScramblingHandler>().Protocol!.Closed.Task.WaitAsync(ct);
+            Assert.Fail($"The server closed the connection instead of echoing: {reason}");
+        }
+
+        Descramble(reply).Should().Be("echo:ping");
     }
 
     [Fact]
@@ -772,6 +810,22 @@ public sealed class TcpConnectionAdapterTests {
         stream.Writes.Should().ContainSingle();
     }
 
+    [Fact]
+    public async Task WriterSend_CompleteMessage_TransformsThePayloadInPlaceOnTheWire() {
+        await using var stream = new RecordingWriteStream();
+        var framer = new ScramblingTcpFramer();
+        framer.EnableScrambling();
+        var (connection, _) = CreateStandaloneConnection(stream, framer, 16, 64);
+
+        // The writer-send serializes the plaintext straight into the frame buffer; CompleteMessage's
+        // writable payload lets the framer transform those bytes before the physical write — the seam an
+        // encrypting framer needs, since the plaintext already occupies the frame's payload region.
+        await connection.SendBinaryAsync("ping", static (payload, writer) =>
+            writer.Write(Encoding.UTF8.GetBytes(payload)), TestContext.Current.CancellationToken);
+
+        stream.Writes.Should().ContainSingle().Which.Should().Equal(Scramble("ping"));
+    }
+
     /// <summary>A sink over a bare stream — the writer/lifetime wiring the runner normally performs,
     /// for tests that exercise the outbound path without a full connection lifecycle.</summary>
     internal static (TcpClientConnection Connection, TcpConnectionLifetime Lifetime) CreateStandaloneConnection(
@@ -827,16 +881,34 @@ public sealed class TcpConnectionAdapterTests {
     }
 
     private static async Task<string?> ReadUntilAsync(NetworkStream stream, byte delimiter, CancellationToken ct) {
+        var raw = await ReadRawUntilAsync(stream, delimiter, ct);
+        return raw is null ? null : Encoding.UTF8.GetString(raw);
+    }
+
+    private static async Task<byte[]?> ReadRawUntilAsync(NetworkStream stream, byte delimiter, CancellationToken ct) {
         var buffer = new List<byte>();
         var single = new byte[1];
         while (true) {
             var read = await stream.ReadAsync(single.AsMemory(), ct);
             if (read == 0) return null;
 
-            if (single[0] == delimiter) return Encoding.UTF8.GetString(buffer.ToArray());
+            if (single[0] == delimiter) return buffer.ToArray();
 
             buffer.Add(single[0]);
         }
+    }
+
+    /// <summary>The client-side mirror of <see cref="ScramblingTcpFramer"/>: payload bytes transformed,
+    /// delimiter structural (clear).</summary>
+    private static byte[] Scramble(string payload) {
+        var bytes = Encoding.UTF8.GetBytes(payload + "\n");
+        for (var i = 0; i < bytes.Length - 1; i++) bytes[i] ^= ScramblingTcpFramer.Key;
+        return bytes;
+    }
+
+    private static string Descramble(byte[] payload) {
+        for (var i = 0; i < payload.Length; i++) payload[i] ^= ScramblingTcpFramer.Key;
+        return Encoding.UTF8.GetString(payload);
     }
 
     private sealed class TcpTestHost(
@@ -846,6 +918,10 @@ public sealed class TcpConnectionAdapterTests {
         public IClientConnectionRegistry Registry => provider.GetRequiredService<IClientConnectionRegistry>();
 
         public AwaitableConnectionObserver Observer => provider.GetRequiredService<AwaitableConnectionObserver>();
+
+        public THandler Handler<THandler>() where THandler : TcpConnectionHandler {
+            return provider.GetRequiredService<THandler>();
+        }
 
         public async Task<TcpClient> ConnectAsync(CancellationToken ct) {
             var client = new TcpClient();
@@ -861,6 +937,17 @@ public sealed class TcpConnectionAdapterTests {
 
     /// <summary>Listener-side: in-socket challenge/response + an echo codec with an idle keepalive.</summary>
     private sealed class ChallengeTcpHandler : TcpConnectionHandler {
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new ChallengeSession());
+        }
+    }
+
+    /// <summary>The shared challenge/response session: authenticates a "device:" reply and defaults to the
+    /// echo codec; stateful handlers derive and override what differs.</summary>
+    private class ChallengeSession(TcpConnectionSettings? settings = null) : TcpConnectionSession {
+        public override TcpConnectionSettings? Settings => settings;
+
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
@@ -891,11 +978,12 @@ public sealed class TcpConnectionAdapterTests {
     }
 
     /// <summary>One endpoint, two wire framings: the first connection keeps the endpoint defaults, every
-    /// later one is switched to '|' delimiters via per-connection settings.</summary>
+    /// later one is switched to '|' delimiters via per-connection settings. The cross-connection counter
+    /// legitimately lives on the handler; everything per-connection lives on the session.</summary>
     private sealed class MultiFramingHandler : TcpConnectionHandler {
         private int _connections;
 
-        public override ValueTask<TcpConnectionSettings?> ConfigureConnectionAsync(
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
             TcpConnectionPeer peer, CancellationToken ct) {
             var settings = Interlocked.Increment(ref _connections) == 1
                 ? new TcpConnectionSettings { Transport = "tcp-lines" }
@@ -903,43 +991,125 @@ public sealed class TcpConnectionAdapterTests {
                     Framer = new DelimitedTcpFramer((byte)'|'),
                     Transport = "tcp-pipes"
                 };
-            return ValueTask.FromResult<TcpConnectionSettings?>(settings);
+            return ValueTask.FromResult<TcpConnectionSession?>(new ChallengeSession(settings));
+        }
+    }
+
+    /// <summary>The encryption-toggle shape: the session creates its stateful framer, returns it through
+    /// <c>Settings</c>, and hands it typed to the codec — per-connection state as session fields, no
+    /// downcasts and no correlation lookups.</summary>
+    private sealed class NegotiatedScramblingHandler : TcpConnectionHandler {
+        public ModeSwitchingEchoProtocol? Protocol { get; private set; }
+
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new NegotiatedScramblingSession(this));
         }
 
-        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
-            TcpHandshakeContext handshake, CancellationToken ct) {
-            await handshake.SendTextAsync("challenge", ct);
-            var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
+        private sealed class NegotiatedScramblingSession(NegotiatedScramblingHandler handler) : ChallengeSession {
+            private readonly ScramblingTcpFramer _framer = new();
 
-            await handshake.SendTextAsync("welcome", ct);
-            return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
-                PrincipalId = reply["device:".Length..]
-            };
+            public override TcpConnectionSettings? Settings => new() { Framer = _framer };
+
+            public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+                return handler.Protocol = new ModeSwitchingEchoProtocol(connection, _framer);
+            }
+        }
+    }
+
+    private sealed class ModeSwitchingEchoProtocol(TcpClientConnection connection, ScramblingTcpFramer framer)
+        : IClientConnectionProtocol {
+        public TaskCompletionSource<Exception?> Closed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask OnClosedAsync(ClientConnection closed, Exception? reason, CancellationToken ct) {
+            Closed.TrySetResult(reason);
+            return ValueTask.CompletedTask;
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
-            return new EchoTcpProtocol(connection);
+        public async ValueTask OnBinaryAsync(ReadOnlyMemory<byte> message, CancellationToken ct) {
+            var text = Encoding.UTF8.GetString(message.Span);
+            if (text == "go-secure") {
+                // Await the plaintext acknowledgement first — a completed send means the frame was
+                // physically written, so the flip lands exactly between "ok" and the next outbound frame.
+                await connection.SendTextAsync("ok", ct);
+                framer.EnableScrambling();
+                return;
+            }
+
+            await connection.SendTextAsync("echo:" + text, ct);
+        }
+    }
+
+    /// <summary>Line framing plus a negotiable same-length payload transform (XOR) — the minimal stand-in
+    /// for a framer that switches into encrypted framing after a key exchange. The delimiter stays
+    /// structural (clear); only payload bytes are transformed.</summary>
+    private sealed class ScramblingTcpFramer : TcpMessageFramer {
+        public const byte Key = 0x2A;
+        private volatile bool _scramble;
+
+        public void EnableScrambling() {
+            _scramble = true;
+        }
+
+        public override bool TryReadMessage(ReadOnlyMemory<byte> buffer, out int consumed,
+            out ReadOnlyMemory<byte> message) {
+            consumed = 0;
+            message = default;
+            var index = buffer.Span.IndexOf((byte)'\n');
+            if (index < 0) return false;
+
+            consumed = index + 1;
+            if (!_scramble) {
+                message = buffer[..index];
+                return true;
+            }
+
+            var payload = buffer[..index].ToArray();
+            for (var i = 0; i < payload.Length; i++) payload[i] ^= Key;
+            message = payload;
+            return true;
+        }
+
+        public override int BeginMessage(IBufferWriter<byte> output) {
+            return 0;
+        }
+
+        public override void CompleteMessage(Span<byte> prologue, Span<byte> payload, IBufferWriter<byte> output) {
+            // The writable payload is the point: the caller serialized plaintext in place, and the framer
+            // transforms exactly those bytes before the physical write.
+            if (_scramble)
+                for (var i = 0; i < payload.Length; i++) payload[i] ^= Key;
+
+            var tail = output.GetSpan(1);
+            tail[0] = (byte)'\n';
+            output.Advance(1);
         }
     }
 
     /// <summary>Dialer-side: introduces itself and expects a ticket line from the device.</summary>
     private sealed class DialerHandler(ChannelWriter<string> inbound) : TcpConnectionHandler {
-        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
-            TcpHandshakeContext handshake, CancellationToken ct) {
-            await handshake.SendTextAsync("hello", ct);
-            var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("ticket:", StringComparison.Ordinal)) return null;
-
-            return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
-                PrincipalId = reply["ticket:".Length..]
-            };
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new DialerSession(inbound));
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
-            return new RecordingTcpProtocol(inbound);
+        private sealed class DialerSession(ChannelWriter<string> inbound) : TcpConnectionSession {
+            public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+                TcpHandshakeContext handshake, CancellationToken ct) {
+                await handshake.SendTextAsync("hello", ct);
+                var reply = await handshake.ReceiveTextAsync(ct);
+                if (reply is null || !reply.StartsWith("ticket:", StringComparison.Ordinal)) return null;
+
+                return new ClientConnectionTicket {
+                    Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
+                    PrincipalId = reply["ticket:".Length..]
+                };
+            }
+
+            public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+                return new RecordingTcpProtocol(inbound);
+            }
         }
     }
 
@@ -955,21 +1125,17 @@ public sealed class TcpConnectionAdapterTests {
         : TcpConnectionHandler {
         public ClosureRecordingProtocol? Protocol { get; private set; }
 
-        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
-            TcpHandshakeContext handshake, CancellationToken ct) {
-            await handshake.SendTextAsync("challenge", ct);
-            var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
-
-            await handshake.SendTextAsync("welcome", ct);
-            return new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity("device")),
-                PrincipalId = reply["device:".Length..]
-            };
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(
+                new ClosureRecordingSession(this, throwOnMessage, throwOnClosed));
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
-            return Protocol = new ClosureRecordingProtocol(throwOnMessage, throwOnClosed);
+        private sealed class ClosureRecordingSession(
+            ClosureRecordingHandler handler, bool throwOnMessage, bool throwOnClosed) : ChallengeSession {
+            public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+                return handler.Protocol = new ClosureRecordingProtocol(throwOnMessage, throwOnClosed);
+            }
         }
     }
 
@@ -995,18 +1161,15 @@ public sealed class TcpConnectionAdapterTests {
     private sealed class OpeningFailureTcpHandler : TcpConnectionHandler {
         public OpeningFailureTcpProtocol? Protocol { get; private set; }
 
-        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake,
-            CancellationToken ct) {
-            await handshake.SendTextAsync("challenge", ct);
-            var reply = await handshake.ReceiveTextAsync(ct);
-            if (reply is null || !reply.StartsWith("device:", StringComparison.Ordinal)) return null;
-            await handshake.SendTextAsync("welcome", ct);
-            return new ClientConnectionTicket
-                { Principal = new ClaimsPrincipal(new ClaimsIdentity("device")), PrincipalId = reply[7..] };
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new OpeningFailureSession(this));
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
-            return Protocol = new OpeningFailureTcpProtocol();
+        private sealed class OpeningFailureSession(OpeningFailureTcpHandler handler) : ChallengeSession {
+            public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+                return handler.Protocol = new OpeningFailureTcpProtocol();
+            }
         }
     }
 
@@ -1027,10 +1190,11 @@ public sealed class TcpConnectionAdapterTests {
 
 
     public enum FramerViolation {
+        /// <summary>Not a violation: a framer-owned message buffer (the transforming-framer shape).</summary>
+        None,
         NegativeConsumed,
         ConsumedPastAvailable,
         ZeroConsumedComplete,
-        MessageOutsidePresentedMemory,
         MessageBeyondConsumed
     }
 
@@ -1052,20 +1216,6 @@ public sealed class TcpConnectionAdapterTests {
             return true;
         }
 
-        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
-            const byte headerLength = 5;
-            if (payload.Length > byte.MaxValue) throw new ArgumentOutOfRangeException(nameof(payload));
-
-            var header = output.GetSpan(headerLength);
-            header[0] = headerLength;
-            header[1] = 0;
-            header[2] = 0;
-            header[3] = 0;
-            header[4] = (byte)payload.Length;
-            output.Advance(headerLength);
-            output.Write(payload);
-        }
-
         public override int BeginMessage(IBufferWriter<byte> output) {
             const byte headerLength = 5;
             var header = output.GetSpan(headerLength);
@@ -1075,7 +1225,7 @@ public sealed class TcpConnectionAdapterTests {
             return headerLength;
         }
 
-        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+        public override void CompleteMessage(Span<byte> prologue, Span<byte> payload,
             IBufferWriter<byte> output) {
             if (payload.Length > byte.MaxValue) throw new ArgumentOutOfRangeException(nameof(payload));
 
@@ -1093,16 +1243,12 @@ public sealed class TcpConnectionAdapterTests {
             return false;
         }
 
-        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
-            output.GetSpan(1024 * 1024);
-        }
-
         public override int BeginMessage(IBufferWriter<byte> output) {
             output.GetSpan(1024 * 1024);
             return 0;
         }
 
-        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+        public override void CompleteMessage(Span<byte> prologue, Span<byte> payload,
             IBufferWriter<byte> output) {
         }
     }
@@ -1118,15 +1264,11 @@ public sealed class TcpConnectionAdapterTests {
             return complete;
         }
 
-        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
-            output.Write(payload);
-        }
-
         public override int BeginMessage(IBufferWriter<byte> output) {
             return 0;
         }
 
-        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+        public override void CompleteMessage(Span<byte> prologue, Span<byte> payload,
             IBufferWriter<byte> output) {
         }
     }
@@ -1139,15 +1281,11 @@ public sealed class TcpConnectionAdapterTests {
             return false;
         }
 
-        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
-            output.Write(payload);
-        }
-
         public override int BeginMessage(IBufferWriter<byte> output) {
             return 0;
         }
 
-        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+        public override void CompleteMessage(Span<byte> prologue, Span<byte> payload,
             IBufferWriter<byte> output) {
         }
     }
@@ -1169,7 +1307,7 @@ public sealed class TcpConnectionAdapterTests {
                     consumed = 0;
                     message = default;
                     return true;
-                case FramerViolation.MessageOutsidePresentedMemory:
+                case FramerViolation.None:
                     consumed = 1;
                     message = foreign;
                     return true;
@@ -1182,15 +1320,11 @@ public sealed class TcpConnectionAdapterTests {
             }
         }
 
-        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
-            output.Write(payload);
-        }
-
         public override int BeginMessage(IBufferWriter<byte> output) {
             return 0;
         }
 
-        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+        public override void CompleteMessage(Span<byte> prologue, Span<byte> payload,
             IBufferWriter<byte> output) {
         }
     }
@@ -1289,33 +1423,44 @@ public sealed class TcpConnectionAdapterTests {
     private sealed class InvalidOverrideTcpHandler : TcpConnectionHandler {
         public int AuthenticateCalls { get; private set; }
 
-        public override ValueTask<TcpConnectionSettings?> ConfigureConnectionAsync(TcpConnectionPeer peer,
-            CancellationToken ct) {
-            return ValueTask.FromResult<TcpConnectionSettings?>(new TcpConnectionSettings { MaxInboundFrameBytes = 0 });
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new InvalidOverrideSession(this));
         }
 
-        public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake,
-            CancellationToken ct) {
-            AuthenticateCalls++;
-            return ValueTask.FromResult<ClientConnectionTicket?>(null);
-        }
+        private sealed class InvalidOverrideSession(InvalidOverrideTcpHandler handler) : TcpConnectionSession {
+            public override TcpConnectionSettings? Settings => new() { MaxInboundFrameBytes = 0 };
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
-            throw new NotSupportedException();
+            public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake,
+                CancellationToken ct) {
+                handler.AuthenticateCalls++;
+                return ValueTask.FromResult<ClientConnectionTicket?>(null);
+            }
+
+            public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+                throw new NotSupportedException();
+            }
         }
     }
 
     private sealed class RegistrationFailureTcpHandler : TcpConnectionHandler {
-        public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
-            TcpHandshakeContext handshake,
-            CancellationToken ct) {
-            return ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
-                Principal = new ClaimsPrincipal(new ClaimsIdentity())
-            });
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new RegistrationFailureSession());
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
-            return new NoOpTcpProtocol();
+        private sealed class RegistrationFailureSession : TcpConnectionSession {
+            public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
+                TcpHandshakeContext handshake,
+                CancellationToken ct) {
+                return ValueTask.FromResult<ClientConnectionTicket?>(new ClientConnectionTicket {
+                    Principal = new ClaimsPrincipal(new ClaimsIdentity())
+                });
+            }
+
+            public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+                return new NoOpTcpProtocol();
+            }
         }
     }
 
@@ -1362,15 +1507,23 @@ public sealed class TcpConnectionAdapterTests {
     private sealed class AuthenticationRecordingTcpHandler : TcpConnectionHandler {
         public int AuthenticateCalls { get; private set; }
 
-        public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake,
-            CancellationToken ct) {
-            AuthenticateCalls++;
-            await handshake.ReceiveAsync(ct);
-            return null;
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new AuthenticationRecordingSession(this));
         }
 
-        public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
-            throw new NotSupportedException();
+        private sealed class AuthenticationRecordingSession(AuthenticationRecordingTcpHandler handler)
+            : TcpConnectionSession {
+            public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(TcpHandshakeContext handshake,
+                CancellationToken ct) {
+                handler.AuthenticateCalls++;
+                await handshake.ReceiveAsync(ct);
+                return null;
+            }
+
+            public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
+                throw new NotSupportedException();
+            }
         }
     }
 }

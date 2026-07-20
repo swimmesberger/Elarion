@@ -153,6 +153,13 @@ public sealed class ClientInvokeTimeoutTests {
     /// <summary>In-socket challenge/response + a codec that answers invokes with the timeout it saw in
     /// options — the probe for sink-side normalization.</summary>
     private sealed class TimeoutEchoHandler : TcpConnectionHandler {
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new TimeoutEchoSession());
+        }
+    }
+
+    private sealed class TimeoutEchoSession : TcpConnectionSession {
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);

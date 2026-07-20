@@ -114,8 +114,10 @@ frame buffer structurally cannot be held across an `await`. A `ref struct` sessi
 cannot survive the contended path's queue hand-off.
 
 The framer seam gains **abstract** `BeginMessage(IBufferWriter<byte>)` (reserve/emit the prologue, return
-its length) and `CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload, IBufferWriter<byte>)`
-(backfill the length prefix / validate delimiters). No capability flag and no buffering fallback: pre-1.0,
+its length) and `CompleteMessage(Span<byte> prologue, Span<byte> payload, IBufferWriter<byte>)`
+(backfill the length prefix / validate delimiters; the payload span was later made writable so a framer
+carrying negotiated cipher state can encrypt the in-place serialized payload and backfill its tag — a
+same-length transform). No capability flag and no buffering fallback: pre-1.0,
 custom framers break and implement the real contract (seams are designed for the strongest
 implementation). Admission, backpressure (`MaxPendingSends`), and completed-send meaning are identical on
 both send paths; a contended writer-send serializes into a rented buffer and queues with unchanged FIFO

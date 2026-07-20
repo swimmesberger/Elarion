@@ -118,6 +118,13 @@ public sealed class ConnectionSimulationUtilitiesTests {
     }
 
     private sealed class EchoHandler : TcpConnectionHandler {
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new EchoSession());
+        }
+    }
+
+    private sealed class EchoSession : TcpConnectionSession {
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);

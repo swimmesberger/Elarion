@@ -299,6 +299,13 @@ public class TcpSendBenchmarks {
     }
 
     public sealed class PassiveHandler : TcpConnectionHandler {
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new PassiveSession());
+        }
+    }
+
+    private sealed class PassiveSession : TcpConnectionSession {
         public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) {
             // Authenticated tickets require a principal id — an id-less authenticated ticket is

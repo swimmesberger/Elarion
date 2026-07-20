@@ -57,9 +57,12 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
                                         ".ConnectionSocket")
                      ?? NullLogger.Instance;
 
-        // Per-connection configuration (the binding-config lookup point): resolved from the upgrade request
-        // before the socket is accepted; nulls inherit the endpoint options.
-        var overrides = await handler.ConfigureConnectionAsync(context, ct);
+        // The per-connection session (the binding-config lookup point): created from the upgrade request
+        // before the socket is accepted; a null session rejects the request pre-accept.
+        var session = await handler.CreateSessionAsync(context, ct);
+        if (session is null) return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        var overrides = session.Settings;
         var maxMessageBytes = overrides?.MaxMessageBytes ?? options.MaxMessageBytes;
         var idleTimeout = overrides?.IdleTimeout ?? options.IdleTimeout;
         var transport = overrides?.Transport ?? "websocket";
@@ -76,7 +79,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
             // a slot forever.
             using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             handshakeCts.CancelAfter(overrides?.HandshakeTimeout ?? options.HandshakeTimeout);
-            ticket = await handler.AuthenticateAsync(
+            ticket = await session.AuthenticateAsync(
                 new WebSocketHandshakeContext(context, socket, reader), handshakeCts.Token);
         }
         catch (OperationCanceledException) {
@@ -112,7 +115,7 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
         // The kernel-wide invoke default (per-call ClientInvokeOptions.Timeout still wins per call).
         var connectionDefaults = services.GetService<ElarionConnectionsOptions>() ?? new ElarionConnectionsOptions();
         var connection = new WebSocketClientConnection(identity, socket, connectionDefaults.DefaultInvokeTimeout);
-        connection.AttachProtocol(handler.CreateProtocol(connection));
+        connection.AttachProtocol(session.CreateProtocol(connection));
 
         Exception? closeReason = null;
         var ownsRegistration = false;

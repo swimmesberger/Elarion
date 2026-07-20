@@ -20,19 +20,23 @@ namespace Elarion.Connections.Simulation;
 /// </example>
 public static class InMemoryTcpLink {
     /// <summary>Starts one in-memory connection against <paramref name="handler"/>.</summary>
-    /// <param name="handler">The connection handler under test/simulation (authenticator + codec).</param>
+    /// <param name="handler">The connection handler under test/simulation (the session factory).</param>
     /// <param name="registry">The registry the connection registers with (resolve from DI so observers,
     /// twins, and the client-events bridge participate exactly as in production).</param>
     /// <param name="configure">Endpoint options; must set <c>Framer</c>. <c>Transport</c> defaults to
-    /// <c>"in-memory"</c>. The returned client speaks the <b>endpoint</b> framer — a handler that swaps
-    /// the framer per connection via <c>ConfigureConnectionAsync</c> must be simulated with that framer
-    /// configured here.</param>
+    /// <c>"in-memory"</c>.</param>
+    /// <param name="clientFramer">The framing the simulated peer speaks. Defaults to the endpoint framer
+    /// instance, which is correct only for stateless framers. A handler whose sessions create a
+    /// <b>stateful</b> per-connection framer (negotiated framing, encryption toggles) must supply the
+    /// client's <b>own</b> instance here — the two ends of a real link never share framing state, and a
+    /// shared toggle would let a broken negotiation pass in simulation.</param>
     /// <param name="timeProvider">Optional clock.</param>
     /// <param name="logger">Optional logger for codec failures.</param>
     public static InMemoryTcpLinkSession Start(
         TcpConnectionHandler handler,
         IClientConnectionRegistry registry,
         Action<ElarionTcpConnectionOptions> configure,
+        TcpMessageFramer? clientFramer = null,
         TimeProvider? timeProvider = null,
         ILogger? logger = null) {
         ArgumentNullException.ThrowIfNull(handler);
@@ -41,7 +45,7 @@ public static class InMemoryTcpLink {
         var options = new ElarionTcpConnectionOptions { Transport = "in-memory" };
         configure(options);
         TcpConnectionServiceCollectionExtensions.ValidateShared(options);
-        var framer = options.Framer!;
+        var framer = clientFramer ?? options.Framer!;
 
         var (serverEnd, clientEnd) = InMemoryDuplexStream.CreatePair();
         var shutdown = new CancellationTokenSource();

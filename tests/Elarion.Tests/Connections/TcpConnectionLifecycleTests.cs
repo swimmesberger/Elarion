@@ -662,16 +662,11 @@ public sealed class TcpConnectionLifecycleTests {
             return false;
         }
 
-        public override void WriteMessage(ReadOnlySpan<byte> payload, IBufferWriter<byte> output) {
-            WriteCalls++;
-            output.Write(payload);
-        }
-
         public override int BeginMessage(IBufferWriter<byte> output) {
             return 0;
         }
 
-        public override void CompleteMessage(Span<byte> prologue, ReadOnlySpan<byte> payload,
+        public override void CompleteMessage(Span<byte> prologue, Span<byte> payload,
             IBufferWriter<byte> output) {
             WriteCalls++;
         }
@@ -682,8 +677,15 @@ public sealed class TcpConnectionLifecycleTests {
     private sealed class ImmediateTicketHandler : TcpConnectionHandler {
         public TaskCompletionSource Opened { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public RecordingLifecycleProtocol? Protocol { get; private set; }
+        public RecordingLifecycleProtocol? Protocol { get; set; }
 
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new ImmediateTicketSession(this));
+        }
+    }
+
+    private sealed class ImmediateTicketSession(ImmediateTicketHandler handler) : TcpConnectionSession {
         public override ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) {
             // Authenticated tickets require a principal id — an id-less authenticated ticket is rejected
@@ -695,13 +697,20 @@ public sealed class TcpConnectionLifecycleTests {
         }
 
         public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
-            return Protocol = new RecordingLifecycleProtocol(Opened);
+            return handler.Protocol = new RecordingLifecycleProtocol(handler.Opened);
         }
     }
 
     private sealed class GreetingTicketHandler : TcpConnectionHandler {
-        public RecordingLifecycleProtocol? Protocol { get; private set; }
+        public RecordingLifecycleProtocol? Protocol { get; set; }
 
+        public override ValueTask<TcpConnectionSession?> CreateSessionAsync(
+            TcpConnectionPeer peer, CancellationToken ct) {
+            return ValueTask.FromResult<TcpConnectionSession?>(new GreetingTicketSession(this));
+        }
+    }
+
+    private sealed class GreetingTicketSession(GreetingTicketHandler handler) : TcpConnectionSession {
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             TcpHandshakeContext handshake, CancellationToken ct) {
             var greeting = await handshake.ReceiveTextAsync(ct);
@@ -715,7 +724,7 @@ public sealed class TcpConnectionLifecycleTests {
         }
 
         public override IClientConnectionProtocol CreateProtocol(TcpClientConnection connection) {
-            return Protocol = new RecordingLifecycleProtocol(
+            return handler.Protocol = new RecordingLifecycleProtocol(
                 new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
         }
     }

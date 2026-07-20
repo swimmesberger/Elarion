@@ -94,13 +94,13 @@ still `IDeviceKeyStore.RemoveAsync(deviceId)`: the device can no longer authenti
 
 ## Connect-time authentication
 
-`HmacChallengeVerifier` is shaped for a connection-handshake authenticator
-(`WebSocketConnectionHandler` / `TcpConnectionHandler`): mint a nonce, send it, verify the device's
-`HMAC-SHA256(key, nonce)` in constant time, and return the ticket.
+`HmacChallengeVerifier` is shaped for a connection-handshake authenticator (a
+`WebSocketConnectionSession` / `TcpConnectionSession`, created per link by its handler): mint a nonce,
+send it, verify the device's `HMAC-SHA256(key, nonce)` in constant time, and return the ticket.
 
 ```csharp
-public sealed class GatewaySocketHandler(HmacChallengeVerifier verifier)
-    : WebSocketConnectionHandler {
+public sealed class GatewaySession(HmacChallengeVerifier verifier)
+    : WebSocketConnectionSession {
     public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
         WebSocketHandshakeContext handshake, CancellationToken ct) {
         var nonce = HmacChallengeVerifier.CreateNonce();

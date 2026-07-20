@@ -94,7 +94,10 @@ internal sealed class TcpOutboundWriter : IDisposable {
         if (queued is null) {
             // The inline owner: this sender owns the stream for its own frame — flat in this method so
             // the uncontended path suspends at most one pooled frame — then hands any queue to a drainer.
-            var (error, fatal) = await WriteFrameAsync(message, ct);
+            // Framing runs through the single Begin/Complete emit path (the static copy-lambda is cached,
+            // so the memory-send stays allocation-free).
+            var (error, fatal) = await WriteCallerFrameAsync(
+                message, static (payload, output) => output.Write(payload.Span), ct);
             FinishWriter(error, fatal);
             if (error is not null) {
                 if (fatal) _lifetime.Abort(error);
@@ -324,7 +327,15 @@ internal sealed class TcpOutboundWriter : IDisposable {
 
                 _frameBuffer.BeginFrame();
                 try {
-                    _framer.WriteMessage(item.Message.Span, _frameBuffer);
+                    // The same Begin/Complete emit path as every other send route — frame-relative
+                    // offsets, because the batch buffer coalesces frames.
+                    var prologueLength = _framer.BeginMessage(_frameBuffer);
+                    var payloadStart = _frameBuffer.WrittenCount;
+                    _frameBuffer.Write(item.Message.Span);
+                    _framer.CompleteMessage(
+                        _frameBuffer.GetWrittenSpan(payloadStart - prologueLength, prologueLength),
+                        _frameBuffer.GetWrittenSpan(payloadStart, item.Message.Length),
+                        _frameBuffer);
                     _drainBatch.Add(item);
                 }
                 catch (Exception framingFailure) {
@@ -397,39 +408,6 @@ internal sealed class TcpOutboundWriter : IDisposable {
         }
 
         TcpConnectionTelemetry.RecordOutboundSettled(_transport);
-    }
-
-    /// <summary>
-    /// Frames and physically writes one message. Returns the send's fault (or <see langword="null"/> on
-    /// success) plus whether it is connection-fatal: a framing/oversize failure never started the frame, so
-    /// the connection lives; a cancelled or failed physical write may have left a partial frame, so the
-    /// stream can no longer be trusted to carry message boundaries.
-    /// </summary>
-    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
-    private async ValueTask<(Exception? Error, bool Fatal)> WriteFrameAsync(
-        ReadOnlyMemory<byte> message, CancellationToken ct) {
-        try {
-            _frameBuffer.ResetWrittenCount();
-            _framer.WriteMessage(message.Span, _frameBuffer);
-        }
-        catch (Exception framingFailure) {
-            _frameBuffer.Trim();
-            return (framingFailure, Fatal: false);
-        }
-
-        try {
-            await _stream.WriteAsync(_frameBuffer.WrittenMemory, ct);
-            return (null, false);
-        }
-        catch (OperationCanceledException cancelled) {
-            return (cancelled, Fatal: true);
-        }
-        catch (Exception ioFailure) {
-            return (new ClientConnectionClosedException(_connectionId, ioFailure), Fatal: true);
-        }
-        finally {
-            _frameBuffer.Trim();
-        }
     }
 
     // Settles the finished inline writer's slot and decides what happens to the stream ownership: hand

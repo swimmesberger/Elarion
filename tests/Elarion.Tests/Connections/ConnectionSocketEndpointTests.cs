@@ -249,6 +249,13 @@ public sealed class ConnectionSocketEndpointTests {
 
     /// <summary>The device-gateway shape: an in-socket challenge/response handshake and an echo codec.</summary>
     private sealed class ChallengeHandler : WebSocketConnectionHandler {
+        public override ValueTask<WebSocketConnectionSession?> CreateSessionAsync(
+            Microsoft.AspNetCore.Http.HttpContext context, CancellationToken ct) {
+            return ValueTask.FromResult<WebSocketConnectionSession?>(new ChallengeSession());
+        }
+    }
+
+    private sealed class ChallengeSession : WebSocketConnectionSession {
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             WebSocketHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
@@ -281,8 +288,15 @@ public sealed class ConnectionSocketEndpointTests {
     /// <summary>Records the codec teardown signal — the connection-ended notification a codec mounts its
     /// pending-invoke <c>FailAll</c> on.</summary>
     private sealed class ClosureRecordingHandler : WebSocketConnectionHandler {
-        public ClosureRecordingProtocol? Protocol { get; private set; }
+        public ClosureRecordingProtocol? Protocol { get; set; }
 
+        public override ValueTask<WebSocketConnectionSession?> CreateSessionAsync(
+            Microsoft.AspNetCore.Http.HttpContext context, CancellationToken ct) {
+            return ValueTask.FromResult<WebSocketConnectionSession?>(new ClosureRecordingSession(this));
+        }
+    }
+
+    private sealed class ClosureRecordingSession(ClosureRecordingHandler handler) : WebSocketConnectionSession {
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             WebSocketHandshakeContext handshake, CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
@@ -297,7 +311,7 @@ public sealed class ConnectionSocketEndpointTests {
         }
 
         public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) {
-            return Protocol = new ClosureRecordingProtocol();
+            return handler.Protocol = new ClosureRecordingProtocol();
         }
     }
 
@@ -312,8 +326,15 @@ public sealed class ConnectionSocketEndpointTests {
     }
 
     private sealed class OpeningFailureHandler : WebSocketConnectionHandler {
-        public OpeningFailureProtocol? Protocol { get; private set; }
+        public OpeningFailureProtocol? Protocol { get; set; }
 
+        public override ValueTask<WebSocketConnectionSession?> CreateSessionAsync(
+            Microsoft.AspNetCore.Http.HttpContext context, CancellationToken ct) {
+            return ValueTask.FromResult<WebSocketConnectionSession?>(new OpeningFailureSession(this));
+        }
+    }
+
+    private sealed class OpeningFailureSession(OpeningFailureHandler handler) : WebSocketConnectionSession {
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(WebSocketHandshakeContext handshake,
             CancellationToken ct) {
             await handshake.SendTextAsync("challenge", ct);
@@ -325,7 +346,7 @@ public sealed class ConnectionSocketEndpointTests {
         }
 
         public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection connection) {
-            return Protocol = new OpeningFailureProtocol();
+            return handler.Protocol = new OpeningFailureProtocol();
         }
     }
 
@@ -355,14 +376,18 @@ public sealed class ConnectionSocketEndpointTests {
     /// <summary>One route, two tiers: per-connection settings picked from the upgrade request's query —
     /// the constrained tier gets a tiny size cap, and both get tier-tagged transports.</summary>
     private sealed class TieredHandler : WebSocketConnectionHandler {
-        public override ValueTask<WebSocketConnectionSettings?> ConfigureConnectionAsync(
+        public override ValueTask<WebSocketConnectionSession?> CreateSessionAsync(
             Microsoft.AspNetCore.Http.HttpContext context, CancellationToken ct) {
             var tier = context.Request.Query["tier"].ToString();
-            return ValueTask.FromResult<WebSocketConnectionSettings?>(new WebSocketConnectionSettings {
+            return ValueTask.FromResult<WebSocketConnectionSession?>(new TieredSession(new WebSocketConnectionSettings {
                 Transport = "websocket-" + tier,
                 MaxMessageBytes = tier == "constrained" ? 64 : null
-            });
+            }));
         }
+    }
+
+    private sealed class TieredSession(WebSocketConnectionSettings settings) : WebSocketConnectionSession {
+        public override WebSocketConnectionSettings? Settings => settings;
 
         public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
             WebSocketHandshakeContext handshake, CancellationToken ct) {
