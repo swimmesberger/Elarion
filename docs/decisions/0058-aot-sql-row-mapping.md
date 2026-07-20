@@ -257,7 +257,12 @@ counterpart to the `DbContext`/`IDbContextFactory` pair. `db.OpenSessionAsync(ct
 routers inherit it) opens an **owning** one-shot session with autonomous per-call semantics — the
 singleton-eligible handler path (a scoped `ISqlSession` would block singleton registration) now goes through
 the seam in one call instead of injecting a raw `DbDataSource` and hand-wrapping a connection, so tenant
-routing applies to singleton handlers on scoped hosts too. `IMigrationDatabase` deliberately does *not* fold
+routing applies to singleton handlers on scoped hosts too. Its transactional sibling
+`db.BeginTransactionAsync(ct)` returns an `ISqlTransaction : ISqlSession` — an owning session whose
+statements commit or roll back together, with the unit-of-work scope's contract (explicit commit; dispose
+without commit rolls back) — the atomic multi-write path outside the framework unit of work. Commit lives
+only on `ISqlTransaction`, never on `ISqlSession`: a scoped handler must not be able to commit the
+framework's transaction out from under the decorator. `IMigrationDatabase` deliberately does *not* fold
 into this handle: it is the migration engine's provider SPI (dialect, exclusive locking, dedicated unpooled
 connections) — polymorphic behavior extensions over a neutral handle cannot express — and applications never
 touch it; the app-facing unification already happens at registration (`AddElarionPostgreSql` registers both)

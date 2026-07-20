@@ -31,4 +31,49 @@ public static class SqlDatabaseExtensions {
         var connection = await database.GetDataSource().OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         return new ConnectionSqlSession(connection, transaction: null, ownsConnection: true);
     }
+
+    /// <summary>
+    /// Opens an <b>owning</b>, <b>transactional</b> one-shot session: a fresh pooled connection with a
+    /// transaction already begun, so several statements commit or roll back together <b>outside</b> the
+    /// framework unit of work. Commit explicitly on the returned <see cref="ISqlTransaction"/>; disposing
+    /// without a commit rolls back, and disposal returns the connection either way. Inside a scoped handler,
+    /// inject the scoped <see cref="ISqlSession"/> instead — the framework transaction decorator owns
+    /// commit/rollback there.
+    /// </summary>
+    /// <param name="database">The database handle to open from.</param>
+    /// <param name="isolationLevel">
+    /// Optional isolation level for the transaction; omit for the provider's default.
+    /// </param>
+    /// <param name="cancellationToken">Cancels opening the connection and beginning the transaction.</param>
+    /// <example>
+    /// <code>
+    /// // Two writes that must commit together (e.g. write the new key AND clear the ticket):
+    /// await using var tx = await db.BeginTransactionAsync(ct);
+    /// await tx.ExecuteAsync($"UPDATE {Account.Table} SET session_key = {key} WHERE id = {id}", ct);
+    /// await tx.ExecuteAsync($"UPDATE {Ticket.Table} SET ticket = NULL WHERE account_id = {id}", ct);
+    /// await tx.CommitAsync(ct);
+    /// </code>
+    /// </example>
+    public static async ValueTask<ISqlTransaction> BeginTransactionAsync(
+        this ISqlDatabase database, System.Data.IsolationLevel? isolationLevel = null,
+        CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(database);
+        var connection = await database.GetDataSource().OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        try {
+            var transaction = isolationLevel is { } level
+                ? await connection.BeginTransactionAsync(level, cancellationToken).ConfigureAwait(false)
+                : await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            return new OwnedSqlTransaction(connection, transaction);
+        }
+        catch {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <inheritdoc cref="BeginTransactionAsync(ISqlDatabase, System.Data.IsolationLevel?, CancellationToken)"/>
+    public static ValueTask<ISqlTransaction> BeginTransactionAsync(
+        this ISqlDatabase database, CancellationToken cancellationToken) {
+        return database.BeginTransactionAsync(isolationLevel: null, cancellationToken);
+    }
 }

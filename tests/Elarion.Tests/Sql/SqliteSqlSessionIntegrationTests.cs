@@ -141,6 +141,42 @@ public sealed class SqliteSqlSessionIntegrationTests : IDisposable {
         found!.Name.Should().Be("one-shot");
     }
 
+    [Fact]
+    public async Task BeginTransactionAsync_CommitMakesBothWritesDurable() {
+        var db = new DataSourceSqlDatabase(new SqliteDataSource(ConnectionString));
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+
+        // The transactional one-shot: two writes that must commit together, outside any unit of work — one
+        // object, commit on it, no hand-assembled connection/transaction/wrap.
+        await using (var tx = await db.BeginTransactionAsync(Ct)) {
+            tx.CurrentTransaction.Should().NotBeNull();
+            await tx.InsertAsync(new SqlWidget { Id = first, Name = "atomic-1" }, Ct);
+            await tx.ExecuteAsync(
+                $"INSERT INTO sql_widgets (id, name) VALUES ({second}, {"atomic-2"})", Ct);
+            await tx.CommitAsync(Ct);
+        }
+
+        (await ExistsAsync(first)).Should().BeTrue();
+        (await ExistsAsync(second)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task BeginTransactionAsync_DisposeWithoutCommit_RollsBackBothWrites() {
+        var db = new DataSourceSqlDatabase(new SqliteDataSource(ConnectionString));
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+
+        // No commit: leaving the scope (the failure path) must discard both writes together.
+        await using (var tx = await db.BeginTransactionAsync(Ct)) {
+            await tx.InsertAsync(new SqlWidget { Id = first, Name = "doomed-1" }, Ct);
+            await tx.InsertAsync(new SqlWidget { Id = second, Name = "doomed-2" }, Ct);
+        }
+
+        (await ExistsAsync(first)).Should().BeFalse();
+        (await ExistsAsync(second)).Should().BeFalse();
+    }
+
     public void Dispose() {
         SqliteConnection.ClearAllPools();
         try {
