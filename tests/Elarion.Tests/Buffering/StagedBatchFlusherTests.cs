@@ -191,6 +191,12 @@ public sealed class StagedBatchFlusherTests {
         }
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        allocated.Should().Be(0, "TrySubmit and the IsIdle gate are the producer's hot path and must not allocate");
+        // Zero expected from the flusher itself, but Release can hand the writer's continuation to the
+        // thread pool, whose queue bookkeeping (segment/array growth) is occasionally charged to this
+        // thread. The slack absorbs those one-offs without letting a real per-submit allocation
+        // (≥ 24 B each, ≥ 240 KB total) sneak past.
+        var bytesPerOp = allocated / (double)iterations;
+        bytesPerOp.Should().BeLessThan(1.0,
+            $"TrySubmit and the IsIdle gate are the producer's hot path and must not allocate, but measured {bytesPerOp:F2} B/op");
     }
 }
