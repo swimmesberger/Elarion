@@ -122,6 +122,49 @@ contract itself — only as the lifecycle forwarder.
   misfire, and resilience policies plus telemetry.
 </Callout>
 
+## Module services vs. contract sets
+
+`[Service]` is deliberately **module-shaped**: registrations are aggregated per `[AppModule]` and
+invoked gated on `Modules:{Name}:Enabled`, so a feature module's services disappear with the module.
+Both properties are wrong for a class of registrations module-less host assemblies have:
+**infrastructure seams** — N implementations of one contract composed into a routing or dispatch
+table at boot (protocol packet bindings, codec catalogs, pipeline stages). There is no module to own
+them, and a config gate that silently empties a transport's dispatch table while the listener stays
+up produces a server that boots deaf.
+
+For these, declare a **contract set**: author the composition method you already call — a
+`static partial` extension method — and let the generator fill in the body:
+
+```csharp title="PacketBindingRegistrations.cs"
+public static partial class PacketBindingRegistrations {
+    [GenerateContractSetRegistration(typeof(IPacketBinding))]
+    public static partial IServiceCollection AddPacketBindings(this IServiceCollection services);
+}
+```
+
+You name and place the method, so go-to-definition works and no naming convention is involved; the
+generator finds every non-abstract, non-generic class in the declaring assembly that is assignable
+to the contract and implements the method, registering each implementation with `TryAddEnumerable`
+(calling it twice never duplicates the set) at `Singleton` scope by default (`Scope` overrides).
+Discovery is compilation-local by design: the assembly that declares the seam owns its
+implementations; a host wanting external ones registers them explicitly.
+
+When do you use which?
+
+- **`[Service]`** — feature-gated module services, *pushed* by the gated module bootstrapper. The
+  registration lives and dies with the module.
+- **Contract sets** — unconditional infrastructure seams, *pulled* by the host from its composition
+  root, exactly once. Nothing gates the composition; the registry consuming
+  `IEnumerable<TContract>` validates the set at startup and is free to fail loudly on an invalid
+  one. An empty set is a warning at compile time ([`ELSG015`](/docs/reference/diagnostics)) —
+  almost always a typo'd contract or refactor casualty.
+
+A type must pick one mechanism per contract: an implementation that also carries `[Service]`
+resolving to the same contract would register twice — once gated, once not — and reports
+[`ELSG018`](/docs/reference/diagnostics). See
+[`[GenerateContractSetRegistration]`](/docs/reference/attributes#generatecontractsetregistration)
+for the full parameter and diagnostic reference.
+
 ## Reacting to events from a service
 
 A `[Service]` can host a lightweight **event consumer** for a small side effect: an instance method

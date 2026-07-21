@@ -83,6 +83,15 @@ jobs, and event consumers, and gate all of it per module (`Modules:{Name}:Enable
 "isn't found" at runtime, the cause is its namespace not being under a module, the module being
 disabled, or a build diagnostic you skipped — never a missing `AddScoped`.
 
+For module-less infrastructure seams (N implementations of one contract composed into a dispatch
+table at boot — packet bindings, codec catalogs, pipeline stages), don't wrap them in a fake module:
+author a `static partial IServiceCollection AddMyBindings(this IServiceCollection services);`
+extension method annotated `[GenerateContractSetRegistration(typeof(IMyBinding))]` — the generator
+fills in the body with every implementation in the assembly — and call it from the host's
+composition root, exactly once. It is unconditional (never config-gated) and
+`TryAddEnumerable`-idempotent. See the services concept ("module services vs. contract sets") for
+when to use which.
+
 Host wiring is a few generated calls (copy the current form from the quickstart doc — these names
 have evolved before). Project layout is your choice: the bootstrapper discovers handlers from
 referenced module assemblies **and from the host compilation itself**, so a tiny app can be one

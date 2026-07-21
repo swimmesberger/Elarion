@@ -56,6 +56,28 @@ See [Client capabilities](/docs/concepts/client-capabilities).
 
 See [Services](/docs/concepts/services).
 
+### `[GenerateContractSetRegistration]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** method (a `static partial` extension method the generator implements)
+- **Triggers:** runs the `ContractSetRegistrationGenerator` to compose **every implementation of one contract, unconditionally** — the module-less counterpart to `[Service]` for infrastructure seams (protocol packet bindings, codec catalogs, pipeline stages) that live in host assemblies with no `[AppModule]`. The host authors, names, and places the composition method; the generator fills in the body. Discovery is compilation-local: every non-abstract, non-generic class in the declaring assembly assignable to the contract is registered via `TryAddEnumerable` (calling the method twice never duplicates the set). The method is **pulled** by the host's composition root, exactly once, unconditionally; no bootstrapper invokes it and no configuration gates it, so a transport's routing table cannot be silently emptied by a module switch. The method shape is fixed (`ELSG019` otherwise): `static partial IServiceCollection Name(this IServiceCollection services)` on a non-generic static partial class, without a hand-written implementation.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `contractType` | `Type` (ctor) → `ContractType` | — | The composed contract; must be an interface or abstract class (open generics rejected). |
+| `Scope` | `ServiceScope` (init) | `Singleton` | DI lifetime for every implementation — infrastructure seams are boot-composed. |
+
+```csharp
+public static partial class PacketBindingRegistrations {
+    [GenerateContractSetRegistration(typeof(IPacketBinding))]
+    public static partial IServiceCollection AddPacketBindings(this IServiceCollection services);
+}
+
+// host composition root:
+services.AddPacketBindings();
+```
+
+Diagnostics `ELSG014` (contract not an interface/abstract class) / `ELSG015` (empty set) / `ELSG016` (same contract declared twice) / `ELSG017` (generic implementation) / `ELSG018` (implementation also a `[Service]` under the same contract) / `ELSG019` (invalid method shape). See [Services — module services vs. contract sets](/docs/concepts/services#module-services-vs-contract-sets).
+
 ### `[DecoratorList]`
 
 - **Package:** `Elarion.Abstractions` (Pipeline) · **Applies to:** class

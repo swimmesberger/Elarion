@@ -19,6 +19,12 @@
  ELSG011    | Elarion.Generators                 | Error    | Singleton handler dependency must be singleton
  ELSG012    | Elarion.Generators                 | Error    | Singleton handler dependency lifetime cannot be verified
  ELSG013    | Elarion.Generators                 | Error    | Singleton handler cannot use a scope-dependent pipeline feature
+ ELSG014    | Elarion.Generators                 | Error    | Contract-set type must be an interface or abstract class
+ ELSG015    | Elarion.Generators                 | Warning  | Contract set has no implementations
+ ELSG016    | Elarion.Generators                 | Error    | Duplicate contract-set declaration
+ ELSG017    | Elarion.Generators                 | Error    | Generic contract-set implementations are not supported
+ ELSG018    | Elarion.Generators                 | Warning  | Contract-set implementation also registers the contract through [Service]
+ ELSG019    | Elarion.Generators                 | Error    | Invalid contract-set method
  ELACT001   | Elarion.Generators                 | Error    | Invalid [Actor] type
  ELACT002   | Elarion.Generators                 | Error    | Invalid actor method
  ELACT003   | Elarion.Generators                 | Warning  | Actor is not in any module
