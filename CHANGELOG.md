@@ -33,6 +33,20 @@ minor releases may include breaking changes.
   expressible — escape in the codec, as delimiter framing already required).
 
 ### Added
+- **Producer-owned hot-state buffering primitives (ADR-0069).** `Elarion.Buffering` gains two additive
+  siblings for application-owned in-memory hot state at gameplay/telemetry rates — the traffic ADR-0066
+  scoped out of the handler pipeline. `BoundedMpscQueue<T>` (`T : struct`) is a fixed-capacity,
+  array-backed, lock-free queue (Vyukov's bounded algorithm) for many producers and one consumer:
+  `TryEnqueue`/`TryDequeue` never block and never allocate, a full queue returns `false` (the caller
+  owns the backpressure policy per message class), ordering is FIFO per producer, and dequeued slots
+  are cleared when `T` carries references. `StagedBatchFlusher<TBatch>` is a single-flight ownership
+  handoff between a producer staging into one preallocated batch object and a background writer
+  draining it through an async delegate: the producer touches the batch only while `IsIdle`,
+  `TrySubmit` transfers ownership without blocking or allocating (`false` = skip-and-retry; dirty flags
+  carry state to the next sweep), a throwing write drops that batch's staged content to `onFlushError`
+  without tearing down the loop or leaking ownership, and `DisposeAsync` drains uncancelled (optional
+  `DisposeTimeout`). Both hot paths are pinned by zero-allocation tests; the data-rate-shaping page
+  gained a selection table across the four family primitives.
 - **Contract-set registration for module-less infrastructure seams (ADR-0070).** A new
   `[GenerateContractSetRegistration(typeof(TContract))]` attribute (in `Elarion.Abstractions`, applied to a
   host-authored `static partial IServiceCollection` extension method) triggers

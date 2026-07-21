@@ -89,4 +89,5 @@ designs that are not yet implemented.
 - [ADR-0066: Opt-in low-allocation dispatch profile for high-rate connections](0066-low-allocation-connection-dispatch.md)
 - [ADR-0067: Per-connection sessions and a single framer emit path](0067-connection-sessions-and-single-framer-emit-path.md)
 - [ADR-0068: Source-generated binary COPY and staged upsert for the AOT SQL tier](0068-aot-sql-binary-copy.md)
+- [ADR-0069: Producer-owned hot-state primitives — bounded MPSC queue and staged-batch flusher](0069-producer-owned-hot-state-buffering.md)
 - [ADR-0070: Contract-set registration — unconditional composition of one contract's implementation set](0070-contract-set-registration.md)

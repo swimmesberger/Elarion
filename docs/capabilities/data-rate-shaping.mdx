@@ -1,24 +1,28 @@
 ---
 title: Data-rate shaping
-description: Shape high-frequency sample streams with a write-behind buffer (batch to the database) and a keyed conflater (latest-wins to the UI).
+description: Shape high-frequency data with a write-behind buffer, a keyed conflater, a bounded MPSC command queue, and a staged-batch flusher for producer-owned hot state.
 ---
 
-Between "a device produces samples many times per second" and "the database and the UI consume them"
-sit two small concurrency problems every telemetry gateway hand-rolls: batching writes so the database
-sees hundreds of rows per call instead of hundreds of calls per second, and throttling live values so
-the UI sees at most a few updates per second per key — without ever getting stuck on a stale one. Both
-are ~100 lines that are easy to get subtly wrong (flush/publish races, shutdown flush, timer lifecycle),
-so `Elarion` core ships them once, in the `Elarion.Buffering` namespace
-([ADR-0055](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0055-data-rate-shaping-helpers.md)):
+Between "something produces data many times per second" and "the database, the UI, or a single-writer
+loop consume it" sit small concurrency problems every gateway and simulation tier hand-rolls — each
+~100 lines that are easy to get subtly wrong (flush/publish races, shutdown drains, timer and
+ownership lifecycles). `Elarion` core ships them once, in the `Elarion.Buffering` namespace
+([ADR-0055](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0055-data-rate-shaping-helpers.md),
+[ADR-0069](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0069-producer-owned-hot-state-buffering.md)).
+Which one do I want?
 
-| Helper | Contract | Natural delegate body |
+| Primitive | Workload shape | Contract |
 | --- | --- | --- |
-| `WriteBehindBuffer<T>` | Accumulate, flush in batches by count or interval — whichever first | [`ExecuteInsertAsync`](/docs/capabilities/bulk-operations) |
-| `KeyedConflater<TKey, TValue>` | Latest wins per key, at most one emit per key per interval | [`IClientEventPublisher.PublishAsync`](/docs/capabilities/events/client-events) |
+| `WriteBehindBuffer<T>` | Append-all samples — every reading is a new fact | Accumulate, flush in batches by count or interval; natural flush body: [`ExecuteInsertAsync`](/docs/capabilities/bulk-operations) |
+| `KeyedConflater<TKey, TValue>` | Latest-per-key emits — hot values headed for the UI | At most one emit per key per interval, never ending stale; natural publish body: [`IClientEventPublisher.PublishAsync`](/docs/capabilities/events/client-events) |
+| `StagedBatchFlusher<TBatch>` | Producer-owned state snapshots — dirty-flag state where only the latest matters | Single-flight ownership handoff of one preallocated batch to a background writer |
+| `BoundedMpscQueue<T>` | Commands into a single-writer loop — many producers, one consumer | Fixed-capacity lock-free struct queue; full returns `false`, the caller picks the backpressure policy |
 
-Both are BCL-only, need no DI registration (construct them wherever the data path lives — typically an
-[actor](/docs/concepts/actors) or gateway component), take a `TimeProvider` for deterministic tests,
-and flush on `DisposeAsync` so shutdown writes the tail instead of dropping it.
+All four are BCL-only and need no DI registration (construct them wherever the data path lives —
+typically an [actor](/docs/concepts/actors), gateway component, or the loop that owns the state). The
+whole family is **loss-tolerant by contract**: a crash, a full queue, or a failed flush loses at most
+recent in-flight data. Data that must not be lost belongs in a handler transaction and
+[the outbox](/docs/capabilities/events/backends), never in these primitives.
 
 ## `WriteBehindBuffer<T>` — batch samples to the database
 
@@ -74,6 +78,42 @@ Each key emits at most once per `MinInterval`:
 - Delivery is **at-most-once**, matching the client-event contract: a publish failure drops that
   emission to the optional `onPublishError` callback, and the next post heals.
 
+## `BoundedMpscQueue<T>` — commands into a single-writer loop
+
+When many producer threads (connection receive continuations, timers) feed one consumer thread (a
+simulation tick loop, a device writer), `ConcurrentQueue<T>` allocates segments and is unbounded, and
+`Channel<T>` allocates and is async-shaped. `BoundedMpscQueue<T>` is the third shape: a fixed-capacity,
+array-backed, lock-free struct queue (Vyukov's bounded algorithm) whose `TryEnqueue` and `TryDequeue`
+never block and never allocate — all slots are preallocated at construction, and capacity rounds up to
+a power of two:
+
+```csharp
+var commands = new BoundedMpscQueue<MoveCommand>(4096);
+
+// Producers — any thread, e.g. a connection receive continuation:
+if (!commands.TryEnqueue(new MoveCommand(entityId, x, y)))
+    _dropped++;                       // full = backpressure; this message class is loss-tolerant
+
+// The single consumer — the tick loop:
+while (commands.TryDequeue(out var command))
+    Apply(command);
+```
+
+The contract:
+
+- **Bounded means backpressure, and the policy is yours.** A full queue returns `false` — there are no
+  blocking or waiting APIs. Decide per message class: drop loss-tolerant traffic (movement, telemetry),
+  retry or fail must-land control messages. The queue also owns no loop or thread; the application
+  drains it from whatever tick it already has.
+- **FIFO per producer.** Cross-producer arrival order is slot-claim order (the order producers won the
+  enqueue cursor), which under contention may differ from call order.
+- **Single consumer.** `TryDequeue` must never run concurrently with itself — one consumer at a time
+  (migrating the consumer between threads is fine as long as calls don't overlap). A debug-only
+  assertion catches violations.
+- **Reference hygiene.** `T` may carry object references (a command with a payload array); a dequeued
+  slot is cleared so the queue never keeps them alive until the slot's next reuse. For pure value types
+  the clear compiles away.
+
 ## Composition: the actor telemetry path
 
 The recommended owner is the actor that already serializes the hot state
@@ -89,7 +129,7 @@ public Task RecordAsync(Measurement m) {
 }
 ```
 
-These two shapes are deliberately the whole surface — windows, joins, or replay are the trigger for a
+These four shapes are deliberately the whole surface — windows, joins, or replay are the trigger for a
 real reactive/streaming library, not for growing these helpers. For ordered, gap-visible streams where
 element identity matters, use [ordered streams](/docs/capabilities/events/streams) instead of
 conflation.
@@ -109,18 +149,43 @@ The standard shape there is **dirty-flag-and-sweep**, in application code:
    allocation, no per-update queue entry.
 2. A periodic sweep (tick-aligned or interval) walks a stable iteration structure — a preallocated
    list or bitset of dirty indices, not LINQ — copies dirty state into a reused batch buffer, clears
-   the flags, and issues **one batched write**.
+   the flags, and hands the batch off for **one batched write**.
 3. Explicit save points (a session ending, an entity unloading) call the same sweep directly.
 
 The sweep itself allocates (rows, command, parameters) — at flush frequency, not update frequency,
-which is the point. A crash loses at most one interval: the same loss-tolerant contract as the
-helpers, so the same rule applies — state that must not be lost belongs in a handler transaction and
-[the outbox](/docs/capabilities/events/backends), not in this loop.
+which is the point. A crash loses at most one interval: the same loss-tolerant contract as the rest of
+the family, so the same rule applies — state that must not be lost belongs in a handler transaction
+and [the outbox](/docs/capabilities/events/backends), not in this loop.
+
+### `StagedBatchFlusher<TBatch>` — the generic half of the handoff
+
+The dirty bit, the iteration structure, and the batch's shape are application business. What *is*
+generic — and easy to get subtly wrong — is the ownership/signaling protocol between the sweep and the
+background write: who may touch the batch when, how the writer signals it's done, what happens when
+the write throws, and who drains on shutdown. `StagedBatchFlusher<TBatch>` owns exactly that half and
+never inspects the batch:
+
+- **Ownership protocol.** The producer stages into the batch only while `IsIdle` is `true`.
+  `TrySubmit` transfers ownership to the background writer without blocking or allocating; when the
+  write delegate returns *or throws*, ownership returns and `IsIdle` becomes `true` again — with full
+  visibility of the writer's effects, so the producer can safely reuse the batch. An optional `reset`
+  callback runs at each ownership return so the clear-the-sections logic lives in one place.
+- **Skip and retry.** `TrySubmit` returning `false` means a batch is still in flight — stage nothing
+  and let the dirty flags carry the state to the next sweep. That is why there is exactly **one**
+  batch and no internal queue: flags already bridge a busy interval, so a second buffer would buy
+  latency nobody needs at the cost of ownership complexity.
+- **Error policy.** A throwing write drops that batch's staged content by contract (latest-wins makes
+  this safe — the next sweep re-stages current values), surfaces through `onFlushError`, and never
+  tears down the loop or leaks ownership.
+- **Shutdown drains.** `DisposeAsync` completes the in-flight write and writes a batch submitted
+  before disposal, uncancelled — the last state of departed entities — bounded by an optional
+  `DisposeTimeout`. `FlushAsync` awaits idleness at explicit save points without disposing.
 
 An [actor](/docs/concepts/actors) is the natural owner of the hot state: updates and the sweep are
-both turns on one mailbox, so the sweep sees a consistent view with no locking, and the flush trigger
-is a facade call from whatever tick the application already has — the simulation loop, a
-[scheduled job](/docs/capabilities/scheduling), or a hosted service:
+both turns on one mailbox, so the sweep sees a consistent view with no locking, the `IsIdle` gate is
+race-free (only the mailbox submits), and the sweep trigger is a facade call from whatever tick the
+application already has — the simulation loop, a [scheduled job](/docs/capabilities/scheduling), or a
+hosted service:
 
 ```csharp
 [SqlRecord("entity_positions")]
@@ -130,13 +195,30 @@ public sealed partial record EntityPositionRow {
     public required float Y { get; init; }
 }
 
+// The batch and its sections are application code; the flusher never looks inside.
+public sealed class PositionBatch {
+    public List<EntityPositionRow> Rows { get; } = [];
+}
+
 [Actor]
-public sealed class ZoneActor(ISqlDatabase db) {
+public sealed class ZoneActor : IActorLifecycle {
     // Mutable by design: hot per-entity state, owned and serialized by the mailbox.
     private sealed class EntitySlot { public Guid Id; public float X; public float Y; public bool Dirty; }
 
     private readonly Dictionary<Guid, EntitySlot> _entities = [];
-    private readonly List<EntityPositionRow> _batch = [];   // reused flush buffer
+    private readonly PositionBatch _batch = new();          // the one preallocated, producer-owned batch
+    private readonly StagedBatchFlusher<PositionBatch> _flusher;
+
+    public ZoneActor(ISqlDatabase db, ILogger<ZoneActor> logger) {
+        _flusher = new StagedBatchFlusher<PositionBatch>(
+            async (batch, ct) => {
+                await using var session = await db.OpenSessionAsync(ct);
+                await session.InsertManyAsync(batch.Rows,
+                    " ON CONFLICT (id) DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y", ct);
+            },
+            onFlushError: (ex, batch) => logger.LogWarning(ex, "Dropped {Count} rows", batch.Rows.Count),
+            reset: static batch => batch.Rows.Clear());
+    }
 
     public Task Move(Guid id, float x, float y) {           // hot path: field writes only
         var slot = _entities[id];
@@ -144,30 +226,36 @@ public sealed class ZoneActor(ISqlDatabase db) {
         return Task.CompletedTask;
     }
 
-    public async Task FlushAsync(CancellationToken ct) {    // tick-aligned, e.g. every 30 s
-        _batch.Clear();
+    public Task Sweep() {                                   // tick-aligned, e.g. every 30 s
+        if (!_flusher.IsIdle) return Task.CompletedTask;    // writer busy — flags carry to the next sweep
+
         foreach (var slot in _entities.Values) {
             if (!slot.Dirty) continue;
             slot.Dirty = false;
-            _batch.Add(new EntityPositionRow { Id = slot.Id, X = slot.X, Y = slot.Y });
+            _batch.Rows.Add(new EntityPositionRow { Id = slot.Id, X = slot.X, Y = slot.Y });
         }
-        if (_batch.Count == 0) return;
+        if (_batch.Rows.Count > 0) _flusher.TrySubmit(_batch);
+        return Task.CompletedTask;
+    }
 
-        await using var session = await db.OpenSessionAsync(ct);
-        await session.InsertManyAsync(_batch,
-            " ON CONFLICT (id) DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y", ct);
+    public async ValueTask OnDeactivateAsync(CancellationToken ct) {
+        await Sweep();                                      // stage whatever is still dirty…
+        await _flusher.DisposeAsync();                      // …and drain it before the actor goes away
     }
 }
 ```
 
-The framework's contribution is the flush target, per host tier:
+The framework's contribution beyond the handoff is the flush target, per host tier:
 
 | Tier | Batched upsert path |
 | --- | --- |
 | EF | [`ExecuteInsertAsync`](/docs/capabilities/bulk-operations) with `OnConflict = BulkInsertConflictBehavior.Update` — binary COPY staged through a temp table, merged with native `ON CONFLICT` |
 | EF-free / AOT | [`InsertManyAsync`](/docs/capabilities/sql-mapping#reads-and-writes) with an `ON CONFLICT …` suffix — one reused prepared command per flush; source-generated binary COPY for this tier is proposed in [ADR-0068](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0068-aot-sql-binary-copy.md) |
 
-There is deliberately no `DirtySweep<T>` helper. The dirty bit and the iteration structure belong to
-the application's entity representation, and any framework intermediary between the update and the
-flag would reintroduce exactly the per-update bookkeeping this shape exists to avoid. The framework's
-seams are the mailbox that serializes the hot state and the batched write the sweep flushes into.
+There is still deliberately no `DirtySweep<T>` helper. The dirty bit and the iteration structure
+belong to the application's entity representation, and any framework intermediary between the update
+and the flag would reintroduce exactly the per-update bookkeeping this shape exists to avoid. New
+state families — even ones with maximally different persistence semantics, like replace-sets with
+deletions next to row updates — extend the *batch*, never the protocol: the framework's seams are the
+mailbox that serializes the hot state, the flusher that owns the handoff, and the batched write the
+sweep flushes into.
