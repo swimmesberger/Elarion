@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-07-21
+
 ### Changed
 - **Per-connection sessions and a single framer emit path (ADR-0067, breaking).** Both connection
   adapters' handlers are now factories: `TcpConnectionHandler`/`WebSocketConnectionHandler` have one
@@ -1401,7 +1403,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.6
 [0.2.5]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.5
 [0.2.4]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.4
 [0.2.3]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.3

@@ -62,7 +62,7 @@ runtime package — the source generator ships inside it:
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Elarion" Version="0.2.5" />
+  <PackageReference Include="Elarion" Version="0.2.6" />
 </ItemGroup>
 ```
 
@@ -89,9 +89,9 @@ lives in the `Elarion` package — and since analyzer assets are not transitive,
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Elarion" Version="0.2.5" />
-  <PackageReference Include="Elarion.JsonRpc" Version="0.2.5" />
-  <PackageReference Include="Elarion.AspNetCore" Version="0.2.5" />
+  <PackageReference Include="Elarion" Version="0.2.6" />
+  <PackageReference Include="Elarion.JsonRpc" Version="0.2.6" />
+  <PackageReference Include="Elarion.AspNetCore" Version="0.2.6" />
   <ProjectReference Include="..\MyApp.Application\MyApp.Application.csproj" />
 </ItemGroup>
 ```
@@ -107,7 +107,7 @@ as private build tooling in the host:
 ```xml
 <ItemGroup>
   <PackageReference Include="Elarion.AspNetCore.SchemaGeneration"
-                    Version="0.2.5"
+                    Version="0.2.6"
                     PrivateAssets="all" />
 </ItemGroup>
 
