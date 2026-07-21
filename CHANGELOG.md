@@ -47,6 +47,18 @@ minor releases may include breaking changes.
   without tearing down the loop or leaking ownership, and `DisposeAsync` drains uncancelled (optional
   `DisposeTimeout`). Both hot paths are pinned by zero-allocation tests; the data-rate-shaping page
   gained a selection table across the four family primitives.
+- **Contract-set registration for module-less infrastructure seams (ADR-0070).** A new
+  `[GenerateContractSetRegistration(typeof(TContract))]` attribute (in `Elarion.Abstractions`, applied to a
+  host-authored `static partial IServiceCollection` extension method) triggers
+  `ContractSetRegistrationGenerator` to implement that method by composing **every implementation of the
+  contract declared in the same assembly** via `TryAddEnumerable` — the module-less counterpart to
+  `[Service]` for infrastructure seams (protocol packet bindings, codec catalogs, pipeline stages) that
+  live in host assemblies with no `[AppModule]`. The host names, places, and calls the method from its
+  composition root; no bootstrapper invokes it and no configuration gates it, so a transport's routing
+  table cannot be silently emptied by a disabled module, and calling it twice never duplicates the set.
+  Discovery is compilation-local and deterministic. New diagnostics `ELSG014`–`ELSG019` (invalid contract
+  kind/open generic, empty set, duplicate declaration, generic implementation, `[Service]` overlap,
+  invalid method shape).
 - **EF-free unit of work for the SQL tier (ADR-0058 addendum).** `Elarion.Sql` now implements the
   provider-neutral `IUnitOfWork` seam, so the framework `TransactionDecorator` wraps a command handler's
   raw-SQL writes in one atomic commit/rollback on an EF-free / NativeAOT host — previously such a host fell
