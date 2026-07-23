@@ -7,9 +7,16 @@ namespace Elarion.Sql.PostgreSql;
 /// PostgreSQL operations on the <c>elarion_schema_history</c> table over the session's dedicated
 /// connection. The table is created by the runner itself under the advisory lock; rows for transactional
 /// migrations are inserted inside the migration's own transaction (the no-repair invariant of ADR-0057).
+/// Every statement names the table schema-qualified when the connection's search path selects one, so
+/// history writes stay anchored even if a script leaves the session's search path pointing elsewhere.
 /// </summary>
-internal sealed class SchemaHistory(NpgsqlConnection connection, string tableName, int commandTimeoutSeconds) {
-    private readonly string _quotedTable = '"' + tableName + '"';
+internal sealed class SchemaHistory(
+    NpgsqlConnection connection,
+    string? schema,
+    string tableName,
+    int commandTimeoutSeconds) {
+    private readonly string _quotedTable =
+        schema is null ? '"' + tableName + '"' : $"\"{schema}\".\"{tableName}\"";
 
     public async Task EnsureTableAsync(CancellationToken cancellationToken) {
         var sql = $"""

@@ -20,6 +20,7 @@ internal sealed class PostgreSqlMigrationSession : IMigrationSession {
 
     internal PostgreSqlMigrationSession(
         NpgsqlConnection connection,
+        string? schema,
         string historyTableName,
         int commandTimeoutSeconds,
         bool holdsLock,
@@ -32,7 +33,7 @@ internal sealed class PostgreSqlMigrationSession : IMigrationSession {
         _advisoryLockKey = advisoryLockKey;
         _lockTimeoutSeconds = lockTimeoutSeconds;
         _logger = logger;
-        _history = new SchemaHistory(connection, historyTableName, commandTimeoutSeconds);
+        _history = new SchemaHistory(connection, schema, historyTableName, commandTimeoutSeconds);
     }
 
     public Task EnsureHistoryTableAsync(CancellationToken cancellationToken) {

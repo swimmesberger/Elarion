@@ -30,6 +30,14 @@ public static class SqlPostgreSqlServiceCollectionExtensions {
     /// Optional extra configuration of the <see cref="NpgsqlSlimDataSourceBuilder"/> (the NativeAOT-friendly
     /// builder) — for example <c>db =&gt; db.EnableParameterLogging()</c> in development.
     /// </param>
+    /// <param name="schema">
+    /// Optional schema the application lives in, applied as the connection's <c>Search Path</c>. It steers
+    /// the access tier and migrations alike — one setting, so prefix-free migration scripts and unqualified
+    /// application queries can never resolve to different schemas — and the migration runner creates it if it
+    /// does not exist yet. Defaults to <see langword="null"/>: the server's own default (<c>public</c>).
+    /// Equivalent to putting <c>Search Path=…</c> in <paramref name="connectionString"/>, which wins if both
+    /// are given.
+    /// </param>
     /// <param name="advisoryLockKey">
     /// The session-level <c>pg_advisory_lock</c> key serializing concurrent migration runners. Defaults to
     /// <see cref="PostgreSqlMigrationRunner.DefaultAdvisoryLockKey"/>; independent schemas in one database can
@@ -39,7 +47,8 @@ public static class SqlPostgreSqlServiceCollectionExtensions {
     /// <example>
     /// <code>
     /// builder.Services.AddElarionPostgreSql(connectionString,
-    ///     db => { if (builder.Environment.IsDevelopment()) db.EnableParameterLogging(); });
+    ///     db => { if (builder.Environment.IsDevelopment()) db.EnableParameterLogging(); },
+    ///     schema: "app");
     /// builder.Services.AddElarionSqlUnitOfWork();
     /// builder.Services.AddElarionMigrations(o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
     /// </code>
@@ -48,12 +57,14 @@ public static class SqlPostgreSqlServiceCollectionExtensions {
         this IServiceCollection services,
         string connectionString,
         Action<NpgsqlSlimDataSourceBuilder>? configure = null,
+        string? schema = null,
         long advisoryLockKey = PostgreSqlMigrationRunner.DefaultAdvisoryLockKey) {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
+        var resolvedConnectionString = ApplySearchPath(connectionString, schema);
         services.TryAddSingleton<NpgsqlDataSource>(sp => {
-            var builder = new NpgsqlSlimDataSourceBuilder(connectionString);
+            var builder = new NpgsqlSlimDataSourceBuilder(resolvedConnectionString);
             builder.UseLoggerFactory(sp.GetService<ILoggerFactory>());
             configure?.Invoke(builder);
             return builder.Build();
@@ -63,10 +74,27 @@ public static class SqlPostgreSqlServiceCollectionExtensions {
     }
 
     /// <summary>
+    /// Puts <paramref name="schema"/> on the connection string as its search path — the single place the
+    /// schema is expressed, so every consumer of the data source (access tier, migrations) inherits it. An
+    /// explicit <c>Search Path</c> already in the connection string wins: it is the more specific statement
+    /// of intent, and silently overwriting it would be worse than ignoring the argument.
+    /// </summary>
+    private static string ApplySearchPath(string connectionString, string? schema) {
+        if (string.IsNullOrWhiteSpace(schema)) return connectionString;
+
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        if (!string.IsNullOrWhiteSpace(builder.SearchPath)) return connectionString;
+
+        builder.SearchPath = schema;
+        return builder.ConnectionString;
+    }
+
+    /// <summary>
     /// The <see cref="NpgsqlDataSource"/> overload of
-    /// <see cref="AddElarionPostgreSql(IServiceCollection, string, Action{NpgsqlSlimDataSourceBuilder}, long)"/>
+    /// <see cref="AddElarionPostgreSql(IServiceCollection, string, Action{NpgsqlSlimDataSourceBuilder}, string, long)"/>
     /// for a host that already built its data source; it is registered as the shared core (the container does not
-    /// dispose an externally-created instance).
+    /// dispose an externally-created instance). There is no <c>schema</c> argument here — the data source's own
+    /// <c>Search Path</c> is the setting, and migrations read it from there.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="dataSource">The data source to use as the shared core.</param>

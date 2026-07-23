@@ -3,6 +3,7 @@ using Elarion.Migrations;
 using Elarion.Sql.PostgreSql;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Npgsql;
 using Xunit;
 
 namespace Elarion.Tests.Migrations;
@@ -70,6 +71,42 @@ public sealed class MigrationsServiceCollectionExtensionsTests {
         var act = () => services.AddElarionMigrations(_ => { });
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*AddScripts*");
+    }
+
+    [Fact]
+    public void Schema_BecomesTheDataSourceSearchPath_SoQueriesAndMigrationsShareIt() {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddElarionPostgreSql(ConnectionString, schema: "app");
+
+        using var provider = services.BuildServiceProvider();
+        var dataSource = provider.GetRequiredService<NpgsqlDataSource>();
+
+        new NpgsqlConnectionStringBuilder(dataSource.ConnectionString).SearchPath.Should().Be("app");
+    }
+
+    [Fact]
+    public void Schema_DoesNotOverrideAnExplicitSearchPathInTheConnectionString() {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddElarionPostgreSql(ConnectionString + ";Search Path=chosen", schema: "app");
+
+        using var provider = services.BuildServiceProvider();
+        var dataSource = provider.GetRequiredService<NpgsqlDataSource>();
+
+        new NpgsqlConnectionStringBuilder(dataSource.ConnectionString).SearchPath.Should().Be("chosen");
+    }
+
+    [Fact]
+    public void WithoutSchema_LeavesTheConnectionAtTheServerDefault() {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddElarionPostgreSql(ConnectionString);
+
+        using var provider = services.BuildServiceProvider();
+        var dataSource = provider.GetRequiredService<NpgsqlDataSource>();
+
+        new NpgsqlConnectionStringBuilder(dataSource.ConnectionString).SearchPath.Should().BeNullOrEmpty();
     }
 
     [Fact]
