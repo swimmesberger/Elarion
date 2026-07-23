@@ -143,6 +143,37 @@ Failed rows are recorded for **versioned** scripts only: a repeatable script tha
 `no-transaction` records nothing — repeatables are idempotent by doctrine and their changed checksum
 was never recorded, so the next run simply retries them.
 
+## Migrating into a schema
+
+By default everything lands in the connection's own default schema (`public` on a stock PostgreSQL). To
+keep the application's objects in a schema of their own — **without putting a prefix in a single script** —
+name it on the provider registration:
+
+```csharp
+builder.Services.AddElarionPostgreSql(
+    builder.Configuration.GetConnectionString("Default")!, schema: "app");
+```
+
+There is no migration option for this, deliberately. The schema is the connection's `Search Path`, so **one
+setting steers both** the SQL access tier and migrations: prefix-free scripts and unqualified application
+queries resolve through the same path and cannot drift into different schemas. `schema:` is pure
+convenience — `Search Path=app` in the connection string is the same thing, and wins if you set both. The
+`NpgsqlDataSource` overload takes no `schema` argument for the same reason: your data source already
+carries it.
+
+What migrations add on top is the one thing a connection setting cannot do: the runner **creates the schema
+if it does not exist**, under the migration lock so concurrent starters cannot race, and writes the history
+table schema-qualified — so two schemas in one database keep independent histories and a script that leaves
+`search_path` pointing elsewhere cannot misplace history rows.
+
+<Callout>
+Multi-schema deployments follow from this: one connection string per schema, each with its own history.
+Give them distinct `advisoryLockKey` values to let them migrate concurrently.
+</Callout>
+
+SQLite has no schema concept — its "schema names" are ATTACHed database files — so use a separate database
+file per tenant there instead.
+
 ## Out-of-order scripts
 
 When a merge lands a script versioned below one already applied, the default policy is **`Warn`**: the
@@ -185,8 +216,10 @@ The neutral options apply to every provider:
 | `CommandTimeout` | none | Per-command timeout; long DDL is normal, so unlimited by default. **PostgreSQL only** — SQLite has no server-side statement timeout, so it is ignored there |
 | `LockTimeout` | none | How long to wait for the migration lock (unlimited: serialize behind a long migration) |
 
-The PostgreSQL provider adds `AdvisoryLockKey` (a fixed constant by default) — distinct keys let two apps
-sharing one database migrate independent schemas concurrently. SQLite adds no options.
+The PostgreSQL provider adds two *registration* arguments rather than options: `advisoryLockKey` (a fixed
+constant by default) — distinct keys let two apps sharing one database migrate independent schemas
+concurrently — and `schema` (see [Migrating into a schema](#migrating-into-a-schema)). Both belong to the
+connection, not to the migration set. SQLite adds neither.
 
 ## What it deliberately is not
 

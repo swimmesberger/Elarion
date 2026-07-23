@@ -8,6 +8,22 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Schema-scoped PostgreSQL migrations.** `AddElarionPostgreSql` gained an optional `schema` argument
+  that puts the schema on the data source's `Search Path`, so prefix-free migration scripts and
+  unqualified application queries resolve through one setting and cannot drift into different schemas.
+  It is a registration argument next to `advisoryLockKey`, deliberately not a `MigrationOptions`
+  property: the schema belongs to the connection (`Search Path=app` in the connection string is the
+  same thing, and wins if both are given), and the `NpgsqlDataSource` overload therefore takes no
+  `schema` argument at all. On top of the connection setting the migration runner adds the part a
+  connection cannot do: it creates the schema if it is missing — on exclusive sessions, under the
+  advisory lock it already holds, so concurrent starters cannot race `CREATE SCHEMA` into a unique
+  violation — and writes the history table schema-qualified, so two schemas in one database keep
+  independent histories and a script that leaves `search_path` pointing elsewhere cannot misplace
+  history rows. Multi-schema deployments follow from one connection string per schema; give them
+  distinct `advisoryLockKey` values to migrate concurrently. The database-neutral migration core is
+  unchanged, and SQLite (which has no schemas) is unaffected.
+
 ## [0.2.6] - 2026-07-21
 
 ### Changed

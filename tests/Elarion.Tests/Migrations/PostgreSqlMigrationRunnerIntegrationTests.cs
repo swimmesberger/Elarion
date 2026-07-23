@@ -225,6 +225,71 @@ public sealed class PostgreSqlMigrationRunnerIntegrationTests(PostgreSqlMigratio
     }
 
     [Fact]
+    public async Task Migrate_WithSearchPathSchema_CreatesItAndRunsPrefixFreeScriptsInsideIt() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var connectionString = await fixture.CreateDatabaseAsync(TestToken);
+        var runner = CreateRunner(InSchema(connectionString, "mig_app"), "Basic.");
+
+        var applied = await runner.MigrateAsync(TestToken);
+        applied.Select(a => a.Version).Should().Equal("1", "2", null);
+
+        // The schema did not exist beforehand — the runner created it — and the prefix-free scripts landed
+        // there rather than in the connection's default schema.
+        (await ScalarAsync(connectionString, "SELECT to_regclass('public.mig_customers') IS NULL")).Should().Be(true);
+        (await ScalarAsync(connectionString, "SELECT to_regclass('mig_app.mig_customers') IS NOT NULL")).Should().Be(true);
+        (await ScalarAsync(connectionString, "SELECT to_regclass('mig_app.mig_customer_names') IS NOT NULL"))
+            .Should().Be(true);
+
+        // The history table lives in the schema too, so a second run is a no-op rather than a re-apply.
+        (await ScalarAsync(connectionString, "SELECT count(*) FROM mig_app.elarion_schema_history")).Should().Be(3L);
+        (await ScalarAsync(connectionString, "SELECT to_regclass('public.elarion_schema_history') IS NULL"))
+            .Should().Be(true);
+        (await runner.MigrateAsync(TestToken)).Should().BeEmpty();
+        (await runner.ValidateAsync(TestToken)).IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Migrate_WithSearchPathSchema_IsIndependentOfTheSameScriptsInAnotherSchema() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var connectionString = await fixture.CreateDatabaseAsync(TestToken);
+
+        await CreateRunner(InSchema(connectionString, "mig_tenant_a"), "Basic.").MigrateAsync(TestToken);
+        var second = CreateRunner(InSchema(connectionString, "mig_tenant_b"), "Basic.");
+
+        // The second schema starts empty: its own history table decides, not the first schema's.
+        (await second.GetPendingAsync(TestToken)).Should().HaveCount(3);
+        (await second.MigrateAsync(TestToken)).Should().HaveCount(3);
+        (await ScalarAsync(connectionString, "SELECT to_regclass('mig_tenant_b.mig_customers') IS NOT NULL"))
+            .Should().Be(true);
+    }
+
+    [Fact]
+    public async Task Migrate_WithSearchPathSchema_LeavesAnExistingSchemaAlone() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var connectionString = await fixture.CreateDatabaseAsync(TestToken);
+        await ScalarAsync(connectionString, "CREATE SCHEMA mig_preexisting; SELECT 1");
+
+        await CreateRunner(InSchema(connectionString, "mig_preexisting"), "Basic.").MigrateAsync(TestToken);
+
+        (await ScalarAsync(connectionString, "SELECT to_regclass('mig_preexisting.mig_customers') IS NOT NULL"))
+            .Should().Be(true);
+    }
+
+    [Fact]
+    public void Runner_WithNonIdentifierSearchPathSchema_FailsBeforeConnecting() {
+        var connectionString = InSchema("Host=localhost;Database=nowhere;Username=u;Password=p", "app\"; DROP TABLE x");
+
+        var act = () => new PostgreSqlMigrationRunner(connectionString, new MigrationOptions());
+
+        act.Should().Throw<MigrationException>().WithMessage("*not a plain identifier*");
+    }
+
+    /// <summary>Points a connection string at a schema exactly as <c>AddElarionPostgreSql(schema:)</c> does.</summary>
+    private static string InSchema(string connectionString, string schema) {
+        return new NpgsqlConnectionStringBuilder(connectionString) { SearchPath = schema }.ConnectionString;
+    }
+
+    [Fact]
     public async Task ConcurrentRunners_SerializeOnTheAdvisoryLock() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var connectionString = await fixture.CreateDatabaseAsync(TestToken);

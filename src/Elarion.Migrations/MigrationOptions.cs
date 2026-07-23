@@ -23,8 +23,9 @@ public class MigrationOptions {
     public IReadOnlyList<MigrationScriptSource> ScriptSources => _scriptSources;
 
     /// <summary>
-    /// The history table the runner creates and maintains. A plain identifier (created in the
-    /// connection's default schema); defaults to <c>elarion_schema_history</c>.
+    /// The history table the runner creates and maintains. A plain identifier, created in the schema the
+    /// connection points at (see the provider's schema handling); defaults to
+    /// <c>elarion_schema_history</c>.
     /// </summary>
     public string HistoryTableName { get; set; } = "elarion_schema_history";
 
