@@ -11,7 +11,10 @@
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <!-- Dapper.AOT rewrites its Dapper call sites via interceptors (the SQL-mapping benchmark's
          Dapper.AOT column); classic-Dapper methods opt out per call site with [DapperAot(false)]. -->
-    <InterceptorsNamespaces>$(InterceptorsNamespaces);Dapper.AOT</InterceptorsNamespaces>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Dapper.AOT;Microsoft.AspNetCore.Http.Generated</InterceptorsNamespaces>
+    <!-- The HTTP endpoint dispatch benchmark compares the ADR-0071 generated shape against a TRUE
+         RDG-compiled baseline: RDG intercepts the hand-written Map* lambdas in this compilation. -->
+    <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,7 +23,6 @@
          the JetBrains dotTrace CLI on first run and emits a .dtt snapshot. The speedscope/flamegraph path
          (the "profiler EP" switch) needs no package; EventPipeProfiler ships in the core package. See Program.cs. -->
     <PackageReference Include="BenchmarkDotNet.Diagnostics.dotTrace"/>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection"/>
     <!-- Bulk insert competitors (benchmark-only dependencies; the MIT fork of EFCore.BulkExtensions is
          deliberate — the upstream package is revenue-gated dual-license). -->
     <PackageReference Include="EFCore.BulkExtensions.MIT.PostgreSql"/>
@@ -34,7 +36,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The HTTP endpoint dispatch benchmark (RDG baseline vs the generated ADR-0071 shape). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App"/>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../../src/Elarion/Elarion.csproj"/>
+    <ProjectReference Include="../../src/Elarion.AspNetCore/Elarion.AspNetCore.csproj"/>
     <ProjectReference Include="../../src/Elarion.Actors/Elarion.Actors.csproj"/>
     <ProjectReference Include="../../src/Elarion.Connections.Tcp/Elarion.Connections.Tcp.csproj"/>
     <ProjectReference Include="../../src/Elarion.Connections.Simulation/Elarion.Connections.Simulation.csproj"/>

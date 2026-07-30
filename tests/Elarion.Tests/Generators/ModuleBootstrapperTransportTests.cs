@@ -125,11 +125,19 @@ public sealed class ModuleBootstrapperTransportTests {
         generated.Should().Contain("        this global::Elarion.Abstractions.Dispatch.HandlerDispatcher dispatcher)");
 
         // The per-module HTTP method maps that module's [HttpEndpoint] handler; the verb comes from the
-        // request's CQRS marker (IQuery -> GET, ICommand -> POST).
+        // request's CQRS marker (IQuery -> GET, ICommand -> POST). Binding is generator-owned (ADR-0071): the
+        // GET binds its route token through the binder, and the POST reads the JSON body; ApiExplorer sees the
+        // route parameter through the shape method's attributed parameter and the body through AcceptsMetadata.
         generated.Should().Contain("app.MapGet(\"invoices/{id}\",");
         generated.Should().Contain("app.MapPost(\"shipments\",");
         generated.Should().Contain(
-            "[global::Microsoft.AspNetCore.Http.AsParameters] global::Sample.Billing.GetInvoice.Query request");
+            "global::Elarion.AspNetCore.ElarionHttpEndpointBinder.RouteValue<global::System.Guid>(__context, \"Id\", required: true, ref __errors)");
+        generated.Should().Contain(
+            ".ResolveBodyTypeInfo<global::Sample.Shipping.CreateShipment.Command>(app);");
+        generated.Should().Contain(
+            "[global::Microsoft.AspNetCore.Mvc.FromRoute(Name = \"Id\")] global::System.Guid @id");
+        generated.Should().Contain(
+            "new global::Microsoft.AspNetCore.Http.Metadata.AcceptsMetadata(new[] { \"application/json\" }, typeof(global::Sample.Shipping.CreateShipment.Command), false)");
         // The per-module handler method maps that module's [Handler] operation onto the registry with its flags.
         generated.Should().Contain(
             "dispatcher.Map<global::Sample.Billing.GetInvoiceRpc.Query, global::Sample.Billing.GetInvoiceRpc.Response>(\"invoices.get\", global::Elarion.Abstractions.HandlerTransports.All);");
@@ -184,6 +192,49 @@ public sealed class ModuleBootstrapperTransportTests {
             .Contain(".WithMetadata(global::Elarion.AspNetCore.ElarionIdempotentEndpointMetadata.Instance)");
         generated.Should().Contain(".WithTags(\"Payments\")");
         generated.Split("ElarionIdempotentEndpointMetadata").Length.Should().Be(2);
+    }
+
+    [Fact]
+    public void Bootstrapper_CopiesDataAnnotationsOntoShapeParameters() {
+        // The DTO's constant-argument DataAnnotations must survive the manifest round-trip (the handler lives
+        // in a referenced image) and re-appear as attribute applications on the shape-method parameters, so
+        // route/query constraints keep flowing into the OpenAPI document (issue #131 / ADR-0071).
+        const string modulesSource =
+            """
+            using System.ComponentModel.DataAnnotations;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Catalog {
+                [AppModule("Catalog", Kind = AppModuleKind.Core)]
+                public static class CatalogModule { }
+
+                [HttpEndpoint("products")]
+                public sealed class SearchProducts : IHandler<SearchProducts.Query, Result<SearchProducts.Response>> {
+                    public sealed record Query : IQuery {
+                        [Range(1, 120)] public required int Page { get; init; }
+                        [StringLength(100, MinimumLength = 3)] public string? Term { get; init; }
+                    }
+                    public sealed record Response(int Count);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(0));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out var compilationWithGenerated);
+
+        generated.Should().Contain(
+            "[global::Microsoft.AspNetCore.Mvc.FromQuery(Name = \"Page\")] [global::System.ComponentModel.DataAnnotations.RangeAttribute(1, 120)] int @page");
+        generated.Should().Contain(
+            "[global::Microsoft.AspNetCore.Mvc.FromQuery(Name = \"Term\")] [global::System.ComponentModel.DataAnnotations.StringLengthAttribute(100, MinimumLength = 3)] string? @term");
+
+        // The copied attribute applications are real code on the shape method — they must compile.
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
     }
 
     [Fact]
@@ -313,10 +364,11 @@ public sealed class ModuleBootstrapperTransportTests {
         // A Result<ElarionFile> endpoint goes through the file translation and advertises a binary payload
         // (plus the marker the OpenAPI package upgrades into type: string, format: binary).
         generated.Should().Contain("app.MapGet(\"files/{id}\",");
-        generated.Should().Contain(".ToFileResult(await handler.HandleAsync(request, ct)))");
-        generated.Should().Contain(".Produces(200, null, \"application/octet-stream\")");
+        generated.Should().Contain("global::Elarion.AspNetCore.ElarionHttpResults.ToFileResult(");
+        generated.Should().Contain(
+            ".WithMetadata(new global::Microsoft.AspNetCore.Http.ProducesResponseTypeMetadata(200, null, new[] { \"application/octet-stream\" }))");
         generated.Should().Contain(".WithMetadata(global::Elarion.AspNetCore.ElarionFileEndpointMetadata.Instance)");
-        generated.Should().NotContain(".Produces<global::Elarion.Abstractions.ElarionFile>");
+        generated.Should().NotContain("typeof(global::Elarion.Abstractions.ElarionFile)");
 
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
@@ -1128,6 +1180,11 @@ public sealed class ModuleBootstrapperTransportTests {
             "0",
             // The client-features blob (10th field) — empty for a module with no [ClientFeatures].
             "");
+        // The nested binding-members blob (ADR-0071): GetManifest.Query's one member, `required Guid Id`,
+        // bound from the query string as an IParsable value type — eleven fields per member, the last the
+        // (here empty) nested validation-attribute blob.
+        var httpMembers = EncodeFields(
+            "Id", "Id", "Query", "Parsable", "global::System.Guid", "0", "1", "0", "0", null, "");
         var http = EncodeFields(
             "ManifestOnly.GetManifest",
             "ManifestOnly",
@@ -1139,7 +1196,8 @@ public sealed class ModuleBootstrapperTransportTests {
             "0",
             "0",
             null,
-            "0");
+            "0",
+            httpMembers);
         var rpc = EncodeFields(
             "manifest.get",
             "ManifestOnly",
@@ -1176,7 +1234,7 @@ public sealed class ModuleBootstrapperTransportTests {
 
                  [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
                  [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
-                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.HttpEndpoint.v1", "{{http}}")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.HttpEndpoint.v2", "{{http}}")]
                  [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{rpc}}")]
                  [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{legacyRpc}}")]
 

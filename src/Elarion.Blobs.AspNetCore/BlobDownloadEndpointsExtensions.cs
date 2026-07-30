@@ -29,12 +29,46 @@ public static class BlobDownloadEndpointsExtensions {
 
         var options = endpoints.ServiceProvider.GetRequiredService<BlobUploadEndpointOptions>();
         var group = endpoints.MapGroup(options.RoutePrefix);
-        group.MapGet("/{blobId}", DownloadAsync);
+        // The AOT-safe RequestDelegate overload: a typed method group here would route through the
+        // reflection-based RequestDelegateFactory, which is broken under Native AOT for framework-owned
+        // call sites (ADR-0071). The shape MethodInfo keeps ApiExplorer describing the endpoint (route
+        // parameter and response) exactly as the typed signature did.
+        group.MapGet("/{blobId}", (RequestDelegate)DownloadAsync)
+            .WithMetadata(
+                ((Func<string, HttpContext, ICurrentUser, IBlobStore, BlobUploadEndpointOptions,
+                    CancellationToken, Task<IResult>>)DownloadApiShape).Method);
 
         return group;
     }
 
-    private static async Task<IResult> DownloadAsync(
+    private static async Task DownloadAsync(HttpContext context) {
+        var blobId = context.Request.RouteValues["blobId"]!.ToString()!;
+        var services = context.RequestServices;
+        var result = await DownloadCoreAsync(
+            blobId,
+            context,
+            services.GetRequiredService<ICurrentUser>(),
+            services.GetRequiredService<IBlobStore>(),
+            services.GetRequiredService<BlobUploadEndpointOptions>(),
+            context.RequestAborted);
+        await result.ExecuteAsync(context);
+    }
+
+    /// <summary>
+    /// OpenAPI shape for the blob-download endpoint — never invoked; ApiExplorer reads parameters from
+    /// this signature.
+    /// </summary>
+    private static Task<IResult> DownloadApiShape(
+        string blobId,
+        HttpContext httpContext,
+        ICurrentUser currentUser,
+        IBlobStore blobStore,
+        BlobUploadEndpointOptions options,
+        CancellationToken cancellationToken) {
+        throw new NotSupportedException("OpenAPI metadata shape only; requests execute through the RequestDelegate.");
+    }
+
+    private static async Task<IResult> DownloadCoreAsync(
         string blobId,
         HttpContext httpContext,
         ICurrentUser currentUser,

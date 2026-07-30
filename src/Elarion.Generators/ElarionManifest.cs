@@ -23,7 +23,9 @@ internal static class ElarionManifest {
 
     public const string ModuleKey = "Elarion.Manifest.Module.v1";
     public const string ModuleEndpointsKey = "Elarion.Manifest.ModuleEndpoints.v1";
-    public const string HttpEndpointKey = "Elarion.Manifest.HttpEndpoint.v1";
+    // v2 appends the compile-time binding-member classification (ADR-0071); v1 entries predate generator-owned
+    // binding and cannot be mapped safely, so they are not decoded — rebuild the module assembly to re-publish.
+    public const string HttpEndpointKey = "Elarion.Manifest.HttpEndpoint.v2";
     public const string RpcMethodKey = "Elarion.Manifest.RpcMethod.v1";
     public const string ResourceFilterKey = "Elarion.Manifest.ResourceFilter.v1";
     public const string PermissionKey = "Elarion.Manifest.Permission.v1";
@@ -237,7 +239,8 @@ internal static class ElarionManifest {
             EncodeBool(model.DisableAntiforgery),
             EncodeBool(model.ResponseIsEmpty),
             model.Description,
-            EncodeBool(model.IsIdempotent));
+            EncodeBool(model.IsIdempotent),
+            ElarionManifestCodec.EncodeBindingMembers(model.BindingMembers));
     }
 
     public static string EncodeRpcMethod(RpcMethodEmission.Model model) {
@@ -381,16 +384,17 @@ internal static class ElarionManifest {
 
     public static bool TryDecodeHttpEndpoint(string value, out HttpEndpointEmission.Model? model) {
         model = null;
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 11)
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 12)
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null || fields[3] is null ||
-            fields[4] is null || fields[5] is null)
+            fields[4] is null || fields[5] is null || fields[11] is null)
             return false;
 
         if (!TryDecodeBool(fields[6], out var useAsParameters) ||
             !TryDecodeBool(fields[7], out var disableAntiforgery) ||
             !TryDecodeBool(fields[8], out var responseIsEmpty) ||
-            !TryDecodeBool(fields[10], out var isIdempotent))
+            !TryDecodeBool(fields[10], out var isIdempotent) ||
+            !ElarionManifestCodec.TryDecodeBindingMembers(fields[11]!, out var bindingMembers))
             return false;
 
         model = new HttpEndpointEmission.Model(
@@ -404,7 +408,8 @@ internal static class ElarionManifest {
             disableAntiforgery,
             responseIsEmpty,
             fields[9],
-            isIdempotent);
+            isIdempotent,
+            bindingMembers);
         return true;
     }
 
@@ -545,6 +550,90 @@ internal static class ElarionManifestCodec {
         }
 
         parameters = result;
+        return true;
+    }
+
+    private const int BindingMemberFieldCount = 11;
+
+    /// <summary>
+    /// Encodes the binding-member classification (ADR-0071) as one nested length-prefixed blob per endpoint —
+    /// eleven fields per member, flattened in member order, so the outer field framing stays name-safe. The
+    /// last field is itself a nested blob: the member's copied validation-attribute applications.
+    /// </summary>
+    public static string EncodeBindingMembers(EquatableArray<HttpEndpointEmission.BindingMember> members) {
+        var fields = new string?[members.Count * BindingMemberFieldCount];
+        for (var i = 0; i < members.Count; i++) {
+            var member = members[i];
+            var at = i * BindingMemberFieldCount;
+            fields[at] = member.MemberName;
+            fields[at + 1] = member.LookupName;
+            fields[at + 2] = member.Source.ToString();
+            fields[at + 3] = member.Parse.ToString();
+            fields[at + 4] = member.ValueTypeFqn;
+            fields[at + 5] = member.DeclaredNullable ? "1" : "0";
+            fields[at + 6] = member.IsRequired ? "1" : "0";
+            fields[at + 7] = member.IsCtorParameter ? "1" : "0";
+            fields[at + 8] = member.UseDefaultsFallback ? "1" : "0";
+            fields[at + 9] = member.DefaultLiteral;
+            fields[at + 10] = EncodeFields(member.ValidationAttributes.ToArray());
+        }
+
+        return EncodeFields(fields);
+    }
+
+    public static bool TryDecodeBindingMembers(string value,
+        out EquatableArray<HttpEndpointEmission.BindingMember> members) {
+        members = EquatableArray<HttpEndpointEmission.BindingMember>.Empty;
+        if (!TryDecodeFields(value, out var fields) || fields.Count % BindingMemberFieldCount != 0)
+            return false;
+
+        var result = System.Collections.Immutable.ImmutableArray
+            .CreateBuilder<HttpEndpointEmission.BindingMember>(fields.Count / BindingMemberFieldCount);
+        for (var i = 0; i < fields.Count; i += BindingMemberFieldCount) {
+            if (fields[i] is null || fields[i + 1] is null || fields[i + 2] is null || fields[i + 3] is null
+                || fields[i + 4] is null || fields[i + 5] is null || fields[i + 6] is null
+                || fields[i + 7] is null || fields[i + 8] is null || fields[i + 10] is null)
+                return false;
+
+            if (!Enum.TryParse<HttpEndpointEmission.BindingSource>(fields[i + 2], out var source) ||
+                !Enum.TryParse<HttpEndpointEmission.BindingParse>(fields[i + 3], out var parse))
+                return false;
+
+            if (!TryDecodeValidationAttributes(fields[i + 10]!, out var validationAttributes))
+                return false;
+
+            result.Add(new HttpEndpointEmission.BindingMember(
+                fields[i]!,
+                fields[i + 1]!,
+                source,
+                parse,
+                fields[i + 4]!,
+                fields[i + 5] == "1",
+                fields[i + 6] == "1",
+                fields[i + 7] == "1",
+                fields[i + 8] == "1",
+                fields[i + 9],
+                validationAttributes));
+        }
+
+        members = result.MoveToImmutable().ToEquatableArray();
+        return true;
+    }
+
+    private static bool TryDecodeValidationAttributes(string value, out EquatableArray<string> attributes) {
+        attributes = EquatableArray<string>.Empty;
+        if (!TryDecodeFields(value, out var fields))
+            return false;
+
+        var result = System.Collections.Immutable.ImmutableArray.CreateBuilder<string>(fields.Count);
+        foreach (var field in fields) {
+            if (field is null)
+                return false;
+
+            result.Add(field);
+        }
+
+        attributes = result.MoveToImmutable().ToEquatableArray();
         return true;
     }
 }

@@ -55,7 +55,7 @@ public static class ElarionHttpResults {
 
     /// <summary>
     /// Returns a lazy SSE result for a request-driven <see cref="IStreamHandler{TRequest,TItem}"/>. Bind the
-    /// request with a direct minimal-API <c>MapGet</c> lambda so ASP.NET Core's Request Delegate Generator owns
+    /// request with a direct minimal-API <c>MapGet</c> lambda in the host compilation, where ASP.NET Core owns
     /// route and query binding. The decorated stream is started only when ASP.NET executes this result; startup
     /// failures remain normal ProblemDetails responses, and an accepted invocation owns its scope until
     /// enumeration completes, faults, or is cancelled.
@@ -89,7 +89,13 @@ public static class ElarionHttpResults {
     /// Adds the ProblemDetails response metadata (for OpenAPI) covering every status code an Elarion handler
     /// failure can produce: 400 validation, 401, 403, 404, 409, 422, and 500.
     /// </summary>
-    public static RouteHandlerBuilder ProducesElarionErrors(this RouteHandlerBuilder builder) {
+    /// <remarks>
+    /// Generic over the builder because the generated <c>[HttpEndpoint]</c> registrations use the AOT-safe
+    /// <c>Map*(string, RequestDelegate)</c> overloads, which return <see cref="IEndpointConventionBuilder"/>
+    /// rather than <see cref="RouteHandlerBuilder"/> (ADR-0071).
+    /// </remarks>
+    public static TBuilder ProducesElarionErrors<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder {
         return builder
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)

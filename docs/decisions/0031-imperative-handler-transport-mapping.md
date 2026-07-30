@@ -1,6 +1,7 @@
 # ADR-0031: Imperative handler transport mapping (and why HTTP stays concrete)
 
-- Status: Accepted
+- Status: Accepted (the RDG mechanism claim is amended by
+  [ADR-0071](0071-generator-owned-http-endpoint-binding.md); the concrete-per-handler rule stands)
 - Date: 2026-07-03
 - Related: [ADR-0030](0030-client-capability-bootstrap.md) (its bootstrap handler is the first consumer),
   [ADR-0006](0006-incremental-source-generator-conventions.md) (AOT/RDG-friendly generation), the
@@ -40,6 +41,14 @@ method is fine and stays AOT-safe as long as the request/response `JsonTypeInfo`
 contributes its own source-generated resolver alongside the `Map` call).
 
 ### REST: no generic seam — concrete, per-handler `Map*` only
+
+> **Amendment (ADR-0071):** the RDG premise below over-claimed. RDG is itself a source generator and can never
+> see call sites emitted by another generator (or compiled into a referenced assembly), so it never intercepted
+> the generated `[HttpEndpoint]` registrations or the framework's hand-authored `Map*` extensions — those fell
+> back to the reflection-based `RequestDelegateFactory` (GitHub issue #131). The registrations now use the
+> AOT-safe `Map*(string, RequestDelegate)` overloads with generator-owned binding. The conclusion of this
+> section is unchanged: HTTP exposure stays a concrete, per-handler call — a generic helper remains illegible
+> to the trimmer/ILC and hides the per-endpoint types.
 
 ASP.NET Core's **Request Delegate Generator (RDG)** — the minimal-API source generator that keeps endpoints
 Native-AOT and trim-safe — only intercepts **statically-analyzable `MapGet`/`MapPost(...)` calls with concrete

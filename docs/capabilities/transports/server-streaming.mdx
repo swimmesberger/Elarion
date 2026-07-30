@@ -80,8 +80,8 @@ stream pipeline.
 ## HTTP/SSE: map the request directly
 
 Put the explicit route in the owning module's `MapEndpoints` hook. The direct `MapGet` call is deliberate:
-ASP.NET Core's Request Delegate Generator sees the route and query parameters, while Elarion owns typed
-stream invocation, canonical JSON, and SSE framing.
+it is hand-written in your compilation, so ASP.NET Core owns the route and query binding, while Elarion owns
+typed stream invocation, canonical JSON, and SSE framing.
 
 ```csharp
 [AppModule("Reports")]

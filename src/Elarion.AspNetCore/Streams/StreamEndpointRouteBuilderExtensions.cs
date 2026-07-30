@@ -41,21 +41,27 @@ public static class StreamEndpointRouteBuilderExtensions {
     /// <param name="endpoints">The endpoint route builder.</param>
     /// <param name="pattern">The route pattern (route values are read from the <see cref="HttpContext"/>).</param>
     /// <param name="subscribe">Creates the subscription for one connection, or <see langword="null"/> for 404.</param>
-    public static RouteHandlerBuilder MapElarionStream<T>(
+    public static IEndpointConventionBuilder MapElarionStream<T>(
         this IEndpointRouteBuilder endpoints,
         [StringSyntax("Route")] string pattern,
         Func<HttpContext, long?, IAsyncEnumerable<StreamItem<T>>?> subscribe) {
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentNullException.ThrowIfNull(subscribe);
 
-        return endpoints.MapGet(pattern, (HttpContext context) => {
-            var stream = subscribe(context, ResumePoint(context.Request));
-            if (stream is null) return Results.NotFound();
+        // The AOT-safe RequestDelegate overload: a typed lambda here would route through the reflection-based
+        // RequestDelegateFactory, which is broken under Native AOT for framework-owned call sites (ADR-0071).
+        return endpoints.MapGet(pattern,
+            (RequestDelegate)(context => CreateResult(context, subscribe).ExecuteAsync(context)));
+    }
 
-            var typeInfo = context.RequestServices.GetRequiredService<IElarionJsonSerialization>().GetTypeInfo<T>();
-            return (IResult)TypedResults.ServerSentEvents(
-                StreamAsync(stream, typeInfo, GetTimeProvider(context), context.RequestAborted));
-        });
+    private static IResult CreateResult<T>(
+        HttpContext context, Func<HttpContext, long?, IAsyncEnumerable<StreamItem<T>>?> subscribe) {
+        var stream = subscribe(context, ResumePoint(context.Request));
+        if (stream is null) return Results.NotFound();
+
+        var typeInfo = context.RequestServices.GetRequiredService<IElarionJsonSerialization>().GetTypeInfo<T>();
+        return TypedResults.ServerSentEvents(
+            StreamAsync(stream, typeInfo, GetTimeProvider(context), context.RequestAborted));
     }
 
     private static long? ResumePoint(HttpRequest request) {

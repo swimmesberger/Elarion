@@ -58,8 +58,9 @@ file download; otherwise success returns `200 OK` with the JSON response body.
 
 `[HttpEndpoint]` generates a unary request/reply route. A response that is itself a lazy sequence instead
 implements `IStreamHandler<TRequest, TItem>` and is mapped explicitly in the owning module's `MapEndpoints`
-hook with a direct `MapGet` and `ElarionHttpResults.ToStreamResult`. This preserves ASP.NET Core's Request
-Delegate Generator binding for route/query parameters; it is intentional, not a missing generated endpoint.
+hook with a direct `MapGet` and `ElarionHttpResults.ToStreamResult`. Because that call site is hand-written
+in your compilation, ASP.NET Core owns its route/query binding (and the Request Delegate Generator can
+compile it ahead of time in an AOT host); it is intentional, not a missing generated endpoint.
 
 ```csharp
 endpoints.MapGet("reports/{reportId}/export", static (Guid reportId) =>
@@ -90,11 +91,15 @@ var app = builder.Build();
 app.MapElarionEndpoints(app.Configuration);   // module routes, gated per module
 ```
 
-The generated registration is a strongly-typed minimal-API lambda per handler (no open generics, no
-runtime reflection binding), so it stays AOT/trimming friendly and works with the ASP.NET Core Request
-Delegate Generator. Each endpoint is also annotated with `.Produces<TResponse>(...)`, the full set of
-`.ProducesProblem(...)` responses, its owning module as an OpenAPI **tag**, and — for an `[Idempotent]`
-handler — an inert idempotency marker, so it shows up correctly in OpenAPI.
+The generated registration is a concrete, per-handler `RequestDelegate` whose binding code the generator
+emits at compile time (ADR-0071): no open generics, no reflection, and no dependency on ASP.NET Core's
+reflection-based `RequestDelegateFactory` or its Request Delegate Generator — RDG is itself a source
+generator and can never see another generator's output, so Elarion does its own binding and the endpoints
+stay Native-AOT/trim-safe by construction. Each endpoint also carries its response metadata
+(`ProducesResponseTypeMetadata`), the full set of ProblemDetails error responses, its owning module as an
+OpenAPI **tag**, an inert idempotency marker for an `[Idempotent]` handler, and a metadata-only "API shape"
+method that keeps ApiExplorer describing the endpoint's parameters and request body, so it shows up
+correctly in OpenAPI.
 
 Add the opt-in [`Elarion.AspNetCore.OpenApi`](/docs/capabilities/transports/openapi) package to turn that
 into a served OpenAPI document (and a generated client) — the REST analog of the JSON-RPC schema and
@@ -164,13 +169,27 @@ or the hand-written `MapEndpoints` hook.
 
 ## Binding
 
-The defaults cover the common cases with no annotation:
+The generator classifies every bindable request member at compile time and emits the binding code itself
+(ADR-0071). The defaults cover the common cases with no annotation:
 
-- `GET`/`DELETE` bind the request from **route tokens and the query string** (via `[AsParameters]`).
+- `GET`/`DELETE` bind the request from **route tokens and the query string**: a constructor parameter or
+  settable/init property whose name matches a route token (case-insensitively) binds from the route;
+  everything else binds from the query string.
 - `POST`/`PUT`/`PATCH` bind the request from the **JSON body**.
 
-The request DTO stays the host's responsibility to keep in a `JsonSerializerContext` (the same
-requirement as JSON-RPC, since reflection-based JSON is off by default).
+Requiredness follows the DTO: a `required` member or a non-nullable member without a default must be
+present on the wire; a nullable member is optional (absent → `null`); a constructor parameter default or a
+property initializer is preserved when the wire says nothing. Supported member types for route/query/header/
+form values are `string`, enums (parsed case-insensitively), and any `IParsable<T>` value type such as
+`Guid`, `int`, or `DateTimeOffset` (invariant culture), plus their nullable forms and — from repeated query
+keys — arrays of those. Anything else is a compile-time `ELHTTP005` diagnostic, not a runtime surprise.
+
+A request that fails to bind never reaches the handler: malformed or missing values produce the same RFC
+7807 `ValidationProblem` shape as handler-tier validation — status `400` with a field-keyed `errors` map —
+and a body with the wrong content type is rejected with `415`. The request DTO stays the host's
+responsibility to keep in a `JsonSerializerContext` (the same requirement as JSON-RPC, since
+reflection-based JSON is off by default); body binding reads the minimal-API `Http.Json` options, so
+`AddElarionHttpJson()` puts it on the canonical source-generated contexts.
 
 ### Customizing binding
 
@@ -191,9 +210,11 @@ public sealed class UploadAvatar : IHandler<UploadAvatar.Command, Result<UploadA
 }
 ```
 
-The generator detects `IFormFile`/`IFormFileCollection` and `[FromForm]` members and adds
-`.DisableAntiforgery()` automatically. For a mutation that mixes a path id with a JSON payload, nest the
-payload in a `[FromBody]` property:
+The generator detects `IFormFile`/`IFormFileCollection` and `[FromForm]` members, binds them from the
+request form (a non-form content type is a `415`), and marks the endpoint `.DisableAntiforgery()` —
+generator-bound endpoints don't participate in ASP.NET's automatic form antiforgery, so a host that wants
+antiforgery on a form post enforces it deliberately. For a mutation that mixes a path id with a JSON
+payload, nest the payload in a `[FromBody]` property:
 
 ```csharp
 public sealed record Command {
@@ -276,6 +297,10 @@ code comes from `AppError.Kind`, mirroring how JSON-RPC maps the same kinds to i
 | `Conflict` | `409` |
 | `BusinessRule` | `422` |
 | `Internal` | `500` |
+
+Binding-tier failures use the same contract before the handler runs: an unparseable route/query/header/form
+value or a missing required member is a `400` `ValidationProblem` keyed by the wire name, and a request body
+with a non-JSON content type is a bare `415`.
 
 ## HTTP or JSON-RPC?
 

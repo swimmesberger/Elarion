@@ -134,9 +134,10 @@ Authorization, feature gates, validation, observability, and context enrichment 
 transactions, audit, and unary resilience do not. Use `StreamHandlerInvoker.InvokeAsync` in a typed custom
 transport: its accepted invocation owns the DI scope until enumeration completes, faults, cancels, or is disposed.
 For SSE, bind the request in a direct minimal-API `MapGet` lambda and return
-`ElarionHttpResults.ToStreamResult<TRequest, TItem>(request)`. Keeping `MapGet` in the host compilation lets
-ASP.NET Core's Request Delegate Generator own route and query binding; the lazy result owns decorated handler
-invocation, canonical JSON, startup-error translation, and native `TypedResults.ServerSentEvents` framing.
+`ElarionHttpResults.ToStreamResult<TRequest, TItem>(request)`. Keeping `MapGet` in the host compilation
+leaves route and query binding to ASP.NET Core (hand-written call sites are the ones its Request Delegate
+Generator can compile ahead of time in an AOT host); the lazy result owns decorated handler invocation,
+canonical JSON, startup-error translation, and native `TypedResults.ServerSentEvents` framing.
 
 ```csharp
 endpoints.MapGet("reports/{reportId}/export", static (Guid reportId) =>

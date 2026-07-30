@@ -30,16 +30,77 @@ public static class BlobUploadEndpointsExtensions {
         var options = endpoints.ServiceProvider.GetRequiredService<BlobUploadEndpointOptions>();
         var group = endpoints.MapGroup(options.RoutePrefix);
 
+        // AOT-safe RequestDelegate overloads: typed method groups here would route through the
+        // reflection-based RequestDelegateFactory, which is broken under Native AOT for framework-owned
+        // call sites (ADR-0071). The shape MethodInfos keep ApiExplorer describing the endpoints exactly
+        // as the typed signatures did.
+        var uploadShape =
+            ((Func<HttpRequest, ICurrentUser, IBlobStore, BlobUploadEndpointOptions, TimeProvider,
+                CancellationToken, Task<IResult>>)UploadApiShape).Method;
         // The caller's authenticated session is the upload's authorization, so the cookie/form CSRF
         // defense does not apply to this API-style endpoint.
-        group.MapPost("", UploadAsync).DisableAntiforgery();
-        group.MapPut("", UploadAsync).DisableAntiforgery();
-        group.MapDelete("/{blobId}", CancelAsync);
+        group.MapPost("", (RequestDelegate)UploadAsync).DisableAntiforgery().WithMetadata(uploadShape);
+        group.MapPut("", (RequestDelegate)UploadAsync).DisableAntiforgery().WithMetadata(uploadShape);
+        group.MapDelete("/{blobId}", (RequestDelegate)CancelAsync)
+            .WithMetadata(
+                ((Func<string, ICurrentUser, IBlobStore, BlobUploadEndpointOptions, CancellationToken,
+                    Task<IResult>>)CancelApiShape).Method);
 
         return group;
     }
 
-    private static async Task<IResult> UploadAsync(
+    private static async Task UploadAsync(HttpContext context) {
+        var services = context.RequestServices;
+        var result = await UploadCoreAsync(
+            context.Request,
+            services.GetRequiredService<ICurrentUser>(),
+            services.GetRequiredService<IBlobStore>(),
+            services.GetRequiredService<BlobUploadEndpointOptions>(),
+            services.GetRequiredService<TimeProvider>(),
+            context.RequestAborted);
+        await result.ExecuteAsync(context);
+    }
+
+    private static async Task CancelAsync(HttpContext context) {
+        var blobId = context.Request.RouteValues["blobId"]!.ToString()!;
+        var services = context.RequestServices;
+        var result = await CancelCoreAsync(
+            blobId,
+            services.GetRequiredService<ICurrentUser>(),
+            services.GetRequiredService<IBlobStore>(),
+            services.GetRequiredService<BlobUploadEndpointOptions>(),
+            context.RequestAborted);
+        await result.ExecuteAsync(context);
+    }
+
+    /// <summary>
+    /// OpenAPI shape for the blob-upload endpoints — never invoked; ApiExplorer reads parameters from
+    /// this signature.
+    /// </summary>
+    private static Task<IResult> UploadApiShape(
+        HttpRequest request,
+        ICurrentUser currentUser,
+        IBlobStore blobStore,
+        BlobUploadEndpointOptions options,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken) {
+        throw new NotSupportedException("OpenAPI metadata shape only; requests execute through the RequestDelegate.");
+    }
+
+    /// <summary>
+    /// OpenAPI shape for the blob-cancel endpoint — never invoked; ApiExplorer reads parameters from
+    /// this signature.
+    /// </summary>
+    private static Task<IResult> CancelApiShape(
+        string blobId,
+        ICurrentUser currentUser,
+        IBlobStore blobStore,
+        BlobUploadEndpointOptions options,
+        CancellationToken cancellationToken) {
+        throw new NotSupportedException("OpenAPI metadata shape only; requests execute through the RequestDelegate.");
+    }
+
+    private static async Task<IResult> UploadCoreAsync(
         HttpRequest request,
         ICurrentUser currentUser,
         IBlobStore blobStore,
@@ -109,7 +170,7 @@ public static class BlobUploadEndpointsExtensions {
         }
     }
 
-    private static async Task<IResult> CancelAsync(
+    private static async Task<IResult> CancelCoreAsync(
         string blobId,
         ICurrentUser currentUser,
         IBlobStore blobStore,

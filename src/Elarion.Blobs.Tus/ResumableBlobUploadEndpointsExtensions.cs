@@ -26,17 +26,136 @@ public static class ResumableBlobUploadEndpointsExtensions {
         var options = endpoints.ServiceProvider.GetRequiredService<ResumableBlobUploadOptions>();
         var group = endpoints.MapGroup(options.RoutePrefix);
 
-        group.MapMethods("", ["OPTIONS"], OptionsAsync);
-        group.MapMethods("/{id}", ["OPTIONS"], OptionsAsync);
-        group.MapPost("", CreateAsync);
-        group.MapMethods("/{id}", ["HEAD"], HeadAsync);
-        group.MapMethods("/{id}", ["PATCH"], PatchAsync);
-        group.MapDelete("/{id}", DeleteAsync);
+        // AOT-safe RequestDelegate overloads: typed method groups here would route through the
+        // reflection-based RequestDelegateFactory, which is broken under Native AOT for framework-owned
+        // call sites (ADR-0071). The shape MethodInfos keep ApiExplorer describing the endpoints exactly
+        // as the typed signatures did; HEAD and PATCH share one shape because their signatures match.
+        var optionsShape = ((Func<HttpContext, ResumableBlobUploadOptions, Task>)OptionsApiShape).Method;
+        var sessionShape =
+            ((Func<HttpContext, string, ICurrentUser, IStagedUploadStore, ResumableBlobUploadOptions,
+                TimeProvider, CancellationToken, Task>)SessionApiShape).Method;
+
+        group.MapMethods("", ["OPTIONS"], (RequestDelegate)OptionsAsync).WithMetadata(optionsShape);
+        group.MapMethods("/{id}", ["OPTIONS"], (RequestDelegate)OptionsAsync).WithMetadata(optionsShape);
+        group.MapPost("", (RequestDelegate)CreateAsync)
+            .WithMetadata(
+                ((Func<HttpContext, ICurrentUser, IStagedUploadStore, ResumableBlobUploadOptions,
+                    TimeProvider, CancellationToken, Task>)CreateApiShape).Method);
+        group.MapMethods("/{id}", ["HEAD"], (RequestDelegate)HeadAsync).WithMetadata(sessionShape);
+        group.MapMethods("/{id}", ["PATCH"], (RequestDelegate)PatchAsync).WithMetadata(sessionShape);
+        group.MapDelete("/{id}", (RequestDelegate)DeleteAsync)
+            .WithMetadata(
+                ((Func<HttpContext, string, ICurrentUser, IStagedUploadStore, CancellationToken, Task>)
+                    DeleteApiShape).Method);
 
         return group;
     }
 
-    private static Task OptionsAsync(HttpContext context, ResumableBlobUploadOptions options) {
+    private static Task OptionsAsync(HttpContext context) {
+        return OptionsCoreAsync(context, context.RequestServices.GetRequiredService<ResumableBlobUploadOptions>());
+    }
+
+    private static Task CreateAsync(HttpContext context) {
+        var services = context.RequestServices;
+        return CreateCoreAsync(
+            context,
+            services.GetRequiredService<ICurrentUser>(),
+            services.GetRequiredService<IStagedUploadStore>(),
+            services.GetRequiredService<ResumableBlobUploadOptions>(),
+            services.GetRequiredService<TimeProvider>(),
+            context.RequestAborted);
+    }
+
+    private static Task HeadAsync(HttpContext context) {
+        var services = context.RequestServices;
+        return HeadCoreAsync(
+            context,
+            RouteId(context),
+            services.GetRequiredService<ICurrentUser>(),
+            services.GetRequiredService<IStagedUploadStore>(),
+            services.GetRequiredService<ResumableBlobUploadOptions>(),
+            services.GetRequiredService<TimeProvider>(),
+            context.RequestAborted);
+    }
+
+    private static Task PatchAsync(HttpContext context) {
+        var services = context.RequestServices;
+        return PatchCoreAsync(
+            context,
+            RouteId(context),
+            services.GetRequiredService<ICurrentUser>(),
+            services.GetRequiredService<IStagedUploadStore>(),
+            services.GetRequiredService<ResumableBlobUploadOptions>(),
+            services.GetRequiredService<TimeProvider>(),
+            context.RequestAborted);
+    }
+
+    private static Task DeleteAsync(HttpContext context) {
+        var services = context.RequestServices;
+        return DeleteCoreAsync(
+            context,
+            RouteId(context),
+            services.GetRequiredService<ICurrentUser>(),
+            services.GetRequiredService<IStagedUploadStore>(),
+            context.RequestAborted);
+    }
+
+    // The {id} token is always present when the matched template contains it.
+    private static string RouteId(HttpContext context) {
+        return context.Request.RouteValues["id"]!.ToString()!;
+    }
+
+    /// <summary>
+    /// OpenAPI shape for the tus OPTIONS endpoints — never invoked; ApiExplorer reads parameters from
+    /// this signature.
+    /// </summary>
+    private static Task OptionsApiShape(HttpContext context, ResumableBlobUploadOptions options) {
+        throw new NotSupportedException("OpenAPI metadata shape only; requests execute through the RequestDelegate.");
+    }
+
+    /// <summary>
+    /// OpenAPI shape for the tus creation endpoint — never invoked; ApiExplorer reads parameters from
+    /// this signature.
+    /// </summary>
+    private static Task CreateApiShape(
+        HttpContext context,
+        ICurrentUser currentUser,
+        IStagedUploadStore store,
+        ResumableBlobUploadOptions options,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken) {
+        throw new NotSupportedException("OpenAPI metadata shape only; requests execute through the RequestDelegate.");
+    }
+
+    /// <summary>
+    /// OpenAPI shape for the tus HEAD/PATCH session endpoints — never invoked; ApiExplorer reads
+    /// parameters from this signature.
+    /// </summary>
+    private static Task SessionApiShape(
+        HttpContext context,
+        string id,
+        ICurrentUser currentUser,
+        IStagedUploadStore store,
+        ResumableBlobUploadOptions options,
+        TimeProvider timeProvider,
+        CancellationToken cancellationToken) {
+        throw new NotSupportedException("OpenAPI metadata shape only; requests execute through the RequestDelegate.");
+    }
+
+    /// <summary>
+    /// OpenAPI shape for the tus termination endpoint — never invoked; ApiExplorer reads parameters from
+    /// this signature.
+    /// </summary>
+    private static Task DeleteApiShape(
+        HttpContext context,
+        string id,
+        ICurrentUser currentUser,
+        IStagedUploadStore store,
+        CancellationToken cancellationToken) {
+        throw new NotSupportedException("OpenAPI metadata shape only; requests execute through the RequestDelegate.");
+    }
+
+    private static Task OptionsCoreAsync(HttpContext context, ResumableBlobUploadOptions options) {
         var response = context.Response;
         response.Headers[TusProtocol.Resumable] = TusProtocol.Version;
         response.Headers[TusProtocol.VersionHeader] = TusProtocol.Version;
@@ -48,7 +167,7 @@ public static class ResumableBlobUploadEndpointsExtensions {
         return Task.CompletedTask;
     }
 
-    private static async Task CreateAsync(
+    private static async Task CreateCoreAsync(
         HttpContext context,
         ICurrentUser currentUser,
         IStagedUploadStore store,
@@ -103,7 +222,7 @@ public static class ResumableBlobUploadEndpointsExtensions {
         response.StatusCode = StatusCodes.Status201Created;
     }
 
-    private static async Task HeadAsync(
+    private static async Task HeadCoreAsync(
         HttpContext context,
         string id,
         ICurrentUser currentUser,
@@ -148,7 +267,7 @@ public static class ResumableBlobUploadEndpointsExtensions {
         response.StatusCode = StatusCodes.Status200OK;
     }
 
-    private static async Task PatchAsync(
+    private static async Task PatchCoreAsync(
         HttpContext context,
         string id,
         ICurrentUser currentUser,
@@ -210,7 +329,7 @@ public static class ResumableBlobUploadEndpointsExtensions {
         response.StatusCode = StatusCodes.Status204NoContent;
     }
 
-    private static async Task DeleteAsync(
+    private static async Task DeleteCoreAsync(
         HttpContext context,
         string id,
         ICurrentUser currentUser,

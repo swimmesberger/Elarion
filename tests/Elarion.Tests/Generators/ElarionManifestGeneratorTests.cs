@@ -37,7 +37,7 @@ public sealed class ElarionManifestGeneratorTests {
             .Should().BeEmpty();
         generated.Should().Contain("Elarion.Manifest.Schema")
             .And.Contain("Elarion.Manifest.Module.v1")
-            .And.Contain("Elarion.Manifest.HttpEndpoint.v1")
+            .And.Contain("Elarion.Manifest.HttpEndpoint.v2")
             .And.Contain("Elarion.Manifest.RpcMethod.v1")
             .And.Contain("AssemblyMetadataAttribute");
     }
@@ -196,7 +196,7 @@ public sealed class ElarionManifestGeneratorTests {
         var generated = RunGenerator(source, out var diagnostics);
 
         diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Warning).Should().BeEmpty();
-        generated.Should().Contain("Elarion.Manifest.HttpEndpoint.v1");
+        generated.Should().Contain("Elarion.Manifest.HttpEndpoint.v2");
         generated.Should().Contain("Elarion.Manifest.RpcMethod.v1");
         generated.Should().Contain("exports.get");
     }

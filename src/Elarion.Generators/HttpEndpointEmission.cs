@@ -7,9 +7,10 @@ namespace Elarion.Generators;
 /// <summary>
 /// Shared discovery and emission for <c>[Elarion.Abstractions.HttpEndpoint]</c> handlers, consumed by
 /// <see cref="AppModuleDiscoveryGenerator"/> for the module-grouped, feature-flag-gated mapping (the only
-/// transport-wiring path). Keeps the binding-mode detection and the emitted minimal-API lambda in one place.
+/// transport-wiring path). Keeps the binding-mode detection, the compile-time request-binding analysis, and the
+/// emitted <c>RequestDelegate</c> registration in one place (ADR-0071).
 /// </summary>
-internal static class HttpEndpointEmission {
+internal static partial class HttpEndpointEmission {
     public const string HttpEndpointAttributeMetadataName = "Elarion.Abstractions.HttpEndpointAttribute";
     private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
     private const string IdempotentAttributeFqn = "Elarion.Abstractions.Idempotency.IdempotentAttribute";
@@ -52,7 +53,12 @@ internal static class HttpEndpointEmission {
         DiagnosticSeverity.Warning,
         true);
 
-    /// <summary>One discovered HTTP endpoint. String-only for incremental-generator value equality.</summary>
+    /// <summary>
+    /// One discovered HTTP endpoint. Strings, bools, and nested value-equatable records only, so the model stays
+    /// cache-friendly in the incremental pipelines. <see cref="BindingMembers"/> carries the compile-time
+    /// request-binding classification for the member-wise (<c>[AsParameters]</c>-style) shapes; it is empty when
+    /// the whole request binds from the JSON body.
+    /// </summary>
     public sealed record Model(
         string EndpointName,
         string HandlerNamespace,
@@ -64,7 +70,8 @@ internal static class HttpEndpointEmission {
         bool DisableAntiforgery,
         bool ResponseIsEmpty,
         string? Description,
-        bool IsIdempotent
+        bool IsIdempotent,
+        EquatableArray<BindingMember> BindingMembers
     ) {
         /// <summary>
         /// Whether the response is the binary file payload (<c>Result&lt;ElarionFile&gt;</c>), mapped through the
@@ -85,64 +92,6 @@ internal static class HttpEndpointEmission {
             else
                 seen[key] = entry.EndpointName;
         }
-    }
-
-    /// <summary>
-    /// Emits one minimal-API endpoint registration onto <paramref name="target"/> (e.g. <c>app</c> or
-    /// <c>endpoints</c>), indented by <paramref name="indent"/>. When <paramref name="moduleTag"/> is non-null the
-    /// endpoint is tagged with the owning module (OpenAPI groups operations by tag); an <c>[Idempotent]</c> handler
-    /// gets an inert <c>ElarionIdempotentEndpointMetadata</c> marker the OpenAPI package reads to advertise the
-    /// <c>Idempotency-Key</c> header.
-    /// </summary>
-    public static void AppendRegistration(StringBuilder sb, Model entry, string indent, string target,
-        string? moduleTag) {
-        const string Handler = "global::Elarion.Abstractions.IHandler";
-        const string Result = "global::Elarion.Abstractions.Result";
-        const string Results = "global::Elarion.AspNetCore.ElarionHttpResults";
-        const string IdempotentMarker =
-            "global::Elarion.AspNetCore.ElarionIdempotentEndpointMetadata.Instance";
-        const string FileMarker =
-            "global::Elarion.AspNetCore.ElarionFileEndpointMetadata.Instance";
-
-        var inner = indent + "    ";
-        var deeper = indent + "        ";
-        var resultCall = entry.ResponseIsFile ? "ToFileResult"
-            : entry.ResponseIsEmpty ? "ToNoContentResult"
-            : "ToResult";
-        var requestParameter = entry.UseAsParameters
-            ? $"[global::Microsoft.AspNetCore.Http.AsParameters] {entry.RequestTypeFqn} request"
-            : $"{entry.RequestTypeFqn} request";
-
-        sb.AppendLine($"{indent}{target}.Map{entry.Verb}({Literal(entry.Route)},");
-        sb.AppendLine($"{inner}static async (");
-        sb.AppendLine($"{deeper}{requestParameter},");
-        sb.AppendLine(
-            $"{deeper}[global::Microsoft.AspNetCore.Mvc.FromServices] {Handler}<{entry.RequestTypeFqn}, {Result}<{entry.ResponseTypeFqn}>> handler,");
-        sb.AppendLine($"{deeper}global::System.Threading.CancellationToken ct) =>");
-        sb.AppendLine($"{deeper}{Results}.{resultCall}(await handler.HandleAsync(request, ct)))");
-
-        // Fluent metadata chain: order is deterministic so the emitted text stays a byte-identical contract.
-        var chain = new List<string> { $".WithName({Literal(entry.EndpointName)})" };
-        if (entry.Description is not null)
-            chain.Add($".WithDescription({Literal(entry.Description)})");
-        if (moduleTag is not null)
-            chain.Add($".WithTags({Literal(moduleTag)})");
-        // A file response advertises the generic binary content type (the concrete type is per-payload at run
-        // time); the marker lets the OpenAPI package upgrade the schema to type: string, format: binary.
-        if (entry.ResponseIsFile)
-            chain.Add(".Produces(200, null, \"application/octet-stream\")");
-        else
-            chain.Add(entry.ResponseIsEmpty ? ".Produces(204)" : $".Produces<{entry.ResponseTypeFqn}>(200)");
-        chain.Add(".ProducesElarionErrors()");
-        if (entry.ResponseIsFile)
-            chain.Add($".WithMetadata({FileMarker})");
-        if (entry.IsIdempotent)
-            chain.Add($".WithMetadata({IdempotentMarker})");
-        if (entry.DisableAntiforgery)
-            chain.Add(".DisableAntiforgery()");
-
-        for (var i = 0; i < chain.Count; i++)
-            sb.AppendLine($"{inner}{chain[i]}{(i == chain.Count - 1 ? ";" : string.Empty)}");
     }
 
     /// <summary>
@@ -200,6 +149,13 @@ internal static class HttpEndpointEmission {
         var (useAsParameters, disableAntiforgery) = DetermineBinding(requestType, verb);
         var responseNamed = responseInner as INamedTypeSymbol;
 
+        // Member-wise shapes (GET/DELETE and the [AsParameters]/[From*]/file opt-ins) are classified at compile
+        // time; the whole-body shapes bind the request as one JSON payload and carry no member facts.
+        var bindingMembers = EquatableArray<BindingMember>.Empty;
+        if (useAsParameters
+            && !TryAnalyzeBindingMembers(type, requestType, route, fmt, report, out bindingMembers))
+            return false;
+
         model = new Model(
             type.ToDisplayString(),
             type.ContainingNamespace?.ToDisplayString() ?? string.Empty,
@@ -211,7 +167,8 @@ internal static class HttpEndpointEmission {
             disableAntiforgery,
             responseNamed is not null && IsResponseEmpty(responseNamed),
             GetDescription(type, descriptionType),
-            IsIdempotentHandler(type));
+            IsIdempotentHandler(type),
+            bindingMembers);
         return true;
     }
 

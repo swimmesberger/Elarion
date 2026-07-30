@@ -20,11 +20,13 @@ using OpenTelemetry.Trace;
 //                                                          embedded V__ migrations — one AddElarionPostgreSql
 //
 // No EF, no reflection, no runtime codegen: handler registrations come from the generated module
-// bootstrapper, while mappers and JSON contracts are source-generated. The ordinary unary endpoints
-// below are hand-authored in this compilation, so ASP.NET Core's Request Delegate Generator compiles
-// their binding ahead of time (the ADR-0031 REST pattern). The streaming endpoint follows the same shape:
-// a direct MapGet owns generated route/query binding, while ElarionHttpResults owns stream invocation,
-// startup-error translation, and native SSE.
+// bootstrapper, while mappers and JSON contracts are source-generated. REST is served two ways on
+// purpose: GET /devices/{deviceId}/latest is a generated [HttpEndpoint] (the generator owns binding and
+// emits an AOT-safe RequestDelegate — ADR-0071), while the remaining unary endpoints are hand-authored
+// in this compilation, where ASP.NET Core's Request Delegate Generator compiles their binding ahead of
+// time (RDG only ever sees hand-written call sites — it cannot intercept another generator's output).
+// The streaming endpoint follows the hand-authored shape: a direct MapGet owns route/query binding,
+// while ElarionHttpResults owns stream invocation, startup-error translation, and native SSE.
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
@@ -103,21 +105,18 @@ var app = builder.Build();
 
 app.MapGet("/healthz", () => Results.Text("ok"));
 
-// Hand-authored, RDG-visible unary endpoints: each is one line of translation — bind, call the handler
-// typed-directly, render the Result<T> (success → 200, AppError.Validation → 400,
-// AppError.NotFound → 404 problem details) via ElarionHttpResults.
+// The generated REST tier: GET /devices/{deviceId}/latest comes from GetLatestReading's [HttpEndpoint]
+// through the module bootstrapper — generator-owned binding, AOT-safe RequestDelegate (ADR-0071).
+app.MapElarionEndpoints(app.Configuration);
+
+// Hand-authored unary endpoints (RDG-visible — RDG intercepts hand-written call sites only): each is one
+// line of translation — bind, call the handler typed-directly, render the Result<T> (success → 200,
+// AppError.Validation → 400, AppError.NotFound → 404 problem details) via ElarionHttpResults.
 app.MapPost("/readings", static async (
         ReadingInput[] readings,
         IHandler<IngestReadings.Command, Result<IngestResult>> ingest,
         CancellationToken ct) =>
     ElarionHttpResults.ToResult(await ingest.HandleAsync(new IngestReadings.Command(readings), ct)));
-
-app.MapGet("/devices/{deviceId}/latest", static async (
-        string deviceId,
-        string metric,
-        IHandler<GetLatestReading.Query, Result<ReadingRow>> latest,
-        CancellationToken ct) =>
-    ElarionHttpResults.ToResult(await latest.HandleAsync(new GetLatestReading.Query(deviceId, metric), ct)));
 
 app.MapGet("/devices/{deviceId}/history", static async (
         string deviceId,

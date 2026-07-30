@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion.Abstractions;
@@ -10,7 +11,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -19,9 +19,11 @@ namespace Elarion.Tests.AspNetCore;
 
 /// <summary>
 /// End-to-end test that boots a real Kestrel host and maps endpoints exactly as
-/// <c>AppModuleDiscoveryGenerator</c> emits them — proving the runtime contract the generator targets works over the
-/// wire: <c>[AsParameters]</c> binding of a <c>required</c>-member query record, body binding, <c>[FromServices]</c>
-/// handler resolution, and <see cref="AppError"/> → RFC 7807 ProblemDetails translation.
+/// <c>AppModuleDiscoveryGenerator</c> emits them (issue #131 / ADR-0071) — proving the runtime contract the
+/// generator targets works over the wire: an AOT-safe <c>Map*(string, RequestDelegate)</c> registration whose
+/// delegate binds through <see cref="ElarionHttpEndpointBinder"/> (never RequestDelegateFactory), typed handler
+/// resolution from <c>RequestServices</c>, <see cref="AppError"/> → RFC 7807 ProblemDetails translation, and the
+/// binder's own RFC 7807 binding-failure tier (400 ValidationProblem / 415).
 /// </summary>
 public sealed class HttpEndpointMappingEndToEndTests {
     private static readonly Guid MissingId = new("00000000-0000-0000-0000-0000000000ff");
@@ -83,11 +85,30 @@ public sealed class HttpEndpointMappingEndToEndTests {
 
         await using var app = builder.Build();
 
-        // Mirrors the file-endpoint lambda emitted by AppModuleDiscoveryGenerator for a Result<ElarionFile> handler.
-        app.MapGet("/exports/{kind}", static async (
-            [AsParameters] ExportQuery request,
-            [FromServices] IHandler<ExportQuery, Result<ElarionFile>> handler,
-            CancellationToken token) => ElarionHttpResults.ToFileResult(await handler.HandleAsync(request, token)));
+        // Mirrors the file-endpoint registration emitted by AppModuleDiscoveryGenerator for a
+        // Result<ElarionFile> handler: an AOT-safe RequestDelegate binding through ElarionHttpEndpointBinder.
+        app.MapGet("/exports/{kind}",
+                (RequestDelegate)(static async __context => {
+                    var __errors = default(ElarionHttpBindingErrors);
+                    var @kind = ElarionHttpEndpointBinder.RouteString(__context, "Kind", required: true,
+                        ref __errors);
+                    if (__errors.HasErrors) {
+                        await __errors.WriteAsync(__context);
+                        return;
+                    }
+                    var __request = new ExportQuery {
+                        Kind = @kind!
+                    };
+                    var __handler = __context.RequestServices
+                        .GetRequiredService<IHandler<ExportQuery, Result<ElarionFile>>>();
+                    var __result = ElarionHttpResults.ToFileResult(
+                        await __handler.HandleAsync(__request, __context.RequestAborted));
+                    await __result.ExecuteAsync(__context);
+                }))
+            .WithName("Sample.Exports.GetExport")
+            .WithMetadata(new ProducesResponseTypeMetadata(200, null, new[] { "application/octet-stream" }))
+            .ProducesElarionErrors()
+            .WithMetadata(ElarionFileEndpointMetadata.Instance);
 
         await app.StartAsync(ct);
 
@@ -140,16 +161,49 @@ public sealed class HttpEndpointMappingEndToEndTests {
 
         await using var app = builder.Build();
 
-        // Mirrors the lambdas emitted by AppModuleDiscoveryGenerator.
-        app.MapGet("/widgets/{id}", static async (
-            [AsParameters] GetWidgetQuery request,
-            [FromServices] IHandler<GetWidgetQuery, Result<WidgetResponse>> handler,
-            CancellationToken token) => ElarionHttpResults.ToResult(await handler.HandleAsync(request, token)));
+        // Mirrors the RequestDelegate registrations emitted by AppModuleDiscoveryGenerator (ADR-0071).
+        app.MapGet("/widgets/{id}",
+                (RequestDelegate)(static async __context => {
+                    var __errors = default(ElarionHttpBindingErrors);
+                    var @id = ElarionHttpEndpointBinder.RouteValue<Guid>(__context, "Id", required: true,
+                        ref __errors);
+                    if (__errors.HasErrors) {
+                        await __errors.WriteAsync(__context);
+                        return;
+                    }
+                    var __request = new GetWidgetQuery {
+                        Id = @id.GetValueOrDefault()
+                    };
+                    var __handler = __context.RequestServices
+                        .GetRequiredService<IHandler<GetWidgetQuery, Result<WidgetResponse>>>();
+                    var __result = ElarionHttpResults.ToResult(
+                        await __handler.HandleAsync(__request, __context.RequestAborted));
+                    await __result.ExecuteAsync(__context);
+                }))
+            .WithName("Sample.Widgets.GetWidget")
+            .WithMetadata(new ProducesResponseTypeMetadata(200, typeof(WidgetResponse), new[] { "application/json" }))
+            .ProducesElarionErrors();
 
-        app.MapPost("/widgets", static async (
-            CreateWidgetCommand request,
-            [FromServices] IHandler<CreateWidgetCommand, Result<CreateWidgetResponse>> handler,
-            CancellationToken token) => ElarionHttpResults.ToResult(await handler.HandleAsync(request, token)));
+        // The body JsonTypeInfo is resolved once at mapping time; the delegate captures it (non-static).
+        var __bodyTypeInfo1 = ElarionHttpEndpointBinder.ResolveBodyTypeInfo<CreateWidgetCommand>(app);
+        app.MapPost("/widgets",
+                (RequestDelegate)(async __context => {
+                    var __bodyResult = await ElarionHttpEndpointBinder.ReadJsonBodyAsync(__context, __bodyTypeInfo1);
+                    if (__bodyResult.Failure != ElarionHttpEndpointBinder.BodyFailure.None) {
+                        await ElarionHttpEndpointBinder.WriteBodyProblemAsync(__context, __bodyResult.Failure);
+                        return;
+                    }
+                    var __request = __bodyResult.Value!;
+                    var __handler = __context.RequestServices
+                        .GetRequiredService<IHandler<CreateWidgetCommand, Result<CreateWidgetResponse>>>();
+                    var __result = ElarionHttpResults.ToResult(
+                        await __handler.HandleAsync(__request, __context.RequestAborted));
+                    await __result.ExecuteAsync(__context);
+                }))
+            .WithName("Sample.Widgets.CreateWidget")
+            .WithMetadata(new ProducesResponseTypeMetadata(200, typeof(CreateWidgetResponse),
+                new[] { "application/json" }))
+            .ProducesElarionErrors();
 
         await app.StartAsync(ct);
 
@@ -177,6 +231,27 @@ public sealed class HttpEndpointMappingEndToEndTests {
                 "/widgets", new StringContent("""{"name":""}""", Encoding.UTF8, "application/json"), ct);
             postInvalid.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             (await postInvalid.Content.ReadAsStringAsync(ct)).Should().Contain("Name is required");
+
+            // Binding-tier failures (ADR-0071): the binder short-circuits before the handler runs, producing the
+            // same RFC 7807 ValidationProblem shape as handler-tier validation.
+            var badRoute = await client.GetAsync("/widgets/not-a-guid", ct);
+            badRoute.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            badRoute.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+            using (var badRouteDoc = JsonDocument.Parse(await badRoute.Content.ReadAsStringAsync(ct))) {
+                badRouteDoc.RootElement.GetProperty("errors").TryGetProperty("Id", out _).Should().BeTrue();
+            }
+
+            var malformed = await client.PostAsync(
+                "/widgets", new StringContent("""{"name":""", Encoding.UTF8, "application/json"), ct);
+            malformed.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            malformed.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+            using (var malformedDoc = JsonDocument.Parse(await malformed.Content.ReadAsStringAsync(ct))) {
+                malformedDoc.RootElement.GetProperty("errors").ValueKind.Should().Be(JsonValueKind.Object);
+            }
+
+            var wrongContentType = await client.PostAsync(
+                "/widgets", new StringContent("""{"name":"Gadget"}""", Encoding.UTF8, "text/plain"), ct);
+            wrongContentType.StatusCode.Should().Be(HttpStatusCode.UnsupportedMediaType);
         }
         finally {
             await app.StopAsync(ct);

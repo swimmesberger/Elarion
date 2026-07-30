@@ -91,3 +91,4 @@ designs that are not yet implemented.
 - [ADR-0068: Source-generated binary COPY and staged upsert for the AOT SQL tier](0068-aot-sql-binary-copy.md)
 - [ADR-0069: Producer-owned hot-state primitives — bounded MPSC queue and staged-batch flusher](0069-producer-owned-hot-state-buffering.md)
 - [ADR-0070: Contract-set registration — unconditional composition of one contract's implementation set](0070-contract-set-registration.md)
+- [ADR-0071: Generator-owned HTTP endpoint binding — RequestDelegate registrations, not RDG](0071-generator-owned-http-endpoint-binding.md)
