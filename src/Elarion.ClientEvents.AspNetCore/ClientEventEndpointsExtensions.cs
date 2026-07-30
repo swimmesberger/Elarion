@@ -43,11 +43,35 @@ public static class ClientEventEndpointsExtensions {
     /// </summary>
     /// <param name="endpoints">The endpoint route builder to map onto.</param>
     /// <param name="pattern">The route pattern.</param>
-    /// <returns>The route builder, so the host can apply conventions (e.g. <c>.RequireAuthorization()</c>).</returns>
-    public static RouteHandlerBuilder MapElarionClientEvents(
+    /// <returns>The endpoint builder, so the host can apply conventions (e.g. <c>.RequireAuthorization()</c>).</returns>
+    public static IEndpointConventionBuilder MapElarionClientEvents(
         this IEndpointRouteBuilder endpoints, [StringSyntax("Route")] string pattern = "/events") {
         ArgumentNullException.ThrowIfNull(endpoints);
-        return endpoints.MapGet(pattern, HandleAsync);
+        // The AOT-safe RequestDelegate overload: a typed method group here would route through the
+        // reflection-based RequestDelegateFactory, which is broken under Native AOT for framework-owned
+        // call sites (ADR-0071). The shape MethodInfo keeps ApiExplorer describing the endpoint (the
+        // `subscriptions` query parameter) exactly as the typed signature did.
+        return endpoints.MapGet(pattern, (RequestDelegate)HandleRequestAsync)
+            .WithMetadata(((Func<HttpContext, string?, CancellationToken, Task<IResult>>)ApiShape).Method);
+    }
+
+    private static async Task HandleRequestAsync(HttpContext context) {
+        // Replicates the optional [FromQuery]-style binding the typed signature had: absent → null,
+        // repeated values → comma-joined.
+        var subscriptions = context.Request.Query["subscriptions"] is { Count: > 0 } values
+            ? values.ToString()
+            : null;
+        var result = await HandleAsync(context, subscriptions, context.RequestAborted);
+        await result.ExecuteAsync(context);
+    }
+
+    /// <summary>
+    /// OpenAPI shape for the client-events endpoint — never invoked; ApiExplorer reads parameters from
+    /// this signature.
+    /// </summary>
+    private static Task<IResult> ApiShape(
+        HttpContext context, string? subscriptions, CancellationToken cancellationToken) {
+        throw new NotSupportedException("OpenAPI metadata shape only; requests execute through the RequestDelegate.");
     }
 
     private static async Task<IResult> HandleAsync(

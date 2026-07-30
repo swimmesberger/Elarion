@@ -133,7 +133,7 @@ See [MCP](/docs/capabilities/transports/mcp).
 ### `[HttpEndpoint]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class
-- **Triggers:** marks a handler as an HTTP/REST endpoint; `AppModuleDiscoveryGenerator` emits the matching minimal-API `MapGet`/`MapPost`/… registration. The handler must implement `IHandler<TRequest, Result<TResponse>>`. With no explicit verb the verb is inferred from the request's CQRS marker (`ICommand` → POST, `IQuery` → GET); a request with neither marker requires an explicit verb (else `ELHTTP004`). Carries no ASP.NET Core dependency; a handler may carry both this and `[Handler]`.
+- **Triggers:** marks a handler as an HTTP/REST endpoint; `AppModuleDiscoveryGenerator` emits the matching `MapGet`/`MapPost`/… registration as an AOT-safe `RequestDelegate` with generator-owned binding (ADR-0071). The handler must implement `IHandler<TRequest, Result<TResponse>>`. With no explicit verb the verb is inferred from the request's CQRS marker (`ICommand` → POST, `IQuery` → GET); a request with neither marker requires an explicit verb (else `ELHTTP004`). Carries no ASP.NET Core dependency; a handler may carry both this and `[Handler]`.
 
 The attribute has two constructors:
 

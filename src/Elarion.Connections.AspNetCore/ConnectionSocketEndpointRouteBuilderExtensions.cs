@@ -40,8 +40,12 @@ public static class ConnectionSocketEndpointRouteBuilderExtensions {
         ArgumentNullException.ThrowIfNull(endpoints);
         var options = new ElarionConnectionSocketOptions();
         configure?.Invoke(options);
-        return endpoints.MapGet(pattern,
-            (HttpContext context, CancellationToken ct) => HandleAsync<THandler>(context, options, ct));
+        // The AOT-safe RequestDelegate overload: a typed lambda here would route through the reflection-based
+        // RequestDelegateFactory, which is broken under Native AOT for framework-owned call sites (ADR-0071).
+        return endpoints.MapGet(pattern, (RequestDelegate)(async context => {
+            var result = await HandleAsync<THandler>(context, options, context.RequestAborted);
+            await result.ExecuteAsync(context);
+        }));
     }
 
     private static async Task<IResult> HandleAsync<THandler>(

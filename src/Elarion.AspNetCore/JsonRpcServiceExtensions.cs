@@ -1,6 +1,7 @@
 using Elarion.Abstractions.Dispatch;
 using Elarion.JsonRpc;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -102,6 +103,8 @@ public static class JsonRpcServiceExtensions {
     /// </example>
     public static IEndpointConventionBuilder MapElarionJsonRpc(this IEndpointRouteBuilder app) {
         var options = app.ServiceProvider.GetRequiredService<IOptions<JsonRpcOptions>>().Value;
-        return app.MapPost(options.EndpointPath, JsonRpcEndpoint.HandleRpc);
+        // Explicit cast so the AOT-safe Map*(string, RequestDelegate) overload is provably chosen and never
+        // regresses into the reflection-based RequestDelegateFactory path (ADR-0071).
+        return app.MapPost(options.EndpointPath, (RequestDelegate)JsonRpcEndpoint.HandleRpc);
     }
 }

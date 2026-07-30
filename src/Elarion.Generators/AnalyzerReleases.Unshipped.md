@@ -46,6 +46,7 @@
  ELHTTP002  | Elarion.Http                       | Warning  | Duplicate HTTP endpoint route
  ELHTTP003  | Elarion.Http                       | Warning  | HTTP endpoint handler is not in any module
  ELHTTP004  | Elarion.Http                       | Warning  | Cannot infer HTTP verb
+ ELHTTP005  | Elarion.Http                       | Warning  | HTTP endpoint request member cannot be bound
  ELMOD001   | Elarion.Modules                    | Warning  | Multiple app modules share a namespace
  ELMOD002   | Elarion.Modules                    | Warning  | Cross-module reference to a module-internal type
  ELMOD003   | Elarion.Modules                    | Warning  | Referenced assembly advertises an unsupported Elarion manifest schema version

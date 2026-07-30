@@ -9,7 +9,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -22,6 +21,8 @@ namespace Elarion.Tests.AspNetCore;
 /// The success value is written with <c>TypedResults.Ok</c>, so it flows through the HTTP JSON options that
 /// <c>AddElarionHttpJson</c> aligns to canonical. Here the canonical options apply an UPPERCASE naming policy that
 /// ASP.NET's default HTTP JSON options do not, proving the response went through the aligned canonical config.
+/// The endpoint is registered exactly as <c>AppModuleDiscoveryGenerator</c> emits it (issue #131 / ADR-0071):
+/// an AOT-safe RequestDelegate binding through <see cref="ElarionHttpEndpointBinder"/>.
 /// </summary>
 public sealed class HttpResultsCanonicalJsonTests {
     private sealed record Widget(string WidgetName);
@@ -61,10 +62,28 @@ public sealed class HttpResultsCanonicalJsonTests {
 
         await using var app = builder.Build();
 
-        app.MapGet("/widget", static async (
-            [AsParameters] WidgetQuery request,
-            [FromServices] IHandler<WidgetQuery, Result<Widget>> handler,
-            CancellationToken token) => ElarionHttpResults.ToResult(await handler.HandleAsync(request, token)));
+        // Mirrors the RequestDelegate registration emitted by AppModuleDiscoveryGenerator (ADR-0071).
+        app.MapGet("/widget",
+                (RequestDelegate)(static async __context => {
+                    var __errors = default(ElarionHttpBindingErrors);
+                    var @ignored = ElarionHttpEndpointBinder.QueryString(__context, "Ignored", required: false,
+                        ref __errors);
+                    if (__errors.HasErrors) {
+                        await __errors.WriteAsync(__context);
+                        return;
+                    }
+                    var __request = new WidgetQuery {
+                        Ignored = @ignored
+                    };
+                    var __handler = __context.RequestServices
+                        .GetRequiredService<IHandler<WidgetQuery, Result<Widget>>>();
+                    var __result = ElarionHttpResults.ToResult(
+                        await __handler.HandleAsync(__request, __context.RequestAborted));
+                    await __result.ExecuteAsync(__context);
+                }))
+            .WithName("Sample.Widgets.GetWidget")
+            .WithMetadata(new ProducesResponseTypeMetadata(200, typeof(Widget), new[] { "application/json" }))
+            .ProducesElarionErrors();
 
         await app.StartAsync(ct);
 

@@ -8,6 +8,35 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Changed
+- **Generator-owned HTTP endpoint binding (ADR-0071, breaking).** `[HttpEndpoint]` registrations no longer
+  emit typed minimal-API lambdas that relied on ASP.NET Core's Request Delegate Generator for AOT safety —
+  a premise that could never hold, because RDG is itself a source generator and cannot see another
+  generator's output, so every generated endpoint silently fell back to the reflection-based
+  `RequestDelegateFactory` (broken under Native AOT; the compile-time IL2026/IL3050 signal was suppressed
+  by RDG's own diagnostic suppressor). The generator now classifies every request member at compile time
+  (route token, query, header, form, file, or one `[FromBody]` member; `string`/enum/`IParsable<T>`
+  parsing, requiredness from `required`/nullability/defaults) and emits an AOT-safe
+  `Map*(string, RequestDelegate)` registration that binds through the new
+  `Elarion.AspNetCore.ElarionHttpEndpointBinder` — one reflection-free code path under JIT and AOT.
+  Binding failures now use the canonical RFC 7807 `ValidationProblem` contract (400 with a field-keyed
+  `errors` map; 415 for a non-JSON body); unbindable member types are the new compile-time `ELHTTP005`
+  diagnostic. OpenAPI descriptions are preserved by attaching a metadata-only "API shape" method per
+  endpoint (ApiExplorer needs a `MethodInfo`); the generator copies each bound member's constant-argument
+  DataAnnotations attributes onto the shape parameters, so route/query/header/form constraints such as
+  `[Range]` and `[StringLength]` keep flowing into the served document. The emitted binding is
+  allocation-lean by design — by-`ref` struct error state, mapping-time `JsonTypeInfo` resolution — and
+  benchmarked at parity-or-better with the RDG-compiled equivalent of the same endpoints
+  (`tests/Elarion.Benchmarks`, `HttpEndpointDispatchBenchmarks`). Framework `Map*` extensions
+  (session, client events, streams, connection sockets, blob and resumable uploads) moved to the same
+  `RequestDelegate` shape.
+  The EdgeTelemetry sample now exercises a generated `[HttpEndpoint]` under `PublishAot`. Migration:
+  rebuild module assemblies against this version (the assembly manifest's HTTP entry moved to
+  `Elarion.Manifest.HttpEndpoint.v2`); `ProducesElarionErrors` is now generic over
+  `IEndpointConventionBuilder` (recompile; framework `Map*` extensions now return
+  `IEndpointConventionBuilder` instead of `RouteHandlerBuilder`); hosts that relied on ASP.NET's
+  automatic antiforgery requirement on form-binding endpoints must enforce antiforgery explicitly.
+
 ### Added
 - **Schema-scoped PostgreSQL migrations.** `AddElarionPostgreSql` gained an optional `schema` argument
   that puts the schema on the data source's `Search Path`, so prefix-free migration scripts and

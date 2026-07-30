@@ -1,7 +1,5 @@
 using System.Collections.Immutable;
-using System.Globalization;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 
 namespace Elarion.Generators;
 
@@ -29,7 +27,6 @@ namespace Elarion.Generators;
 /// </para>
 /// </summary>
 internal static class ValidatableTypeWalker {
-    private const string ValidationAttributeDisplay = "System.ComponentModel.DataAnnotations.ValidationAttribute";
     private const string ValidatableObjectDisplay = "System.ComponentModel.DataAnnotations.IValidatableObject";
     private const string DisplayAttributeDisplay = "System.ComponentModel.DataAnnotations.DisplayAttribute";
 
@@ -357,7 +354,8 @@ internal static class ValidatableTypeWalker {
 
     /// <summary>
     /// Renders every attribute deriving from <c>ValidationAttribute</c> as a constant-construction expression
-    /// (<c>new StringLengthAttribute(100) { MinimumLength = 3 }</c>). Attributes whose arguments cannot be
+    /// (<c>new StringLengthAttribute(100) { MinimumLength = 3 }</c>) through the shared
+    /// <see cref="AttributeArgumentRendering"/> round-tripping. Attributes whose arguments cannot be
     /// represented as compile-time constants, or whose type is not accessible from the generated code, are
     /// skipped (attribute arguments are constants by construction, so this is a guard, not a policy).
     /// </summary>
@@ -367,7 +365,7 @@ internal static class ValidatableTypeWalker {
             if (attribute.AttributeClass is not { TypeKind: not TypeKind.Error } attributeClass)
                 continue;
 
-            if (!DerivesFromValidationAttribute(attributeClass))
+            if (!AttributeArgumentRendering.DerivesFromValidationAttribute(attributeClass))
                 continue;
 
             if (TryRenderAttribute(attribute, attributeClass, context, out var rendered))
@@ -375,14 +373,6 @@ internal static class ValidatableTypeWalker {
         }
 
         return result;
-    }
-
-    private static bool DerivesFromValidationAttribute(INamedTypeSymbol attributeClass) {
-        for (var current = attributeClass.BaseType; current is not null; current = current.BaseType)
-            if (current.ToDisplayString() == ValidationAttributeDisplay)
-                return true;
-
-        return false;
     }
 
     private static bool TryRenderAttribute(
@@ -419,150 +409,12 @@ internal static class ValidatableTypeWalker {
     }
 
     private static bool TryRenderTypedConstant(TypedConstant constant, Context context, out string rendered) {
-        rendered = string.Empty;
-        if (constant.IsNull) {
-            // Cast the null so overloaded attribute constructors stay unambiguous.
-            rendered = constant.Type is { TypeKind: not TypeKind.Error } type &&
-                       IsAccessibleFromGeneratedCode(type, context.CurrentAssembly)
-                ? $"({type.ToDisplayString(Fmt)})null"
-                : "null";
-            return true;
-        }
-
-        switch (constant.Kind) {
-            case TypedConstantKind.Primitive:
-                return TryRenderPrimitive(constant.Value!, out rendered);
-
-            case TypedConstantKind.Enum:
-                if (constant.Type is not { } enumType ||
-                    !IsAccessibleFromGeneratedCode(enumType, context.CurrentAssembly) ||
-                    !TryRenderPrimitive(constant.Value!, out var underlying))
-                    return false;
-
-                // Cast the underlying constant back to the enum type — exact for undeclared/flags combinations.
-                rendered = $"({enumType.ToDisplayString(Fmt)})({underlying})";
-                return true;
-
-            case TypedConstantKind.Type:
-                if (constant.Value is not ITypeSymbol typeValue ||
-                    typeValue.TypeKind == TypeKind.Error ||
-                    !IsAccessibleFromGeneratedCode(typeValue, context.CurrentAssembly))
-                    return false;
-
-                rendered = $"typeof({typeValue.ToDisplayString(Fmt)})";
-                return true;
-
-            case TypedConstantKind.Array:
-                if (constant.Type is not IArrayTypeSymbol arrayType ||
-                    !IsAccessibleFromGeneratedCode(arrayType.ElementType, context.CurrentAssembly))
-                    return false;
-
-                var elements = new List<string>(constant.Values.Length);
-                foreach (var value in constant.Values) {
-                    if (!TryRenderTypedConstant(value, context, out var element))
-                        return false;
-
-                    elements.Add(element);
-                }
-
-                var elementTypeFqn = arrayType.ElementType.ToDisplayString(Fmt);
-                rendered = elements.Count == 0
-                    ? $"global::System.Array.Empty<{elementTypeFqn}>()"
-                    : $"new {elementTypeFqn}[] {{ {string.Join(", ", elements)} }}";
-                return true;
-
-            default:
-                return false;
-        }
+        return AttributeArgumentRendering.TryRenderTypedConstant(
+            constant, context.CurrentAssembly, Fmt, attributeArgument: false, out rendered);
     }
 
-    private static bool TryRenderPrimitive(object value, out string rendered) {
-        switch (value) {
-            case string s:
-                rendered = SymbolDisplay.FormatLiteral(s, true);
-                return true;
-            case char c:
-                rendered = SymbolDisplay.FormatLiteral(c, true);
-                return true;
-            case bool b:
-                rendered = b ? "true" : "false";
-                return true;
-            case int i:
-                // int.MinValue has no plain literal form (the '-' is an operator applied to 2147483648).
-                rendered = i == int.MinValue ? "int.MinValue" : i.ToString(CultureInfo.InvariantCulture);
-                return true;
-            case long l:
-                rendered = l == long.MinValue ? "long.MinValue" : l.ToString(CultureInfo.InvariantCulture) + "L";
-                return true;
-            case uint ui:
-                rendered = ui.ToString(CultureInfo.InvariantCulture) + "U";
-                return true;
-            case ulong ul:
-                rendered = ul.ToString(CultureInfo.InvariantCulture) + "UL";
-                return true;
-            case short sh:
-                rendered = "(short)" + sh.ToString(CultureInfo.InvariantCulture);
-                return true;
-            case ushort us:
-                rendered = "(ushort)" + us.ToString(CultureInfo.InvariantCulture);
-                return true;
-            case byte by:
-                rendered = "(byte)" + by.ToString(CultureInfo.InvariantCulture);
-                return true;
-            case sbyte sb:
-                rendered = "(sbyte)" + sb.ToString(CultureInfo.InvariantCulture);
-                return true;
-            case double d:
-                rendered = double.IsNaN(d) ? "double.NaN"
-                    : double.IsPositiveInfinity(d) ? "double.PositiveInfinity"
-                    : double.IsNegativeInfinity(d) ? "double.NegativeInfinity"
-                    : d.ToString("G17", CultureInfo.InvariantCulture) + "D";
-                return true;
-            case float f:
-                rendered = float.IsNaN(f) ? "float.NaN"
-                    : float.IsPositiveInfinity(f) ? "float.PositiveInfinity"
-                    : float.IsNegativeInfinity(f) ? "float.NegativeInfinity"
-                    : f.ToString("G9", CultureInfo.InvariantCulture) + "F";
-                return true;
-            default:
-                rendered = string.Empty;
-                return false;
-        }
-    }
-
-    // Whether generated code in the current assembly may reference the type in typeof()/new expressions:
-    // public all the way out, or internal within this assembly (or an assembly granting it access via IVT).
     private static bool IsAccessibleFromGeneratedCode(ITypeSymbol type, IAssemblySymbol currentAssembly) {
-        if (type is IArrayTypeSymbol array)
-            return IsAccessibleFromGeneratedCode(array.ElementType, currentAssembly);
-
-        if (type is ITypeParameterSymbol)
-            return false;
-
-        if (type is not INamedTypeSymbol named)
-            return type.TypeKind == TypeKind.Dynamic;
-
-        foreach (var argument in named.TypeArguments)
-            if (!IsAccessibleFromGeneratedCode(argument, currentAssembly))
-                return false;
-
-        for (var current = named; current is not null; current = current.ContainingType)
-            switch (current.DeclaredAccessibility) {
-                case Accessibility.Public:
-                case Accessibility.NotApplicable:
-                    continue;
-                case Accessibility.Internal:
-                case Accessibility.ProtectedOrInternal:
-                    if (SymbolEqualityComparer.Default.Equals(current.ContainingAssembly, currentAssembly) ||
-                        current.ContainingAssembly.GivesAccessTo(currentAssembly))
-                        continue;
-
-                    return false;
-                default:
-                    return false;
-            }
-
-        return true;
+        return AttributeArgumentRendering.IsAccessibleFromGeneratedCode(type, currentAssembly);
     }
 }
 

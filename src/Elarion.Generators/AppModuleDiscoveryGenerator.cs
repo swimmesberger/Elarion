@@ -1096,10 +1096,14 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         sb.AppendLine("    {");
         // Tag each operation with its owning module so OpenAPI groups them; unmatched endpoints carry no tag.
         var moduleTag = moduleName == UnmatchedModuleName ? null : moduleName;
-        foreach (var endpoint in endpoints)
-            HttpEndpointEmission.AppendRegistration(sb, endpoint, "        ", "app", moduleTag);
+        for (var i = 0; i < endpoints.Count; i++)
+            HttpEndpointEmission.AppendRegistration(sb, endpoints[i], "        ", "app", moduleTag, i);
         sb.AppendLine("        return app;");
         sb.AppendLine("    }");
+
+        // The never-invoked OpenAPI shape methods the registrations above attach as MethodInfo metadata.
+        foreach (var endpoint in endpoints)
+            HttpEndpointEmission.AppendApiShapeMethod(sb, endpoint);
     }
 
     private static void AppendHandlersMethods(StringBuilder sb, List<ModuleEntry> entries, TransportMaps transport) {

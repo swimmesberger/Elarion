@@ -123,7 +123,7 @@ await foreach (var row in stream.WithCancellation(ct)) await WriteItemAsync(row,
 ```
 
 The ASP.NET SSE adapter is `ElarionHttpResults.ToStreamResult<TRequest, TItem>(request)`: return it from a
-direct `MapGet` lambda so the host compiler's Request Delegate Generator owns binding. The lazy result uses
+direct `MapGet` lambda in the host compilation, where ASP.NET Core owns binding. The lazy result uses
 native `TypedResults.ServerSentEvents` framing and does not start the handler until ASP.NET executes it.
 JSON-RPC and MCP are deliberately single-response;
 client and duplex streams belong to a transport-specific protocol or `Elarion.Connections`, not this contract.
@@ -156,8 +156,9 @@ dispatcher.Map<MyRequest, MyResponse>(
 ```
 
 The named bus has a generic map because its schema and serialization metadata are explicit. REST has no
-generic equivalent: ASP.NET's request delegate generator needs concrete `MapGet`/`MapPost` call sites for
-AOT-safe binding. A reusable feature therefore ships a concrete `MapElarionX(route)` extension.
+generic equivalent: a concrete per-endpoint registration keeps the request/response types visible to the
+trimmer and to OpenAPI, and its binding code concrete and AOT-safe (ADR-0071). A reusable feature therefore
+ships a concrete `MapElarionX(route)` extension.
 
 ## Packaging boundary
 

@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -58,10 +58,29 @@ public sealed partial class ElarionHttpJsonEndToEndTests {
 
         await using var app = builder.Build();
 
-        app.MapPost("/things", static async (
-            CreateThingCommand request,
-            [FromServices] IHandler<CreateThingCommand, Result<CreateThingResponse>> handler,
-            CancellationToken token) => ElarionHttpResults.ToResult(await handler.HandleAsync(request, token)));
+        // Mirrors the body-binding RequestDelegate emitted by AppModuleDiscoveryGenerator (issue #131 /
+        // ADR-0071): the body JsonTypeInfo resolves once at mapping time through the minimal-API JSON options,
+        // so this exercises the AddElarionHttpJson alignment onto the canonical source-gen contexts (the AOT
+        // guard); the delegate captures it (non-static).
+        var __bodyTypeInfo0 = ElarionHttpEndpointBinder.ResolveBodyTypeInfo<CreateThingCommand>(app);
+        app.MapPost("/things",
+                (RequestDelegate)(async __context => {
+                    var __bodyResult = await ElarionHttpEndpointBinder.ReadJsonBodyAsync(__context, __bodyTypeInfo0);
+                    if (__bodyResult.Failure != ElarionHttpEndpointBinder.BodyFailure.None) {
+                        await ElarionHttpEndpointBinder.WriteBodyProblemAsync(__context, __bodyResult.Failure);
+                        return;
+                    }
+                    var __request = __bodyResult.Value!;
+                    var __handler = __context.RequestServices
+                        .GetRequiredService<IHandler<CreateThingCommand, Result<CreateThingResponse>>>();
+                    var __result = ElarionHttpResults.ToResult(
+                        await __handler.HandleAsync(__request, __context.RequestAborted));
+                    await __result.ExecuteAsync(__context);
+                }))
+            .WithName("Sample.Things.CreateThing")
+            .WithMetadata(new ProducesResponseTypeMetadata(200, typeof(CreateThingResponse),
+                new[] { "application/json" }))
+            .ProducesElarionErrors();
 
         await app.StartAsync(ct);
 

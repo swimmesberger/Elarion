@@ -36,6 +36,7 @@ Minimal-API endpoint emission for `[HttpEndpoint]` handlers. See
 | ELHTTP002 | Warning | Two handlers map the same HTTP verb + route template (for example, the same `GET /x`). | Change one handler's verb or route template so each verb+route pair is unique. |
 | ELHTTP003 | Warning | An `[HttpEndpoint]` handler's namespace is not under any `[AppModule]`; it is mapped unconditionally (not gated by any module feature flag) so it is never silently dropped. | Move the handler under a module's namespace so its endpoint is module-scoped and feature-gated. |
 | ELHTTP004 | Warning | An `[HttpEndpoint]` has no explicit verb and its request implements neither `ICommand` (POST) nor `IQuery` (GET), so the verb cannot be inferred. | Specify an explicit verb on `[HttpEndpoint]`, or make the request implement `ICommand` (POST) or `IQuery` (GET). |
+| ELHTTP005 | Warning | A member of a member-wise-bound request DTO cannot be bound from its wire source (route/query/header/form), so no endpoint is generated. Supported member types are `string`, enums, `IParsable<T>` value types and their nullable forms, arrays of those from the query string, `IFormFile`/`IFormFileCollection`, and one `[FromBody]` member. | Change the member to a supported type, move complex payload data into a `[FromBody]` member, or bind the whole request from the JSON body (POST/PUT/PATCH without `[From*]`/file members). |
 
 ## ELMCP — MCP customization
 
