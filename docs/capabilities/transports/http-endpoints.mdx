@@ -6,8 +6,9 @@ description: Mark a handler with [HttpEndpoint] and Elarion generates the minima
 HTTP/REST is a first-class, optional transport in Elarion — the sibling of [JSON-RPC](/docs/capabilities/transports/json-rpc).
 Mark a handler with `[HttpEndpoint]` and the module bootstrapper generator emits the matching minimal-API
 registration: it unwraps the nested `Query`/`Command` into route/query/body parameters and translates
-the handler's [`Result<T>`](/docs/concepts/results-and-errors) into a response — `200`/`204` on success,
-or an RFC 7807 ProblemDetails with the right status code on failure.
+the handler's [`Result<T>`](/docs/concepts/results-and-errors) into a response — `200`/`204` (or
+[`201 Created`](#creation-responses-201--location)) on success, or an RFC 7807 ProblemDetails with the
+right status code on failure.
 
 Like JSON-RPC, the mapping lives in `Elarion.AspNetCore` (plus the `[HttpEndpoint]` attribute in
 `Elarion.Abstractions`), so applications that don't need it pay nothing, and handlers stay
@@ -52,7 +53,41 @@ The generator reads the request and response from the `IHandler<TRequest, Result
 interface (the success type is unwrapped from `Result<T>`); the types may be nested or top-level. A
 `Response` with no properties returns
 `204 No Content`; a [`Result<ElarionFile>`](#files-downloads-and-uploads) response is served as a binary
-file download; otherwise success returns `200 OK` with the JSON response body.
+file download; a [`Result<ElarionCreated<T>>`](#creation-responses-201--location) response returns
+`201 Created`; otherwise success returns `200 OK` with the JSON response body.
+
+## Creation responses: 201 + Location
+
+A resourceful create answers `201 Created` by declaring the created-resource envelope as its response type —
+the same declare-once pattern as [`ElarionFile`](#files-downloads-and-uploads) (ADR-0072). The generated
+mapping peels the envelope: the response body is the **inner** value, the envelope's optional `Location`
+becomes the `Location` header, and the OpenAPI document truthfully advertises `201` with the inner type's
+schema. Failures keep the central `AppError` → RFC 7807 translation unchanged.
+
+```csharp
+[HttpEndpoint("clients")]                       // POST (inferred from ICommand)
+public sealed class CreateClient(BillingDbContext db)
+    : IHandler<CreateClient.Command, Result<ElarionCreated<CreateClient.Response>>> {
+    public sealed record Command : ICommand {
+        public required string Name { get; init; }
+    }
+    public sealed record Response(Guid Id, string Name);
+
+    public async ValueTask<Result<ElarionCreated<Response>>> HandleAsync(Command command, CancellationToken ct) {
+        var client = new Client { Id = Guid.CreateVersion7(), Name = command.Name };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync(ct);
+
+        return new ElarionCreated<Response>(new Response(client.Id, client.Name)) {
+            Location = $"clients/{client.Id}",   // optional; omit for 201 without a Location header
+        };
+    }
+}
+```
+
+The envelope never appears on the HTTP wire. On the name-routed JSON surfaces (a handler that also carries
+`[Handler]`) there is no status code to express, so there it serializes as a plain object carrying `value`
+and `location` — prefer a plain response type for operations designed for JSON-RPC/MCP.
 
 ## Request-driven SSE responses
 
@@ -163,9 +198,42 @@ a URL segment can instead return `root.MapGroup("/billing")` — that prefixes *
 routes, the explicit trade for a module that wants its own path.
 
 This is the same seam as a module's own `MapEndpoints` hook: the host owns global middleware order, the
-module owns its group, and the generator never reads `[Authorize]`/`[AllowAnonymous]` from handlers.
-Per-endpoint policy is out of scope — a handler that needs a different policy belongs in its own module
-or the hand-written `MapEndpoints` hook.
+module owns its group, and the generator never reads `[Authorize]`/`[AllowAnonymous]` from handlers. When a
+*single* endpoint needs its own conventions, declare a [`CustomizeEndpoint` hook](#per-endpoint-conventions-the-customizeendpoint-hook)
+on the handler instead of moving it off the generated path.
+
+### Per-endpoint conventions: the CustomizeEndpoint hook
+
+A handler may declare a static convention hook that the generated registration calls **after** the emitted
+metadata chain (ADR-0072). It receives the endpoint's `IEndpointConventionBuilder`, so the handler can
+attach per-endpoint host conventions — an authorization policy, rate limiting, output caching, extra
+metadata — while keeping generated binding, ProblemDetails translation, and OpenAPI description:
+
+```csharp
+[HttpEndpoint("exports/{list}")]
+public sealed class GetExport(IMasterDataExporter exporter)
+    : IHandler<GetExport.Query, Result<ElarionFile>> {
+    // Called once at mapping time, after the generated metadata chain; conventions added here land last.
+    public static void CustomizeEndpoint(IEndpointConventionBuilder endpoint) =>
+        endpoint.RequireRateLimiting("exports").CacheOutput();
+
+    // ...
+}
+```
+
+The contract is exactly `public static void CustomizeEndpoint(IEndpointConventionBuilder)` — `public`
+because the call site is emitted into the referencing host's compilation (the same visibility a
+cross-assembly handler already needs for its DTOs), and `IEndpointConventionBuilder` (not
+`RouteHandlerBuilder`) because the AOT-safe `RequestDelegate` registrations return the interface
+(ADR-0071). A method named `CustomizeEndpoint` with any other shape warns `ELHTTP006` and is ignored.
+Declaring the hook opts the handler's assembly into an ASP.NET Core reference — the same deliberate trade
+as the [`[From*]` binding opt-ins](#customizing-binding); a strictly web-free module assembly attaches
+conventions through its module group or a `[ModuleEndpoints]` contributor instead.
+
+The hook attaches **host/transport conventions**. Business authorization stays declarative in the handler
+pipeline (`[Require*]` — see [authorization](/docs/concepts/authorization)); the hook is where an
+HTTP-tier policy (`RequireAuthorization("policy")`) goes when one endpoint genuinely differs from its
+module's group.
 
 ## Binding
 

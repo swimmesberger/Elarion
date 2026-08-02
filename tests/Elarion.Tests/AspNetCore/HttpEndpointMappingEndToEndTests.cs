@@ -73,6 +73,105 @@ public sealed class HttpEndpointMappingEndToEndTests {
         }
     }
 
+    private sealed record CreateGadgetCommand {
+        public required string Name { get; init; }
+    }
+
+    private sealed record CreateGadgetResponse(Guid Id, string Name);
+
+    private sealed class CreateGadgetHandler
+        : IHandler<CreateGadgetCommand, Result<ElarionCreated<CreateGadgetResponse>>> {
+        public static readonly Guid CreatedId = new("00000000-0000-0000-0000-000000000042");
+
+        public ValueTask<Result<ElarionCreated<CreateGadgetResponse>>> HandleAsync(
+            CreateGadgetCommand request, CancellationToken ct) {
+            return request.Name switch {
+                "" => ValueTask.FromResult<Result<ElarionCreated<CreateGadgetResponse>>>(
+                    AppError.Conflict("gadget already exists")),
+                "unlocated" => ValueTask.FromResult<Result<ElarionCreated<CreateGadgetResponse>>>(
+                    new ElarionCreated<CreateGadgetResponse>(new CreateGadgetResponse(CreatedId, request.Name))),
+                _ => ValueTask.FromResult<Result<ElarionCreated<CreateGadgetResponse>>>(
+                    new ElarionCreated<CreateGadgetResponse>(new CreateGadgetResponse(CreatedId, request.Name)) {
+                        Location = $"/gadgets/{CreatedId}",
+                    })
+            };
+        }
+    }
+
+    [Fact]
+    public async Task GeneratedCreatedEndpointShape_Writes201WithLocationAndMapsErrors() {
+        var ct = TestContext.Current.CancellationToken;
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+
+        builder.Services.ConfigureHttpJsonOptions(o =>
+            o.SerializerOptions.TypeInfoResolver = new DefaultJsonTypeInfoResolver());
+        builder.Services.ConfigureElarionJson(o => o.EnableReflectionFallback = true);
+        builder.Services.AddProblemDetails();
+        builder.Services
+            .AddScoped<IHandler<CreateGadgetCommand, Result<ElarionCreated<CreateGadgetResponse>>>,
+                CreateGadgetHandler>();
+
+        await using var app = builder.Build();
+
+        // Mirrors the created-endpoint registration emitted by AppModuleDiscoveryGenerator for a
+        // Result<ElarionCreated<T>> handler: the envelope is peeled by ToCreatedResult, so the wire carries the
+        // inner value with 201 and the optional Location header.
+        var __bodyTypeInfo0 = ElarionHttpEndpointBinder.ResolveBodyTypeInfo<CreateGadgetCommand>(app);
+        app.MapPost("/gadgets",
+                (RequestDelegate)(async __context => {
+                    var __bodyResult = await ElarionHttpEndpointBinder.ReadJsonBodyAsync(__context, __bodyTypeInfo0);
+                    if (__bodyResult.Failure != ElarionHttpEndpointBinder.BodyFailure.None) {
+                        await ElarionHttpEndpointBinder.WriteBodyProblemAsync(__context, __bodyResult.Failure);
+                        return;
+                    }
+                    var __request = __bodyResult.Value!;
+                    var __handler = __context.RequestServices
+                        .GetRequiredService<IHandler<CreateGadgetCommand, Result<ElarionCreated<CreateGadgetResponse>>>>();
+                    var __result = ElarionHttpResults.ToCreatedResult(
+                        await __handler.HandleAsync(__request, __context.RequestAborted));
+                    await __result.ExecuteAsync(__context);
+                }))
+            .WithName("Sample.Gadgets.CreateGadget")
+            .WithMetadata(new ProducesResponseTypeMetadata(201, typeof(CreateGadgetResponse),
+                new[] { "application/json" }))
+            .ProducesElarionErrors();
+
+        await app.StartAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+
+            var created = await client.PostAsync(
+                "/gadgets", new StringContent("""{"name":"Gadget"}""", Encoding.UTF8, "application/json"), ct);
+            created.StatusCode.Should().Be(HttpStatusCode.Created);
+            created.Headers.Location!.ToString().Should().Be($"/gadgets/{CreateGadgetHandler.CreatedId}");
+            var body = await created.Content.ReadAsStringAsync(ct);
+            body.Should().Contain("Gadget").And.Contain(CreateGadgetHandler.CreatedId.ToString());
+            body.Should().NotContain("location");
+
+            // A null Location is a 201 without the header — not an error.
+            var unlocated = await client.PostAsync(
+                "/gadgets", new StringContent("""{"name":"unlocated"}""", Encoding.UTF8, "application/json"), ct);
+            unlocated.StatusCode.Should().Be(HttpStatusCode.Created);
+            unlocated.Headers.Location.Should().BeNull();
+
+            // Failures keep the central AppError -> RFC 7807 translation.
+            var conflict = await client.PostAsync(
+                "/gadgets", new StringContent("""{"name":""}""", Encoding.UTF8, "application/json"), ct);
+            conflict.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            conflict.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+            (await conflict.Content.ReadAsStringAsync(ct)).Should().Contain("gadget already exists");
+        }
+        finally {
+            await app.StopAsync(ct);
+        }
+    }
+
     [Fact]
     public async Task GeneratedFileEndpointShape_WritesDownloadsAndMapsErrors() {
         var ct = TestContext.Current.CancellationToken;

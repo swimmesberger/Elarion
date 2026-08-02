@@ -38,6 +38,27 @@ minor releases may include breaking changes.
   automatic antiforgery requirement on form-binding endpoints must enforce antiforgery explicitly.
 
 ### Added
+- **Per-endpoint HTTP conventions: the `CustomizeEndpoint` hook (ADR-0072).** An `[HttpEndpoint]` handler
+  may declare `public static void CustomizeEndpoint(IEndpointConventionBuilder)`; the generated
+  registration captures the endpoint builder and calls the hook after the emitted metadata chain, so one
+  endpoint can attach host conventions — an authorization policy, rate limiting, output caching, extra
+  metadata — without leaving the generated path (previously the only options were the module-level group
+  or hand-written `MapEndpoints` mapping). The contract is checked at compile time: a method named
+  `CustomizeEndpoint` with any other shape warns with the new `ELHTTP006` diagnostic and is ignored.
+  The hook rides the assembly manifest's HTTP entry as a count-gated appended field, so module assemblies
+  built before this version decode unchanged. Declaring the hook opts the handler's assembly into an
+  ASP.NET Core reference, the same deliberate trade as the `[From*]` binding opt-ins; business
+  authorization stays in the handler pipeline (`[Require*]`), and the generator still never reads
+  `[Authorize]`/`[AllowAnonymous]` off handlers.
+- **`201 Created` responses: the `ElarionCreated<T>` envelope (ADR-0072).** Declaring
+  `Result<ElarionCreated<T>>` as a handler's response marks the operation as a resource creation once, the
+  same declare-once pattern as `ElarionFile`: the generated `[HttpEndpoint]` mapping translates a success
+  through the new `ElarionHttpResults.ToCreatedResult` — `201 Created`, the envelope's optional
+  `Location` as the response header, and the inner value as the JSON body — and the emitted OpenAPI
+  response metadata advertises `201` with the inner type, because the envelope is peeled at compile time
+  and never appears on the HTTP wire. Failures keep the central `AppError` → RFC 7807 translation
+  unchanged. On the name-routed JSON surfaces the envelope serializes as a plain object
+  (`value` + `location`); prefer a plain response type for operations designed for JSON-RPC/MCP.
 - **Schema-scoped PostgreSQL migrations.** `AddElarionPostgreSql` gained an optional `schema` argument
   that puts the schema on the data source's `Search Path`, so prefix-free migration scripts and
   unqualified application queries resolve through one setting and cannot drift into different schemas.

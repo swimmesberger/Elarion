@@ -47,6 +47,14 @@ internal static class ElarionGeneratorConventions {
     /// </summary>
     public const string FileResponseTypeFqn = "global::Elarion.Abstractions.ElarionFile";
 
+    /// <summary>
+    /// The generic prefix of the created-resource response envelope (<c>Result&lt;ElarionCreated&lt;T&gt;&gt;</c>),
+    /// fully qualified. The HTTP emission switches to the created translation (<c>ToCreatedResult</c>,
+    /// <c>201</c> + <c>Location</c>, body = inner value) for exactly this construction; the name-routed
+    /// transports have no status code to express and serialize the envelope as a plain object.
+    /// </summary>
+    public const string CreatedResponseTypePrefix = "global::Elarion.Abstractions.ElarionCreated<";
+
     // --- EF model-configuration seam naming ---------------------------------------------------------------
 
     private const string GenerateElarionPrefix = "GenerateElarion";
