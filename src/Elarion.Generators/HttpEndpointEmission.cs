@@ -44,6 +44,15 @@ internal static partial class HttpEndpointEmission {
         DiagnosticSeverity.Warning,
         true);
 
+    public static readonly DiagnosticDescriptor InvalidCustomizeEndpointHook = new(
+        "ELHTTP006",
+        "CustomizeEndpoint hook has an unusable shape",
+        "Handler '{0}' declares a CustomizeEndpoint method that is not "
+        + "'public static void CustomizeEndpoint(IEndpointConventionBuilder)'; the hook is ignored",
+        "Elarion.Http",
+        DiagnosticSeverity.Warning,
+        true);
+
     public static readonly DiagnosticDescriptor UnmatchedModule = new(
         "ELHTTP003",
         "HTTP endpoint handler is not in any module",
@@ -57,7 +66,8 @@ internal static partial class HttpEndpointEmission {
     /// One discovered HTTP endpoint. Strings, bools, and nested value-equatable records only, so the model stays
     /// cache-friendly in the incremental pipelines. <see cref="BindingMembers"/> carries the compile-time
     /// request-binding classification for the member-wise (<c>[AsParameters]</c>-style) shapes; it is empty when
-    /// the whole request binds from the JSON body.
+    /// the whole request binds from the JSON body. <see cref="CustomizeEndpointTypeFqn"/> carries the handler
+    /// type declaring a valid <c>CustomizeEndpoint</c> hook, or <see langword="null"/> when there is none.
     /// </summary>
     public sealed record Model(
         string EndpointName,
@@ -71,7 +81,8 @@ internal static partial class HttpEndpointEmission {
         bool ResponseIsEmpty,
         string? Description,
         bool IsIdempotent,
-        EquatableArray<BindingMember> BindingMembers
+        EquatableArray<BindingMember> BindingMembers,
+        string? CustomizeEndpointTypeFqn
     ) {
         /// <summary>
         /// Whether the response is the binary file payload (<c>Result&lt;ElarionFile&gt;</c>), mapped through the
@@ -79,6 +90,22 @@ internal static partial class HttpEndpointEmission {
         /// encoding is unchanged and older manifests decode into the same behavior.
         /// </summary>
         public bool ResponseIsFile => ResponseTypeFqn == ElarionGeneratorConventions.FileResponseTypeFqn;
+
+        /// <summary>
+        /// Whether the response is the created-resource envelope (<c>Result&lt;ElarionCreated&lt;T&gt;&gt;</c>),
+        /// mapped through the created translation (<c>201</c> + <c>Location</c>, body = inner value). Derived
+        /// from <see cref="ResponseTypeFqn"/> like <see cref="ResponseIsFile"/>, so the manifest encoding is
+        /// unchanged and older manifests decode into the same behavior.
+        /// </summary>
+        public bool ResponseIsCreated =>
+            ResponseTypeFqn.StartsWith(ElarionGeneratorConventions.CreatedResponseTypePrefix, StringComparison.Ordinal)
+            && ResponseTypeFqn.EndsWith(">", StringComparison.Ordinal);
+
+        /// <summary>The inner response type of a created-resource envelope — the advertised <c>201</c> body.</summary>
+        public string CreatedInnerTypeFqn =>
+            ResponseTypeFqn.Substring(
+                ElarionGeneratorConventions.CreatedResponseTypePrefix.Length,
+                ResponseTypeFqn.Length - ElarionGeneratorConventions.CreatedResponseTypePrefix.Length - 1);
     }
 
     public static void ReportDuplicateRoutes(IEnumerable<Model> entries, List<DiagnosticInfo> diagnostics) {
@@ -168,8 +195,48 @@ internal static partial class HttpEndpointEmission {
             responseNamed is not null && IsResponseEmpty(responseNamed),
             GetDescription(type, descriptionType),
             IsIdempotentHandler(type),
-            bindingMembers);
+            bindingMembers,
+            DetectCustomizeEndpointHook(type, fmt, report));
         return true;
+    }
+
+    private const string CustomizeEndpointMethodName = "CustomizeEndpoint";
+    private const string EndpointConventionBuilderFqn = "Microsoft.AspNetCore.Builder.IEndpointConventionBuilder";
+
+    /// <summary>
+    /// Detects the optional per-endpoint convention hook on the handler type:
+    /// <c>public static void CustomizeEndpoint(IEndpointConventionBuilder)</c>. The generated registration calls
+    /// it after the emitted metadata chain, so the handler can attach per-endpoint conventions (a policy, rate
+    /// limiting, output caching) without leaving the generated mapping. The method must be <c>public</c> because
+    /// the call site is emitted into the referencing host's compilation — the same visibility a cross-assembly
+    /// handler already needs for its request/response DTOs. A method with the right name but the wrong shape is
+    /// reported (<c>ELHTTP006</c>) and ignored rather than silently skipped.
+    /// </summary>
+    private static string? DetectCustomizeEndpointHook(
+        INamedTypeSymbol type, SymbolDisplayFormat fmt, Action<DiagnosticInfo>? report) {
+        var misshapen = false;
+        foreach (var member in type.GetMembers(CustomizeEndpointMethodName)) {
+            if (member is not IMethodSymbol method)
+                continue;
+
+            if (method is {
+                    IsStatic: true,
+                    ReturnsVoid: true,
+                    IsGenericMethod: false,
+                    DeclaredAccessibility: Accessibility.Public,
+                    Parameters.Length: 1
+                }
+                && method.Parameters[0].Type.ToDisplayString() == EndpointConventionBuilderFqn)
+                return type.ToDisplayString(fmt);
+
+            misshapen = true;
+        }
+
+        if (misshapen)
+            report?.Invoke(DiagnosticInfo.Create(
+                InvalidCustomizeEndpointHook, type.Locations.FirstOrDefault(), type.ToDisplayString()));
+
+        return null;
     }
 
     // [Idempotent] is declared with Inherited = false, so only the handler type's own attributes are inspected

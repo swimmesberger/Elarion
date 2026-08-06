@@ -12,7 +12,8 @@ namespace Elarion.AspNetCore;
 
 /// <summary>
 /// Translates an Elarion <see cref="Result{T}"/> into an ASP.NET Core <see cref="IResult"/>: success values
-/// become <c>200 OK</c> (or <c>204 No Content</c>), and an <see cref="AppError"/> becomes an RFC 7807
+/// become <c>200 OK</c> (or <c>204 No Content</c>, or <c>201 Created</c> for an
+/// <see cref="ElarionCreated{T}"/> envelope), and an <see cref="AppError"/> becomes an RFC 7807
 /// ProblemDetails response whose status code comes from <see cref="HttpAppErrorMapper"/>.
 /// </summary>
 /// <remarks>
@@ -39,6 +40,19 @@ public static class ElarionHttpResults {
     /// <summary>Returns <c>204 No Content</c> on success, otherwise a ProblemDetails failure. Used when the response type is empty.</summary>
     public static IResult ToNoContentResult<T>(Result<T> result) {
         return result.IsSuccess ? TypedResults.NoContent() : ToProblem(result.Error);
+    }
+
+    /// <summary>
+    /// Returns <c>201 Created</c> with the envelope's inner value as the body (and its
+    /// <see cref="ElarionCreated{T}.Location"/> as the <c>Location</c> header when set) on success, otherwise a
+    /// ProblemDetails failure. Used when the handler's response type is <see cref="ElarionCreated{T}"/> — the
+    /// envelope is peeled here, so it never appears on the wire.
+    /// </summary>
+    public static IResult ToCreatedResult<T>(Result<ElarionCreated<T>> result) {
+        if (!result.IsSuccess) return ToProblem(result.Error);
+
+        var created = result.Value;
+        return TypedResults.Created(created.Location, created.Value);
     }
 
     /// <summary>

@@ -376,6 +376,99 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_MapsCreatedResponseEndpointThroughCreatedTranslation() {
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Clients {
+                [AppModule("Clients", Kind = AppModuleKind.Core)]
+                public static class ClientsModule { }
+
+                [HttpEndpoint("clients")]
+                public sealed class CreateClient : IHandler<CreateClient.Command, Result<ElarionCreated<CreateClient.Response>>> {
+                    public sealed record Command : ICommand { public required string Name { get; init; } }
+                    public sealed record Response(System.Guid Id, string Name);
+                    public ValueTask<Result<ElarionCreated<Response>>> HandleAsync(Command request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<ElarionCreated<Response>>>(
+                            new ElarionCreated<Response>(new Response(System.Guid.Empty, request.Name)) {
+                                Location = "clients/x",
+                            });
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out var compilationWithGenerated);
+
+        // A Result<ElarionCreated<T>> endpoint goes through the created translation: the envelope is peeled at
+        // compile time, so the advertised response is 201 with the inner type — never the envelope itself.
+        generated.Should().Contain("app.MapPost(\"clients\",");
+        generated.Should().Contain("global::Elarion.AspNetCore.ElarionHttpResults.ToCreatedResult(");
+        generated.Should().Contain(
+            ".WithMetadata(new global::Microsoft.AspNetCore.Http.ProducesResponseTypeMetadata(201, typeof(global::Sample.Clients.CreateClient.Response), new[] { \"application/json\" }))");
+        generated.Should().NotContain("typeof(global::Elarion.Abstractions.ElarionCreated");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_CallsCustomizeEndpointHookAfterMetadataChain() {
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Microsoft.AspNetCore.Builder;
+
+            namespace Sample.Exports {
+                [AppModule("Exports", Kind = AppModuleKind.Core)]
+                public static class ExportsModule { }
+
+                [HttpEndpoint("exports/{id}")]
+                public sealed class GetExport : IHandler<GetExport.Query, Result<GetExport.Response>> {
+                    public sealed record Query : IQuery { public required System.Guid Id { get; init; } }
+                    public sealed record Response(string Name);
+
+                    public static void CustomizeEndpoint(IEndpointConventionBuilder endpoint) { }
+
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("x"));
+                }
+
+                [HttpEndpoint("exports")]
+                public sealed class ListExports : IHandler<ListExports.Query, Result<ListExports.Response>> {
+                    public sealed record Query : IQuery;
+                    public sealed record Response(int Count);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(0));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out var compilationWithGenerated);
+
+        // The hook rides the manifest round-trip (the handler lives in a referenced image) and the registration
+        // captures the builder so the handler's conventions are applied after the generated metadata chain.
+        // Deterministic emit order (verb, route, name) puts "exports" at index 0 and "exports/{id}" at 1.
+        generated.Should().Contain("var __endpoint1 = app.MapGet(\"exports/{id}\",");
+        generated.Should().Contain("global::Sample.Exports.GetExport.CustomizeEndpoint(__endpoint1);");
+        // The hook-less endpoint stays a plain expression statement — no builder local, no hook call.
+        generated.Should().Contain("app.MapGet(\"exports\",");
+        generated.Should().NotContain("__endpoint0");
+        generated.Should().NotContain("ListExports.CustomizeEndpoint");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Bootstrapper_CallsHostDeclaredModuleEndpointsInsideModuleGate() {
         const string hostSource =
             """

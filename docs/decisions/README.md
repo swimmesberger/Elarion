@@ -92,3 +92,4 @@ designs that are not yet implemented.
 - [ADR-0069: Producer-owned hot-state primitives — bounded MPSC queue and staged-batch flusher](0069-producer-owned-hot-state-buffering.md)
 - [ADR-0070: Contract-set registration — unconditional composition of one contract's implementation set](0070-contract-set-registration.md)
 - [ADR-0071: Generator-owned HTTP endpoint binding — RequestDelegate registrations, not RDG](0071-generator-owned-http-endpoint-binding.md)
+- [ADR-0072: Per-endpoint HTTP customization hook and the created-resource envelope](0072-per-endpoint-customization-and-created-envelope.md)

@@ -40,7 +40,10 @@ internal static partial class HttpEndpointEmission {
         if (bodyTypeFqn is not null)
             sb.AppendLine(
                 $"{indent}var __bodyTypeInfo{index} = {BinderFqn}.ResolveBodyTypeInfo<{bodyTypeFqn}>({target});");
-        sb.AppendLine($"{indent}{target}.Map{entry.Verb}({Literal(entry.Route)},");
+        // A handler-declared CustomizeEndpoint hook receives the builder after the full metadata chain, so its
+        // conventions land last; without a hook the registration stays a plain expression statement.
+        var endpointLocal = entry.CustomizeEndpointTypeFqn is null ? string.Empty : $"var __endpoint{index} = ";
+        sb.AppendLine($"{indent}{endpointLocal}{target}.Map{entry.Verb}({Literal(entry.Route)},");
         sb.AppendLine(
             $"{inner}({RequestDelegateFqn})({(bodyTypeFqn is null ? "static " : string.Empty)}async __context => {{");
         AppendDelegateBody(sb, entry, body, index);
@@ -58,6 +61,10 @@ internal static partial class HttpEndpointEmission {
         // lets the OpenAPI package upgrade the schema to type: string, format: binary.
         if (entry.ResponseIsFile)
             chain.Add($".WithMetadata(new {ProducesMetadataFqn}(200, null, new[] {{ \"application/octet-stream\" }}))");
+        else if (entry.ResponseIsCreated)
+            // The created envelope is peeled by the translation, so the advertised 201 body is the inner type.
+            chain.Add(
+                $".WithMetadata(new {ProducesMetadataFqn}(201, typeof({entry.CreatedInnerTypeFqn}), new[] {{ \"application/json\" }}))");
         else if (entry.ResponseIsEmpty)
             chain.Add($".WithMetadata(new {ProducesMetadataFqn}(204))");
         else
@@ -93,6 +100,9 @@ internal static partial class HttpEndpointEmission {
 
         for (var i = 0; i < chain.Count; i++)
             sb.AppendLine($"{inner}{chain[i]}{(i == chain.Count - 1 ? ";" : string.Empty)}");
+
+        if (entry.CustomizeEndpointTypeFqn is not null)
+            sb.AppendLine($"{indent}{entry.CustomizeEndpointTypeFqn}.CustomizeEndpoint(__endpoint{index});");
     }
 
     /// <summary>
@@ -168,6 +178,7 @@ internal static partial class HttpEndpointEmission {
 
     private static void AppendDelegateBody(StringBuilder sb, Model entry, string indent, int index) {
         var resultCall = entry.ResponseIsFile ? "ToFileResult"
+            : entry.ResponseIsCreated ? "ToCreatedResult"
             : entry.ResponseIsEmpty ? "ToNoContentResult"
             : "ToResult";
 

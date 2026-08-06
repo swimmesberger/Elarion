@@ -170,6 +170,68 @@ public sealed class ElarionManifestGeneratorTests {
     }
 
     [Fact]
+    public void Manifest_HttpEndpoint_CustomizeEndpointHook_IsPublishedWithoutWarning() {
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Microsoft.AspNetCore.Builder;
+
+            namespace Sample.Manifest;
+
+            [HttpEndpoint("hooked/{id}")]
+            public sealed class GetHooked : IHandler<GetHooked.Query, Result<GetHooked.Response>> {
+                public sealed record Query : IQuery { public required int Id { get; init; } }
+                public sealed record Response(string Name);
+
+                public static void CustomizeEndpoint(IEndpointConventionBuilder endpoint) { }
+
+                public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<Response>>(new Response("x"));
+            }
+            """;
+
+        var generated = RunGenerator(source, out var diagnostics);
+
+        // The hook type rides the manifest entry (count-gated appended field), so a referencing host emits the
+        // CustomizeEndpoint call for this endpoint.
+        diagnostics.Any(diagnostic => diagnostic.Id == "ELHTTP006").Should().BeFalse();
+        generated.Should().Contain("Sample.Manifest.GetHooked");
+    }
+
+    [Fact]
+    public void Manifest_HttpEndpoint_InvalidCustomizeEndpointHook_WarnsAndIgnores() {
+        // Instance shape (not static) — one representative violation of the required
+        // 'public static void CustomizeEndpoint(IEndpointConventionBuilder)' contract.
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Microsoft.AspNetCore.Builder;
+
+            namespace Sample.Manifest;
+
+            [HttpEndpoint("hooked/{id}")]
+            public sealed class GetHooked : IHandler<GetHooked.Query, Result<GetHooked.Response>> {
+                public sealed record Query : IQuery { public required int Id { get; init; } }
+                public sealed record Response(string Name);
+
+                public void CustomizeEndpoint(IEndpointConventionBuilder endpoint) { }
+
+                public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<Response>>(new Response("x"));
+            }
+            """;
+
+        RunGenerator(source, out var diagnostics);
+
+        diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "ELHTTP006" && diagnostic.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
     public void Manifest_FileResponseHandler_PublishesBothTransportEntries() {
         // A Result<ElarionFile> handler is a first-class citizen on every transport: HTTP streams the download,
         // the name-routed transports carry the canonical base64 envelope — so both entries are published and

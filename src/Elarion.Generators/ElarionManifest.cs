@@ -25,6 +25,8 @@ internal static class ElarionManifest {
     public const string ModuleEndpointsKey = "Elarion.Manifest.ModuleEndpoints.v1";
     // v2 appends the compile-time binding-member classification (ADR-0071); v1 entries predate generator-owned
     // binding and cannot be mapped safely, so they are not decoded — rebuild the module assembly to re-publish.
+    // The CustomizeEndpoint hook type rides a count-gated appended field (no key bump): a 12-field entry
+    // predates the hook and decodes with none.
     public const string HttpEndpointKey = "Elarion.Manifest.HttpEndpoint.v2";
     public const string RpcMethodKey = "Elarion.Manifest.RpcMethod.v1";
     public const string ResourceFilterKey = "Elarion.Manifest.ResourceFilter.v1";
@@ -240,7 +242,9 @@ internal static class ElarionManifest {
             EncodeBool(model.ResponseIsEmpty),
             model.Description,
             EncodeBool(model.IsIdempotent),
-            ElarionManifestCodec.EncodeBindingMembers(model.BindingMembers));
+            ElarionManifestCodec.EncodeBindingMembers(model.BindingMembers),
+            // Appended (not inserted) so earlier field indices stay stable; count-gated decode below.
+            model.CustomizeEndpointTypeFqn);
     }
 
     public static string EncodeRpcMethod(RpcMethodEmission.Model model) {
@@ -384,7 +388,9 @@ internal static class ElarionManifest {
 
     public static bool TryDecodeHttpEndpoint(string value, out HttpEndpointEmission.Model? model) {
         model = null;
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 12)
+        // 12 fields = an assembly built before the CustomizeEndpoint hook existed; decode it with no hook (that
+        // compilation could not have declared one) instead of dropping its endpoints.
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count is not (12 or 13))
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null || fields[3] is null ||
             fields[4] is null || fields[5] is null || fields[11] is null)
@@ -409,7 +415,8 @@ internal static class ElarionManifest {
             responseIsEmpty,
             fields[9],
             isIdempotent,
-            bindingMembers);
+            bindingMembers,
+            fields.Count == 13 ? fields[12] : null);
         return true;
     }
 
