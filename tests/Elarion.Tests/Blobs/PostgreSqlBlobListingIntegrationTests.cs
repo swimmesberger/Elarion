@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using Elarion.Blobs;
 using Elarion.Blobs.PostgreSql;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -116,6 +117,47 @@ public sealed class PostgreSqlBlobListingIntegrationTests(PostgreSqlBlobStoreFix
     }
 
     [Fact]
+    public async Task ListAsync_SnakeCaseNamingConvention_ListsAndPaginates() {
+        // Regression: the listing query materializes an ad-hoc SqlQueryRaw row type whose implicit
+        // mapping is rewritten by naming-convention plugins (entry/is_prefix under snake_case). With
+        // hard-coded "Entry"/"IsPrefix" SELECT aliases, every ListAsync on such a context failed with
+        // "The required column 'is_prefix' was not present in the results of a 'FromSql' operation."
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var context = fixture.CreateSnakeCaseContext();
+        var store = CreateStore(context);
+        var container = await SeedTreeAsync(store, ct);
+
+        // Flat listing with keyset pagination (both branches of the listing SQL alias the row columns).
+        var first = await store.ListAsync(
+            new BlobListRequest { Container = container, Prefix = "docs/", PageSize = 2 }, ct);
+        first.Blobs.Select(b => b.Name).Should().Equal("docs/1.txt", "docs/2.txt");
+        first.ContinuationToken.Should().NotBeNull();
+
+        var second = await store.ListAsync(
+            new BlobListRequest {
+                Container = container, Prefix = "docs/", PageSize = 2, ContinuationToken = first.ContinuationToken
+            },
+            ct);
+        second.Blobs.Select(b => b.Name).Should().Equal("docs/sub/3.txt");
+        second.ContinuationToken.Should().BeNull();
+
+        // Delimiter roll-up: the aliased subselect plus keyset references over the aliases.
+        var root = await store.ListAsync(
+            new BlobListRequest { Container = container, Delimiter = "/", PageSize = 2 }, ct);
+        root.Blobs.Select(b => b.Name).Should().Equal("a.txt");
+        root.Prefixes.Should().Equal("docs/");
+
+        var rest = await store.ListAsync(
+            new BlobListRequest {
+                Container = container, Delimiter = "/", PageSize = 2, ContinuationToken = root.ContinuationToken
+            },
+            ct);
+        rest.Blobs.Select(b => b.Name).Should().Equal("z.txt");
+        rest.ContinuationToken.Should().BeNull();
+    }
+
+    [Fact]
     public async Task ListAsync_MissingContainer_ReturnsEmpty() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var ct = TestContext.Current.CancellationToken;
@@ -142,9 +184,7 @@ public sealed class PostgreSqlBlobListingIntegrationTests(PostgreSqlBlobStoreFix
         (await store.ListContainersAsync(ct)).Should().Contain(container);
     }
 
-    private static async Task<string> SeedTreeAsync(
-        PostgreSqlBlobStore<IntegrationBlobDbContext> store,
-        CancellationToken ct) {
+    private static async Task<string> SeedTreeAsync(IBlobStore store, CancellationToken ct) {
         var container = $"c-{Guid.NewGuid():N}";
         foreach (var name in new[] { "a.txt", "docs/1.txt", "docs/2.txt", "docs/sub/3.txt", "z.txt" })
             await store.SaveAsync(NewRequest(container, name), new MemoryStream([1]), ct);
@@ -160,8 +200,9 @@ public sealed class PostgreSqlBlobListingIntegrationTests(PostgreSqlBlobStoreFix
         };
     }
 
-    private static PostgreSqlBlobStore<IntegrationBlobDbContext> CreateStore(IntegrationBlobDbContext context) {
-        return new PostgreSqlBlobStore<IntegrationBlobDbContext>(context,
-            NullLogger<PostgreSqlBlobStore<IntegrationBlobDbContext>>.Instance, TimeProvider.System);
+    private static PostgreSqlBlobStore<TDbContext> CreateStore<TDbContext>(TDbContext context)
+        where TDbContext : DbContext {
+        return new PostgreSqlBlobStore<TDbContext>(context,
+            NullLogger<PostgreSqlBlobStore<TDbContext>>.Instance, TimeProvider.System);
     }
 }

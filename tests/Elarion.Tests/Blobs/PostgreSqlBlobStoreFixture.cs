@@ -52,10 +52,31 @@ public sealed class PostgreSqlBlobStoreFixture : IAsyncLifetime {
             .UseNpgsql(ConnectionString)
             .Options);
     }
+
+    /// <summary>
+    /// Creates a context with EFCore.NamingConventions' snake_case convention active, as consuming
+    /// applications commonly configure it. The blob tables themselves are unaffected (UseElarionBlobStorage
+    /// names them explicitly, snake_case by default, so this context maps to the same tables the fixture
+    /// created) — what the convention does rewrite is the implicit mapping of ad-hoc SqlQueryRaw row types,
+    /// which is exactly what the listing regression tests exercise.
+    /// </summary>
+    public SnakeCaseBlobDbContext CreateSnakeCaseContext() {
+        return new SnakeCaseBlobDbContext(new DbContextOptionsBuilder<SnakeCaseBlobDbContext>()
+            .UseNpgsql(ConnectionString)
+            .UseSnakeCaseNamingConvention()
+            .Options);
+    }
 }
 
 /// <summary>EF Core context mapping the PostgreSQL blob tables for integration tests.</summary>
 public sealed class IntegrationBlobDbContext(DbContextOptions<IntegrationBlobDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) {
+        modelBuilder.UseElarionBlobStorage();
+    }
+}
+
+/// <summary>Same blob model, created via <see cref="PostgreSqlBlobStoreFixture.CreateSnakeCaseContext"/>.</summary>
+public sealed class SnakeCaseBlobDbContext(DbContextOptions<SnakeCaseBlobDbContext> options) : DbContext(options) {
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.UseElarionBlobStorage();
     }

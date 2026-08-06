@@ -304,6 +304,22 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         var container = Column(nameof(StoredBlob.Container));
         var state = Column(nameof(StoredBlob.State));
 
+        // The SELECT aliases must match the columns EF expects when materializing BlobListEntryRow.
+        // SqlQueryRaw maps that type ad hoc through IAdHocMapper, where model conventions still apply —
+        // a naming-convention plugin (e.g. UseSnakeCaseNamingConvention) rewrites the expected columns
+        // to entry/is_prefix — so the aliases are resolved from that same mapping, not hard-coded.
+        IEntityType rowType = dbContext.GetService<IAdHocMapper>().GetOrAddEntityType(typeof(BlobListEntryRow));
+
+        string RowColumn(string propertyName) {
+            var property = rowType.FindProperty(propertyName)
+                           ?? throw new InvalidOperationException(
+                               $"The {nameof(BlobListEntryRow)}.{propertyName} property is not mapped.");
+            return sqlHelper.DelimitIdentifier(property.GetColumnName());
+        }
+
+        var entry = RowColumn(nameof(BlobListEntryRow.Entry));
+        var isPrefix = RowColumn(nameof(BlobListEntryRow.IsPrefix));
+
         var args = new List<object>();
 
         string P(object value) {
@@ -326,18 +342,18 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             var rest = $"substr({name}, length({prefixParam}) + 1)";
             var position = $"strpos({rest}, {delimiterParam})";
             sql =
-                $"SELECT e.\"Entry\", e.\"IsPrefix\" FROM (" +
+                $"SELECT e.{entry}, e.{isPrefix} FROM (" +
                 $"SELECT DISTINCT CASE WHEN {position} > 0 " +
                 $"THEN substr({name}, 1, length({prefixParam}) + {position} + length({delimiterParam}) - 1) " +
-                $"ELSE {name} END AS \"Entry\", {position} > 0 AS \"IsPrefix\" " +
+                $"ELSE {name} END AS {entry}, {position} > 0 AS {isPrefix} " +
                 $"FROM {table} WHERE {filter}) AS e";
             if (afterEntry is not null)
-                sql += $" WHERE (e.\"Entry\" COLLATE \"C\", e.\"IsPrefix\") > ({P(afterEntry)}, {P(afterIsPrefix)})";
+                sql += $" WHERE (e.{entry} COLLATE \"C\", e.{isPrefix}) > ({P(afterEntry)}, {P(afterIsPrefix)})";
 
-            sql += $" ORDER BY e.\"Entry\" COLLATE \"C\", e.\"IsPrefix\" LIMIT {P(limit)}";
+            sql += $" ORDER BY e.{entry} COLLATE \"C\", e.{isPrefix} LIMIT {P(limit)}";
         }
         else {
-            sql = $"SELECT {name} AS \"Entry\", false AS \"IsPrefix\" FROM {table} WHERE {filter}";
+            sql = $"SELECT {name} AS {entry}, false AS {isPrefix} FROM {table} WHERE {filter}";
             if (afterEntry is not null) sql += $" AND {name} COLLATE \"C\" > {P(afterEntry)}";
 
             sql += $" ORDER BY {name} COLLATE \"C\" LIMIT {P(limit)}";
