@@ -53,6 +53,16 @@ minor releases may include breaking changes.
   distinct `advisoryLockKey` values to migrate concurrently. The database-neutral migration core is
   unchanged, and SQLite (which has no schemas) is unaffected.
 
+### Fixed
+- **Blob listing under naming-convention plugins.** `PostgreSqlBlobStore.ListAsync` failed with
+  "The required column 'is_prefix' was not present in the results of a 'FromSql' operation" on any
+  context using EFCore.NamingConventions' `UseSnakeCaseNamingConvention`: the listing SQL hard-coded
+  `"Entry"`/`"IsPrefix"` result aliases while the ad-hoc `SqlQueryRaw` row mapping — where model
+  conventions still apply — expected the rewritten `entry`/`is_prefix` columns. The aliases are now
+  resolved from that same ad-hoc mapping (via `IAdHocMapper`, the service EF's query pipeline itself
+  uses), so the SQL and the materializer cannot diverge under any naming convention. The blob tables
+  themselves were never affected — `UseElarionBlobStorage` names them explicitly.
+
 ## [0.2.6] - 2026-07-21
 
 ### Changed

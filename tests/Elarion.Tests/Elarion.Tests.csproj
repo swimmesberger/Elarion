@@ -8,6 +8,7 @@
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <PackageReference Include="EFCore.NamingConventions"/>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL"/>
     <PackageReference Include="Testcontainers.Azurite"/>
     <PackageReference Include="Testcontainers.PostgreSql"/>
