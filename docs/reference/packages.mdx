@@ -114,7 +114,7 @@ Read the [actor decision guide](/docs/concepts/actors) before adding the actor p
 | Package | Add it when |
 | --- | --- |
 | `Elarion.Settings` | Application code needs scoped runtime settings and the in-process default store/change source. |
-| `Elarion.Settings.EntityFrameworkCore` | Settings need durable relational storage with optimistic concurrency. |
+| `Elarion.Settings.EntityFrameworkCore` | Settings need durable relational storage with optimistic concurrency (provider-neutral; PostgreSQL and SQLite are exercised by the test suite). |
 | `Elarion.Settings.Configuration` | Global runtime settings should surface through `IConfiguration`/`IOptionsMonitor` reload. |
 | `Elarion.Settings.PostgreSql` | Setting changes must notify every node over PostgreSQL `LISTEN/NOTIFY`. |
 
