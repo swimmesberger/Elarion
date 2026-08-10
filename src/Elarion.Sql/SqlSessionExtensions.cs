@@ -31,6 +31,9 @@ public static class SqlSessionExtensions {
         this ISqlSession session, SqlStatement sql, CancellationToken cancellationToken = default)
         where T : ISqlRecord<T> {
         ArgumentNullException.ThrowIfNull(session);
+        // Built before the connection is obtained: a statement that cannot build (e.g. an empty IN list)
+        // must fail without touching the database. The same ordering applies to every method below.
+        sql.EnsureBuilt();
         var connection = await session.GetConnectionAsync(cancellationToken).ConfigureAwait(false);
         return await connection.QueryAsync<T>(sql, cancellationToken).ConfigureAwait(false);
     }
@@ -47,6 +50,7 @@ public static class SqlSessionExtensions {
         this ISqlSession session, SqlStatement sql, CancellationToken cancellationToken = default)
         where T : ISqlRecord<T> {
         ArgumentNullException.ThrowIfNull(session);
+        sql.EnsureBuilt();
         var connection = await session.GetConnectionAsync(cancellationToken).ConfigureAwait(false);
         return await connection.QueryFirstOrDefaultAsync<T>(sql, cancellationToken).ConfigureAwait(false);
     }
@@ -67,6 +71,7 @@ public static class SqlSessionExtensions {
         this ISqlSession session, SqlStatement sql, CancellationToken cancellationToken = default)
         where T : ISqlRecord<T> {
         ArgumentNullException.ThrowIfNull(session);
+        sql.EnsureBuilt();
         var connection = await session.GetConnectionAsync(cancellationToken).ConfigureAwait(false);
         return await connection.QuerySingleOrDefaultAsync<T>(sql, cancellationToken).ConfigureAwait(false);
     }
@@ -87,6 +92,7 @@ public static class SqlSessionExtensions {
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
         where T : ISqlRecord<T> {
         ArgumentNullException.ThrowIfNull(session);
+        sql.EnsureBuilt();
         var connection = await session.GetConnectionAsync(cancellationToken).ConfigureAwait(false);
         await foreach (var row in connection.QueryUnbufferedAsync<T>(sql, cancellationToken).ConfigureAwait(false))
             yield return row;
@@ -106,6 +112,7 @@ public static class SqlSessionExtensions {
         this ISqlSession session, ISqlRowMapper<T> mapper, SqlStatement sql,
         CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(session);
+        sql.EnsureBuilt();
         var connection = await session.GetConnectionAsync(cancellationToken).ConfigureAwait(false);
         return await connection.QueryAsync(mapper, sql, cancellationToken).ConfigureAwait(false);
     }
@@ -123,6 +130,7 @@ public static class SqlSessionExtensions {
         this ISqlSession session, ISqlRowMapper<T> mapper, SqlStatement sql,
         CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(session);
+        sql.EnsureBuilt();
         var connection = await session.GetConnectionAsync(cancellationToken).ConfigureAwait(false);
         return await connection.QueryFirstOrDefaultAsync(mapper, sql, cancellationToken).ConfigureAwait(false);
     }
@@ -173,6 +181,7 @@ public static class SqlSessionExtensions {
     public static async Task<int> ExecuteAsync(
         this ISqlSession session, SqlStatement sql, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(session);
+        sql.EnsureBuilt();
         var connection = await session.GetConnectionAsync(cancellationToken).ConfigureAwait(false);
         // With a transaction active the statement enlists it; without one it runs autonomously.
         return session.CurrentTransaction is { } transaction
@@ -193,6 +202,7 @@ public static class SqlSessionExtensions {
     public static async Task<TResult?> ExecuteScalarAsync<TResult>(
         this ISqlSession session, SqlStatement sql, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(session);
+        sql.EnsureBuilt();
         var connection = await session.GetConnectionAsync(cancellationToken).ConfigureAwait(false);
         return await connection.ExecuteScalarAsync<TResult>(sql, cancellationToken).ConfigureAwait(false);
     }

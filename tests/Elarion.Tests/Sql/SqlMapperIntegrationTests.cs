@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Elarion.Abstractions.Serialization;
 using Elarion.Sql;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Xunit;
 
 namespace Elarion.Tests.SqlMapping;
@@ -103,6 +104,22 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
     [Fact]
     public async Task Interpolation_EmptyInList_FailsBeforeTouchingTheDatabase() {
         await using var connection = fixture.CreateConnection();
+        var db = connection.AsSqlSession();
+
+        var act = () => db.QueryAsync(
+            Mapper,
+            $"{SqlItem.Select} WHERE id IN {Array.Empty<Guid>()}",
+            Ct);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*empty collection*");
+    }
+
+    [Fact]
+    public async Task Interpolation_EmptyInList_FailsEvenWhenTheConnectionCannotOpen() {
+        // A connection with no connection string can never open, so this proves the build-time guard fires
+        // before any connection work — the regression was the connection opening first and its failure
+        // (e.g. Docker unavailable on CI, empty fixture connection string) masking the validation error.
+        await using var connection = new NpgsqlConnection();
         var db = connection.AsSqlSession();
 
         var act = () => db.QueryAsync(

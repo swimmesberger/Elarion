@@ -145,6 +145,15 @@ public sealed class SqlStatement {
 
     private static readonly List<object?> NoValues = [];
 
+    /// <summary>
+    /// Forces materialization so build-time validation (such as the empty IN-list guard) throws before the
+    /// caller does any connection work — a statement that cannot build must fail without touching the
+    /// database, even when the connection itself could not open.
+    /// </summary>
+    internal void EnsureBuilt() {
+        Materialize();
+    }
+
     private void Materialize() {
         if (_text is not null) return;
 
