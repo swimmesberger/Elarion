@@ -129,6 +129,16 @@ Writes are change-tracker-free and immediate (they never flush the caller's unre
 with a `version` column backing optimistic concurrency. Generate and apply an EF migration for the
 `elarion_settings` table; the framework ships no migrations.
 
+**Database providers.** The store is provider-neutral EF Core: table and column names are resolved from your
+model, and the two raw statements it issues (the create-path `INSERT` and the last-write-wins
+`UPDATE … RETURNING`) are built from that model rather than hard-coded for one dialect. **PostgreSQL and
+SQLite are both exercised by the test suite**; any relational provider whose SQL supports `RETURNING` should
+behave the same (SQLite has supported it since 3.35 — every bundled `Microsoft.Data.Sqlite` native build is
+far newer). On SQLite, pair the store with the default in-process change source: a SQLite database file
+implies a single application node, and in-process notification already reaches every watcher in that process.
+The multi-node change source below is deliberately PostgreSQL-only — with SQLite there is no second node to
+notify.
+
 **Change notification and transactions.** A store write enlists in the context's ambient transaction when one
 is open, and the default in-process notifier is **commit-gated** to match: a write made *outside* a transaction
 is announced immediately (it is already durable), while a write made *inside* a caller-owned transaction is
@@ -144,7 +154,8 @@ same commit-gated delivery to **every** node.
 not observed by another node's watchers or scheduler until that node restarts. When the EF Core store is
 paired with the in-process source, `AddElarionSettingsEntityFrameworkCore` registers a startup service that
 logs a **Warning** making this limitation visible at runtime; registering the PostgreSQL source below silences
-it.
+it. In a deliberately single-node deployment — a SQLite-backed host, say — the warning is informational and
+safe to ignore: there is no other node whose watchers could go stale.
 
 ## Multi-node change notification (PostgreSQL LISTEN/NOTIFY)
 

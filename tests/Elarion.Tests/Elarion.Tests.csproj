@@ -10,6 +10,7 @@
     </PackageReference>
     <PackageReference Include="EFCore.NamingConventions"/>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL"/>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite"/>
     <PackageReference Include="Testcontainers.Azurite"/>
     <PackageReference Include="Testcontainers.PostgreSql"/>
     <PackageReference Include="xunit.v3.mtp-v2"/>

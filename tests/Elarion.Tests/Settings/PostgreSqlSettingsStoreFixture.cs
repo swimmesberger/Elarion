@@ -10,13 +10,13 @@ namespace Elarion.Tests.Settings;
 /// settings schema once. When Docker is not available the fixture records a skip reason instead of failing,
 /// so the suite still runs (and these tests skip) on machines without Docker.
 /// </summary>
-public sealed class PostgreSqlSettingsStoreFixture : IAsyncLifetime {
+public sealed class PostgreSqlSettingsStoreFixture : IAsyncLifetime, ISettingsStoreFixture {
     private PostgreSqlContainer? _container;
 
-    /// <summary>Gets a value indicating whether the container started and the schema is ready.</summary>
+    /// <inheritdoc />
     public bool IsAvailable { get; private set; }
 
-    /// <summary>Gets the reason the integration tests are skipped when <see cref="IsAvailable"/> is false.</summary>
+    /// <inheritdoc />
     public string SkipReason { get; private set; } = "";
 
     /// <summary>Gets the container connection string, for tests that open their own connections.</summary>
@@ -46,7 +46,7 @@ public sealed class PostgreSqlSettingsStoreFixture : IAsyncLifetime {
         if (_container is not null) await _container.DisposeAsync();
     }
 
-    /// <summary>Creates a fresh context bound to the container, so each test owns its own connection.</summary>
+    /// <inheritdoc />
     public SettingsIntegrationDbContext CreateContext() {
         return new SettingsIntegrationDbContext(new DbContextOptionsBuilder<SettingsIntegrationDbContext>()
             .UseNpgsql(ConnectionString)
