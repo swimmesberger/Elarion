@@ -334,7 +334,11 @@ public class TcpSendBenchmarks {
         san.AddDnsName("localhost");
         san.AddIpAddress(IPAddress.Loopback);
         request.CertificateExtensions.Add(san.Build());
-        return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        using var ephemeral =
+            request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        // CreateSelfSigned yields an ephemeral private key, which Windows Schannel cannot use for a
+        // server-side handshake; round-trip through PKCS#12 so every platform's TLS stack accepts the key.
+        return X509CertificateLoader.LoadPkcs12(ephemeral.Export(X509ContentType.Pfx), null);
     }
 
     /// <summary>Writes never complete until disposal faults them — pins one admitted send so the
