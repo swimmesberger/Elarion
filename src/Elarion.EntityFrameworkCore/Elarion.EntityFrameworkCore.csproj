@@ -1,8 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Entity Framework Core source-generation markers for Elarion applications.</Description>
+    <Description>Entity Framework Core source-generation markers and opt-in model conventions for Elarion applications.</Description>
   </PropertyGroup>
+
+  <!-- The opt-in value-shape conventions (ElarionValueComparers, HasElarionJsonStringArray,
+       UseElarionEnumStringConversions) configure a real ModelBuilder, so this package carries EF Core itself.
+       The provider-neutral base package is deliberate: nothing here touches a provider API. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore"/>
+  </ItemGroup>
 
   <!-- Bundle the EF Core source generator's analyzer into this marker package. NuGet analyzer assets
        are not transitive, so shipping the generator inside the package that a configuration assembly

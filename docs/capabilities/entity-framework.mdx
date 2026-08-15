@@ -248,6 +248,84 @@ inspectable and AOT-friendly. The trade-off is explicit participation: each enti
   generation — see [Blob storage](/docs/capabilities/blob-storage).
 </Callout>
 
+## Value-shape conventions
+
+Three conveniences every EF consumer ends up hand-rolling. All **opt-in**, all no-configuration: the call
+*is* the decision, and per-property deviation is already expressible in that property's own configuration.
+
+### Enums as text
+
+`modelBuilder.UseElarionEnumStringConversions()` stores every enum property in the model as its **name**
+rather than its ordinal. A text column survives reordering or inserting enum members and reads as itself in a
+database you migrate and debug; an ordinal column silently re-points every existing row when the enum is
+edited. Call it as a post-pass, after the configurations have run:
+
+```csharp
+protected override void OnModelCreating(ModelBuilder modelBuilder) {
+    base.OnModelCreating(modelBuilder);
+    ConfigureEntities(modelBuilder);              // generated
+    modelBuilder.UseElarionEnumStringConversions();
+}
+```
+
+Nullable enums are covered. **Explicit configuration always wins** — a property that already declares a value
+converter or a provider CLR type is left alone, so one enum stored as an ordinal opts out by saying so:
+
+```csharp
+builder.Property(e => e.Status).HasConversion<int>();   // untouched by the pass
+```
+
+### A `string[]` column, converter and comparer together
+
+`HasElarionJsonStringArray()` stores a `string[]` as a JSON text column **and** attaches the matching
+comparer in the same call:
+
+```csharp
+builder.Property(e => e.Tags).HasElarionJsonStringArray();
+```
+
+The pairing is the point. A converted collection with no comparer is compared by *reference*, so EF misses
+every in-place edit (`entity.Tags[0] = "…"` never saves). And a hand-rolled comparer is where the subtle bug
+lives: EF snapshots the property to detect changes, so its equality and hashing halves must **agree** —
+pairing an order-*independent* equality with an order-*dependent* hash (or the reverse) breaks the
+`GetHashCode` contract, and change detection then depends on how the elements happened to be ordered.
+
+`ElarionValueComparers.Sequence<T>()` (arrays) and `ElarionValueComparers.SequenceList<T>()` (`List<T>`)
+expose that comparer for your own converters. Both are consistently **order-dependent**: equality is
+`SequenceEqual`, the hash aggregates the same elements in order, and the snapshot is a shallow copy —
+reordering a stored list is a change, which is the right default when the persisted order is part of the
+value.
+
+```csharp
+builder.Property(e => e.Tags)
+    .HasConversion(
+        tags => string.Join(',', tags),
+        value => value.Split(',', StringSplitOptions.RemoveEmptyEntries),
+        ElarionValueComparers.Sequence<string>());
+```
+
+Serialization goes through the package's own source-generated JSON context, so the column encoding is
+reflection-free (trim/AOT-safe) and never moves when a host retunes its wire JSON. A `null` or empty column
+reads back as an empty array, so a column added by a migration without a backfill is readable.
+
+### Sortable `DateTimeOffset` on SQLite — a recipe, not an API
+
+SQLite has no native `DateTimeOffset`: EF stores it as text, and `ORDER BY` on that text is not a
+chronological order across differing offsets. If a SQLite-backed query needs newest-first at the database
+(rather than sorting client-side), store a sortable surrogate — `UtcTicks` as `long`:
+
+```csharp
+builder.Property(e => e.OccurredAt)
+    .HasConversion(
+        value => value.UtcTicks,
+        ticks => new DateTimeOffset(ticks, TimeSpan.Zero));
+```
+
+Two consequences to accept deliberately: the original **offset is discarded** — every value reads back as
+UTC, so keep the local offset in its own column if the application needs it — and the column is opaque in a
+SQL client. This stays a documented recipe rather than a shipped API because it is provider-specific and
+lossy; Elarion's centre of gravity is PostgreSQL, where `timestamptz` sorts correctly with no surrogate.
+
 ## Pagination
 
 List handlers page against the `DbContext` and return the shared, transport-neutral `Page<T>`

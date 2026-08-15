@@ -51,7 +51,7 @@ no provider.
 
 | Package | Add it when |
 | --- | --- |
-| `Elarion.EntityFrameworkCore` | EF models need generated `DbSet`s, entity configuration application, key conventions, or keyset paging support. |
+| `Elarion.EntityFrameworkCore` | EF models need generated `DbSet`s, entity configuration application, key conventions, keyset paging support, or the opt-in value-shape conventions (`UseElarionEnumStringConversions`, `HasElarionJsonStringArray`, `ElarionValueComparers`). Depends on `Microsoft.EntityFrameworkCore` (provider-neutral) for those conventions. |
 | `Elarion.EntityFrameworkCore.UnitOfWork` | Handler transactions need the EF-backed `IUnitOfWork`, PostgreSQL lock timeout, and savepoints. |
 | `Elarion.Paging` | EF queries need keyset/offset execution, opaque cursors, sort maps, or authorization-aware list filtering. |
 | `Elarion.EntityFrameworkCore.BulkOperations` | EF code needs provider-neutral streaming `ExecuteInsertAsync` and the bulk provider seam. |
