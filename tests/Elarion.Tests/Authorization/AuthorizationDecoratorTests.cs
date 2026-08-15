@@ -32,6 +32,22 @@ public sealed class AuthorizationDecoratorTests {
             requireAuthenticatedByDefault);
     }
 
+    private static AuthorizationDecorator<GuardedCommand, Result<string>> DecorateWithGlobalRules(
+        Type handlerType,
+        ICurrentUser user,
+        IEnumerable<IGlobalAuthorizationRule> globalRules,
+        bool requireAuthenticatedByDefault = false) {
+        var inner = new StubInnerHandler<GuardedCommand, Result<string>>(Result<string>.Success("ok"));
+        var authorizer = new ClaimsAuthorizer(
+            user, [], new StubResourceAuthorizer(), new AuthorizationOptions(),
+            NullLogger<ClaimsAuthorizer>.Instance, globalRules);
+        return new AuthorizationDecorator<GuardedCommand, Result<string>>(
+            inner,
+            new HandlerMetadata(handlerType, typeof(GuardedCommand), typeof(Result<string>)),
+            authorizer,
+            requireAuthenticatedByDefault);
+    }
+
     private static AuthorizationDecorator<GuardedCommand, Result<string>> DecorateWithResource(
         ICurrentUser user,
         IResourceAuthorizer resourceAuthorizer) {
@@ -189,6 +205,49 @@ public sealed class AuthorizationDecoratorTests {
             m.InstrumentName == "handler.authorization.denied.count" &&
             m.HasTag("elarion.handler", nameof(RequirePermissionHandler)) &&
             m.HasTag("elarion.authorization.outcome", "unauthorized"));
+    }
+
+    [Fact]
+    public async Task GlobalRuleDenial_ShortCircuitsTheHandler_AndTagsOutcomeLikeAnyOtherDenial() {
+        using var meters = new MeterCollector(HandlerTelemetry.MeterName);
+        using var handlerActivity = new Activity("handle").Start();
+        var calls = new List<string>();
+        var inner = new StubInnerHandler<GuardedCommand, Result<string>>(Result<string>.Success("ok"));
+        var authorizer = new ClaimsAuthorizer(
+            new FakeCurrentUser { IsAuthenticated = true, Claims = [("permission", "tenants.write")] },
+            [], new StubResourceAuthorizer(), new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance,
+            [new RecordingGlobalRule(AppError.Forbidden("Workspace suspended."), calls, "rule")]);
+        var decorator = new AuthorizationDecorator<GuardedCommand, Result<string>>(
+            inner,
+            new HandlerMetadata(typeof(RequirePermissionHandler), typeof(GuardedCommand), typeof(Result<string>)),
+            authorizer);
+
+        var result = await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
+
+        // The declared permission is satisfied — only the global rule denies, and the handler never runs.
+        result.Error.Kind.Should().Be(ErrorKind.Forbidden);
+        result.Error.Message.Should().Be("Workspace suspended.");
+        inner.WasInvoked.Should().BeFalse();
+        handlerActivity.GetTagItem("elarion.authorization.outcome").Should().Be("forbidden");
+        meters.Measurements.Should().Contain(m =>
+            m.InstrumentName == "handler.authorization.denied.count" &&
+            m.HasTag("elarion.handler", nameof(RequirePermissionHandler)) &&
+            m.HasTag("elarion.authorization.outcome", "forbidden"));
+    }
+
+    [Fact]
+    public async Task GlobalRulePasses_HandlerRuns() {
+        var calls = new List<string>();
+        var decorator = DecorateWithGlobalRules(
+            typeof(NoAttributesHandler),
+            new FakeCurrentUser { IsAuthenticated = true },
+            [new RecordingGlobalRule(null, calls, "rule")],
+            true);
+
+        var result = await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeTrue();
+        calls.Should().Equal("rule");
     }
 
     [Fact]

@@ -145,6 +145,71 @@ services.AddElarionAuthorizationPolicy<AtLeast21Policy>();            // reads t
 services.AddElarionAuthorizationPolicy("AtLeast21", (ctx, ct) => ...); // inline delegate
 ```
 
+### Global rules — one condition across every handler
+
+A named policy answers "does *this* handler's declared requirement hold". Some conditions are not per-handler at
+all: a suspended tenant, a lapsed subscription, a read-only maintenance window. Register an
+`IGlobalAuthorizationRule` and it runs for **every** authorized invocation — after the authenticated gate, before
+the declared permission/role/claim/policy/resource checks:
+
+```csharp
+public sealed class ActiveSubscriptionRule(ITenantContext tenants) : IGlobalAuthorizationRule {
+    public async ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
+        var tenant = await tenants.GetCurrentAsync(ct);
+        return tenant.IsSuspended ? AppError.Forbidden("This workspace is suspended.") : null;   // null => pass
+    }
+}
+
+builder.Services.AddElarionGlobalAuthorizationRule<ActiveSubscriptionRule>();
+```
+
+Rules are additive and run in **registration order**; the first non-null `AppError` wins and reaches the caller
+**unchanged**, so the rule — not the framework — chooses the outcome kind. A rule that must not disclose a
+resource returns `AppError.NotFound(...)`; one that states the denial plainly returns `AppError.Forbidden(...)`.
+The `AuthorizationContext` carries the current user and the handler request, so a rule can scope itself to a
+request shape (e.g. only writes) without touching the handler.
+
+<Callout type="warn">
+A rule only runs **where the authorization decorator is attached**, and the generator attaches it at compile time
+only for handlers carrying a `Require*` attribute or in scope of `[ElarionAuthorizationDefaults]`. To have a
+global rule cover *literally every* handler, pair it with the assembly-level default:
+
+```csharp
+[assembly: ElarionAuthorizationDefaults] // RequireAuthenticated = true
+```
+
+`[AllowAnonymous]` handlers opt out of authorization entirely, global rules included — that attribute means "this
+operation is outside authorization", and a rule must not resurrect a gate the handler declined. A check that must
+also cover anonymous traffic belongs in the handler or in host middleware.
+</Callout>
+
+### Replacing or decorating the authorizer
+
+Every registration in `AddElarionAuthorization()` uses `TryAdd`, and the concrete `ClaimsAuthorizer` is registered
+as its own service with the `IAuthorizer` registration resolving it. That pins two seams:
+
+- **Replace** — register your own `IAuthorizer` **before** calling `AddElarionAuthorization()`; the framework then
+  adds nothing for that service.
+- **Decorate** — do the same, and inject the concrete `ClaimsAuthorizer` as your inner authorizer. Both resolve to
+  the same scoped instance, so there is no second authorizer and no `RemoveAll` gymnastics:
+
+```csharp
+public sealed class AuditingAuthorizer(ClaimsAuthorizer inner, IAuditSink sink) : IAuthorizer {
+    public async ValueTask<AppError?> AuthorizeAsync(
+        AuthorizationRequirements requirements, object? resource, CancellationToken ct) {
+        var error = await inner.AuthorizeAsync(requirements, resource, ct);
+        if (error is not null) await sink.RecordDenialAsync(error, ct);
+        return error;
+    }
+}
+
+builder.Services.AddScoped<IAuthorizer, AuditingAuthorizer>();   // registered first — TryAdd defers to it
+builder.Services.AddElarionAuthorization();                      // still registers ClaimsAuthorizer itself
+```
+
+Reach for a global rule when the condition is a *decision*; reach for decoration when you need to observe or
+reshape decisions the shipped authorizer already makes.
+
 ## Provider neutrality
 
 Authorization depends only on `ICurrentUser`, so the same `[Require*]` handlers work under any
