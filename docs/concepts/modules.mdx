@@ -41,8 +41,8 @@ For every `[AppModule]`, the generators emit a sibling partial class named by ap
 module's type name plus that suffix, so the host bootstrapper can always find and call it without any
 extra manifest metadata.
 
-`ConfigureDefaultServices` aggregates the module's discovered building blocks through six
-`static partial void` hooks, invoked in this deterministic order:
+`ConfigureDefaultServices` aggregates the module's discovered building blocks through a
+`static partial void` hook per category, invoked in a deterministic order:
 
 | Hook | Registers |
 | --- | --- |
@@ -52,6 +52,11 @@ extra manifest metadata.
 | `AddScheduledJobs` | The module's [scheduled jobs](/docs/capabilities/scheduling). |
 | `AddEventConsumers` | The module's [event consumers](/docs/capabilities/events/consuming-events). |
 | `AddModuleApi` | The module's generated [module API](/docs/concepts/cross-module-communication) facades. |
+| `AddJsonTypeInfoResolver` | The module's `GetJsonTypeInfoResolver()` context, contributed through `ConfigureElarionJson` — see [serialization](/docs/capabilities/serialization). |
+
+The JSON hook is what makes module composition **self-contained**: registering a module brings its
+`System.Text.Json` metadata along, so a test host that cannot reference the host assembly's generated
+`ElarionBootstrapper` still gets it.
 
 Each category generator contributes the filler partial that implements its hook (calling the existing
 per-module `Add{Module}…` registration method). A hook for a category the module doesn't use elides to

@@ -95,7 +95,12 @@ internal static class AppModuleDiscovery {
         return EquatableArray<string>.Empty;
     }
 
-    private static bool HasStaticMethod(INamedTypeSymbol type, string name, int paramCount) {
+    /// <summary>
+    /// Whether <paramref name="type"/> declares a static <paramref name="name"/> method taking exactly
+    /// <paramref name="paramCount"/> parameters — the convention-hook probe shared by every module discovery, so
+    /// the manifest, the bootstrapper, and the per-module defaults skeleton agree on what a hook looks like.
+    /// </summary>
+    public static bool HasStaticMethod(INamedTypeSymbol type, string name, int paramCount) {
         foreach (var member in type.GetMembers(name))
             if (member is IMethodSymbol { IsStatic: true } method && method.Parameters.Length == paramCount)
                 return true;

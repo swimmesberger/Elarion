@@ -21,11 +21,25 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
     public JsonSerializerOptions Options => _options.Value;
 
     public JsonTypeInfo<T> GetTypeInfo<T>() {
-        return (JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T));
+        return (JsonTypeInfo<T>)GetTypeInfo(typeof(T));
     }
 
     public JsonTypeInfo GetTypeInfo(Type type) {
-        return Options.GetTypeInfo(type);
+        ArgumentNullException.ThrowIfNull(type);
+
+        // TryGetTypeInfo rather than GetTypeInfo: the BCL's failure message names only the type, which leaves the
+        // caller guessing at the AOT-strict contract. Composing a module without its JSON context is the common
+        // cause (see AddJsonTypeInfoResolver in the generated ConfigureDefaultServices), so say so.
+        if (Options.TryGetTypeInfo(type, out var info))
+            return info;
+
+        throw new InvalidOperationException(
+            $"No JSON metadata for '{type}': it is in none of the resolvers composed into Elarion's canonical " +
+            "JsonSerializerOptions, and the reflection fallback is off. Add the type to a source-generated " +
+            "JsonSerializerContext and contribute that context with ConfigureElarionJson(o => " +
+            "o.TypeInfoResolvers.Add(MyJsonContext.Default)) — a module's context is contributed automatically by " +
+            "its generated ConfigureDefaultServices, so a container composed without that module's registration " +
+            "(or without AddElarion) never sees it.");
     }
 
     private static JsonSerializerOptions Build(IEnumerable<ElarionJsonConfigurator> configurators) {
@@ -41,9 +55,15 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
         // Ordered, first-match-wins. Host overrides win over everything the framework and transports
         // contributed; then transport envelopes (contributed first within the ordinary list), then
         // module/host contexts.
-        foreach (var resolver in config.OverrideTypeInfoResolvers) options.TypeInfoResolverChain.Add(resolver);
+        //
+        // The same resolver instance may be contributed twice — a module contributes its own context through the
+        // generated ConfigureDefaultServices, and the host bootstrapper contributes every enabled module's context
+        // again through GetAllJsonTypeInfoResolvers. Appending it once keeps the chain (and its first-match order)
+        // exactly what a single contribution would produce. Identity is by instance, which is why a contribution
+        // should hand over a stable resolver — a generated context's .Default singleton is one.
+        foreach (var resolver in config.OverrideTypeInfoResolvers) AddOnce(options, resolver);
 
-        foreach (var resolver in config.TypeInfoResolvers) options.TypeInfoResolverChain.Add(resolver);
+        foreach (var resolver in config.TypeInfoResolvers) AddOnce(options, resolver);
 
         // The framework's own types that no app/module context would register (e.g. the ValidationErrorData behind
         // AppError.Data's polymorphic object slot) must always be resolvable, so a failed Result serializes its
@@ -59,6 +79,15 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
         config.PostConfigure?.Invoke(options);
         options.MakeReadOnly();
         return options;
+    }
+
+    /// <summary>Appends <paramref name="resolver"/> unless that exact instance is already in the chain.</summary>
+    private static void AddOnce(JsonSerializerOptions options, IJsonTypeInfoResolver resolver) {
+        foreach (var existing in options.TypeInfoResolverChain)
+            if (ReferenceEquals(existing, resolver))
+                return;
+
+        options.TypeInfoResolverChain.Add(resolver);
     }
 
     [UnconditionalSuppressMessage("Trimming", "IL2026",
