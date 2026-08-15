@@ -188,13 +188,15 @@ tier `TryAddSingleton`s an `NpgsqlDataSource`, and `AddElarionPostgreSqlClientEv
 `AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString))` and the host runs **two pools against one
 database** — each sized independently, each counting separately against `max_connections`.
 
-Register one data source in the container and let everything resolve it:
+Build one data source, register it, and hand it explicitly to everything that would otherwise pool for
+itself:
 
 ```csharp
 var connectionString = builder.Configuration.GetConnectionString("Database")!;
 
-// One pool for the whole host. Registered as a factory, so the container owns and disposes it.
-builder.Services.AddNpgsqlDataSource(connectionString);
+// One pool for the whole host. Registered through a factory delegate, so the container disposes it.
+var dataSource = NpgsqlDataSource.Create(connectionString);
+builder.Services.AddSingleton(_ => dataSource);
 
 // The parameterless UseNpgsql() resolves the registered NpgsqlDataSource — no second pool.
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql());
@@ -202,20 +204,38 @@ builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql());
 // Blob registrations need no connection argument: they draw from the context's connection.
 builder.Services.AddElarionPostgreSqlBlobLifecycle<AppDbContext>();
 builder.Services.AddElarionPostgreSqlStagedUploads<AppDbContext>();
+
+// These would each build their own pool from a connection string — pass the shared source instead.
+builder.Services.AddElarionPostgreSqlClientEvents(dataSource);
+builder.Services.AddElarionPostgreSqlSettingsChanges(dataSource);
+builder.Services.AddElarionPostgreSqlHandlerCaching(options => options.DataSource = dataSource);
 ```
 
-The Elarion registrations that *do* build a data source use `TryAddSingleton`, so a source the host
-registered first always wins and the framework never overwrites it. The two `LISTEN/NOTIFY` siblings
-(`AddElarionPostgreSqlClientEvents`, `AddElarionPostgreSqlSettingsChanges`) each expose an
-`NpgsqlDataSource` overload next to the connection-string one — they borrow the source you pass and do
-not dispose it. Weigh that choice deliberately: a listen connection is held open for the life of the
-process, so sharing the application pool permanently consumes one of its connections.
+Sharing is **not** uniform across the packages, so read the registration you are calling:
+
+| Registration | Connection-string form | How it shares the host's pool |
+| --- | --- | --- |
+| `AddElarionPostgreSql` (EF-free SQL tier) | `TryAddSingleton`s an `NpgsqlDataSource` built from the string | Automatically — a source the host registered first wins, because `TryAdd` does not overwrite it. |
+| `AddElarionPostgreSqlClientEvents` | Calls `NpgsqlDataSource.Create(connectionString)` inside its factory | Only through the explicit `NpgsqlDataSource` overload; the string form never consults DI. |
+| `AddElarionPostgreSqlSettingsChanges` | Calls `NpgsqlDataSource.Create(connectionString)` inside its factory | Only through the explicit `NpgsqlDataSource` overload; the string form never consults DI. |
+| `AddElarionPostgreSqlHandlerCaching` | Sets the cache's `ConnectionString` option, and the cache builds its own source | Only through the options overload, setting `options.DataSource`. |
+| `AddElarionPostgreSql*Blob*` / `*StagedUploads` | No connection argument at all | Always — they clone from the `DbContext` connection. |
+
+If your host only pairs EF with the blob packages, `builder.Services.AddNpgsqlDataSource(connectionString)`
+is the shorter equivalent of the first two lines: nothing else needs the instance in hand.
+
+The `NpgsqlDataSource`/options overloads all **borrow** the source you pass and never dispose it, which is
+why the container has to own it. Weigh the `LISTEN/NOTIFY` pair deliberately, though: a listen connection
+is held open for the life of the process, so pointing client events or settings changes at the application
+pool permanently consumes one of its connections — size the pool for it, or leave those two on their own
+source.
 
 <Callout type="warn">
-Register the data source **through a factory** — `AddNpgsqlDataSource(connectionString)`, or
-`services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString))` — and never a prebuilt instance
-(`services.AddSingleton(NpgsqlDataSource.Create(connectionString))`). A DI container disposes only the
-instances it created itself, so a prebuilt source survives its host's shutdown and leaks its entire pool.
+Register the data source **through a factory delegate** — `AddNpgsqlDataSource(connectionString)`, or
+`services.AddSingleton(_ => dataSource)` as in the recipe above — and never through the instance
+overload (`services.AddSingleton(NpgsqlDataSource.Create(connectionString))`). The container disposes
+what it hands out from a factory, but never an instance it was simply given, so an instance-registered
+source survives its host's shutdown and leaks its entire pool.
 One long-lived process hides that; an integration suite does not — a `WebApplicationFactory` per test
 class leaks one pool per host until PostgreSQL answers `53300: too many clients already`.
 </Callout>
