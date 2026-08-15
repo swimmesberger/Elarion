@@ -50,7 +50,9 @@ The options are **composed** from contributions, in order (first-match-wins):
    `GetJsonTypeInfoResolver()`, and the generated `AddElarion(configuration)` contributes every enabled module's
    again (gated by `Modules:{Name}:Enabled`). The same resolver instance composes into the chain **once**.
 3. **Host extras** — anything you add via `ConfigureElarionJson`.
-4. **The framework context** — `ElarionFrameworkJsonContext`, always seeded last (see below).
+4. **The framework context** — `ElarionFrameworkJsonContext`, seeded automatically (see below). It is
+   appended last *unless* a host contributed that same instance earlier, in which case it stays where the
+   host put it — the chain composes each resolver instance once.
 
 <Callout type="info">
   Because the module's context rides along with its own registration, **composing a module is self-contained**: a
