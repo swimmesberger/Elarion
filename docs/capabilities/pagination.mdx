@@ -224,14 +224,24 @@ entry. Offset pages fill `Total`; keyset pages fill the cursors instead.
 they are simply always `null`. The rule for a client is short:
 
 - `total` is **always present** on an offset endpoint (`ToOffsetPageAsync` counts the filtered query
-  every call), so page numbers are computable: `totalPages = Math.ceil(total / size)`.
+  every call), so page numbers are computable: `totalPages = Math.ceil(total / size)` — where `size` is
+  the **effective** page size, not necessarily the one you sent.
 - `startCursor` and `endCursor` are **always `null`** — ignore them. Do not build a "next page" from
   them, and do not treat their absence as an error.
 - `hasNext` / `hasPrevious` are filled on both strategies, so a plain prev/next control needs nothing
   else.
 
+The effective size matters because the server [clamps `Size`](#keyset-pagination) to the handler's
+`maxSize` (default `100`) and substitutes `20` for anything below `1` — and `Page<T>` does not echo the
+size back. Divide by the size the server would actually have used, or the last page number is wrong
+whenever a client over-asks:
+
 ```ts
-const size = 20
+// Mirror the handler's maxSize; the server clamps and the envelope never reports what it used.
+const MAX_SIZE = 100
+const requested = 20
+const size = Math.min(requested < 1 ? 20 : requested, MAX_SIZE)
+
 const page = await rpc.clients.list({ page: 1, size, sort: '-createdAt' })
 
 // Offset endpoint: `total` is set, the cursors are not.
@@ -240,6 +250,9 @@ const totalPages = Math.ceil((page.total ?? 0) / size)
 renderRows(page.items)
 renderPager({ totalPages, canPrev: page.hasPrevious, canNext: page.hasNext })
 ```
+
+The simplest way to stay honest is to never send a size above the handler's `maxSize` in the first
+place — then requested and effective size are the same number.
 
 The uniform shape is deliberate: every list endpoint — keyset feed or numbered table — hands the client
 the same envelope, so one list component, one Zod schema, and one cache key strategy cover both. A
@@ -262,14 +275,14 @@ public sealed record Query {
     public int Page { get; init; } = 1;
     public int PageSize { get; init; } = 20;          // this endpoint's own wire name
     public string? SortBy { get; init; }
-    public SortDirection Direction { get; init; } = SortDirection.Ascending;
+    public bool Descending { get; init; }             // this endpoint's own wire shape
 }
 
 public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, CancellationToken ct) {
     var paging = new OffsetPageRequest {
         Page = query.Page,
         Size = query.PageSize,
-        Sort = query.Direction == SortDirection.Descending ? $"-{query.SortBy}" : query.SortBy,
+        Sort = query.Descending ? $"-{query.SortBy}" : query.SortBy,
     };
 
     return await db.Clients
