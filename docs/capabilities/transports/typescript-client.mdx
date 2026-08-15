@@ -25,6 +25,23 @@ It emits three files:
 The schema and client files import `zod` (v3 and v4 are both supported), so install it as a runtime
 dependency in the consuming app.
 
+<Callout type="warn">
+  **Pin the generator to the backend's version.** The npm `latest` dist-tag tracks stable releases and
+  can lag behind the backend packages, which publish a `-preview.N` build from every push to `main`.
+  When your host runs a preview version, install the **matching exact preview version** of the
+  generator rather than a `^` range — otherwise the generator reads a newer `rpc-schema.json` with an
+  older code path and silently emits less than the schema describes (a missing emitted file such as
+  `session-client.ts`, or absent params schemas, are the usual symptoms):
+
+  ```bash
+  # Use the exact version your host's Elarion packages resolve to, e.g. 0.2.7-preview.42.1
+  npm install --save-dev --save-exact \
+    @swimmesberger/elarion-jsonrpc-client-generator@<backend-version>
+  ```
+
+  Move both sides together: bump the backend packages and the generator in the same change.
+</Callout>
+
 The emitted Zod schemas are **constraint-aware**: the DataAnnotations attributes on the server's
 request DTOs flow through the exported schema into the client (see
 [Validation](/docs/concepts/validation)) — `minLength`/`maxLength` become `.min()`/`.max()`,
