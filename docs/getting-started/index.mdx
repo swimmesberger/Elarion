@@ -30,3 +30,15 @@ three pages in order — each builds on the last.
     everything else.
   </Card>
 </Cards>
+
+<Callout type="warn">
+  **Don't learn from the Swerp repository.** The public `swimmesberger/Swerp` repository predates the
+  current generator model: it vendors an older copy of Elarion and hand-writes the per-module
+  `services.AddXHandlers()` / `AddXServices()` registrations that `[GenerateModuleBootstrapper]` and the
+  generated `ConfigureDefaultServices` now emit for you — copying that pattern onto current packages
+  double-registers everything (see [Modules](/docs/concepts/modules)). Use the
+  [tutorial](/docs/tutorial) and its compiled billing sample under
+  [`samples/`](https://github.com/swimmesberger/Elarion/tree/main/samples) as the current reference
+  instead. One gap to know about: the billing sample authenticates with JWT bearer tokens, so the
+  ASP.NET [Identity](/docs/capabilities/identity) path has no sample of its own yet.
+</Callout>
