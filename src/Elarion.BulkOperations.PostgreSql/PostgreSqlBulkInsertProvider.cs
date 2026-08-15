@@ -90,9 +90,13 @@ internal sealed class PostgreSqlBulkInsertProvider : IBulkInsertProvider {
         CancellationToken cancellationToken)
         where TEntity : class {
         var sqlHelper = context.GetService<ISqlGenerationHelper>();
-        // Random (not time-ordered) suffix: concurrent calls on other connections may stage at the
-        // same instant, and temp names only need to be unique within this call's session anyway.
+        // Random (not time-ordered) suffix, deliberately v4: the name is truncated to its first eight hex
+        // digits, which for a v7 are the high bits of the millisecond timestamp — identical for every stage
+        // within the same ~65s window, so concurrent calls on other connections would collide. Temp names only
+        // need to be unique within this call's session, and this one is never persisted or indexed.
+#pragma warning disable ELID001 // Truncated prefix must be random; see above.
         var tempTable = sqlHelper.DelimitIdentifier("elarion_bulk_stage_" + Guid.NewGuid().ToString("N")[..8]);
+#pragma warning restore ELID001
         // Conflict metadata is validated before the connection opens, so misconfiguration fails loud
         // without touching the database.
         var mergeSql = BuildMergeSql(plan, options, sqlHelper, tempTable);

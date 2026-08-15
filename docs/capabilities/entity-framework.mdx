@@ -107,6 +107,13 @@ business data by id; that is what `CreatedAt` is for. The one place to keep a ra
 an id that must be *unpredictable* (a capability-style token) — precisely because a v7 id leaks its creation
 timestamp.
 
+<Callout type="info">
+  **ELID001** (Warning, category `Elarion.Identity`) flags every `Guid.NewGuid()` call and names
+  `Guid.CreateVersion7()` as the replacement. Flagging every site is deliberate: whether a given id becomes a
+  key is not decidable at the call site. At the unpredictable-id site, keep v4 and suppress `ELID001` with a
+  justification — that turns the exception into an argued, visible choice instead of an accidental one.
+</Callout>
+
 ### The model declares client-assigned keys
 
 EF Core's default convention claims the opposite of the idiom above: a `Guid` primary key is declared
