@@ -58,6 +58,15 @@ The JSON hook is what makes module composition **self-contained**: registering a
 `System.Text.Json` metadata along, so a test host that cannot reference the host assembly's generated
 `ElarionBootstrapper` still gets it.
 
+<Callout type="warn">
+  `GetJsonTypeInfoResolver()` must be **pure and return a stable instance** — a generated context's `.Default`
+  singleton, or a `static readonly` field you build once. It is now invoked up to twice per host startup (once
+  by the module's own registration, once by the bootstrapper's aggregate), and duplicate contributions are
+  collapsed by **reference** equality. A body that mints a new resolver per call —
+  `JsonTypeInfoResolver.Combine(A.Default, B.Default)` is the usual one — returns a different instance each
+  time, so both land in the chain. Hoist the combination into a `static readonly` field and return that.
+</Callout>
+
 Each category generator contributes the filler partial that implements its hook (calling the existing
 per-module `Add{Module}…` registration method). A hook for a category the module doesn't use elides to
 a no-op, so a module that declares, say, only handlers and services costs nothing for the rest. The
@@ -274,7 +283,7 @@ Every module hook is optional and discovered structurally by signature:
 | `ConfigureServices(IServiceCollection, IConfiguration)` | Register **additional, non-generated** services (options, third-party libraries, manual decorators). Runs after the generated defaults. |
 | `MapEndpoints(IEndpointRouteBuilder)` | Declare module-owned Minimal API endpoints. |
 | `ConfigureEndpointGroup(IEndpointRouteBuilder) → IEndpointRouteBuilder` | Return a route group (prefix, policy, conventions) onto which the module's endpoints are mapped. |
-| `GetJsonTypeInfoResolver() → IJsonTypeInfoResolver` | Contribute the module's source-generated `System.Text.Json` metadata. |
+| `GetJsonTypeInfoResolver() → IJsonTypeInfoResolver` | Contribute the module's source-generated `System.Text.Json` metadata. Must be **pure** and return a **stable instance** (a context's `.Default`, or a `static readonly` field): it is invoked up to twice per startup and duplicates are collapsed by reference, so a per-call `JsonTypeInfoResolver.Combine(…)` lands in the chain twice. |
 
 The two endpoint hooks may also be declared outside the module type on a
 [`[ModuleEndpoints]`](#declaring-the-hooks-outside-the-module-moduleendpoints) contributor class, for

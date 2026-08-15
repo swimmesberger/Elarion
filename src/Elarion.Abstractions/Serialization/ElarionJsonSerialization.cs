@@ -70,8 +70,9 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
         // typed error data under source generation even when the host contributed no context for them. Appended
         // last so any host/module context still wins first-match for an overlapping type; reflection-free, so it
         // keeps core AOT-strict. It also guarantees the chain is never empty, so MakeReadOnly always has a
-        // resolver to freeze.
-        options.TypeInfoResolverChain.Add(ElarionFrameworkJsonContext.Default);
+        // resolver to freeze. Appended through the same once-only path as every contribution, so a host that
+        // also contributes this context explicitly keeps it at the position it asked for rather than twice.
+        AddOnce(options, ElarionFrameworkJsonContext.Default);
 
         // AOT-strict by default: only append the reflection fallback when explicitly opted in.
         if (config.EnableReflectionFallback) options.TypeInfoResolverChain.Add(CreateReflectionFallbackResolver());

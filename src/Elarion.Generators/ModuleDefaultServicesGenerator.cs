@@ -89,7 +89,7 @@ public sealed class ModuleDefaultServicesGenerator : IIncrementalGenerator {
             module.Namespace,
             module.TypeName,
             ModuleDefaultsEmitter.AddJsonTypeInfoResolverMethod,
-            "Json",
+            "JsonTypeInfoResolver",
             $"{JsonExtensionsFqn}.ConfigureElarionJson(services, o => o.TypeInfoResolvers.Add({module.TypeFqn}.GetJsonTypeInfoResolver()));");
     }
 
