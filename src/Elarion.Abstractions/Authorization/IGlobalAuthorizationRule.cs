@@ -23,13 +23,19 @@ namespace Elarion.Abstractions.Authorization;
 /// <para>
 /// <b>A rule only runs where the authorization decorator is attached.</b> The decorator is attached at compile
 /// time by the handler-registration generator, and only for handlers that carry a <c>[Require*]</c> attribute or
-/// that are in scope of <c>[ElarionAuthorizationDefaults]</c>. A host that wants a global rule enforced on
-/// literally every handler must therefore pair it with an assembly-level default, which attaches the decorator
-/// everywhere:
+/// that are in scope of <c>[ElarionAuthorizationDefaults]</c>. A host that wants broad coverage therefore pairs
+/// the rule with an assembly-level default:
 /// </para>
 /// <code>
-/// [assembly: ElarionAuthorizationDefaults(RequireAuthenticated = true)]
+/// [assembly: ElarionAuthorizationDefaults]
 /// </code>
+/// <para>
+/// That covers every handler <b>except event-consumer handlers</b> (a handler whose request implements
+/// <c>IDomainEvent</c>/<c>IIntegrationEvent</c>): the generator deliberately skips <i>implicit</i>
+/// default-driven attachment for those, because consumers are dispatched on a delivery scope with no
+/// authenticated user. A consumer that carries an <b>explicit</b> <c>[Require*]</c> does get the decorator, and
+/// then rules run for it too — so a rule reached from a consumer must tolerate an unauthenticated principal.
+/// </para>
 /// </remarks>
 /// <example>
 /// <code>
@@ -50,5 +56,5 @@ public interface IGlobalAuthorizationRule {
     /// or the <see cref="AppError"/> the caller should receive — returned as-is, so the rule chooses the outcome
     /// kind (forbidden, not-found, conflict, …) and the message.
     /// </summary>
-    ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken cancellationToken);
+    ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken ct);
 }

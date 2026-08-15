@@ -100,13 +100,13 @@ public sealed class AuthorizationPolicyRegistrationTests {
     }
 
     private sealed class PassingRule : IGlobalAuthorizationRule {
-        public ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken cancellationToken) {
+        public ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
             return ValueTask.FromResult<AppError?>(null);
         }
     }
 
     private sealed class DenyingRule : IGlobalAuthorizationRule {
-        public ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken cancellationToken) {
+        public ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
             return ValueTask.FromResult<AppError?>(AppError.Forbidden("rule denied"));
         }
     }

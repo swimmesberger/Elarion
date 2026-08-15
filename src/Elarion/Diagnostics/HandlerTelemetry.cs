@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using Elarion.Abstractions;
 
 namespace Elarion.Diagnostics;
 
@@ -70,6 +71,27 @@ public static class HandlerTelemetry {
         };
         ExecutionCount.Add(1, tags);
         ExecutionDuration.Record(elapsed.TotalSeconds, tags);
+    }
+
+    /// <summary>
+    /// The <c>elarion.authorization.outcome</c> tag value for a denial. Derived from the denial's
+    /// <see cref="ErrorKind"/> rather than collapsed to "forbidden", because an
+    /// <see cref="Abstractions.Authorization.IGlobalAuthorizationRule"/> chooses its own outcome kind — a rule
+    /// that hides a resource answers <see cref="ErrorKind.NotFound"/>, and reporting that as "forbidden" would
+    /// make the metric lie about what the caller received. <see cref="ErrorKind"/> is a closed enum mapped to
+    /// constants here, so tag cardinality stays bounded and no string is allocated per denial.
+    /// </summary>
+    public static string AuthorizationOutcome(ErrorKind kind) {
+        return kind switch {
+            ErrorKind.Unauthorized => "unauthorized",
+            ErrorKind.Forbidden => "forbidden",
+            ErrorKind.NotFound => "not_found",
+            ErrorKind.Conflict => "conflict",
+            ErrorKind.Validation => "validation",
+            ErrorKind.BusinessRule => "business_rule",
+            ErrorKind.Internal => "internal",
+            _ => "forbidden"
+        };
     }
 
     /// <summary>Records one authorization denial tagged with the bounded handler name and outcome.</summary>

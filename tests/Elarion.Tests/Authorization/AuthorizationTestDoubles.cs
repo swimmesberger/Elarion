@@ -63,7 +63,7 @@ internal sealed class RecordingGlobalRule(AppError? error, List<string> calls, s
     : IGlobalAuthorizationRule {
     public AuthorizationContext? LastContext { get; private set; }
 
-    public ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken cancellationToken) {
+    public ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
         LastContext = context;
         calls.Add(name);
         return ValueTask.FromResult(error);

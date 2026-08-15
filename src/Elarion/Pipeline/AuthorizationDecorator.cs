@@ -54,8 +54,10 @@ public sealed class AuthorizationDecorator<TRequest, TResponse>(
         var error = await authorizer.AuthorizeAsync(requirements, request, ct).ConfigureAwait(false);
         if (error is not null) {
             // Denials are a security-relevant signal: tag the handler span and count by outcome so
-            // 401/403 rates are observable per handler without logging caller identity.
-            var outcome = error.Kind == ErrorKind.Unauthorized ? "unauthorized" : "forbidden";
+            // 401/403 rates are observable per handler without logging caller identity. The outcome follows
+            // the denial's kind — a global rule may answer NotFound — and ErrorKind is a closed enum, so
+            // cardinality stays bounded.
+            var outcome = HandlerTelemetry.AuthorizationOutcome(error.Kind);
             Activity.Current?.SetTag("elarion.authorization.outcome", outcome);
             HandlerTelemetry.RecordAuthorizationDenied(metadata.HandlerType.Name, outcome);
             return TResponse.Failure(error);
