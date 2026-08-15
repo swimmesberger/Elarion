@@ -4,8 +4,8 @@
 - Date: 2026-08-15
 - Related: [ADR-0049](0049-role-leases.md) (the one-row identity lease and the coordination taxonomy),
   [ADR-0062](0062-role-affine-routing-and-outbox-delivery.md) (role-affine claims over the outbox's
-  leased rows), [ADR-0064](0064-acknowledgment-gated-outbound-delivery.md) (the second-demand
-  extraction convention this ADR applies).
+  leased rows), [ADR-0064](0064-acknowledgment-gated-outbound-delivery.md) (`Proposed` — the
+  second-demand extraction convention this ADR follows).
 
 ## Context
 
@@ -68,7 +68,7 @@ lease guard.
 ### Do not extract it yet
 
 There is no `Elarion.*` leased-work helper, and this ADR deliberately does not create one. The
-extraction convention recorded in ADR-0064 applies: one consumer's mechanism is that consumer's
+extraction convention *proposed* in ADR-0064 applies: one consumer's mechanism is that consumer's
 implementation detail; **two** make a framework seam. A helper designed against the outbox alone would
 bake in the outbox's shape — its role-group targeting, its attempt/backoff columns, its
 `MessageId`-keyed inbox — and the second consumer would spend more effort escaping the abstraction
@@ -97,7 +97,7 @@ changes outbox delivery semantics is a different ADR.
 - **Extract the helper now, before a second consumer.** Rejected — speculative generalization. The
   only available design input is the outbox, so the "generic" helper would be the outbox with its
   names filed off, and the first genuinely different consumer would force a redesign anyway. ADR-0064
-  recorded the same posture for connection helpers, for the same reason.
+  proposes the same posture for connection helpers, for the same reason.
 - **Leave it entirely undocumented and let the next subsystem copy-paste `EfCoreOutboxStore`.**
   Rejected — copy-paste drops precisely the invariant that matters. The candidate select and the
   stamping update are visibly load-bearing and get copied; the `LockId == lockId` guard on every
