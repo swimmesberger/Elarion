@@ -17,7 +17,10 @@ namespace Elarion.ClientEvents;
 /// <see cref="ClientEventSubscriptionStatus.Unauthenticated"/>; an empty set or a blank topic →
 /// <see cref="ClientEventSubscriptionStatus.InvalidRequest"/>; an unknown topic, a failed topic requirement,
 /// or a resource scope without a passing <see cref="IClientEventSubscriptionAuthorizer"/> →
-/// <see cref="ClientEventSubscriptionStatus.NotFound"/>, deliberately indistinguishable. A topic-only
+/// <see cref="ClientEventSubscriptionStatus.NotFound"/>, deliberately indistinguishable. Any topic that
+/// declares a requirement — including one that only requires authentication — is decided by the registered
+/// <see cref="IAuthorizer"/>, so cross-cutting <see cref="IGlobalAuthorizationRule"/> denials apply to
+/// subscriptions exactly as they do to request/reply. A topic-only
 /// request expands to the topic's global scope plus the caller's own user scope; user scope is always the
 /// caller's own. A topic declaring <c>AllowAnyResource</c> has said "the resource is a routing key, not an
 /// entitlement" — its requirements still apply, but the per-resource authorizer seam is skipped.
@@ -77,17 +80,24 @@ public sealed class ClientEventSubscriptionResolver(ClientEventTopicCatalog cata
     }
 
     private async ValueTask<bool> AuthorizeTopicAsync(AuthorizationRequirements requirements, CancellationToken ct) {
-        // "Authenticated" is already established for the whole resolution; only richer requirements need the
-        // IAuthorizer. Requirements with no evaluator fail closed.
-        var beyondAuthenticated = requirements.Permissions.Count > 0 || requirements.Roles.Count > 0
-                                                                     || requirements.Claims.Count > 0 ||
-                                                                     requirements.Policies.Count > 0 ||
-                                                                     requirements.Resources.Count > 0;
-        if (!beyondAuthenticated) return true;
+        // A topic with no requirements at all needs no decision.
+        if (!requirements.HasAny) return true;
 
         var authorizer = services.GetService<IAuthorizer>();
-        if (authorizer is null) return false;
+        if (authorizer is not null) {
+            // Every requirement-bearing topic is decided by the authorizer, including one that requires nothing
+            // beyond authentication. The authorizer is more than a requirement evaluator: it also runs the
+            // registered IGlobalAuthorizationRule set (a suspended tenant, a maintenance lockdown). Deciding
+            // "authenticated" locally would let a subscription outlive a gate every request/reply handler honors.
+            return await authorizer.AuthorizeAsync(requirements, null, ct) is null;
+        }
 
-        return await authorizer.AuthorizeAsync(requirements, null, ct) is null;
+        // No authorizer registered. Anything beyond "authenticated" has no evaluator and fails closed;
+        // "authenticated" itself was already established for the whole resolution, so a host that never opted
+        // into the authorization package keeps its subscriptions. That is not a hole: a global rule can only
+        // take effect *through* an IAuthorizer, so with none registered there is no rule set being bypassed.
+        return !(requirements.Permissions.Count > 0 || requirements.Roles.Count > 0
+                 || requirements.Claims.Count > 0 || requirements.Policies.Count > 0
+                 || requirements.Resources.Count > 0);
     }
 }

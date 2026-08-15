@@ -6,6 +6,7 @@ using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.ClientEvents;
 using Elarion.Abstractions.Identity;
 using Elarion.Abstractions.Serialization;
+using Elarion.Authorization;
 using Elarion.ClientEvents;
 using Elarion.ClientEvents.AspNetCore;
 using Microsoft.AspNetCore.Builder;
@@ -108,6 +109,45 @@ public sealed partial class ClientEventEndpointsTests {
             SubscriptionsUrl("""[{"topic":"test.invoiceChanged"}]"""), ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Subscribe_AuthenticatedOnlyTopic_ConsultsAuthorizer_SoGlobalRulesApply() {
+        // Regression (#149): the resolver used to decide "authenticated" itself and skip the IAuthorizer for a
+        // topic with no richer requirement — which silently exempted subscriptions from every
+        // IGlobalAuthorizationRule (a suspended tenant, a maintenance lockdown). The real ClaimsAuthorizer is
+        // used here, with a denying global rule, so the wiring is proven end to end rather than through a stub.
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(
+            ct,
+            // The default topic declares no permission or role: authenticated-only, the bypassed case.
+            configureServices: services => {
+                services.AddLogging();
+                services.AddElarionAuthorization();
+                services.AddElarionGlobalAuthorizationRule<SuspendedTenantRule>();
+            });
+
+        var response = await host.Client.GetAsync(
+            SubscriptionsUrl("""[{"topic":"test.invoiceChanged"}]"""), ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Subscribe_AuthenticatedOnlyTopic_WithPassingGlobalRule_Subscribes() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(
+            ct,
+            configureServices: services => {
+                services.AddLogging();
+                services.AddElarionAuthorization();
+            });
+
+        using var response = await host.Client.GetAsync(
+            SubscriptionsUrl("""[{"topic":"test.invoiceChanged"}]"""),
+            HttpCompletionOption.ResponseHeadersRead, ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -243,7 +283,8 @@ public sealed partial class ClientEventEndpointsTests {
         FakeCurrentUser? user = null,
         Action<ClientEventsBuilder>? configureTopics = null,
         IAuthorizer? authorizer = null,
-        IClientEventSubscriptionAuthorizer? subscriptionAuthorizer = null) {
+        IClientEventSubscriptionAuthorizer? subscriptionAuthorizer = null,
+        Action<IServiceCollection>? configureServices = null) {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
@@ -254,6 +295,7 @@ public sealed partial class ClientEventEndpointsTests {
         builder.Services.AddScoped<ICurrentUser>(_ => user ?? new FakeCurrentUser("user-1", true));
         if (authorizer is not null) builder.Services.AddSingleton(authorizer);
         if (subscriptionAuthorizer is not null) builder.Services.AddSingleton(subscriptionAuthorizer);
+        configureServices?.Invoke(builder.Services);
 
         var app = builder.Build();
         app.MapElarionClientEvents();
@@ -294,6 +336,13 @@ public sealed partial class ClientEventEndpointsTests {
         public ValueTask<AppError?> AuthorizeAsync(
             AuthorizationRequirements requirements, object? resource, CancellationToken ct) {
             return ValueTask.FromResult(allow ? null : AppError.Forbidden("Denied."));
+        }
+    }
+
+    /// <summary>A cross-cutting rule that denies every authorized operation — the suspended-tenant shape.</summary>
+    private sealed class SuspendedTenantRule : IGlobalAuthorizationRule {
+        public ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
+            return ValueTask.FromResult<AppError?>(AppError.Forbidden("This workspace is suspended."));
         }
     }
 
