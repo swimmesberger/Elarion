@@ -107,7 +107,49 @@ client.getStringValue('ForecastAlgorithm', 'control')
 ```
 
 Teams that don't want OpenFeature can use `SessionCapabilities` (`isModuleEnabled`, `hasPermission`, `hasRole`,
-`isFlagEnabled`, `getVariant`) directly. Refresh the snapshot (and rebuild the provider) on login or context change.
+`isFlagEnabled`, `getVariant`, `getSection`) directly.
+
+### Keeping the snapshot live
+
+Capabilities change *during* a session — a login, a tenant switch, a subscription upgrade, an admin granting a
+role. `createSessionCapabilitiesStore` wraps the fetch in a **store**: the same synchronous reads, plus
+`refresh()` and `subscribe()`. Its identity is stable while its answers change, so it is placed once and every
+later read sees the current snapshot:
+
+```ts
+import { createSessionCapabilitiesStore, type ClientSnapshot } from './generated/session-client'
+import { createContributionRegistryStore } from '@swimmesberger/elarion-contributions'
+
+export const capabilities = createSessionCapabilitiesStore(
+  async () => (await rpc.elarion.session({})) as ClientSnapshot
+)
+await capabilities.refresh()                  // boot
+
+// The router context holds the store itself — `redirectUnless` re-reads it on every navigation.
+const router = createRouter({ routeTree, context: { caps: capabilities } })
+
+// Slots re-render when the snapshot changes; resolution still goes through the pure registry.
+const registry = createContributionRegistryStore(manifests, capabilities)
+// <ContributionProvider registry={registry}>  (React)   |   provideContributions(registry)  (Angular)
+
+await capabilities.refresh()                  // after a mutation that changes what the user may see
+```
+
+Every read **before the first successful refresh fails closed** — modules, permissions, roles, and flags answer
+`false` — so gated UI stays hidden while the snapshot is in flight instead of flashing and retracting. A failed
+refresh rejects and leaves the previous answers in place. Contributor-fed sections ride along automatically,
+since they are part of the same snapshot.
+
+Applications without a session snapshot get the same reactivity from
+`createCapabilityStore(createStaticCapabilities(...))`, and applications that prefer to own the fetch can keep
+building a fresh `SessionCapabilities`/provider per refresh — the store is opt-in, not a replacement. See
+[ADR-0074](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0074-reactive-client-capabilities.md).
+
+<Callout type="info">
+There is deliberately **no** server push for capability changes yet. A `session.changed` client-event topic needs
+per-user targeting and its own authorization story; `refresh()` after a mutation covers the demand today, and a
+push topic would call the same `refresh()` when it lands.
+</Callout>
 
 ## Contributing session sections
 
@@ -198,5 +240,6 @@ compile-checked on both sides of the wire (see
 - [ADR-0030: Client capability bootstrap](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0030-client-capability-bootstrap.md)
 - [ADR-0031: Imperative handler transport mapping](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0031-imperative-handler-transport-mapping.md)
 - [ADR-0032: Frontend contribution model and the typed capability vocabulary](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0032-frontend-contribution-model.md)
+- [ADR-0074: Reactive client capabilities](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0074-reactive-client-capabilities.md)
 - [Feature flags](/docs/concepts/feature-flags) — the flag/variant seams the snapshot reads.
 - [Custom transports](/docs/capabilities/transports/custom-transports) — declarative vs. imperative exposure.

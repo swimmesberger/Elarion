@@ -94,3 +94,4 @@ designs that are not yet implemented.
 - [ADR-0071: Generator-owned HTTP endpoint binding — RequestDelegate registrations, not RDG](0071-generator-owned-http-endpoint-binding.md)
 - [ADR-0072: Per-endpoint HTTP customization hook and the created-resource envelope](0072-per-endpoint-customization-and-created-envelope.md)
 - [ADR-0073: Leased work rows are a recognized pattern, extracted on second demand](0073-leased-work-rows.md)
+- [ADR-0074: Reactive client capabilities — stores over values, with the registry left pure](0074-reactive-client-capabilities.md)

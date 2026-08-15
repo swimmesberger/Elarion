@@ -4,9 +4,12 @@
 // keep the offending expression on a single line so the directive covers it.
 import type { ReactNode } from "react"
 import {
+  createCapabilityStore,
   createContributionKit,
   createContributionRegistry,
+  createContributionRegistryStore,
   createStaticCapabilities,
+  type CapabilitySource,
   type ContextOf,
   type Contribution,
   type ExtensionPoint,
@@ -14,7 +17,8 @@ import {
   type ModuleManifest,
   type WhenClause,
 } from "../src/index.js"
-import { ExtensionSlot } from "../src/react.js"
+import { ContributionProvider, ExtensionSlot } from "../src/react.js"
+import { provideContributions } from "../src/angular.js"
 import { createRouteGuards } from "../src/tanstack-router.js"
 
 type Expect<T extends true> = T
@@ -136,3 +140,38 @@ export const guardTypo = redirectUnless({ module: "ai-agnet" }, "/")
 // The contribution type stays assignable across vocabularies (bound → base) for interop helpers.
 export const widened: Contribution<SidebarItem> = { id: "core.home", label: "Home" }
 export const pointWidens: ExtensionPoint<SidebarItem, unknown> = sidebarItems
+
+// ─── Reactive snapshot: the store forms are accepted everywhere a registry is (ADR-0074) ─────────────
+const capabilityStore = createCapabilityStore(createStaticCapabilities())
+export const registryStore = createContributionRegistryStore(manifests, capabilityStore)
+
+// A capability store is itself a reader, so it drops into a router context unchanged.
+export const routerContext: { caps: Parameters<typeof createContributionRegistry>[1] } = { caps: capabilityStore }
+
+// Both bindings accept a plain registry and a store.
+export const providerWithRegistry = <ContributionProvider registry={registry}>{null}</ContributionProvider>
+export const providerWithStore = <ContributionProvider registry={registryStore}>{null}</ContributionProvider>
+export const angularWithRegistry = provideContributions(registry)
+export const angularWithStore = provideContributions(registryStore)
+
+// ─── The generated session store satisfies CapabilitySource *structurally* ───────────────────────────
+// Mirrors the `SessionCapabilitiesStore` interface the Elarion client generator emits (`session-client.ts`).
+// Neither package imports the other; this assertion is what pins the shared shape from this side.
+interface GeneratedSessionCapabilitiesStore {
+  readonly current: { readonly user: { readonly id: string } } | undefined
+  refresh(): Promise<unknown>
+  subscribe(listener: () => void): () => void
+  isModuleEnabled(name: "Clients" | "Invoicing" | (string & {})): boolean
+  hasPermission(permission: "clients.read" | (string & {})): boolean
+  hasRole(role: "admin" | (string & {})): boolean
+  isFlagEnabled(name: "beta" | (string & {})): boolean
+  getVariant(name: "beta" | (string & {})): string | undefined
+  getSection<T = unknown>(name: string): T | undefined
+}
+declare const generatedSessionStore: GeneratedSessionCapabilitiesStore
+
+export const sessionStoreIsACapabilitySource: CapabilitySource = generatedSessionStore
+export const sessionStoreDrivesTheRegistry = createContributionRegistryStore(
+  manifests,
+  generatedSessionStore
+)

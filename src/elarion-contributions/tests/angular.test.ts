@@ -7,7 +7,9 @@ import {
 import {describe, expect, it} from "vitest"
 import {
   contribute,
+  createCapabilityStore,
   createContributionRegistry,
+  createContributionRegistryStore,
   defineExtensionPoint,
   type CapabilityReader,
   type ContributionRegistry,
@@ -63,6 +65,22 @@ describe("injectContributions", () => {
 
     source.set(createContributionRegistry([], capabilities(true)))
     expect(items()).toEqual([])
+  })
+
+  it("tracks a ContributionRegistryStore, so a capability change re-resolves the slot", () => {
+    const caps = createCapabilityStore(capabilities(false))
+    const manifest: ModuleManifest = {
+      name: "demo",
+      when: {module: "demo"},
+      contributes: [contribute(point, [{id: "a", label: "A"}])],
+    }
+    const store = createContributionRegistryStore([manifest], caps)
+
+    const items = read(() => injectContributions(point), provideContributions(store))
+    expect(items()).toEqual([])
+
+    caps.set(capabilities(true))
+    expect(items().map((i) => i.id)).toEqual(["a"])
   })
 
   it("throws when no provideContributions() is in the injector tree", () => {

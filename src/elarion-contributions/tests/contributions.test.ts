@@ -1,7 +1,9 @@
-import {describe, expect, it} from "vitest"
+import {describe, expect, it, vi} from "vitest"
 import {
   contribute,
+  createCapabilityStore,
   createContributionRegistry,
+  createContributionRegistryStore,
   createStaticCapabilities,
   defineExtensionPoint,
   defineModule,
@@ -140,6 +142,109 @@ describe("createContributionRegistry", () => {
     })
     const registry = createContributionRegistry([a, b], capabilities({}))
     expect(registry.get(point).map((item) => item.label)).toEqual(["From A"])
+  })
+})
+
+describe("createCapabilityStore", () => {
+  it("delegates every read to the current reader", () => {
+    const store = createCapabilityStore(capabilities({modules: ["A"]}))
+    expect(store.isModuleEnabled("A")).toBe(true)
+    expect(store.isModuleEnabled("B")).toBe(false)
+
+    store.set(capabilities({modules: ["B"], permissions: ["a.read"], roles: ["admin"], flags: ["beta"]}))
+    expect(store.isModuleEnabled("A")).toBe(false)
+    expect(store.isModuleEnabled("B")).toBe(true)
+    expect(store.hasPermission("a.read")).toBe(true)
+    expect(store.hasRole("admin")).toBe(true)
+    expect(store.isFlagEnabled("beta")).toBe(true)
+  })
+
+  it("notifies subscribers on set, and is a no-op for the same reference", () => {
+    const reader = capabilities({})
+    const store = createCapabilityStore(reader)
+    const listener = vi.fn()
+    store.subscribe(listener)
+
+    store.set(reader)
+    expect(listener).not.toHaveBeenCalled()
+
+    store.set(capabilities({modules: ["A"]}))
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("stops notifying after unsubscribe", () => {
+    const store = createCapabilityStore(capabilities({}))
+    const listener = vi.fn()
+    const unsubscribe = store.subscribe(listener)
+
+    store.set(capabilities({modules: ["A"]}))
+    unsubscribe()
+    store.set(capabilities({modules: ["B"]}))
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("drives a route guard's context.caps without the context being rebuilt", () => {
+    // The store's identity is the point: a router context holds it once, and later reads see new answers.
+    const store = createCapabilityStore(capabilities({}))
+    const context = {caps: store}
+    expect(evaluateWhen({module: "A"}, context.caps)).toBe(false)
+    store.set(capabilities({modules: ["A"]}))
+    expect(evaluateWhen({module: "A"}, context.caps)).toBe(true)
+  })
+})
+
+describe("createContributionRegistryStore", () => {
+  const manifest = defineModule({
+    name: "A",
+    contributes: [contribute(point, [{id: "beta", label: "Beta", when: {flag: "beta"}}])],
+  })
+
+  it("rebuilds when the capability source changes — a contribution appears and disappears", () => {
+    const caps = createCapabilityStore(capabilities({}))
+    const store = createContributionRegistryStore([manifest], caps)
+
+    expect(store.current.get(point)).toHaveLength(0)
+
+    caps.set(capabilities({flags: ["beta"]}))
+    expect(store.current.get(point).map((item) => item.id)).toEqual(["beta"])
+
+    caps.set(capabilities({}))
+    expect(store.current.get(point)).toHaveLength(0)
+  })
+
+  it("keeps current referentially stable between changes", () => {
+    const caps = createCapabilityStore(capabilities({flags: ["beta"]}))
+    const store = createContributionRegistryStore([manifest], caps)
+
+    // useSyncExternalStore calls getSnapshot repeatedly per render; an unstable identity would loop forever.
+    expect(store.current).toBe(store.current)
+
+    const before = store.current
+    caps.set(capabilities({}))
+    expect(store.current).not.toBe(before)
+  })
+
+  it("notifies subscribers when the source changes, and stops after unsubscribe", () => {
+    const caps = createCapabilityStore(capabilities({}))
+    const store = createContributionRegistryStore([manifest], caps)
+    const listener = vi.fn()
+    const unsubscribe = store.subscribe(listener)
+
+    caps.set(capabilities({flags: ["beta"]}))
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    unsubscribe()
+    caps.set(capabilities({}))
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("resolves through the pure registry, so a duplicate id still throws — at the read", () => {
+    const a = defineModule({name: "A", contributes: [contribute(point, [{id: "same", label: "A"}])]})
+    const b = defineModule({name: "B", contributes: [contribute(point, [{id: "same", label: "B"}])]})
+    const store = createContributionRegistryStore([a, b], createCapabilityStore(capabilities({})))
+
+    expect(() => store.current).toThrowError(/Duplicate contribution id "same"/)
   })
 })
 

@@ -108,7 +108,8 @@ export function generateSessionClientSource(options: GenerateSessionClientSource
 // Source: ${sourceLabel}
 //
 // Client-capability snapshot (operation: ${JSON.stringify(operationName)}). Fetch it with the generated RPC client
-// and pass it to createSessionCapabilities / createElarionOpenFeatureProvider.
+// and pass it to createSessionCapabilities / createElarionOpenFeatureProvider, or hand the fetcher itself to
+// createSessionCapabilitiesStore for a live snapshot you can refresh().
 
 /** The current user's identity and raw grants, as projected into the snapshot. */
 export interface ClientSnapshotUser {
@@ -202,6 +203,97 @@ export class SessionCapabilities {
 
 export function createSessionCapabilities(snapshot: ClientSnapshot): SessionCapabilities {
   return new SessionCapabilities(snapshot)
+}
+
+/**
+ * A live capability snapshot: the same synchronous reads as \`SessionCapabilities\`, plus \`refresh()\` to
+ * re-fetch and \`subscribe()\` to learn that the answers changed. Its *identity is stable* while its answers
+ * change, so it is placed once — a router context, a DI provider, a React provider — and every later read
+ * sees the current snapshot.
+ *
+ * It structurally satisfies the \`CapabilitySource\` interface of \`@swimmesberger/elarion-contributions\`
+ * (the four reader methods plus \`subscribe\`), so it can be handed straight to
+ * \`createContributionRegistryStore(manifests, store)\`; neither package references the other.
+ */
+export interface SessionCapabilitiesStore {
+  /** The capabilities from the last successful refresh, or \`undefined\` before the first one completes. */
+  readonly current: SessionCapabilities | undefined
+  /**
+   * Re-fetches the snapshot, replaces \`current\`, and notifies subscribers. Call it after any action that can
+   * change what the user may see — a login, a tenant switch, a role or subscription change. Contributor-fed
+   * sections ride along automatically, since they are part of the same snapshot.
+   *
+   * A failed fetch rejects and leaves the previous answers in place, so a transient network error never
+   * silently strips the UI down to the fail-closed defaults.
+   */
+  refresh(): Promise<SessionCapabilities>
+  /** Registers a change listener; returns its own unsubscribe function. */
+  subscribe(listener: () => void): () => void
+  isModuleEnabled(name: ModuleName | (string & {})): boolean
+  hasPermission(permission: PermissionName | (string & {})): boolean
+  hasRole(role: RoleName | (string & {})): boolean
+  isFlagEnabled(name: FlagName | (string & {})): boolean
+  getVariant(name: FlagName | (string & {})): string | undefined
+  getSection<T = unknown>(name: string): T | undefined
+}
+
+/**
+ * Builds a {@link SessionCapabilitiesStore} over a snapshot fetcher. The fetcher is injected rather than
+ * built in, which is what keeps this module import-free: the caller supplies the transport, typically the
+ * generated RPC client.
+ *
+ * Every read **before the first successful refresh fails closed** — modules, permissions, roles, and flags
+ * all answer \`false\`, variants and sections \`undefined\` — so UI gated on a capability stays hidden while
+ * the snapshot is in flight rather than flashing and retracting.
+ *
+ * \`\`\`ts
+ * const capabilities = createSessionCapabilitiesStore(
+ *   async () => (await rpc.elarion.session({})) as ClientSnapshot
+ * )
+ * await capabilities.refresh()
+ * \`\`\`
+ */
+export function createSessionCapabilitiesStore(
+  fetchSnapshot: () => Promise<ClientSnapshot>
+): SessionCapabilitiesStore {
+  let current: SessionCapabilities | undefined
+  const listeners = new Set<() => void>()
+  return {
+    get current() {
+      return current
+    },
+    async refresh() {
+      const capabilities = new SessionCapabilities(await fetchSnapshot())
+      current = capabilities
+      // Iterate a copy so a listener that unsubscribes itself cannot skip a sibling.
+      for (const listener of [...listeners]) listener()
+      return capabilities
+    },
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    isModuleEnabled(name) {
+      return current?.isModuleEnabled(name) ?? false
+    },
+    hasPermission(permission) {
+      return current?.hasPermission(permission) ?? false
+    },
+    hasRole(role) {
+      return current?.hasRole(role) ?? false
+    },
+    isFlagEnabled(name) {
+      return current?.isFlagEnabled(name) ?? false
+    },
+    getVariant(name) {
+      return current?.getVariant(name)
+    },
+    getSection<T = unknown>(name: string) {
+      return current?.getSection<T>(name)
+    },
+  }
 }
 
 /** A single flag resolution result (structurally compatible with OpenFeature's ResolutionDetails). */
