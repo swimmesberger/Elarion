@@ -14,7 +14,7 @@ npm install --save-dev @swimmesberger/elarion-jsonrpc-client-generator
 npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated
 ```
 
-It emits three files, plus a fourth when the schema calls for it:
+It always emits the three core files, plus conditional outputs when the schema calls for them:
 
 | File | Purpose |
 | --- | --- |
@@ -22,6 +22,11 @@ It emits three files, plus a fourth when the schema calls for it:
 | `rpc-schemas.ts` | `rpcParamsSchemas` and `rpcResultSchemas` Zod maps for runtime params/result validation. |
 | `rpc-client.ts` | Typed fetch client for single calls and batches. |
 | `session-client.ts` | Client-capability snapshot client and OpenFeature provider — emitted **only** when the schema exposes the `elarion.session` operation (rename it with `--session-client <file>`). |
+| `events-client.ts` | Topic-typed [client-event subscription client](#client-event-subscriptions) — emitted **only** when the schema declares client-event topics. |
+
+An opt-in [`start-adapter.ts`](#tanstack-start) joins them under `--framework tanstack-start`. A schema
+that declares neither session nor events produces byte-identical output to before — the conditional
+files simply do not exist.
 
 The schema and client files import `zod` (v3 and v4 are both supported), so install it as a runtime
 dependency in the consuming app.

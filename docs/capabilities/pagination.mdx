@@ -231,10 +231,11 @@ they are simply always `null`. The rule for a client is short:
 - `hasNext` / `hasPrevious` are filled on both strategies, so a plain prev/next control needs nothing
   else.
 
-The effective size matters because the server [clamps `Size`](#keyset-pagination) to the handler's
-`maxSize` (default `100`) and substitutes `20` for anything below `1` — and `Page<T>` does not echo the
-size back. Divide by the size the server would actually have used, or the last page number is wrong
-whenever a client over-asks:
+The effective size matters because the server clamps `Size` to the handler's `maxSize` (default `100`,
+as described under [keyset pagination](#keyset-pagination) — the same clamp applies to both strategies),
+and substitutes `20` for anything below `1`, itself capped at `maxSize` (so a handler with
+`maxSize: 10` substitutes `10`). `Page<T>` does not echo the size back, so divide by the size the server
+would actually have used, or the last page number is wrong whenever a client over-asks:
 
 ```ts
 // Mirror the handler's maxSize; the server clamps and the envelope never reports what it used.

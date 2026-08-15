@@ -192,6 +192,8 @@ Build one data source, register it, and hand it explicitly to everything that wo
 itself:
 
 ```csharp
+using Npgsql;
+
 var connectionString = builder.Configuration.GetConnectionString("Database")!;
 
 // One pool for the whole host. Registered through a factory delegate, so the container disposes it.
