@@ -100,4 +100,4 @@
  ELREQ001   | Elarion.Abstractions.Requests      | Error    | Self-typed request marker must name the implementing type
  ELREQ002   | Elarion.Abstractions.Requests      | Warning  | Handler response does not match the request's self-typed marker
  ELREQ003   | Elarion.Abstractions.Requests      | Warning  | Stream handler item does not match the request's self-typed marker
- ELID001    | Elarion.Identity                   | Warning  | Prefer Guid.CreateVersion7() over Guid.NewGuid()
+ ELID001    | Elarion.Identifiers                | Warning  | Prefer Guid.CreateVersion7() over Guid.NewGuid()

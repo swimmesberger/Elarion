@@ -46,8 +46,58 @@ public sealed class GuidVersionAnalyzerTests {
 
         // The remedy travels with the message: there is no code fix (the analyzer assembly may not reference
         // Microsoft.CodeAnalysis.Workspaces — RS1038), so the replacement has to be readable in the warning.
-        var message = diagnostics.First(d => d.Id == "ELID001").GetMessage();
-        message.Should().Contain("Guid.CreateVersion7()").And.Contain("unpredictable");
+        var flagged = diagnostics.First(d => d.Id == "ELID001");
+        flagged.GetMessage().Should().Contain("Guid.CreateVersion7()").And.Contain("unpredictable");
+
+        // Identifiers, not Identity: the rule is about minting a Guid value, not the user-identity subsystem
+        // whose diagnostics are ELIDN.
+        flagged.Descriptor.Category.Should().Be("Elarion.Identifiers");
+    }
+
+    [Fact]
+    public async Task Flags_MethodGroupReferences() {
+        const string source =
+            """
+            using System;
+
+            namespace Sample {
+                public sealed class Registrations {
+                    public Func<Guid> Local() {
+                        Func<Guid> mint = Guid.NewGuid;
+                        return mint;
+                    }
+
+                    // The shape that sets an id source for a whole application in one line.
+                    public void Register() => Configure<Func<Guid>>(Guid.NewGuid);
+
+                    private static void Configure<T>(T factory) { }
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        // A method group mints v4 ids just as surely as a direct call, and never appears as an invocation.
+        diagnostics.Where(d => d.Id == "ELID001").Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task DoesNotFlag_OtherGuidMethodGroups() {
+        const string source =
+            """
+            using System;
+
+            namespace Sample {
+                public sealed class Registrations {
+                    public Func<string, Guid> Parser() => Guid.Parse;
+                    public Func<Guid> Preferred() => Guid.CreateVersion7;
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        diagnostics.Should().NotContain(d => d.Id == "ELID001");
     }
 
     [Fact]
