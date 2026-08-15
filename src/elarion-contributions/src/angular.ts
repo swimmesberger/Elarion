@@ -58,12 +58,19 @@ function isRegistryStore(
   return typeof (source as ContributionRegistryStore).subscribe === "function"
 }
 
-// The store's own subscription is held for the provider's lifetime (an application-lifetime object), mirroring
-// what the store itself does with the capability source.
+// The subscriber bumps a version counter instead of reading `store.current`, so resolution stays *lazy* — it
+// happens at the injection read site, not inside the notifier. Reading eagerly here would resolve a registry
+// for a snapshot no template consumes and would move a manifest data bug (a duplicate contribution id) into a
+// notification callback, which is exactly what ADR-0074 rejects.
+// The store subscription is held for the provider's lifetime (an application-lifetime object), mirroring what
+// the store itself does with the capability source.
 function fromStore(store: ContributionRegistryStore): Signal<ContributionRegistry> {
-  const value = signal(store.current)
-  store.subscribe(() => value.set(store.current))
-  return value
+  const version = signal(0)
+  store.subscribe(() => version.update((n) => n + 1))
+  return computed(() => {
+    version()
+    return store.current
+  })
 }
 
 /**

@@ -1005,6 +1005,34 @@ describe('JSON-RPC client generator', () => {
     expect(store.isModuleEnabled('Billing')).toBe(true)
   })
 
+  it('applies overlapping refreshes in call order, so a slow earlier fetch cannot win', async () => {
+    const generated = generateRpcClientFiles(sessionSchema(), {
+      generatedBy: 'test-generator',
+      sourceLabel: 'session.json',
+    })
+    const sessionModule = await loadGeneratedSessionClient(generated.sessionClientSource as string)
+
+    const base = {user: {id: 'u-1', isAuthenticated: true, roles: [], permissions: []}, flags: {}, variants: {}}
+    const gates: Array<(snapshot: unknown) => void> = []
+    const store = sessionModule.createSessionCapabilitiesStore(
+      () => new Promise((resolve) => gates.push(resolve))
+    )
+
+    // Two refreshes in flight; the first (stale) one settles last.
+    const first = store.refresh()
+    const second = store.refresh()
+    gates[1]!({...base, modules: {Billing: true}})
+    await second
+    expect(store.isModuleEnabled('Billing')).toBe(true)
+
+    gates[0]!({...base, modules: {Billing: false}})
+    const firstCapabilities = await first
+    // The superseded fetch neither replaced `current` nor notified...
+    expect(store.isModuleEnabled('Billing')).toBe(true)
+    // ...but its own caller still receives its own snapshot's capabilities.
+    expect(firstCapabilities.isModuleEnabled('Billing')).toBe(false)
+  })
+
   it('omits the session client when the schema does not expose elarion.session', () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     expect(generated.sessionClientSource).toBeUndefined()

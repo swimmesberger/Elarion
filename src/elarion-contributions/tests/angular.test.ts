@@ -83,6 +83,29 @@ describe("injectContributions", () => {
     expect(items().map((i) => i.id)).toEqual(["a"])
   })
 
+  it("resolves lazily — a capability change does not resolve inside the notifier", () => {
+    // Two contributions share an id and become co-visible only once capabilities open up, so resolution
+    // throws. If provideContributions read `store.current` inside its subscriber, `caps.set(...)` itself
+    // would throw; lazily, the set is clean and the error surfaces at the template read.
+    const caps = createCapabilityStore(capabilities(false))
+    const a: ModuleManifest = {
+      name: "A",
+      when: {module: "A"},
+      contributes: [contribute(point, [{id: "same", label: "A"}])],
+    }
+    const b: ModuleManifest = {
+      name: "B",
+      when: {module: "B"},
+      contributes: [contribute(point, [{id: "same", label: "B"}])],
+    }
+    const store = createContributionRegistryStore([a, b], caps)
+    const items = read(() => injectContributions(point), provideContributions(store))
+    expect(items()).toEqual([])
+
+    expect(() => caps.set(capabilities(true))).not.toThrow()
+    expect(() => items()).toThrowError(/Duplicate contribution id "same"/)
+  })
+
   it("throws when no provideContributions() is in the injector tree", () => {
     expect(() => read(() => injectContributions(point))).toThrow(/requires provideContributions/)
   })

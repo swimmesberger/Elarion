@@ -224,7 +224,9 @@ export interface SessionCapabilitiesStore {
    * sections ride along automatically, since they are part of the same snapshot.
    *
    * A failed fetch rejects and leaves the previous answers in place, so a transient network error never
-   * silently strips the UI down to the fail-closed defaults.
+   * silently strips the UI down to the fail-closed defaults. Overlapping refreshes are safe: results are
+   * applied in call order, so a slower earlier fetch can never overwrite a newer snapshot. Each caller still
+   * receives its own fetch's capabilities.
    */
   refresh(): Promise<SessionCapabilities>
   /** Registers a change listener; returns its own unsubscribe function. */
@@ -257,16 +259,25 @@ export function createSessionCapabilitiesStore(
   fetchSnapshot: () => Promise<ClientSnapshot>
 ): SessionCapabilitiesStore {
   let current: SessionCapabilities | undefined
+  // Monotonic call token: concurrent refreshes (a login and a route load, say) can settle out of order, and
+  // applying a slower *earlier* fetch last would leave the UI on a stale snapshot. Only a result no newer
+  // call has superseded is applied; every caller still gets its own fetch's capabilities back.
+  let issued = 0
+  let applied = 0
   const listeners = new Set<() => void>()
   return {
     get current() {
       return current
     },
     async refresh() {
+      const token = ++issued
       const capabilities = new SessionCapabilities(await fetchSnapshot())
-      current = capabilities
-      // Iterate a copy so a listener that unsubscribes itself cannot skip a sibling.
-      for (const listener of [...listeners]) listener()
+      if (token > applied) {
+        applied = token
+        current = capabilities
+        // Iterate a copy so a listener that unsubscribes itself cannot skip a sibling.
+        for (const listener of [...listeners]) listener()
+      }
       return capabilities
     },
     subscribe(listener) {
