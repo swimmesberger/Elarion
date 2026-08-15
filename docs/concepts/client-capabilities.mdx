@@ -197,8 +197,16 @@ names are wire keys, and a silent shadow would hand the frontend the wrong paylo
 <Callout type="warn">
 **Re-export the schema and regenerate the client after adding a contributor.** The generated result validators are
 `z.object(...)`, which **strips unknown keys** — so against a `rpc-schema.json` exported before the contributor
-existed, `sections` is silently removed client-side and `getSection` always returns `undefined`. Re-run the schema
-export (`dotnet elarion-getrpcschema`) and the client generator whenever the snapshot's shape changes.
+existed, `sections` is silently removed client-side and `getSection` always returns `undefined`. Re-run the
+[schema export](/docs/capabilities/transports/schema-generation) and the client generator whenever the snapshot's
+shape changes:
+
+```bash
+dotnet msbuild src/MyApp.Api/MyApp.Api.csproj \
+  -t:GenerateElarionJsonRpcSchema \
+  -p:ElarionJsonRpcGenerateSchema=true
+npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated
+```
 </Callout>
 
 Read a section through the generated accessors — the type parameter is your assertion about the contributor's

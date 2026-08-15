@@ -21,6 +21,14 @@ namespace Elarion.Abstractions.Authorization;
 /// handler or a host middleware instead.
 /// </para>
 /// <para>
+/// Rules always run behind the authentication gate: a handler declaring any requirement rejects an unauthenticated
+/// caller with <see cref="AppError.Unauthorized(string)"/> before rules are reached, so
+/// <see cref="AuthorizationContext.User"/> is an authenticated principal. <see cref="AuthorizationContext.Resource"/>
+/// is the handler request, or <see langword="null"/> on the client-event subscription path, which has no request —
+/// a rule that branches on the request shape falls through to its denial there (fail-closed), so handle
+/// <see langword="null"/> explicitly when subscribes should be treated differently from commands.
+/// </para>
+/// <para>
 /// <b>A rule only runs where the authorization decorator is attached.</b> The decorator is attached at compile
 /// time by the handler-registration generator, and only for handlers that carry a <c>[Require*]</c> attribute or
 /// that are in scope of <c>[ElarionAuthorizationDefaults]</c>. A host that wants broad coverage therefore pairs
@@ -33,8 +41,8 @@ namespace Elarion.Abstractions.Authorization;
 /// That covers every handler <b>except event-consumer handlers</b> (a handler whose request implements
 /// <c>IDomainEvent</c>/<c>IIntegrationEvent</c>): the generator deliberately skips <i>implicit</i>
 /// default-driven attachment for those, because consumers are dispatched on a delivery scope with no
-/// authenticated user. A consumer that carries an <b>explicit</b> <c>[Require*]</c> does get the decorator, and
-/// then rules run for it too — so a rule reached from a consumer must tolerate an unauthenticated principal.
+/// authenticated user. A consumer that carries an <b>explicit</b> <c>[Require*]</c> does get the decorator, and is
+/// then rejected as unauthenticated on that scope — before any rule is consulted.
 /// </para>
 /// </remarks>
 /// <example>

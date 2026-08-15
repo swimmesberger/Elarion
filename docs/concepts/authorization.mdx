@@ -167,7 +167,10 @@ Rules are additive and run in **registration order**; the first non-null `AppErr
 **unchanged**, so the rule — not the framework — chooses the outcome kind. A rule that must not disclose a
 resource returns `AppError.NotFound(...)`; one that states the denial plainly returns `AppError.Forbidden(...)`.
 The `AuthorizationContext` carries the current user and the handler request, so a rule can scope itself to a
-request shape (e.g. only writes) without touching the handler.
+request shape (e.g. only writes) without touching the handler. On the **client-event subscription** path there is
+no request, so `context.Resource` is `null` — a rule that branches on the request shape will fall through to its
+denial there, which is fail-closed but may not be what you meant. Handle `null` explicitly if a rule should treat
+subscribes differently from commands.
 
 <Callout type="warn">
 A rule only runs **where the authorization decorator is attached**, and the generator attaches it at compile time
@@ -180,12 +183,14 @@ coverage, pair the rule with the assembly-level default:
 
 That reaches every handler **except event-consumer handlers**, which the deny-by-default section above exempts
 from *implicit* attachment (they run on a delivery scope with no authenticated user). A consumer carrying an
-**explicit** `Require*` still gets the decorator — so a rule reachable from a consumer must tolerate an
-unauthenticated principal.
+**explicit** `Require*` still gets the decorator — and is then rejected as unauthenticated on that scope, before
+any rule is consulted.
 
-`[AllowAnonymous]` handlers opt out of authorization entirely, global rules included — that attribute means "this
-operation is outside authorization", and a rule must not resurrect a gate the handler declined. A check that must
-also cover anonymous traffic belongs in the handler or in host middleware.
+Rules always run **behind the authentication gate**: a handler that declares any requirement rejects an
+unauthenticated caller with `Unauthorized` before rules are reached, so a rule never has to defend against a
+missing principal. `[AllowAnonymous]` handlers opt out of authorization entirely, global rules included — that
+attribute means "this operation is outside authorization", and a rule must not resurrect a gate the handler
+declined. A check that must also cover anonymous traffic belongs in the handler or in host middleware.
 
 Client-event **subscriptions** are covered: any topic declaring a requirement is decided by the same `IAuthorizer`,
 so a rule that denies a request also denies the corresponding subscribe.

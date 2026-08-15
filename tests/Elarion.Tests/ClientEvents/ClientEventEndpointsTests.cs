@@ -136,11 +136,14 @@ public sealed partial class ClientEventEndpointsTests {
     [Fact]
     public async Task Subscribe_AuthenticatedOnlyTopic_WithPassingGlobalRule_Subscribes() {
         var ct = TestContext.Current.CancellationToken;
+        var probe = new RuleProbe();
         await using var host = await StartAsync(
             ct,
             configureServices: services => {
                 services.AddLogging();
                 services.AddElarionAuthorization();
+                services.AddSingleton(probe);
+                services.AddElarionGlobalAuthorizationRule<PassingRule>();
             });
 
         using var response = await host.Client.GetAsync(
@@ -148,6 +151,11 @@ public sealed partial class ClientEventEndpointsTests {
             HttpCompletionOption.ResponseHeadersRead, ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        probe.Evaluated.Should().BeTrue();
+        // The subscribe path has no request, so a rule sees a null Resource — the documented contract, and the
+        // reason a request-shaped rule falls through to its denial here.
+        probe.SawNullResource.Should().BeTrue();
+        probe.SawAuthenticatedUser.Should().BeTrue();
     }
 
     [Fact]
@@ -336,6 +344,27 @@ public sealed partial class ClientEventEndpointsTests {
         public ValueTask<AppError?> AuthorizeAsync(
             AuthorizationRequirements requirements, object? resource, CancellationToken ct) {
             return ValueTask.FromResult(allow ? null : AppError.Forbidden("Denied."));
+        }
+    }
+
+    /// <summary>Records what a rule observed, resolved from the host's container rather than a static.</summary>
+    private sealed class RuleProbe {
+        public bool Evaluated { get; private set; }
+        public bool SawNullResource { get; private set; }
+        public bool SawAuthenticatedUser { get; private set; }
+
+        public void Record(AuthorizationContext context) {
+            Evaluated = true;
+            SawNullResource = context.Resource is null;
+            SawAuthenticatedUser = context.User.IsAuthenticated;
+        }
+    }
+
+    /// <summary>A cross-cutting rule that passes, recording the context it was handed.</summary>
+    private sealed class PassingRule(RuleProbe probe) : IGlobalAuthorizationRule {
+        public ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
+            probe.Record(context);
+            return ValueTask.FromResult<AppError?>(null);
         }
     }
 
