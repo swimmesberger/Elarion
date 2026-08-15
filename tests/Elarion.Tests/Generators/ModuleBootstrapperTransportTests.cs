@@ -1054,6 +1054,22 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_EmitsEmptyClientCapabilityManifest_WhenHostDeclaresNoModules() {
+        // The floor case behind the CS0117 report: a host with no [AppModule] at all still gets the method, so
+        // AddElarionSession(configuration.GetClientCapabilityManifest()) compiles without falling back to the
+        // undocumented ClientCapabilityManifest.Empty.
+        var generated = RunGenerator([], out var compilationWithGenerated);
+
+        var method = Slice(generated, "GetClientCapabilityManifest(");
+        method.Should().Contain("Modules = new global::Elarion.Abstractions.Modules.ClientModuleManifest[]")
+            .And.NotContain("new global::Elarion.Abstractions.Modules.ClientModuleManifest {");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Bootstrapper_IsDeterministic() {
         var first = RunGenerator(out _);
         var second = RunGenerator(out _);
