@@ -36,6 +36,12 @@ minor releases may include breaking changes.
   `IEndpointConventionBuilder` (recompile; framework `Map*` extensions now return
   `IEndpointConventionBuilder` instead of `RouteHandlerBuilder`); hosts that relied on ASP.NET's
   automatic antiforgery requirement on form-binding endpoints must enforce antiforgery explicitly.
+- **`Elarion.EntityFrameworkCore` now depends on `Microsoft.EntityFrameworkCore`.** The package was
+  marker-and-generator only; the new opt-in value-shape conventions (`UseElarionEnumStringConversions`,
+  `HasElarionJsonStringArray`, `ElarionValueComparers`) configure a real `ModelBuilder`, so EF Core is now a
+  package dependency. The reference stays provider-neutral — nothing in the package touches a provider API —
+  and every assembly that already declared `[EntityConfiguration]`/`[GenerateDbSets]` referenced EF Core
+  anyway.
 
 ### Added
 - **Per-endpoint HTTP conventions: the `CustomizeEndpoint` hook (ADR-0072).** An `[HttpEndpoint]` handler

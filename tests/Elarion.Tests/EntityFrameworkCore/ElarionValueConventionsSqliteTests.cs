@@ -123,6 +123,46 @@ public sealed class ElarionValueConventionsSqliteTests : IAsyncLifetime {
         }
     }
 
+    [Fact]
+    public async Task NullColumnReadsAsNull_WhileAnEmptyStringColumnReadsAsEmpty() {
+        var ct = TestContext.Current.CancellationToken;
+        var id = Guid.CreateVersion7();
+
+        await using (var context = CreateContext()) {
+            // A null array property: EF builds the converter with convertsNulls: false, so it short circuits
+            // and writes SQL NULL rather than the JSON "null" the converter would produce.
+            context.Widgets.Add(new ConventionWidget {
+                Id = id, Name = "nulls", Tags = ["kept"], OptionalTags = null
+            });
+            await context.SaveChangesAsync(ct);
+        }
+
+        await using (var connection = new SqliteConnection(ConnectionString)) {
+            await connection.OpenAsync(ct);
+
+            await using (var probe = connection.CreateCommand()) {
+                probe.CommandText = "SELECT OptionalTags IS NULL FROM Widgets WHERE Name = $name";
+                probe.Parameters.AddWithValue("$name", "nulls");
+                (await probe.ExecuteScalarAsync(ct)).Should().Be(1L);
+            }
+
+            // The empty string is what an AddColumn migration with a "" default leaves in existing rows — the
+            // one non-JSON value the converter genuinely has to absorb.
+            await using var backfill = connection.CreateCommand();
+            backfill.CommandText = "UPDATE Widgets SET Tags = '' WHERE Name = $name";
+            backfill.Parameters.AddWithValue("$name", "nulls");
+            (await backfill.ExecuteNonQueryAsync(ct)).Should().Be(1);
+        }
+
+        await using (var context = CreateContext()) {
+            var stored = await context.Widgets.SingleAsync(widget => widget.Id == id, ct);
+
+            // NULL is not an empty array: the converter never runs for it, so the property reads back null.
+            stored.OptionalTags.Should().BeNull();
+            stored.Tags.Should().BeEmpty();
+        }
+    }
+
     private ConventionsDbContext CreateContext() {
         return new ConventionsDbContext(new DbContextOptionsBuilder<ConventionsDbContext>()
             .UseSqlite(ConnectionString)

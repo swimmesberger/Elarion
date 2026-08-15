@@ -57,6 +57,37 @@ public sealed class ElarionValueComparersTests {
     }
 
     [Fact]
+    public void Sequence_Snapshot_SatisfiesEqualsWithItsSource_ForEveryInput() {
+        var comparer = ElarionValueComparers.Sequence<string>();
+
+        // The comparer's own invariant: a snapshot must compare equal to what it was taken from, or change
+        // detection reports a modification on every pass. Null is the case a normalizing snapshot breaks —
+        // returning [] for null would make Equals(null, []) false and mark an untouched null property dirty.
+        foreach (var value in new[] { null, Array.Empty<string>(), new[] { "alpha", "beta" } })
+            comparer.Equals(value, comparer.Snapshot(value!)).Should().BeTrue();
+
+        comparer.Snapshot(null!).Should().BeNull();
+    }
+
+    [Fact]
+    public void SequenceList_Snapshot_SatisfiesEqualsWithItsSource_ForEveryInput() {
+        var comparer = ElarionValueComparers.SequenceList<int>();
+
+        foreach (var value in new[] { null, new List<int>(), new List<int> { 1, 2 } })
+            comparer.Equals(value, comparer.Snapshot(value!)).Should().BeTrue();
+
+        comparer.Snapshot(null!).Should().BeNull();
+    }
+
+    [Fact]
+    public void Sequence_NullIsNotAnEmptySequence() {
+        var comparer = ElarionValueComparers.Sequence<string>();
+
+        comparer.Equals(null, []).Should().BeFalse();
+        comparer.Equals(null, null).Should().BeTrue();
+    }
+
+    [Fact]
     public void SequenceList_HasTheSameSemantics() {
         var comparer = ElarionValueComparers.SequenceList<int>();
         List<int> left = [1, 2, 3];

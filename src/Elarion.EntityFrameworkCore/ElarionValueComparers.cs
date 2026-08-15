@@ -19,7 +19,9 @@ namespace Elarion.EntityFrameworkCore;
 /// aggregates the elements in order, both through <see cref="EqualityComparer{T}.Default"/>. Reordering a
 /// sequence is therefore a change, which is the right default for a stored list — the persisted order is part of
 /// the value. The snapshot is a shallow copy, so mutating the tracked instance in place is still detected;
-/// elements themselves must be immutable (or value types) for that to hold.
+/// elements themselves must be immutable (or value types) for that to hold. <c>null</c> is carried through
+/// unchanged (never normalized to an empty collection), so <c>Equals(value, Snapshot(value))</c> holds for every
+/// input — including <c>null</c>, which is not equal to an empty sequence.
 /// </para>
 /// <example>
 /// <code>
@@ -86,11 +88,14 @@ public static class ElarionValueComparers {
         return hash.ToHashCode();
     }
 
+    // Null is preserved rather than normalized to an empty collection: the comparer's own invariant is
+    // Equals(value, Snapshot(value)), and AreEqual(null, []) is false — normalizing here would make a null
+    // property look modified on every change-detection pass.
     private static T[] Snapshot<T>(T[]? value) {
-        return value is null ? [] : (T[])value.Clone();
+        return value is null ? null! : (T[])value.Clone();
     }
 
     private static List<T> SnapshotList<T>(List<T>? value) {
-        return value is null ? [] : new List<T>(value);
+        return value is null ? null! : new List<T>(value);
     }
 }
