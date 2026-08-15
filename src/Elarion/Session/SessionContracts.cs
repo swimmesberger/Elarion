@@ -25,6 +25,14 @@ public sealed record SessionResponse {
 
     /// <summary>The allocated variant for each exposed variant flag, keyed by flag name (only flags that resolved a variant).</summary>
     public required IReadOnlyDictionary<string, string> Variants { get; init; }
+
+    /// <summary>
+    /// Application-contributed sections, keyed by <see cref="IClientSnapshotContributor.SectionName"/> — the seam
+    /// for bootstrap data the framework does not own (tenant, branding, onboarding state). <see langword="null"/>
+    /// when no contributor produced a payload, and omitted from the wire entirely in that case, so a host with no
+    /// contributors serializes byte-identically to before the seam existed.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?>? Sections { get; init; }
 }
 
 /// <summary>The current user's identity and raw grants, as projected into the session snapshot.</summary>

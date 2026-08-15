@@ -109,6 +109,69 @@ client.getStringValue('ForecastAlgorithm', 'control')
 Teams that don't want OpenFeature can use `SessionCapabilities` (`isModuleEnabled`, `hasPermission`, `hasRole`,
 `isFlagEnabled`, `getVariant`) directly. Refresh the snapshot (and rebuild the provider) on login or context change.
 
+## Contributing session sections
+
+The snapshot's fixed shape — user, modules, flags, variants — is framework-owned. Application bootstrap data that
+a frontend would otherwise fetch with a second round trip (the current tenant, branding, a server clock, an
+onboarding state) rides along as a **named section**. Implement `IClientSnapshotContributor`, declare its payload
+in a source-generated context, and register both together:
+
+```csharp
+public sealed record TenantSection {
+    public required string Name { get; init; }
+    public required string Theme { get; init; }
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(TenantSection))]
+public sealed partial class TenantSectionJsonContext : JsonSerializerContext;
+
+public sealed class TenantSectionContributor(ITenantContext tenants) : IClientSnapshotContributor {
+    public string SectionName => "tenant";
+
+    public async ValueTask<object?> GetSectionAsync(CancellationToken ct) {
+        var tenant = await tenants.GetCurrentAsync(ct);
+        return tenant is null ? null : new TenantSection { Name = tenant.Name, Theme = tenant.Theme };
+    }
+}
+
+// Program.cs — the resolver argument contributes the payload types to the canonical serialization chain.
+builder.Services.AddElarionClientSnapshotContributor<TenantSectionContributor>(TenantSectionJsonContext.Default);
+```
+
+The snapshot then carries a `sections` object keyed by section name:
+
+```jsonc
+{ "user": { … }, "modules": { … }, "flags": { … }, "variants": { … },
+  "sections": { "tenant": { "name": "Acme", "theme": "dark" } } }
+```
+
+Contributors are **scoped**, so they may inject the current user or a `DbContext`. Returning `null` omits the
+section entirely rather than emitting a null, so a section can be conditional on the caller without the frontend
+having to tell "absent" from "null". A host with no contributors keeps the exact pre-existing wire shape —
+`sections` is omitted, not empty. Two contributors declaring the same name is a wiring bug and throws: section
+names are wire keys, and a silent shadow would hand the frontend the wrong payload under a name it trusts.
+
+Read a section through the generated accessors — the type parameter is your assertion about the contributor's
+payload, since the wire carries no runtime type information:
+
+```ts
+interface TenantSection { readonly name: string; readonly theme: string }
+
+const tenant = capabilities.getSection<TenantSection>('tenant')   // undefined when not contributed
+```
+
+<Callout type="warn">
+A section is the same **read-only UX projection** as the rest of the snapshot. Put in it exactly what the UI needs
+to render, and nothing whose absence you would rely on as a control: the operation is still gated server-side by
+the handler's `[RequirePermission]`/`[FeatureGate]`. Sections are explicit and named — the framework never
+reflects over your services to decide what to publish.
+</Callout>
+
+Because section payloads are serialized from their **runtime** type, the payload type must be reachable through a
+source-generated context; that is what the resolver argument to `AddElarionClientSnapshotContributor` wires, and
+it keeps the snapshot reflection-free under Native AOT.
+
 ## Typed vocabulary — no stringly-typed capability checks
 
 The exported schema carries the application's **capability vocabulary** (module names, each module's

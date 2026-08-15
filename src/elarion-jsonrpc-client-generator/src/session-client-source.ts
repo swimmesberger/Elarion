@@ -125,6 +125,13 @@ export interface ClientSnapshot {
   readonly modules: Readonly<Record<string, boolean>>
   readonly flags: Readonly<Record<string, boolean>>
   readonly variants: Readonly<Record<string, string>>
+  /**
+   * Application-contributed sections, keyed by section name — whatever the backend's
+   * IClientSnapshotContributor implementations returned. Absent when the host registers none, and a section
+   * whose contributor returned null is absent rather than null. Read one with
+   * \`capabilities.getSection<TenantSection>('tenant')\`.
+   */
+  readonly sections?: Readonly<Record<string, unknown>>
 }
 
 ${vocabularySection(capabilities)}
@@ -168,6 +175,20 @@ export class SessionCapabilities {
 
   getVariant(name: FlagName | (string & {})): string | undefined {
     return this.snapshot.variants[name]
+  }
+
+  /**
+   * Reads an application-contributed section, or \`undefined\` when the backend contributed none under that
+   * name. The type parameter is an assertion about the contributor's payload — the wire carries no runtime
+   * type information, so declare the section's shape in the app and keep it next to the contributor:
+   *
+   * \`\`\`ts
+   * interface TenantSection { readonly name: string; readonly theme: string }
+   * const tenant = capabilities.getSection<TenantSection>('tenant')
+   * \`\`\`
+   */
+  getSection<T = unknown>(name: string): T | undefined {
+    return this.snapshot.sections?.[name] as T | undefined
   }
 
   /** Resolves a reserved-namespace boolean key (the OpenFeature boolean read). */

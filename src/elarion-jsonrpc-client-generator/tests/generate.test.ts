@@ -905,6 +905,38 @@ describe('JSON-RPC client generator', () => {
     expect(sessionModule.Keys.module('Billing')).toBe('module.Billing')
   })
 
+  it('reads application-contributed snapshot sections, and stays undefined when absent', async () => {
+    const generated = generateRpcClientFiles(sessionSchema(), {
+      generatedBy: 'test-generator',
+      sourceLabel: 'session.json',
+    })
+    const source = generated.sessionClientSource as string
+    expect(source).toContain('getSection<T = unknown>(name: string): T | undefined')
+    expect(source).not.toContain('import ')
+
+    const sessionModule = await loadGeneratedSessionClient(source)
+    const base = {
+      user: {id: 'u-1', isAuthenticated: true, roles: [], permissions: []},
+      modules: {},
+      flags: {},
+      variants: {},
+    }
+
+    const withSections = sessionModule.createSessionCapabilities({
+      ...base,
+      sections: {tenant: {name: 'Acme', theme: 'dark'}},
+    })
+    expect(withSections.getSection<{name: string; theme: string}>('tenant')).toEqual({
+      name: 'Acme',
+      theme: 'dark',
+    })
+    // A section the backend did not contribute reads as undefined, not as an error.
+    expect(withSections.getSection('missing')).toBeUndefined()
+
+    // A host with no contributors omits `sections` entirely — every read is undefined.
+    expect(sessionModule.createSessionCapabilities(base).getSection('tenant')).toBeUndefined()
+  })
+
   it('omits the session client when the schema does not expose elarion.session', () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     expect(generated.sessionClientSource).toBeUndefined()
@@ -1167,7 +1199,10 @@ interface SessionClientModule {
   createSessionCapabilities(snapshot: unknown): {
     isModuleEnabled(name: string): boolean
     hasPermission(permission: string): boolean
+    hasRole(role: string): boolean
+    isFlagEnabled(name: string): boolean
     getVariant(name: string): string | undefined
+    getSection<T = unknown>(name: string): T | undefined
   }
 
   Keys: { module(name: string): string; permission(permission: string): string; role(role: string): string }
