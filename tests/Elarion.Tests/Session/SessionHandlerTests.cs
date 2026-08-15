@@ -199,6 +199,22 @@ public sealed class SessionHandlerTests {
     }
 
     [Fact]
+    public async Task HandleAsync_PropagatesAContributorsException_RatherThanDegradingTheSnapshot() {
+        // No swallow-and-continue: a contributor that fails is a bug in the host's bootstrap data, and hiding
+        // it would ship the frontend a snapshot that is silently missing a section it was built to expect.
+        var handler = new SessionHandler(
+            new FakeCurrentUser(), ClientCapabilityManifest.Empty, null, null, null,
+            [
+                new StubContributor("tenant", new TenantSection { Name = "Acme", Theme = "dark" }),
+                new ThrowingContributor("broken")
+            ]);
+
+        var act = async () => await handler.HandleAsync(new SessionRequest(), TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("contributor exploded");
+    }
+
+    [Fact]
     public void AddElarionClientSnapshotContributor_IsAdditive_AndContributesItsSectionResolver() {
         var services = new ServiceCollection();
         services.AddElarionSession(ClientCapabilityManifest.Empty);
@@ -303,15 +319,23 @@ internal sealed partial class TenantSectionJsonContext : JsonSerializerContext;
 internal sealed class TenantSectionContributor : IClientSnapshotContributor {
     public string SectionName => "tenant";
 
-    public ValueTask<object?> GetSectionAsync(CancellationToken cancellationToken) {
+    public ValueTask<object?> GetSectionAsync(CancellationToken ct) {
         return ValueTask.FromResult<object?>(new TenantSection { Name = "Acme", Theme = "dark" });
+    }
+}
+
+internal sealed class ThrowingContributor(string sectionName) : IClientSnapshotContributor {
+    public string SectionName { get; } = sectionName;
+
+    public ValueTask<object?> GetSectionAsync(CancellationToken ct) {
+        throw new InvalidOperationException("contributor exploded");
     }
 }
 
 internal sealed class StubContributor(string sectionName, object? payload) : IClientSnapshotContributor {
     public string SectionName { get; } = sectionName;
 
-    public ValueTask<object?> GetSectionAsync(CancellationToken cancellationToken) {
+    public ValueTask<object?> GetSectionAsync(CancellationToken ct) {
         return ValueTask.FromResult(payload);
     }
 }

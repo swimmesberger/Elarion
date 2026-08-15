@@ -178,6 +178,12 @@
             "additionalProperties": {
               "type": "string"
             }
+          },
+          "sections": {
+            "type": [
+              "object",
+              "null"
+            ]
           }
         },
         "required": [
@@ -185,6 +191,39 @@
           "modules",
           "flags",
           "variants"
+        ]
+      }
+    },
+    "invoices.clientDunning": {
+      "params": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "clientId"
+        ]
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "overdueCount": {
+            "type": "integer"
+          },
+          "escalated": {
+            "type": "boolean"
+          },
+          "needsAttention": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "overdueCount",
+          "escalated",
+          "needsAttention"
         ]
       }
     },

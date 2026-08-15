@@ -47,6 +47,17 @@ export interface RpcMethods {
     modules: unknown
     flags: unknown
     variants: unknown
+    sections?: unknown
+  }
+  }
+  "invoices.clientDunning": {
+    params: {
+    clientId: string
+  }
+    result: {
+    overdueCount: number
+    escalated: boolean
+    needsAttention: boolean
   }
   }
   "invoices.create": {

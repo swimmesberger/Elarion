@@ -13,6 +13,9 @@ export const rpcParamsSchemas = {
   }),
   "clients.list": z.unknown(),
   "elarion.session": z.unknown(),
+  "invoices.clientDunning": z.object({
+    clientId: z.string().uuid(),
+  }),
   "invoices.create": z.object({
     clientId: z.string().uuid(),
     amountCents: z.number().int().gte(1),
@@ -57,6 +60,12 @@ export const rpcResultSchemas = {
     modules: z.unknown(),
     flags: z.unknown(),
     variants: z.unknown(),
+    sections: z.unknown().optional(),
+  }),
+  "invoices.clientDunning": z.object({
+    overdueCount: z.number().int(),
+    escalated: z.boolean(),
+    needsAttention: z.boolean(),
   }),
   "invoices.create": z.object({
     invoiceId: z.string().uuid(),

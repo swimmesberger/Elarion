@@ -194,6 +194,13 @@ having to tell "absent" from "null". A host with no contributors keeps the exact
 `sections` is omitted, not empty. Two contributors declaring the same name is a wiring bug and throws: section
 names are wire keys, and a silent shadow would hand the frontend the wrong payload under a name it trusts.
 
+<Callout type="warn">
+**Re-export the schema and regenerate the client after adding a contributor.** The generated result validators are
+`z.object(...)`, which **strips unknown keys** — so against a `rpc-schema.json` exported before the contributor
+existed, `sections` is silently removed client-side and `getSection` always returns `undefined`. Re-run the schema
+export (`dotnet elarion-getrpcschema`) and the client generator whenever the snapshot's shape changes.
+</Callout>
+
 Read a section through the generated accessors — the type parameter is your assertion about the contributor's
 payload, since the wire carries no runtime type information:
 

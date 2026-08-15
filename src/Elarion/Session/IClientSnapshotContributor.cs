@@ -39,7 +39,7 @@ namespace Elarion.Session;
 /// public sealed class TenantSectionContributor(ITenantContext tenants) : IClientSnapshotContributor {
 ///     public string SectionName => "tenant";
 ///
-///     public async ValueTask&lt;object?&gt; GetSectionAsync(CancellationToken cancellationToken) {
+///     public async ValueTask&lt;object?&gt; GetSectionAsync(CancellationToken ct) {
 ///         var tenant = await tenants.GetCurrentAsync(cancellationToken);
 ///         return tenant is null ? null : new TenantSection { Name = tenant.Name, Theme = tenant.Theme };
 ///     }
@@ -61,5 +61,5 @@ public interface IClientSnapshotContributor {
     /// <summary>
     /// Produces the section payload for the current request, or <see langword="null"/> to omit the section.
     /// </summary>
-    ValueTask<object?> GetSectionAsync(CancellationToken cancellationToken);
+    ValueTask<object?> GetSectionAsync(CancellationToken ct);
 }
