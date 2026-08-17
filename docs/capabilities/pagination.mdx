@@ -218,6 +218,82 @@ A request `Sort` of `"name"` orders by `Name` then `Id`; a leading `-` (descendi
 `"-name"` sorts `Name` descending, `Id` ascending). Unknown or blank keys fall back to the default
 entry. Offset pages fill `Total`; keyset pages fill the cursors instead.
 
+### Consuming an offset page
+
+`Page<T>` is one envelope for both strategies, so an offset endpoint still returns the cursor fields —
+they are simply always `null`. The rule for a client is short:
+
+- `total` is **always present** on an offset endpoint (`ToOffsetPageAsync` counts the filtered query
+  every call), so page numbers are computable: `totalPages = Math.ceil(total / size)` — where `size` is
+  the **effective** page size, not necessarily the one you sent.
+- `startCursor` and `endCursor` are **always `null`** — ignore them. Do not build a "next page" from
+  them, and do not treat their absence as an error.
+- `hasNext` / `hasPrevious` are filled on both strategies, so a plain prev/next control needs nothing
+  else.
+
+The effective size matters because the server clamps `Size` to the handler's `maxSize` (default `100`,
+as described under [keyset pagination](#keyset-pagination) — the same clamp applies to both strategies),
+and substitutes `20` for anything below `1`, itself capped at `maxSize` (so a handler with
+`maxSize: 10` substitutes `10`). `Page<T>` does not echo the size back, so divide by the size the server
+would actually have used, or the last page number is wrong whenever a client over-asks:
+
+```ts
+// Mirror the handler's maxSize; the server clamps and the envelope never reports what it used.
+const MAX_SIZE = 100
+const requested = 20
+const size = Math.min(requested < 1 ? 20 : requested, MAX_SIZE)
+
+const page = await rpc.clients.list({ page: 1, size, sort: '-createdAt' })
+
+// Offset endpoint: `total` is set, the cursors are not.
+const totalPages = Math.ceil((page.total ?? 0) / size)
+
+renderRows(page.items)
+renderPager({ totalPages, canPrev: page.hasPrevious, canNext: page.hasNext })
+```
+
+The simplest way to stay honest is to never send a size above the handler's `maxSize` in the first
+place — then requested and effective size are the same number.
+
+The uniform shape is deliberate: every list endpoint — keyset feed or numbered table — hands the client
+the same envelope, so one list component, one Zod schema, and one cache key strategy cover both. A
+strategy-specific response type would buy nothing but a fork in every consumer. If you find yourself
+reading a cursor on an offset endpoint, you are on the wrong strategy — switch the handler to
+`ToKeysetPageAsync` rather than teaching the client to guess.
+
+### Naming the request fields
+
+`IOffsetPageRequest` fixes three member names — `Page`, `Size`, `Sort` — and the execution helpers read
+the request through that interface. Those names reach the wire through your DTO, so a request that
+implements the interface publishes `page` / `size` / `sort`.
+
+If a contract needs different wire names (`pageSize`, say, or a `sortBy`/`sortDirection` pair), do not
+rename the interface members — a request DTO owns its wire contract, and the paging contract is not the
+place to negotiate it. Carry your own fields and build an `OffsetPageRequest` inside the handler:
+
+```csharp
+public sealed record Query {
+    public int Page { get; init; } = 1;
+    public int PageSize { get; init; } = 20;          // this endpoint's own wire name
+    public string? SortBy { get; init; }
+    public bool Descending { get; init; }             // this endpoint's own wire shape
+}
+
+public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, CancellationToken ct) {
+    var paging = new OffsetPageRequest {
+        Page = query.Page,
+        Size = query.PageSize,
+        Sort = query.Descending ? $"-{query.SortBy}" : query.SortBy,
+    };
+
+    return await db.Clients
+        .Where(c => c.OwnerId == user.UserId)
+        .ToOffsetPageAsync(paging, c => new Item(c.Id, c.Name, c.CreatedAt), Sort, maxSize: 100, ct);
+}
+```
+
+The translation is three lines in one place, and the endpoint keeps the vocabulary its clients expect.
+
 <Cards>
   <Card title="Entity Framework Core" href="/docs/capabilities/entity-framework">
     Generated `DbSet`s on the concrete `DbContext` that handlers page against.
