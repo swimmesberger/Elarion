@@ -68,6 +68,67 @@ export interface CapabilityReader {
   isFlagEnabled(name: string): boolean
 }
 
+/**
+ * A {@link CapabilityReader} that can also announce that its answers changed — the reactive half of the
+ * snapshot contract (ADR-0074). Structurally satisfied by {@link createCapabilityStore} and by the
+ * `createSessionCapabilitiesStore(...)` the Elarion client generator emits, so this package still depends on
+ * no generated code.
+ *
+ * `subscribe` returns its own unsubscribe function. Listeners are notified *after* the new reader is in
+ * place, so a listener that reads during the notification already sees the new answers.
+ */
+export interface CapabilitySource extends CapabilityReader {
+  subscribe(listener: () => void): () => void
+}
+
+/**
+ * A {@link CapabilitySource} whose backing reader can be swapped — the composition root's handle on "the
+ * capability snapshot right now".
+ */
+export interface CapabilityStore extends CapabilitySource {
+  /** Swaps the backing reader and notifies subscribers. A no-op when `next` is the current reader. */
+  set(next: CapabilityReader): void
+}
+
+/**
+ * Wraps a reader in a store whose *identity is stable* while its answers change. That stability is the whole
+ * point: the store is placed in long-lived contexts once — a TanStack router context (`context.caps`), a DI
+ * provider, a closure — and every later read sees the current snapshot without those contexts being rebuilt.
+ * Because the store is itself a `CapabilityReader`, nothing downstream needs to know it is reactive:
+ * `redirectUnless` re-reads it on every navigation, `evaluateWhen` on every resolution.
+ *
+ * @example
+ * ```ts
+ * const caps = createCapabilityStore(createStaticCapabilities({modules: []}))
+ * const router = createRouter({routeTree, context: {caps}})       // placed once
+ * caps.set(await loadCapabilities())                              // every guard now sees the new answers
+ * ```
+ */
+export function createCapabilityStore(initial: CapabilityReader): CapabilityStore {
+  let current = initial
+  const listeners = new Set<() => void>()
+  return {
+    isModuleEnabled: (name) => current.isModuleEnabled(name),
+    hasPermission: (permission) => current.hasPermission(permission),
+    hasRole: (role) => current.hasRole(role),
+    isFlagEnabled: (name) => current.isFlagEnabled(name),
+    set(next) {
+      // Reference equality, not deep comparison: a reader is an opaque object here, and re-notifying on an
+      // identical reference would rebuild every registry for nothing.
+      if (next === current) return
+      current = next
+      // Iterate a copy so a listener that unsubscribes itself during notification cannot skip a sibling.
+      for (const listener of [...listeners]) listener()
+    },
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+  }
+}
+
 export function evaluateWhen(when: WhenClause | undefined, capabilities: CapabilityReader): boolean {
   if (when === undefined) return true
   if (when.module !== undefined && !capabilities.isModuleEnabled(when.module)) return false
@@ -233,8 +294,9 @@ const EMPTY: ReadonlyArray<Contribution<unknown>> = []
 /**
  * Resolves manifests against a capability snapshot. Resolution is eager and pure — the same
  * (manifests, capabilities) input yields the same registry, so a server render and the client hydration
- * produce identical trees. Refreshing the snapshot (login, context change) means building a new registry,
- * the same contract as the generated session provider.
+ * produce identical trees. Refreshing the snapshot (login, context change) means building a *new* registry;
+ * {@link createContributionRegistryStore} automates exactly that and is what an app with a changing snapshot
+ * should use, so this function stays a pure function of its inputs.
  *
  * Resolution validates that no two co-visible contributions to one point share an id (ids double as
  * render keys and as the deterministic tiebreak) and throws on a collision — manifests are static data,
@@ -286,6 +348,62 @@ export function createContributionRegistry<V extends Vocabulary = Vocabulary>(
   return {
     get<TItem, TContext>(point: ExtensionPoint<TItem, TContext>) {
       return (resolved.get(point.id) ?? EMPTY) as ReadonlyArray<Contribution<TItem>>
+    },
+  }
+}
+
+/**
+ * A live view of the resolved registry: `current` is always the registry for the capability source's present
+ * answers, and `subscribe` fires whenever that changes (ADR-0074).
+ */
+export interface ContributionRegistryStore {
+  readonly current: ContributionRegistry
+  subscribe(listener: () => void): () => void
+}
+
+/**
+ * Keeps a resolved registry in step with a {@link CapabilitySource}. Every rebuild goes through the pure
+ * {@link createContributionRegistry}, so resolution semantics — `when` filtering, deterministic ordering, the
+ * duplicate-id check — are identical whether an app resolves once or a hundred times; this store owns only
+ * *when* to re-resolve.
+ *
+ * Rebuilding is **lazy**: a source notification invalidates the cached registry and notifies subscribers, and
+ * the next `current` read resolves. That keeps `current` referentially stable between changes (what
+ * `useSyncExternalStore` requires), avoids resolving for a snapshot nobody reads, and keeps a manifest data
+ * bug (a duplicate contribution id) throwing at the read that surfaces it rather than inside the notifier.
+ *
+ * The store subscribes to the source for its lifetime; it is an application-lifetime object created at the
+ * composition root, so there is deliberately no disposal ceremony.
+ *
+ * @example
+ * ```ts
+ * const caps = createCapabilityStore(createStaticCapabilities({modules: []}))
+ * const registry = createContributionRegistryStore(manifests, caps)
+ * // <ContributionProvider registry={registry}> — slots re-render when caps.set(...) lands.
+ * ```
+ */
+export function createContributionRegistryStore<V extends Vocabulary = Vocabulary>(
+  manifests: ReadonlyArray<ModuleManifest<V>>,
+  source: CapabilitySource
+): ContributionRegistryStore {
+  const listeners = new Set<() => void>()
+  let resolved: ContributionRegistry | undefined
+
+  source.subscribe(() => {
+    resolved = undefined
+    for (const listener of [...listeners]) listener()
+  })
+
+  return {
+    get current() {
+      if (resolved === undefined) resolved = createContributionRegistry(manifests, source)
+      return resolved
+    },
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
     },
   }
 }

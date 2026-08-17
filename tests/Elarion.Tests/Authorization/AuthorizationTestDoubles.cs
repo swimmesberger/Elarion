@@ -58,6 +58,18 @@ internal sealed class AtLeast21Policy : IAuthorizationPolicy {
     }
 }
 
+/// <summary>A global rule that records its invocation order and returns a fixed outcome.</summary>
+internal sealed class RecordingGlobalRule(AppError? error, List<string> calls, string name)
+    : IGlobalAuthorizationRule {
+    public AuthorizationContext? LastContext { get; private set; }
+
+    public ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
+        LastContext = context;
+        calls.Add(name);
+        return ValueTask.FromResult(error);
+    }
+}
+
 // Handlers whose class-level attributes the decorator reads through HandlerMetadata.
 internal sealed record GuardedCommand(int Id);
 

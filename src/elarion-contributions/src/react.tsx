@@ -2,19 +2,53 @@
 // Elarion.Abstractions ↔ Elarion.AspNetCore): one provider, one hook, one slot component. Everything
 // interesting happens in the framework-free core; this file only surfaces the resolved registry through
 // React context, so porting it to another view framework is a page of code, not a redesign.
-import {createContext, Fragment, useContext, type ReactNode} from "react"
-import type {Contribution, ContributionRegistry, ExtensionPoint} from "./index.js"
+import {createContext, Fragment, useCallback, useContext, useSyncExternalStore, type ReactNode} from "react"
+import type {
+  Contribution,
+  ContributionRegistry,
+  ContributionRegistryStore,
+  ExtensionPoint,
+} from "./index.js"
 
 const RegistryContext = createContext<ContributionRegistry | null>(null)
 
+const NO_OP = () => {}
+
+function isStore(
+  source: ContributionRegistry | ContributionRegistryStore
+): source is ContributionRegistryStore {
+  return typeof (source as ContributionRegistryStore).subscribe === "function"
+}
+
+/**
+ * Publishes the resolved registry to the tree. Accepts either a plain {@link ContributionRegistry} (a static
+ * snapshot, resolved once) or a {@link ContributionRegistryStore} — the store form subscribes, so slots
+ * re-render when the capability snapshot changes (login, tenant switch, a post-mutation refresh).
+ *
+ * The context always carries a plain registry, so `useContributions` and `ExtensionSlot` are unaware of the
+ * difference: reactivity is confined to this component.
+ */
 export function ContributionProvider({
                                        registry,
                                        children,
                                      }: {
-  registry: ContributionRegistry
+  registry: ContributionRegistry | ContributionRegistryStore
   children: ReactNode
 }) {
-  return <RegistryContext.Provider value={registry}>{children}</RegistryContext.Provider>
+  // Both callbacks are declared unconditionally (hooks rules) and branch inside; a plain registry subscribes
+  // to nothing and reports itself, which useSyncExternalStore treats as a value that never changes.
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => (isStore(registry) ? registry.subscribe(onStoreChange) : NO_OP),
+    [registry]
+  )
+  // The store caches `current` between changes, so this is referentially stable — the invariant
+  // useSyncExternalStore requires to avoid re-rendering forever.
+  const getSnapshot = useCallback(
+    () => (isStore(registry) ? registry.current : registry),
+    [registry]
+  )
+  const resolved = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  return <RegistryContext.Provider value={resolved}>{children}</RegistryContext.Provider>
 }
 
 /** The resolved contributions for a point — already filtered by `when` and deterministically ordered. */

@@ -32,7 +32,8 @@ public sealed class StreamAuthorizationDecorator<TRequest, TItem>(
         if (error is null)
             return await inner.HandleAsync(request, ct).ConfigureAwait(false);
 
-        var outcome = error.Kind == ErrorKind.Unauthorized ? "unauthorized" : "forbidden";
+        // The outcome follows the denial's kind (a global rule may answer NotFound); see HandlerTelemetry.
+        var outcome = HandlerTelemetry.AuthorizationOutcome(error.Kind);
         Activity.Current?.SetTag("elarion.authorization.outcome", outcome);
         HandlerTelemetry.RecordAuthorizationDenied(metadata.HandlerType.Name, outcome);
         return error;

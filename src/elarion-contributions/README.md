@@ -215,9 +215,33 @@ export class ExtensionSlotDirective<TItem> {
   code-unit comparison — the same input renders the same UI on server and client. Two co-visible
   contributions to one point sharing an id throw at resolution (ids double as render keys); prefix ids
   with the module name (`"invoicing.create-invoice"`). Refreshing the snapshot means building a new
-  registry.
+  registry — which is exactly what the stores below automate, leaving this function pure.
 - **UX projection, never security.** A hidden contribution is not a secured operation — the backend
   handler's own gates are the enforcement on every call.
+
+## Capabilities that change at runtime
+
+A login, a tenant switch, or a role grant changes what the user may see mid-session. Wrap the reader in a
+store; its **identity is stable while its answers change**, so it is placed once and every later read is
+current:
+
+```ts
+import {createCapabilityStore, createContributionRegistryStore} from "@swimmesberger/elarion-contributions"
+
+const caps = createCapabilityStore(createStaticCapabilities({modules: []}))
+const registry = createContributionRegistryStore(manifests, caps)
+
+const router = createRouter({routeTree, context: {caps}}) // the store *is* a CapabilityReader
+// <ContributionProvider registry={registry}>   |   provideContributions(registry)
+
+caps.set(await loadCapabilities()) // every guard and slot now sees the new answers
+```
+
+The generated `createSessionCapabilitiesStore(...)` from `session-client.ts` satisfies the same
+`CapabilitySource` interface structurally, so `createContributionRegistryStore(manifests, sessionStore)`
+works with no adapter and no dependency in either direction — call its `refresh()` instead of `set(...)`.
+Rebuilds go through the unchanged pure `createContributionRegistry`, and both bindings accept either a
+plain registry or a store. See ADR-0074.
 
 ## Reference usage
 

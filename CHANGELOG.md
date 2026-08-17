@@ -121,7 +121,64 @@ minor releases may include breaking changes.
   and there is no options bag beyond the scope. The sortable-`DateTimeOffset`-on-SQLite case stays a
   documented recipe rather than an API: it is provider-specific and lossy.
 
+- **Global authorization rules: the `IGlobalAuthorizationRule` seam.** A cross-cutting rule registered with
+  `AddElarionGlobalAuthorizationRule<T>()` is evaluated for every authorized handler invocation — after the
+  authenticated gate, before the handler's declared permission/role/claim/policy/resource checks — for the
+  conditions that are not per-handler: a suspended tenant, a lapsed subscription, a maintenance lockdown.
+  Rules are additive, run in registration order, and the first non-null `AppError` reaches the caller
+  **unchanged**, so the rule chooses the outcome kind (a rule that must not disclose a resource answers
+  `NotFound`; one that states the denial answers `Forbidden`). `[AllowAnonymous]` handlers still skip
+  authorization entirely, rules included. A rule runs wherever the authorization decorator is attached, so
+  pair it with `[assembly: ElarionAuthorizationDefaults]` for broad coverage — that reaches every handler
+  except event-consumer handlers, which are exempt from implicit attachment. Client-event subscriptions are
+  covered too (see Fixed).
+- **A decoratable authorizer.** `AddElarionAuthorization()` now registers the concrete `ClaimsAuthorizer` as
+  its own service and resolves `IAuthorizer` from it, so a host decorator can take `ClaimsAuthorizer` as its
+  inner authorizer and both resolve to the same scoped instance. Every registration remains `TryAdd`, so a
+  host registration placed **before** the framework call still wins outright. Note that only
+  `ClaimsAuthorizer` evaluates global rules: wholesale replacement makes them inert, decoration keeps them
+  running.
+- **Application sections on the client-capability snapshot: `IClientSnapshotContributor`.** Register a
+  contributor with `AddElarionClientSnapshotContributor<T>(sectionResolver)` and it adds one named section to
+  the `elarion.session` snapshot — the seam for bootstrap data the framework does not own (tenant, branding,
+  onboarding state) that a frontend would otherwise fetch with a second round trip. Contributors are scoped
+  (so they may inject the current user or a `DbContext`), returning `null` omits the section entirely, and
+  the optional resolver argument contributes the payload types' source-generated JSON context to the
+  canonical serialization chain so the snapshot stays reflection-free under Native AOT. A host with no
+  contributors serializes byte-identically to before (`sections` is omitted, not empty); two contributors
+  declaring the same section name throw, because section names are wire keys. On the client,
+  `ClientSnapshot` gains an optional `sections` and `SessionCapabilities` a `getSection<T>(name)`.
+  Re-export `rpc-schema.json` and regenerate the client after adding a contributor — the generated result
+  validators strip unknown keys, so a stale schema silently drops `sections`.
+- **Reactive client capabilities (ADR-0074).** `@swimmesberger/elarion-contributions` gains a store layer
+  above its pure resolution: `CapabilitySource` (a `CapabilityReader` that can announce changes),
+  `createCapabilityStore`, and `createContributionRegistryStore`. A capability store *is* a
+  `CapabilityReader`, so it goes into a TanStack router context once and `redirectUnless` re-reads it per
+  navigation with no adapter change; a registry store rebuilds lazily through the unchanged pure
+  `createContributionRegistry`, keeping `current` referentially stable for `useSyncExternalStore` and keeping
+  a duplicate-id error at the read that surfaces it. `ContributionProvider` and `provideContributions` accept
+  either a plain registry or a store. The TypeScript client generator emits a matching
+  `createSessionCapabilitiesStore(fetchSnapshot)` — `current`/`refresh()`/`subscribe()`, fail-closed reads
+  until the first refresh completes, and overlapping refreshes applied in call order so a slow earlier fetch
+  cannot overwrite a newer snapshot. It satisfies `CapabilitySource` structurally, so neither package
+  references the other. Existing call shapes are unchanged; stores are opt-in.
+
 ### Fixed
+- **Client-event subscriptions bypassed the authorizer for authenticated-only topics.**
+  `ClientEventSubscriptionResolver` decided the "authenticated" requirement itself and consulted
+  `IAuthorizer` only for topics declaring a permission, role, claim, policy, or resource requirement. Since
+  every topic requires authentication and nothing more by default, the common case never reached the
+  authorizer at all — which meant a registered `IGlobalAuthorizationRule` (a suspended tenant, a maintenance
+  lockdown) gated request/reply but silently exempted the corresponding subscribe, letting a live stream
+  outlive the gate. Any topic declaring a requirement is now decided by the `IAuthorizer` when one is
+  registered. Hosts that never registered the authorization package are unaffected: with no `IAuthorizer`
+  there is no rule set to bypass, so an authenticated-only topic still resolves, and anything beyond
+  authentication still fails closed exactly as before.
+- **Authorization denial telemetry reported the wrong outcome for non-forbidden denials.** Both the handler
+  and stream authorization decorators collapsed every non-`Unauthorized` denial to
+  `elarion.authorization.outcome="forbidden"`, so a global rule answering `NotFound` was counted as a
+  403. The tag now follows the denial's `ErrorKind` (`unauthorized`, `forbidden`, `not_found`, …); `ErrorKind`
+  is a closed enum mapped to constants, so tag cardinality stays bounded.
 - **Blob listing under naming-convention plugins.** `PostgreSqlBlobStore.ListAsync` failed with
   "The required column 'is_prefix' was not present in the results of a 'FromSql' operation" on any
   context using EFCore.NamingConventions' `UseSnakeCaseNamingConvention`: the listing SQL hard-coded

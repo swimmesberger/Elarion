@@ -905,6 +905,134 @@ describe('JSON-RPC client generator', () => {
     expect(sessionModule.Keys.module('Billing')).toBe('module.Billing')
   })
 
+  it('reads application-contributed snapshot sections, and stays undefined when absent', async () => {
+    const generated = generateRpcClientFiles(sessionSchema(), {
+      generatedBy: 'test-generator',
+      sourceLabel: 'session.json',
+    })
+    const source = generated.sessionClientSource as string
+    expect(source).toContain('getSection<T = unknown>(name: string): T | undefined')
+    expect(source).not.toContain('import ')
+
+    const sessionModule = await loadGeneratedSessionClient(source)
+    const base = {
+      user: {id: 'u-1', isAuthenticated: true, roles: [], permissions: []},
+      modules: {},
+      flags: {},
+      variants: {},
+    }
+
+    const withSections = sessionModule.createSessionCapabilities({
+      ...base,
+      sections: {tenant: {name: 'Acme', theme: 'dark'}},
+    })
+    expect(withSections.getSection<{name: string; theme: string}>('tenant')).toEqual({
+      name: 'Acme',
+      theme: 'dark',
+    })
+    // A section the backend did not contribute reads as undefined, not as an error.
+    expect(withSections.getSection('missing')).toBeUndefined()
+
+    // A host with no contributors omits `sections` entirely — every read is undefined.
+    expect(sessionModule.createSessionCapabilities(base).getSection('tenant')).toBeUndefined()
+  })
+
+  it('emits a refreshable session capabilities store that fails closed before the first refresh', async () => {
+    const generated = generateRpcClientFiles(sessionSchema(), {
+      generatedBy: 'test-generator',
+      sourceLabel: 'session.json',
+    })
+    const source = generated.sessionClientSource as string
+    expect(source).toContain('export function createSessionCapabilitiesStore')
+    // The store must stay structurally compatible with the contributions package's CapabilitySource — the
+    // four reader methods plus subscribe — without either package importing the other.
+    expect(source).toContain('subscribe(listener: () => void): () => void')
+    expect(source).not.toContain('import ')
+
+    const sessionModule = await loadGeneratedSessionClient(source)
+    const snapshots = [
+      {
+        user: {id: 'u-1', isAuthenticated: true, roles: [], permissions: []},
+        modules: {Billing: false},
+        flags: {},
+        variants: {},
+      },
+      {
+        user: {id: 'u-1', isAuthenticated: true, roles: ['admin'], permissions: ['billing.write']},
+        modules: {Billing: true},
+        flags: {'new-checkout': true},
+        variants: {ForecastAlgorithm: 'neural'},
+        sections: {tenant: {name: 'Acme'}},
+      },
+    ]
+    let fetches = 0
+    const store = sessionModule.createSessionCapabilitiesStore(async () => snapshots[fetches++]!)
+
+    // Before the first refresh every read denies — UI gated on a capability stays hidden while the
+    // snapshot is in flight instead of flashing and retracting.
+    expect(store.current).toBeUndefined()
+    expect(store.isModuleEnabled('Billing')).toBe(false)
+    expect(store.hasPermission('billing.write')).toBe(false)
+    expect(store.hasRole('admin')).toBe(false)
+    expect(store.isFlagEnabled('new-checkout')).toBe(false)
+    expect(store.getVariant('ForecastAlgorithm')).toBeUndefined()
+    expect(store.getSection('tenant')).toBeUndefined()
+
+    let notifications = 0
+    const unsubscribe = store.subscribe(() => {
+      notifications++
+    })
+
+    await store.refresh()
+    expect(notifications).toBe(1)
+    expect(store.isModuleEnabled('Billing')).toBe(false)
+
+    await store.refresh()
+    expect(notifications).toBe(2)
+    expect(store.current).toBeDefined()
+    expect(store.isModuleEnabled('Billing')).toBe(true)
+    expect(store.hasPermission('billing.write')).toBe(true)
+    expect(store.hasRole('admin')).toBe(true)
+    expect(store.isFlagEnabled('new-checkout')).toBe(true)
+    expect(store.getVariant('ForecastAlgorithm')).toBe('neural')
+    expect(store.getSection<{name: string}>('tenant')).toEqual({name: 'Acme'})
+
+    // Unsubscribing stops notifications; the store keeps answering.
+    unsubscribe()
+    snapshots.push(snapshots[1]!)
+    await store.refresh()
+    expect(notifications).toBe(2)
+    expect(store.isModuleEnabled('Billing')).toBe(true)
+  })
+
+  it('applies overlapping refreshes in call order, so a slow earlier fetch cannot win', async () => {
+    const generated = generateRpcClientFiles(sessionSchema(), {
+      generatedBy: 'test-generator',
+      sourceLabel: 'session.json',
+    })
+    const sessionModule = await loadGeneratedSessionClient(generated.sessionClientSource as string)
+
+    const base = {user: {id: 'u-1', isAuthenticated: true, roles: [], permissions: []}, flags: {}, variants: {}}
+    const gates: Array<(snapshot: unknown) => void> = []
+    const store = sessionModule.createSessionCapabilitiesStore(
+      () => new Promise((resolve) => gates.push(resolve))
+    )
+
+    // Two refreshes in flight; the first (stale) one settles last.
+    const first = store.refresh()
+    const second = store.refresh()
+    gates[1]!({...base, modules: {Billing: true}})
+    await second
+    expect(store.isModuleEnabled('Billing')).toBe(true)
+
+    gates[0]!({...base, modules: {Billing: false}})
+    const firstCapabilities = await first
+    // The superseded fetch neither replaced `current` nor notified...
+    expect(store.isModuleEnabled('Billing')).toBe(true)
+    // ...but its own caller still receives its own snapshot's capabilities.
+    expect(firstCapabilities.isModuleEnabled('Billing')).toBe(false)
+  })
+
   it('omits the session client when the schema does not expose elarion.session', () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     expect(generated.sessionClientSource).toBeUndefined()
@@ -1167,7 +1295,22 @@ interface SessionClientModule {
   createSessionCapabilities(snapshot: unknown): {
     isModuleEnabled(name: string): boolean
     hasPermission(permission: string): boolean
+    hasRole(role: string): boolean
+    isFlagEnabled(name: string): boolean
     getVariant(name: string): string | undefined
+    getSection<T = unknown>(name: string): T | undefined
+  }
+
+  createSessionCapabilitiesStore(fetchSnapshot: () => Promise<unknown>): {
+    readonly current: {isModuleEnabled(name: string): boolean} | undefined
+    refresh(): Promise<{isModuleEnabled(name: string): boolean}>
+    subscribe(listener: () => void): () => void
+    isModuleEnabled(name: string): boolean
+    hasPermission(permission: string): boolean
+    hasRole(role: string): boolean
+    isFlagEnabled(name: string): boolean
+    getVariant(name: string): string | undefined
+    getSection<T = unknown>(name: string): T | undefined
   }
 
   Keys: { module(name: string): string; permission(permission: string): string; role(role: string): string }

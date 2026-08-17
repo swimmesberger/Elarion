@@ -12,9 +12,10 @@ public sealed class ClaimsAuthorizerTests {
         FakeCurrentUser user,
         IEnumerable<NamedAuthorizationPolicy>? policies = null,
         AuthorizationOptions? options = null,
-        IResourceAuthorizer? resourceAuthorizer = null) {
+        IResourceAuthorizer? resourceAuthorizer = null,
+        IEnumerable<IGlobalAuthorizationRule>? globalRules = null) {
         return new ClaimsAuthorizer(user, policies ?? [], resourceAuthorizer ?? new StubResourceAuthorizer(),
-            options ?? new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance);
+            options ?? new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance, globalRules);
     }
 
     private static AuthorizationRequirements Requirements(
@@ -100,6 +101,99 @@ public sealed class ClaimsAuthorizerTests {
             Requirements(policies: ["AtLeast21"]), new GuardedCommand(1), TestContext.Current.CancellationToken);
 
         error.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GlobalRuleDeniesWithItsOwnErrorKind() {
+        var user = new FakeCurrentUser { IsAuthenticated = true };
+        var calls = new List<string>();
+        var forbidding = Create(user,
+            globalRules: [new RecordingGlobalRule(AppError.Forbidden("Workspace suspended."), calls, "forbid")]);
+
+        var forbidden = await forbidding.AuthorizeAsync(
+            Requirements(requireAuthenticated: true), null, TestContext.Current.CancellationToken);
+
+        forbidden!.Kind.Should().Be(ErrorKind.Forbidden);
+        forbidden.Message.Should().Be("Workspace suspended.");
+
+        // A rule that must not disclose the resource answers NotFound; the authorizer passes it through
+        // unchanged rather than reshaping every denial into Forbidden.
+        var hiding = Create(user,
+            globalRules: [new RecordingGlobalRule(AppError.NotFound("Not found."), calls, "hide")]);
+
+        var notFound = await hiding.AuthorizeAsync(
+            Requirements(requireAuthenticated: true), null, TestContext.Current.CancellationToken);
+
+        notFound!.Kind.Should().Be(ErrorKind.NotFound);
+        notFound.Message.Should().Be("Not found.");
+    }
+
+    [Fact]
+    public async Task GlobalRulesRunInRegistrationOrderAndFirstDenialWins() {
+        var user = new FakeCurrentUser { IsAuthenticated = true };
+        var calls = new List<string>();
+        var authorizer = Create(user, globalRules: [
+            new RecordingGlobalRule(null, calls, "first"),
+            new RecordingGlobalRule(AppError.Forbidden("second denied"), calls, "second"),
+            new RecordingGlobalRule(AppError.Forbidden("third denied"), calls, "third")
+        ]);
+
+        var error = await authorizer.AuthorizeAsync(
+            Requirements(requireAuthenticated: true), null, TestContext.Current.CancellationToken);
+
+        error!.Message.Should().Be("second denied");
+        calls.Should().Equal("first", "second");
+    }
+
+    [Fact]
+    public async Task GlobalRuleRunsBeforeDeclaredRequirementsAndSeesTheRequest() {
+        var user = new FakeCurrentUser { IsAuthenticated = true };
+        var calls = new List<string>();
+        var rule = new RecordingGlobalRule(AppError.Forbidden("rule denied"), calls, "rule");
+        var resourceAuthorizer = new StubResourceAuthorizer();
+        var authorizer = Create(user, resourceAuthorizer: resourceAuthorizer, globalRules: [rule]);
+
+        var command = new GuardedCommand(7);
+        var error = await authorizer.AuthorizeAsync(
+            Requirements(
+                permissions: ["tenants.read"],
+                resources: [new ResourceRequirement(typeof(string), "Tenant", ResourceOperation.Read, 7)]),
+            command,
+            TestContext.Current.CancellationToken);
+
+        // The rule's message (not the generic permission denial) proves it short-circuited first.
+        error!.Message.Should().Be("rule denied");
+        resourceAuthorizer.Calls.Should().BeEmpty();
+        rule.LastContext!.Resource.Should().BeSameAs(command);
+        rule.LastContext.User.Should().BeSameAs(user);
+    }
+
+    [Fact]
+    public async Task GlobalRulesAreSkippedForAllowAnonymous() {
+        var calls = new List<string>();
+        var authorizer = Create(
+            new FakeCurrentUser { IsAuthenticated = false },
+            globalRules: [new RecordingGlobalRule(AppError.Forbidden("never"), calls, "rule")]);
+
+        var error = await authorizer.AuthorizeAsync(
+            Requirements(allowAnonymous: true, permissions: ["x"]), null, TestContext.Current.CancellationToken);
+
+        error.Should().BeNull();
+        calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UnauthenticatedYieldsUnauthorizedBeforeGlobalRulesRun() {
+        var calls = new List<string>();
+        var authorizer = Create(
+            new FakeCurrentUser { IsAuthenticated = false },
+            globalRules: [new RecordingGlobalRule(AppError.Forbidden("never"), calls, "rule")]);
+
+        var error = await authorizer.AuthorizeAsync(
+            Requirements(permissions: ["tenants.read"]), null, TestContext.Current.CancellationToken);
+
+        error!.Kind.Should().Be(ErrorKind.Unauthorized);
+        calls.Should().BeEmpty();
     }
 
     [Fact]

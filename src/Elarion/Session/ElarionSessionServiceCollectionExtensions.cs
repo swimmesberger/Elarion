@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization.Metadata;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Modules;
@@ -46,6 +48,46 @@ public static class ElarionSessionServiceCollectionExtensions {
         // ConfigureElarionJson (which self-registers the accessor); a duplicate host contribution is harmless
         // (first-match-wins over identical type infos).
         services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SessionJsonContext.Default));
+        return services;
+    }
+
+    /// <summary>
+    /// Registers an <see cref="IClientSnapshotContributor"/> that adds one named section to the snapshot, and
+    /// (when <paramref name="sectionResolver"/> is supplied) contributes the resolver its payload types are
+    /// declared in to the canonical <c>IElarionJsonSerialization</c>.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="sectionResolver">
+    /// The source-generated <c>JsonSerializerContext</c> (or any <see cref="IJsonTypeInfoResolver"/>) declaring the
+    /// contributor's payload types. Section payloads are serialized from their runtime type, so a payload type
+    /// absent from every registered resolver throws at serialization time under AOT rules; pass the contributor's
+    /// own context here and the snapshot stays reflection-free. Omit it only when the payload types are already
+    /// contributed elsewhere.
+    /// </param>
+    /// <remarks>
+    /// Additive and per-contributor: call it once per section. Contributors are scoped, so they may inject the
+    /// current user, a <c>DbContext</c>, or any other request-scoped service. Registering the same contributor
+    /// type twice is a no-op; two <b>different</b> contributors declaring the same section name is a wiring bug
+    /// the handler rejects with an <see cref="InvalidOperationException"/>.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// builder.Services.AddElarionSession(builder.Configuration.GetClientCapabilityManifest());
+    /// builder.Services.AddElarionClientSnapshotContributor&lt;TenantSectionContributor&gt;(
+    ///     TenantSectionJsonContext.Default);
+    /// </code>
+    /// </example>
+    public static IServiceCollection AddElarionClientSnapshotContributor<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TContributor>(
+        this IServiceCollection services,
+        IJsonTypeInfoResolver? sectionResolver = null)
+        where TContributor : class, IClientSnapshotContributor {
+        ArgumentNullException.ThrowIfNull(services);
+
+        // TryAddEnumerable keys on (service, implementation): the same contributor registered twice stays one
+        // registration, while distinct contributors accumulate in registration order.
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IClientSnapshotContributor, TContributor>());
+        if (sectionResolver is not null) services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(sectionResolver));
         return services;
     }
 

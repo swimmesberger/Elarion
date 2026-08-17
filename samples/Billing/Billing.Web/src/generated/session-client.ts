@@ -2,7 +2,8 @@
 // Source: Billing sample (rpc-schema.json)
 //
 // Client-capability snapshot (operation: "elarion.session"). Fetch it with the generated RPC client
-// and pass it to createSessionCapabilities / createElarionOpenFeatureProvider.
+// and pass it to createSessionCapabilities / createElarionOpenFeatureProvider, or hand the fetcher itself to
+// createSessionCapabilitiesStore for a live snapshot you can refresh().
 
 /** The current user's identity and raw grants, as projected into the snapshot. */
 export interface ClientSnapshotUser {
@@ -19,6 +20,13 @@ export interface ClientSnapshot {
   readonly modules: Readonly<Record<string, boolean>>
   readonly flags: Readonly<Record<string, boolean>>
   readonly variants: Readonly<Record<string, string>>
+  /**
+   * Application-contributed sections, keyed by section name — whatever the backend's
+   * IClientSnapshotContributor implementations returned. Absent when the host registers none, and a section
+   * whose contributor returned null is absent rather than null. Read one with
+   * `capabilities.getSection<TenantSection>('tenant')`.
+   */
+  readonly sections?: Readonly<Record<string, unknown>>
 }
 
 /** Module names declared by the backend (enabled at schema-export time). */
@@ -93,6 +101,20 @@ export class SessionCapabilities {
     return this.snapshot.variants[name]
   }
 
+  /**
+   * Reads an application-contributed section, or `undefined` when the backend contributed none under that
+   * name. The type parameter is an assertion about the contributor's payload — the wire carries no runtime
+   * type information, so declare the section's shape in the app and keep it next to the contributor:
+   *
+   * ```ts
+   * interface TenantSection { readonly name: string; readonly theme: string }
+   * const tenant = capabilities.getSection<TenantSection>('tenant')
+   * ```
+   */
+  getSection<T = unknown>(name: string): T | undefined {
+    return this.snapshot.sections?.[name] as T | undefined
+  }
+
   /** Resolves a reserved-namespace boolean key (the OpenFeature boolean read). */
   resolveBoolean(key: string): boolean {
     if (key.startsWith('module.')) return this.isModuleEnabled(key.slice('module.'.length))
@@ -104,6 +126,108 @@ export class SessionCapabilities {
 
 export function createSessionCapabilities(snapshot: ClientSnapshot): SessionCapabilities {
   return new SessionCapabilities(snapshot)
+}
+
+/**
+ * A live capability snapshot: the same synchronous reads as `SessionCapabilities`, plus `refresh()` to
+ * re-fetch and `subscribe()` to learn that the answers changed. Its *identity is stable* while its answers
+ * change, so it is placed once — a router context, a DI provider, a React provider — and every later read
+ * sees the current snapshot.
+ *
+ * It structurally satisfies the `CapabilitySource` interface of `@swimmesberger/elarion-contributions`
+ * (the four reader methods plus `subscribe`), so it can be handed straight to
+ * `createContributionRegistryStore(manifests, store)`; neither package references the other.
+ */
+export interface SessionCapabilitiesStore {
+  /** The capabilities from the last successful refresh, or `undefined` before the first one completes. */
+  readonly current: SessionCapabilities | undefined
+  /**
+   * Re-fetches the snapshot, replaces `current`, and notifies subscribers. Call it after any action that can
+   * change what the user may see — a login, a tenant switch, a role or subscription change. Contributor-fed
+   * sections ride along automatically, since they are part of the same snapshot.
+   *
+   * A failed fetch rejects and leaves the previous answers in place, so a transient network error never
+   * silently strips the UI down to the fail-closed defaults. Overlapping refreshes are safe: results are
+   * applied in call order, so a slower earlier fetch can never overwrite a newer snapshot. Each caller still
+   * receives its own fetch's capabilities.
+   */
+  refresh(): Promise<SessionCapabilities>
+  /** Registers a change listener; returns its own unsubscribe function. */
+  subscribe(listener: () => void): () => void
+  isModuleEnabled(name: ModuleName | (string & {})): boolean
+  hasPermission(permission: PermissionName | (string & {})): boolean
+  hasRole(role: RoleName | (string & {})): boolean
+  isFlagEnabled(name: FlagName | (string & {})): boolean
+  getVariant(name: FlagName | (string & {})): string | undefined
+  getSection<T = unknown>(name: string): T | undefined
+}
+
+/**
+ * Builds a {@link SessionCapabilitiesStore} over a snapshot fetcher. The fetcher is injected rather than
+ * built in, which is what keeps this module import-free: the caller supplies the transport, typically the
+ * generated RPC client.
+ *
+ * Every read **before the first successful refresh fails closed** — modules, permissions, roles, and flags
+ * all answer `false`, variants and sections `undefined` — so UI gated on a capability stays hidden while
+ * the snapshot is in flight rather than flashing and retracting.
+ *
+ * ```ts
+ * const capabilities = createSessionCapabilitiesStore(
+ *   async () => (await rpc.elarion.session({})) as ClientSnapshot
+ * )
+ * await capabilities.refresh()
+ * ```
+ */
+export function createSessionCapabilitiesStore(
+  fetchSnapshot: () => Promise<ClientSnapshot>
+): SessionCapabilitiesStore {
+  let current: SessionCapabilities | undefined
+  // Monotonic call token: concurrent refreshes (a login and a route load, say) can settle out of order, and
+  // applying a slower *earlier* fetch last would leave the UI on a stale snapshot. Only a result no newer
+  // call has superseded is applied; every caller still gets its own fetch's capabilities back.
+  let issued = 0
+  let applied = 0
+  const listeners = new Set<() => void>()
+  return {
+    get current() {
+      return current
+    },
+    async refresh() {
+      const token = ++issued
+      const capabilities = new SessionCapabilities(await fetchSnapshot())
+      if (token > applied) {
+        applied = token
+        current = capabilities
+        // Iterate a copy so a listener that unsubscribes itself cannot skip a sibling.
+        for (const listener of [...listeners]) listener()
+      }
+      return capabilities
+    },
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    isModuleEnabled(name) {
+      return current?.isModuleEnabled(name) ?? false
+    },
+    hasPermission(permission) {
+      return current?.hasPermission(permission) ?? false
+    },
+    hasRole(role) {
+      return current?.hasRole(role) ?? false
+    },
+    isFlagEnabled(name) {
+      return current?.isFlagEnabled(name) ?? false
+    },
+    getVariant(name) {
+      return current?.getVariant(name)
+    },
+    getSection<T = unknown>(name: string) {
+      return current?.getSection<T>(name)
+    },
+  }
 }
 
 /** A single flag resolution result (structurally compatible with OpenFeature's ResolutionDetails). */
@@ -121,13 +245,9 @@ export interface ResolutionDetails<T> {
 export interface ElarionWebProvider {
   readonly metadata: { readonly name: string }
   readonly runsOn: 'client'
-
   resolveBooleanEvaluation(flagKey: string, defaultValue: boolean): ResolutionDetails<boolean>
-
   resolveStringEvaluation(flagKey: string, defaultValue: string): ResolutionDetails<string>
-
   resolveNumberEvaluation(flagKey: string, defaultValue: number): ResolutionDetails<number>
-
   resolveObjectEvaluation<T>(flagKey: string, defaultValue: T): ResolutionDetails<T>
 }
 
@@ -143,7 +263,7 @@ const DEFAULT = 'DEFAULT'
 export function createElarionOpenFeatureProvider(snapshot: ClientSnapshot): ElarionWebProvider {
   const capabilities = new SessionCapabilities(snapshot)
   return {
-    metadata: {name: 'elarion-session'},
+    metadata: { name: 'elarion-session' },
     runsOn: 'client',
     resolveBooleanEvaluation(flagKey, defaultValue) {
       if (
@@ -151,22 +271,22 @@ export function createElarionOpenFeatureProvider(snapshot: ClientSnapshot): Elar
         flagKey.startsWith('permission.') ||
         flagKey.startsWith('role.')
       ) {
-        return {value: capabilities.resolveBoolean(flagKey), reason: STATIC}
+        return { value: capabilities.resolveBoolean(flagKey), reason: STATIC }
       }
       const flag = snapshot.flags[flagKey]
-      return flag === undefined ? {value: defaultValue, reason: DEFAULT} : {value: flag, reason: STATIC}
+      return flag === undefined ? { value: defaultValue, reason: DEFAULT } : { value: flag, reason: STATIC }
     },
     resolveStringEvaluation(flagKey, defaultValue) {
       const variant = capabilities.getVariant(flagKey)
       return variant === undefined
-        ? {value: defaultValue, reason: DEFAULT}
-        : {value: variant, variant, reason: STATIC}
+        ? { value: defaultValue, reason: DEFAULT }
+        : { value: variant, variant, reason: STATIC }
     },
     resolveNumberEvaluation(_flagKey, defaultValue) {
-      return {value: defaultValue, reason: DEFAULT}
+      return { value: defaultValue, reason: DEFAULT }
     },
     resolveObjectEvaluation(_flagKey, defaultValue) {
-      return {value: defaultValue, reason: DEFAULT}
+      return { value: defaultValue, reason: DEFAULT }
     },
   }
 }

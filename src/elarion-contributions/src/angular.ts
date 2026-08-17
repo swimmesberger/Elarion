@@ -14,7 +14,12 @@ import {
   type EnvironmentProviders,
   type Signal,
 } from "@angular/core"
-import type {Contribution, ContributionRegistry, ExtensionPoint} from "./index.js"
+import type {
+  Contribution,
+  ContributionRegistry,
+  ContributionRegistryStore,
+  ExtensionPoint,
+} from "./index.js"
 
 // A Signal is held (never a bare registry) so a snapshot refresh — login, context change — re-resolves every
 // slot reactively by setting one signal, the Angular mirror of React swapping the provider value.
@@ -25,21 +30,47 @@ const CONTRIBUTION_REGISTRY = new InjectionToken<Signal<ContributionRegistry>>(
 /**
  * Provides the resolved registry to the injector tree — the idiomatic mirror of React's
  * `<ContributionProvider>`, shaped like `provideRouter`/`provideHttpClient`. Pass a live registry for a
- * static snapshot, or a `Signal<ContributionRegistry>` when the capability snapshot can change at runtime
- * (login, tenant switch): rebuilding the registry and setting the signal re-resolves every slot.
+ * static snapshot, a `ContributionRegistryStore` when the capability snapshot can change at runtime (login,
+ * tenant switch, a post-mutation refresh), or a `Signal<ContributionRegistry>` when the app already drives
+ * the rebuild itself. Every form ends up behind one signal, so a change re-resolves every slot.
  *
  * @example
  * ```ts
  * bootstrapApplication(App, {
- *   providers: [provideContributions(createContributionRegistry(manifests, capabilities))],
+ *   providers: [provideContributions(createContributionRegistryStore(manifests, capabilityStore))],
  * })
  * ```
  */
 export function provideContributions(
-  source: ContributionRegistry | Signal<ContributionRegistry>
+  source: ContributionRegistry | ContributionRegistryStore | Signal<ContributionRegistry>
 ): EnvironmentProviders {
-  const registry = isSignal(source) ? source : signal(source)
+  const registry = isSignal(source)
+    ? source
+    : isRegistryStore(source)
+      ? fromStore(source)
+      : signal(source)
   return makeEnvironmentProviders([{provide: CONTRIBUTION_REGISTRY, useValue: registry}])
+}
+
+function isRegistryStore(
+  source: ContributionRegistry | ContributionRegistryStore
+): source is ContributionRegistryStore {
+  return typeof (source as ContributionRegistryStore).subscribe === "function"
+}
+
+// The subscriber bumps a version counter instead of reading `store.current`, so resolution stays *lazy* — it
+// happens at the injection read site, not inside the notifier. Reading eagerly here would resolve a registry
+// for a snapshot no template consumes and would move a manifest data bug (a duplicate contribution id) into a
+// notification callback, which is exactly what ADR-0074 rejects.
+// The store subscription is held for the provider's lifetime (an application-lifetime object), mirroring what
+// the store itself does with the capability source.
+function fromStore(store: ContributionRegistryStore): Signal<ContributionRegistry> {
+  const version = signal(0)
+  store.subscribe(() => version.update((n) => n + 1))
+  return computed(() => {
+    version()
+    return store.current
+  })
 }
 
 /**

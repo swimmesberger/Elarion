@@ -5,10 +5,12 @@ using Elarion.Abstractions;
 using Elarion.Abstractions.Pipeline;
 using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Features;
+using Elarion.Authorization;
 using Elarion.Diagnostics;
 using Elarion.Pipeline;
 using Elarion.Tests.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Elarion.Tests.Pipeline;
@@ -297,6 +299,59 @@ public sealed class StreamPipelineTests {
         result.IsSuccess.Should().BeFalse();
         authorizer.Requirements.Resources.Should().ContainSingle().Which.ResourceId.Should().Be(42);
         steps.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Authorization_GlobalRule_DeniesTheStream_AndTagsTheRulesOwnOutcomeKind() {
+        // Parity with the request/reply decorator (#149): a stream goes through the same IAuthorizer, so the
+        // registered IGlobalAuthorizationRule set gates it too. The real ClaimsAuthorizer is used so the rule
+        // wiring is exercised rather than stubbed, and the rule answers NotFound to prove the outcome tag
+        // follows the denial's kind instead of collapsing to "forbidden".
+        using var meters = new MeterCollector(HandlerTelemetry.MeterName);
+        using var activity = new Activity("stream").Start();
+        var steps = new List<string>();
+        var authorizer = new ClaimsAuthorizer(
+            new StubCurrentUser(), [], new AllowAllResourceAuthorizer(), new AuthorizationOptions(),
+            NullLogger<ClaimsAuthorizer>.Instance,
+            [new DenyingGlobalRule(AppError.NotFound("Not found."))]);
+        var decorator = new StreamAuthorizationDecorator<Request, int>(
+            new ProbeHandler(steps),
+            new StreamHandlerMetadata(typeof(ProbeHandler), typeof(Request), typeof(int)),
+            authorizer,
+            requireAuthenticatedByDefault: true);
+
+        var result = await decorator.HandleAsync(new Request(), TestContext.Current.CancellationToken);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Kind.Should().Be(ErrorKind.NotFound);
+        result.Error.Message.Should().Be("Not found.");
+        steps.Should().BeEmpty();
+        activity.GetTagItem("elarion.authorization.outcome").Should().Be("not_found");
+        meters.Measurements.Should().Contain(m => m.InstrumentName == "handler.authorization.denied.count" &&
+                                                  m.HasTag("elarion.authorization.outcome", "not_found"));
+    }
+
+    private sealed class DenyingGlobalRule(AppError error) : IGlobalAuthorizationRule {
+        public ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
+            return ValueTask.FromResult<AppError?>(error);
+        }
+    }
+
+    private sealed class StubCurrentUser : Elarion.Abstractions.Identity.ICurrentUser {
+        public string UserId => "user-1";
+        public string? Email => null;
+        public IReadOnlyList<string> Roles => [];
+        public bool IsAuthenticated => true;
+
+        public bool IsInRole(string role) {
+            return false;
+        }
+    }
+
+    private sealed class AllowAllResourceAuthorizer : IResourceAuthorizer {
+        public ValueTask<bool> AuthorizeResourceAsync(ResourceAuthorizationContext context, CancellationToken ct) {
+            return ValueTask.FromResult(true);
+        }
     }
 
     [Fact]

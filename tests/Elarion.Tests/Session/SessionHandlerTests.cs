@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Authorization;
@@ -145,6 +147,132 @@ public sealed class SessionHandlerTests {
         serialization.GetTypeInfo<SessionRequest>().Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task HandleAsync_WithNoContributors_LeavesSectionsNull() {
+        var handler = new SessionHandler(new FakeCurrentUser(), ClientCapabilityManifest.Empty);
+
+        var result = await handler.HandleAsync(new SessionRequest(), TestContext.Current.CancellationToken);
+
+        result.Value!.Sections.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task HandleAsync_OmitsSectionsWhoseContributorReturnedNull() {
+        var handler = new SessionHandler(
+            new FakeCurrentUser(), ClientCapabilityManifest.Empty, null, null, null,
+            [
+                new StubContributor("tenant", new TenantSection { Name = "Acme", Theme = "dark" }),
+                new StubContributor("absent", null)
+            ]);
+
+        var result = await handler.HandleAsync(new SessionRequest(), TestContext.Current.CancellationToken);
+
+        result.Value!.Sections.Should().ContainKey("tenant");
+        result.Value!.Sections.Should().NotContainKey("absent");
+    }
+
+    [Fact]
+    public async Task HandleAsync_WithOnlyNullContributors_LeavesSectionsNull() {
+        var handler = new SessionHandler(
+            new FakeCurrentUser(), ClientCapabilityManifest.Empty, null, null, null,
+            [new StubContributor("absent", null)]);
+
+        var result = await handler.HandleAsync(new SessionRequest(), TestContext.Current.CancellationToken);
+
+        result.Value!.Sections.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task HandleAsync_ThrowsWhenTwoContributorsDeclareTheSameSection() {
+        var handler = new SessionHandler(
+            new FakeCurrentUser(), ClientCapabilityManifest.Empty, null, null, null,
+            [
+                new StubContributor("tenant", new TenantSection { Name = "Acme", Theme = "dark" }),
+                // A duplicate name fails even though this one contributes nothing: the wiring bug must fail the
+                // same way on every request, not only when both contributors happen to produce a payload.
+                new StubContributor("tenant", null)
+            ]);
+
+        var act = async () => await handler.HandleAsync(new SessionRequest(), TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*'tenant'*");
+    }
+
+    [Fact]
+    public async Task HandleAsync_PropagatesAContributorsException_RatherThanDegradingTheSnapshot() {
+        // No swallow-and-continue: a contributor that fails is a bug in the host's bootstrap data, and hiding
+        // it would ship the frontend a snapshot that is silently missing a section it was built to expect.
+        var handler = new SessionHandler(
+            new FakeCurrentUser(), ClientCapabilityManifest.Empty, null, null, null,
+            [
+                new StubContributor("tenant", new TenantSection { Name = "Acme", Theme = "dark" }),
+                new ThrowingContributor("broken")
+            ]);
+
+        var act = async () => await handler.HandleAsync(new SessionRequest(), TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("contributor exploded");
+    }
+
+    [Fact]
+    public void AddElarionClientSnapshotContributor_IsAdditive_AndContributesItsSectionResolver() {
+        var services = new ServiceCollection();
+        services.AddElarionSession(ClientCapabilityManifest.Empty);
+        services.AddElarionClientSnapshotContributor<TenantSectionContributor>(TenantSectionJsonContext.Default);
+        services.AddElarionClientSnapshotContributor<TenantSectionContributor>(TenantSectionJsonContext.Default);
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetServices<IClientSnapshotContributor>().Should().ContainSingle();
+
+        // AOT-strict: GetTypeInfo throws for a type absent from every source-gen context, so a non-null result
+        // proves the registration contributed the section's own resolver to the canonical chain.
+        var serialization = scope.ServiceProvider.GetRequiredService<IElarionJsonSerialization>();
+        serialization.GetTypeInfo<TenantSection>().Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ContributedSectionsSerializeCamelCased_AndRoundTripThroughCanonicalSerialization() {
+        var services = new ServiceCollection();
+        services.AddSingleton<ICurrentUser>(new FakeCurrentUser { UserId = "u-1", IsAuthenticated = true });
+        services.AddElarionSession(ClientCapabilityManifest.Empty);
+        services.AddElarionClientSnapshotContributor<TenantSectionContributor>(TenantSectionJsonContext.Default);
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var serialization = scope.ServiceProvider.GetRequiredService<IElarionJsonSerialization>();
+        var handler = scope.ServiceProvider.GetRequiredService<IHandler<SessionRequest, Result<SessionResponse>>>();
+        var response = (await handler.HandleAsync(new SessionRequest(), TestContext.Current.CancellationToken)).Value!;
+
+        var json = JsonSerializer.Serialize(response, serialization.GetTypeInfo<SessionResponse>());
+
+        using var document = JsonDocument.Parse(json);
+        var tenant = document.RootElement.GetProperty("sections").GetProperty("tenant");
+        tenant.GetProperty("name").GetString().Should().Be("Acme");
+        // The section payload's own context owns its naming policy, and it round-trips as its declared type.
+        tenant.GetProperty("theme").GetString().Should().Be("dark");
+        JsonSerializer.Deserialize(tenant.GetRawText(), serialization.GetTypeInfo<TenantSection>())
+            .Should().Be(new TenantSection { Name = "Acme", Theme = "dark" });
+    }
+
+    [Fact]
+    public async Task SectionsIsAbsentFromTheWireWhenNoContributorIsRegistered() {
+        var services = new ServiceCollection();
+        services.AddSingleton<ICurrentUser>(new FakeCurrentUser());
+        services.AddElarionSession(ClientCapabilityManifest.Empty);
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var serialization = scope.ServiceProvider.GetRequiredService<IElarionJsonSerialization>();
+        var handler = scope.ServiceProvider.GetRequiredService<IHandler<SessionRequest, Result<SessionResponse>>>();
+        var response = (await handler.HandleAsync(new SessionRequest(), TestContext.Current.CancellationToken)).Value!;
+
+        var json = JsonSerializer.Serialize(response, serialization.GetTypeInfo<SessionResponse>());
+
+        // The pre-seam wire shape is unchanged for a host with no contributors.
+        json.Should().NotContain("sections");
+    }
+
     private sealed class FakeCurrentUser : ICurrentUser {
         public string UserId { get; init; } = string.Empty;
         public string? Email { get; init; }
@@ -175,5 +303,39 @@ public sealed class SessionHandlerTests {
         public ValueTask<string?> GetVariantAsync(string feature, CancellationToken ct = default) {
             return ValueTask.FromResult(TryGetValue(feature, out var value) ? value : null);
         }
+    }
+}
+
+/// <summary>A contributed section payload with its own source-generated context — the documented shape.</summary>
+internal sealed record TenantSection {
+    public required string Name { get; init; }
+    public required string Theme { get; init; }
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(TenantSection))]
+internal sealed partial class TenantSectionJsonContext : JsonSerializerContext;
+
+internal sealed class TenantSectionContributor : IClientSnapshotContributor {
+    public string SectionName => "tenant";
+
+    public ValueTask<object?> GetSectionAsync(CancellationToken ct) {
+        return ValueTask.FromResult<object?>(new TenantSection { Name = "Acme", Theme = "dark" });
+    }
+}
+
+internal sealed class ThrowingContributor(string sectionName) : IClientSnapshotContributor {
+    public string SectionName { get; } = sectionName;
+
+    public ValueTask<object?> GetSectionAsync(CancellationToken ct) {
+        throw new InvalidOperationException("contributor exploded");
+    }
+}
+
+internal sealed class StubContributor(string sectionName, object? payload) : IClientSnapshotContributor {
+    public string SectionName { get; } = sectionName;
+
+    public ValueTask<object?> GetSectionAsync(CancellationToken ct) {
+        return ValueTask.FromResult(payload);
     }
 }
