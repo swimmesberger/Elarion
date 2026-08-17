@@ -35,11 +35,15 @@ internal static class ModuleDefaultsEmitter {
     public const string AddModuleApiMethod = "AddModuleApi";
     public const string AddActorsMethod = "AddActors";
     public const string AddClientEventsMethod = "AddClientEvents";
+    public const string AddJsonTypeInfoResolverMethod = "AddJsonTypeInfoResolver";
 
     public const string ServiceCollectionFqn =
         "global::Microsoft.Extensions.DependencyInjection.IServiceCollection";
 
-    /// <summary>The hook methods, in deterministic registration order.</summary>
+    /// <summary>
+    /// The hook methods, in deterministic registration order. New hooks are appended so the call order of the
+    /// existing ones — and therefore the emitted text of every module that already had them — never shifts.
+    /// </summary>
     public static readonly string[] PartialMethods = [
         AddHandlersMethod,
         AddStreamHandlersMethod,
@@ -52,7 +56,8 @@ internal static class ModuleDefaultsEmitter {
         AddPermissionsMethod,
         AddModuleApiMethod,
         AddActorsMethod,
-        AddClientEventsMethod
+        AddClientEventsMethod,
+        AddJsonTypeInfoResolverMethod
     ];
 
     public static string SiblingClassName(string moduleTypeName) {

@@ -107,6 +107,14 @@ business data by id; that is what `CreatedAt` is for. The one place to keep a ra
 an id that must be *unpredictable* (a capability-style token) — precisely because a v7 id leaks its creation
 timestamp.
 
+<Callout type="info">
+  **ELID001** (Warning, category `Elarion.Identifiers`) flags every `Guid.NewGuid()` reference — called or
+  passed as a method group — and names `Guid.CreateVersion7()` as the replacement. Flagging every site is
+  deliberate: whether a given id becomes a key is not decidable at the call site. At the unpredictable-id site,
+  keep v4 and suppress `ELID001` with a justification — that turns the exception into an argued, visible choice
+  instead of an accidental one.
+</Callout>
+
 ### The model declares client-assigned keys
 
 EF Core's default convention claims the opposite of the idiom above: a `Guid` primary key is declared
@@ -240,6 +248,100 @@ inspectable and AOT-friendly. The trade-off is explicit participation: each enti
   `UseElarionBlobStorage()`), so they join your context's model without opting into entity
   generation — see [Blob storage](/docs/capabilities/blob-storage).
 </Callout>
+
+## Value-shape conventions
+
+Three conveniences every EF consumer ends up hand-rolling. All **opt-in**, all no-configuration: the call
+*is* the decision, and per-property deviation is already expressible in that property's own configuration.
+
+### Enums as text
+
+`modelBuilder.UseElarionEnumStringConversions(...)` stores enum properties as their **name** rather than their
+ordinal. A text column survives reordering or inserting enum members and reads as itself in a database you
+migrate and debug; an ordinal column silently re-points every existing row when the enum is edited. Call it as
+a post-pass, after the configurations have run, and **pass the assemblies that own your entities**:
+
+```csharp
+protected override void OnModelCreating(ModelBuilder modelBuilder) {
+    base.OnModelCreating(modelBuilder);
+    ConfigureEntities(modelBuilder);              // generated
+    modelBuilder.UseElarionEnumStringConversions(typeof(Invoice).Assembly);
+}
+```
+
+<Callout type="warn">
+  Calling it with **no arguments** applies the pass to *every* entity type in the model — including types a
+  third-party library or another Elarion package mapped into the same `DbContext`, whose enum columns then
+  change from integer to text. That is a schema change on someone else's model, so scope the call unless the
+  context's model is entirely application-owned. The generated client-assigned-keys pass scopes itself by
+  entity assembly for the same reason.
+</Callout>
+
+Nullable enums are covered. **Explicit configuration always wins** — a property that already declares a value
+converter or a provider CLR type is left alone, so one enum stored as an ordinal opts out by saying so:
+
+```csharp
+builder.Property(e => e.Status).HasConversion<int>();   // untouched by the pass
+```
+
+### A `string[]` column, converter and comparer together
+
+`HasElarionJsonStringArray()` stores a `string[]` as a JSON text column **and** attaches the matching
+comparer in the same call:
+
+```csharp
+builder.Property(e => e.Tags).HasElarionJsonStringArray();
+
+// A nullable string[]? property: PropertyBuilder<T> is invariant, so the null-forgiving operator
+// selects the PropertyBuilder<string[]> the method is declared on.
+builder.Property(e => e.OptionalTags!).HasElarionJsonStringArray();
+```
+
+The pairing is the point. A converted collection with no comparer is compared by *reference*, so EF misses
+every in-place edit (`entity.Tags[0] = "…"` never saves). And a hand-rolled comparer is where the subtle bug
+lives: EF snapshots the property to detect changes, so its equality and hashing halves must **agree** —
+pairing an order-*independent* equality with an order-*dependent* hash (or the reverse) breaks the
+`GetHashCode` contract, and change detection then depends on how the elements happened to be ordered.
+
+`ElarionValueComparers.Sequence<T>()` (arrays) and `ElarionValueComparers.SequenceList<T>()` (`List<T>`)
+expose that comparer for your own converters. Both are consistently **order-dependent**: equality is
+`SequenceEqual`, the hash aggregates the same elements in order, and the snapshot is a shallow copy that
+carries `null` through unchanged — reordering a stored list is a change, which is the right default when the
+persisted order is part of the value.
+
+```csharp
+builder.Property(e => e.Tags)
+    .HasConversion(
+        tags => string.Join(',', tags),
+        value => value.Split(',', StringSplitOptions.RemoveEmptyEntries),
+        ElarionValueComparers.Sequence<string>());
+```
+
+Serialization goes through the package's own source-generated JSON context, so the column encoding is
+reflection-free (trim/AOT-safe) and never moves when a host retunes its wire JSON.
+
+Nulls are **not** converted: EF builds the converter with its default `convertsNulls: false` and short circuits
+them, so a `null` property writes SQL `NULL` and a `NULL` column reads back as a `null` array — not an empty
+one. What the converter does absorb is an **empty string**, the value an `AddColumn` migration with a `""`
+default leaves in existing rows, which reads back as an empty array instead of throwing on invalid JSON.
+
+### Sortable `DateTimeOffset` on SQLite — a recipe, not an API
+
+SQLite has no native `DateTimeOffset`: EF stores it as text, and `ORDER BY` on that text is not a
+chronological order across differing offsets. If a SQLite-backed query needs newest-first at the database
+(rather than sorting client-side), store a sortable surrogate — `UtcTicks` as `long`:
+
+```csharp
+builder.Property(e => e.OccurredAt)
+    .HasConversion(
+        value => value.UtcTicks,
+        ticks => new DateTimeOffset(ticks, TimeSpan.Zero));
+```
+
+Two consequences to accept deliberately: the original **offset is discarded** — every value reads back as
+UTC, so keep the local offset in its own column if the application needs it — and the column is opaque in a
+SQL client. This stays a documented recipe rather than a shipped API because it is provider-specific and
+lossy; Elarion's centre of gravity is PostgreSQL, where `timestamptz` sorts correctly with no surrogate.
 
 ## Pagination
 

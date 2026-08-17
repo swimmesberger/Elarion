@@ -9,8 +9,8 @@ namespace Elarion.Generators;
 /// Emits the per-module <c>ConfigureDefaultServices</c> aggregation skeleton for every <c>[AppModule]</c> type.
 /// <para>
 /// For each module it emits a sibling <c>{ModuleType}ElarionModuleServices</c> partial class with a single
-/// <c>ConfigureDefaultServices(IServiceCollection)</c> method that invokes five <c>static partial void</c> hooks —
-/// one per category (handlers, services, validators, scheduled jobs, event consumers). The category generators
+/// <c>ConfigureDefaultServices(IServiceCollection)</c> method that invokes one <c>static partial void</c> hook per
+/// category (handlers, services, validators, scheduled jobs, event consumers, …). The category generators
 /// implement the hooks via filler partials; unimplemented hooks elide to no-ops, so a module that uses only some
 /// categories costs nothing for the rest.
 /// </para>
@@ -19,12 +19,34 @@ namespace Elarion.Generators;
 /// so the host bootstrapper can always call <c>ConfigureDefaultServices</c> gated per module. See
 /// <see cref="ModuleDefaultsEmitter"/> for the shared naming and filler contract.
 /// </para>
+/// <para>
+/// This generator also fills the <c>AddJsonTypeInfoResolver</c> hook itself, because the module's JSON context is
+/// declared by the module type (a static <c>GetJsonTypeInfoResolver()</c>) rather than by a category generator.
+/// That makes module composition self-contained: any container that calls a module's
+/// <c>ConfigureDefaultServices</c> gets its source-generated JSON context, without the host-assembly
+/// <c>ElarionBootstrapper</c> — the composition a test host cannot reference.
+/// </para>
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class ModuleDefaultServicesGenerator : IIncrementalGenerator {
     private const string AppModuleAttributeMetadataName = "Elarion.Abstractions.Modules.AppModuleAttribute";
 
-    private sealed record ModuleTarget(string Namespace, string TypeName);
+    private const string JsonExtensionsFqn =
+        "global::Elarion.Abstractions.Serialization.ElarionJsonServiceCollectionExtensions";
+
+    private static class TrackingNames {
+        public const string Modules = "ModuleDefaultsModules";
+    }
+
+    /// <param name="Namespace">The module type's namespace, or empty for the global namespace.</param>
+    /// <param name="TypeName">The module's simple type name (the sibling class name is derived from it).</param>
+    /// <param name="TypeFqn">The module's fully-qualified name, used to call its static JSON hook.</param>
+    /// <param name="HasGetJsonTypeInfoResolver">Whether the module declares <c>static GetJsonTypeInfoResolver()</c>.</param>
+    private sealed record ModuleTarget(
+        string Namespace,
+        string TypeName,
+        string TypeFqn,
+        bool HasGetJsonTypeInfoResolver);
 
     /// <inheritdoc/>
     public void Initialize(IncrementalGeneratorInitializationContext context) {
@@ -34,7 +56,8 @@ public sealed class ModuleDefaultServicesGenerator : IIncrementalGenerator {
                 static (node, _) => node is TypeDeclarationSyntax,
                 static (ctx, _) => CreateTarget(ctx))
             .Where(static module => module is not null)
-            .Select(static (module, _) => module!);
+            .Select(static (module, _) => module!)
+            .WithTrackingName(TrackingNames.Modules);
 
         context.RegisterSourceOutput(modules, static (spc, module) => Emit(spc, module));
     }
@@ -46,10 +69,31 @@ public sealed class ModuleDefaultServicesGenerator : IIncrementalGenerator {
         var ns = type.ContainingNamespace is { IsGlobalNamespace: false } containing
             ? containing.ToDisplayString()
             : string.Empty;
-        return new ModuleTarget(ns, type.Name);
+        return new ModuleTarget(
+            ns,
+            type.Name,
+            type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            AppModuleDiscovery.HasStaticMethod(type, "GetJsonTypeInfoResolver", 0));
     }
 
     private static void Emit(SourceProductionContext spc, ModuleTarget module) {
+        EmitSkeleton(spc, module);
+
+        // No filler when the module declares no context: the hook call site elides to a no-op, so a module
+        // without JSON types costs nothing and the skeleton still compiles.
+        if (!module.HasGetJsonTypeInfoResolver)
+            return;
+
+        ModuleDefaultsEmitter.EmitFiller(
+            spc,
+            module.Namespace,
+            module.TypeName,
+            ModuleDefaultsEmitter.AddJsonTypeInfoResolverMethod,
+            "JsonTypeInfoResolver",
+            $"{JsonExtensionsFqn}.ConfigureElarionJson(services, o => o.TypeInfoResolvers.Add({module.TypeFqn}.GetJsonTypeInfoResolver()));");
+    }
+
+    private static void EmitSkeleton(SourceProductionContext spc, ModuleTarget module) {
         var className = ModuleDefaultsEmitter.SiblingClassName(module.TypeName);
         var services = ModuleDefaultsEmitter.ServiceCollectionFqn;
 
@@ -68,7 +112,7 @@ public sealed class ModuleDefaultServicesGenerator : IIncrementalGenerator {
         sb.AppendLine($"public static partial class {className}");
         sb.AppendLine("{");
         sb.AppendLine(
-            "    /// <summary>Registers all generated default services for this module (handlers, stream handlers, services, validators, scheduled jobs, event consumers).</summary>");
+            "    /// <summary>Registers all generated default services for this module (handlers, stream handlers, services, validators, scheduled jobs, event consumers) and contributes the module's source-generated JSON context.</summary>");
         sb.AppendLine($"    public static {services} ConfigureDefaultServices({services} services)");
         sb.AppendLine("    {");
         foreach (var method in ModuleDefaultsEmitter.PartialMethods)

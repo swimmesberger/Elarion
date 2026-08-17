@@ -85,15 +85,47 @@ public sealed class ElarionJsonSerializationTests {
     }
 
     [Fact]
-    public void GetTypeInfo_AotStrict_ThrowsForUnmappedType() {
+    public void GetTypeInfo_AotStrict_ThrowsActionableDiagnosticForUnmappedType() {
         var services = new ServiceCollection();
         services.AddElarionJson();
 
         var accessor = Resolve(services);
 
-        // No source-gen context, no reflection fallback => an unmapped type cannot be resolved.
+        // No source-gen context, no reflection fallback => an unmapped type cannot be resolved. The message must
+        // name the type and the remedy: the BCL's own message leaves the caller guessing at the AOT-strict contract
+        // (and the common cause is a container composed without a module's generated ConfigureDefaultServices).
         var act = () => accessor.GetTypeInfo<SampleDto>();
-        act.Should().Throw<Exception>();
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*SampleDto*")
+            .And.Message.Should().Contain("ConfigureElarionJson").And.Contain("ConfigureDefaultServices");
+    }
+
+    [Fact]
+    public void Resolvers_ContributedTwice_ComposeIntoTheChainOnce() {
+        // A module contributes its own context through its generated ConfigureDefaultServices, and the host
+        // bootstrapper contributes every enabled module's context again through GetAllJsonTypeInfoResolvers.
+        // The same instance must land in the chain once, so first-match order is what one contribution would give.
+        var services = new ServiceCollection();
+        services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SampleJsonContext.Default));
+        services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SampleJsonContext.Default));
+
+        var options = Resolve(services).Options;
+
+        options.TypeInfoResolverChain.Count(resolver => ReferenceEquals(resolver, SampleJsonContext.Default))
+            .Should().Be(1);
+        options.TypeInfoResolverChain.Should().HaveCount(2); // the context plus the always-seeded framework context
+    }
+
+    [Fact]
+    public void OverrideResolvers_ContributedTwice_ComposeIntoTheChainOnce() {
+        var services = new ServiceCollection();
+        services.ConfigureElarionJson(o => o.OverrideTypeInfoResolvers.Add(SampleJsonContext.Default));
+        services.ConfigureElarionJson(o => o.OverrideTypeInfoResolvers.Add(SampleJsonContext.Default));
+
+        var options = Resolve(services).Options;
+
+        options.TypeInfoResolverChain.Count(resolver => ReferenceEquals(resolver, SampleJsonContext.Default))
+            .Should().Be(1);
     }
 
     [Fact]

@@ -47,6 +47,83 @@ public sealed class ModuleDefaultServicesGeneratorTests {
     }
 
     [Fact]
+    public void Skeleton_DeclaresJsonTypeInfoResolverHook() {
+        const string source =
+            """
+            namespace Sample.Modules {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule { }
+            }
+            """;
+
+        var generated = GenerateSibling(source);
+
+        generated.Should().Contain("        AddJsonTypeInfoResolver(services);");
+        generated.Should().Contain(
+            "static partial void AddJsonTypeInfoResolver(global::Microsoft.Extensions.DependencyInjection.IServiceCollection services);");
+
+        // Appended last, so the pre-existing hooks keep their emitted call order.
+        generated.IndexOf("        AddJsonTypeInfoResolver(services);", StringComparison.Ordinal)
+            .Should().BeGreaterThan(generated.IndexOf("        AddClientEvents(services);", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Json_EmitsFiller_WhenModuleDeclaresGetJsonTypeInfoResolver() {
+        const string source =
+            """
+            namespace Sample.Modules {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule {
+                    public static System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver GetJsonTypeInfoResolver() =>
+                        new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver();
+                }
+            }
+            """;
+
+        var filler = GenerateFiller(source);
+
+        filler.Should().Contain(
+            "    static partial void AddJsonTypeInfoResolver(global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+        filler.Should().Contain(
+            "global::Elarion.Abstractions.Serialization.ElarionJsonServiceCollectionExtensions.ConfigureElarionJson(services, o => o.TypeInfoResolvers.Add(global::Sample.Modules.BillingModule.GetJsonTypeInfoResolver()));");
+    }
+
+    [Fact]
+    public void Json_EmitsNoFiller_WhenModuleDeclaresNoResolver() {
+        const string source =
+            """
+            namespace Sample.Modules {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule { }
+            }
+            """;
+
+        var result = Run(source);
+
+        // The declared-but-unimplemented hook elides to a no-op, so a module with no JSON context costs nothing.
+        result.GeneratedTrees
+            .Any(tree => tree.GetText().ToString().Contains("ConfigureElarionJson"))
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void Generator_ReusesOutputs_AfterIrrelevantEdit() {
+        const string source =
+            """
+            namespace Sample.Modules {
+                [Elarion.Abstractions.Modules.AppModule("Billing")]
+                public static class BillingModule {
+                    public static System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver GetJsonTypeInfoResolver() =>
+                        new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver();
+                }
+            }
+            """;
+
+        GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
+            new ModuleDefaultServicesGenerator(), source, "ModuleDefaultsModules");
+    }
+
+    [Fact]
     public void Skeleton_NoModules_EmitsNothing() {
         const string source =
             """
@@ -67,6 +144,13 @@ public sealed class ModuleDefaultServicesGeneratorTests {
         return result.GeneratedTrees
             .Select(tree => tree.GetText().ToString())
             .Single(text => text.Contains("ConfigureDefaultServices"));
+    }
+
+    private static string GenerateFiller(string source) {
+        var result = Run(source);
+        return result.GeneratedTrees
+            .Select(tree => tree.GetText().ToString())
+            .Single(text => text.Contains("ConfigureElarionJson"));
     }
 
     private static GeneratorDriverRunResult Run(string source) {

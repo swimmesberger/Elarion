@@ -74,9 +74,9 @@ Concretely, four moves:
    ids, scheduler run ids) are minted with `Guid.CreateVersion7()`; framework tables already declared
    their keys `ValueGeneratedNever`.
 
-Preferring `Guid.CreateVersion7()` over `Guid.NewGuid()` is a **documented convention**, not a
-build-enforced one. A framework-shipped analyzer (ELID001) was built and then cut before shipping — see
-*Rejected alternatives*.
+Preferring `Guid.CreateVersion7()` over `Guid.NewGuid()` was originally a **documented convention**, not a
+build-enforced one; a framework-shipped analyzer (ELID001) was built and then cut before shipping. That
+decision was revisited — see the *2026-08-15 addendum* below.
 
 Two caveats are part of the contract and documented rather than hidden: a v7 id **embeds its creation
 instant** (visible wherever the id is, e.g. in URLs — acceptable, but a conscious choice), and ids created
@@ -106,7 +106,7 @@ is).
   (unpredictable tokens, where v7 would leak a timestamp); and as a warning under the common
   `TreatWarningsAsErrors` posture it is a mandatory rewrite, not the advisory nudge it reads as. The
   convention is documented instead; a targeted, non-breaking analyzer can be revisited if adopters mint v4
-  keys in practice.
+  keys in practice. **Superseded — the revisit condition was met; see the 2026-08-15 addendum.**
 - **`BannedApiAnalyzers` + `BannedSymbols.txt`** (the adopter's interim solution): a hard ban with no code
   fix and no TFM awareness. An adopter who wants build-time enforcement can add it themselves; the framework
   does not impose it.
@@ -131,4 +131,31 @@ is).
   `ClientAssignedGuidKeyTests`.
 - Minting a key as v4 is not caught at build time — the `Guid.CreateVersion7()` preference is a documented
   convention, not enforced. That is a missed index-ordering optimization, never a correctness bug: the model
-  pass prevents the phantom UPDATE regardless of v4 vs v7.
+  pass prevents the phantom UPDATE regardless of v4 vs v7. *(Superseded by the addendum below.)*
+
+## Addendum — 2026-08-15: ELID001 ships
+
+The revisit condition set above ("if adopters mint v4 keys in practice") was met. A downstream adopter
+reported minting entity keys with `Guid.NewGuid()` and resorted to `BannedApiAnalyzers` +
+`BannedSymbols.txt` to stop it — the exact interim solution this ADR rejected as the framework's job,
+adopted downstream because the framework declined it. That is adopter evidence rather than speculation, so
+**ELID001 now ships** in `Elarion.Generators`, bundled with `Elarion` like every other framework diagnostic.
+
+What changes from the cut design:
+
+- **Warning severity, flagging every `Guid.NewGuid()`** — unchanged from the original design, and still
+  deliberate: deciding "is this a key?" without the EF model is brittle, and v7 is the better default nearly
+  everywhere. The friction argument still holds for the residue, and the residue is exactly what should be
+  visible: an id that must be *unpredictable* keeps v4 and suppresses ELID001 with a justification, so the
+  exception is argued at the site instead of indistinguishable from an accident.
+- **No code fix, for now.** The original design paired the diagnostic with a `Guid.CreateVersion7()` code
+  fix. Elarion ships no code-fix infrastructure: `Microsoft.CodeAnalysis.*.Workspaces` is not in
+  `Directory.Packages.props`, and RS1038 forbids a Workspaces reference from a compiler-loaded analyzer
+  assembly — a code fix needs its own assembly, packaged separately. The replacement is a one-token edit, so
+  the message carries it inline instead. A dedicated code-fix package can follow without changing the rule.
+- The framework's own one deliberate v4 site (the PostgreSQL bulk-insert temp-table suffix, whose truncated
+  eight-hex-digit prefix must be random — a v7's is the millisecond timestamp's high bits, identical across a
+  ~65-second window) carries an explicit suppression, which is the practice the rule is meant to produce.
+
+This does not change any decision above: ELID001 is index/ordering hygiene, decoupled from the phantom-UPDATE
+bug the model pass fixes.

@@ -295,6 +295,16 @@ Resource-grants generation for `[GenerateElarionResourceGrants]`. See
 | --- | --- | --- | --- |
 | ELRG001 | Error | A context is annotated with `[GenerateElarionResourceGrants]` but not `[GenerateDbSets]`, so the resource-grants `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionResourceGrants]`. |
 
+## ELID — Identifier minting
+
+The `Guid.CreateVersion7()` convention (ADR-0038), enforced by an analyzer rather than left to review. Category
+`Elarion.Identifiers` — this is about how a `Guid` value is minted, and is unrelated to the user-identity
+diagnostics below (`ELIDN`). See [Entity identity](/docs/capabilities/entity-framework#entity-identity).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELID001 | Warning | A reference to `Guid.NewGuid()` — called, or passed as a method group such as `AddSingleton<Func<Guid>>(Guid.NewGuid)` — mints a random v4 id. **Every** site is flagged deliberately: whether a given id becomes a primary key is not decidable at the call site, and a v7's time-ordered prefix keeps b-tree inserts append-mostly where v4 scatters across the index. | Use `Guid.CreateVersion7()`. If the id must be *unpredictable* (a token or capability code — a v7 leaks its creation instant and carries only 74 random bits), keep v4 and suppress `ELID001` at that site with a justification. There is no code fix: the replacement is a one-token edit named in the message. |
+
 ## ELIDN — Identity model generation
 
 Identity-model generation for `[GenerateElarionIdentity]`. See [Identity](/docs/capabilities/identity).

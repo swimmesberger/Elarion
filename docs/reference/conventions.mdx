@@ -169,6 +169,12 @@ public static partial class ClientsModule {
 }
 ```
 
+`GetJsonTypeInfoResolver()` must be **pure and return a stable instance** — the `.Default` singleton above, or a
+`static readonly` field built once. The framework invokes it up to twice per host startup (the module's own
+registration and the bootstrapper's aggregate both contribute it) and collapses duplicates by *reference*, so a
+body that mints a resolver per call — typically `JsonTypeInfoResolver.Combine(A.Default, B.Default)` — is
+contributed twice. Hoist such a combination into a `static readonly` field and return that.
+
 The convention-based module hooks (`ConfigureServices`, `MapEndpoints`, `GetJsonTypeInfoResolver`,
 `ConfigureEndpointGroup`) and the core-vs-feature distinction are covered in
 [Modules](/docs/concepts/modules); the registration mechanics in

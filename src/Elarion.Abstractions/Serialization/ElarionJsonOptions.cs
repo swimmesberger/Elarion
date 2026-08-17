@@ -51,6 +51,13 @@ public sealed class ElarionJsonOptions {
     /// is <see cref="OverrideTypeInfoResolvers"/>, then this list, then the always-seeded framework context,
     /// then the optional reflection fallback.
     /// </summary>
+    /// <remarks>
+    /// Contribute a <b>stable resolver instance</b> — a source-generated context's <c>.Default</c> singleton is
+    /// one. The same instance contributed by several layers is composed into the chain once (a module contributes
+    /// its own context through its generated <c>ConfigureDefaultServices</c>, and the host bootstrapper contributes
+    /// every enabled module's context again), whereas a freshly constructed resolver per contribution is a distinct
+    /// instance and lands in the chain repeatedly.
+    /// </remarks>
     public IList<IJsonTypeInfoResolver> TypeInfoResolvers { get; } = new List<IJsonTypeInfoResolver>();
 
     /// <summary>

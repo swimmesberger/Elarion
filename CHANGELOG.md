@@ -36,6 +36,12 @@ minor releases may include breaking changes.
   `IEndpointConventionBuilder` (recompile; framework `Map*` extensions now return
   `IEndpointConventionBuilder` instead of `RouteHandlerBuilder`); hosts that relied on ASP.NET's
   automatic antiforgery requirement on form-binding endpoints must enforce antiforgery explicitly.
+- **`Elarion.EntityFrameworkCore` now depends on `Microsoft.EntityFrameworkCore`.** The package was
+  marker-and-generator only; the new opt-in value-shape conventions (`UseElarionEnumStringConversions`,
+  `HasElarionJsonStringArray`, `ElarionValueComparers`) configure a real `ModelBuilder`, so EF Core is now a
+  package dependency. The reference stays provider-neutral — nothing in the package touches a provider API —
+  and every assembly that already declared `[EntityConfiguration]`/`[GenerateDbSets]` referenced EF Core
+  anyway.
 
 ### Added
 - **Per-endpoint HTTP conventions: the `CustomizeEndpoint` hook (ADR-0072).** An `[HttpEndpoint]` handler
@@ -73,6 +79,47 @@ minor releases may include breaking changes.
   history rows. Multi-schema deployments follow from one connection string per schema; give them
   distinct `advisoryLockKey` values to migrate concurrently. The database-neutral migration core is
   unchanged, and SQLite (which has no schemas) is unaffected.
+- **Self-contained module JSON composition: the `AddJsonTypeInfoResolver` hook.** A module's generated
+  `ConfigureDefaultServices` now contributes the module's own `GetJsonTypeInfoResolver()` through a new
+  hook appended to the per-module skeleton, so registering a module brings its `System.Text.Json` metadata
+  with it. Previously that contribution lived only in the host assembly's generated
+  `ElarionBootstrapper.AddElarion`, so any composition that was not the full host — most commonly an
+  application-layer test project, which cannot reference the API assembly's bootstrapper without inverting
+  the dependency — got an `IElarionJsonSerialization` with an empty resolver chain, and typed settings,
+  idempotency replay, and caching threw at first use. The host bootstrapper still contributes every enabled
+  module's context (module assemblies built by older generators depend on it); the resulting double
+  contribution is neutralized by composing the resolver chain idempotently — the same resolver *instance*
+  lands in it once. `GetJsonTypeInfoResolver()` must therefore be pure and return a stable instance (a
+  generated context's `.Default`, or a `static readonly` field): a body that mints one per call, typically
+  `JsonTypeInfoResolver.Combine(…)`, is contributed twice. A type missing from every context now fails with
+  a message naming the type and the remedy instead of the BCL's type-only text.
+- **`ELID001`: prefer `Guid.CreateVersion7()` over `Guid.NewGuid()`.** A new **Warning**-severity analyzer
+  ships in the `Elarion` package (category `Elarion.Identifiers`), flagging every reference to
+  `Guid.NewGuid()` — called, or passed as a method group such as `AddSingleton<Func<Guid>>(Guid.NewGuid)`.
+  A UUIDv7's time-ordered prefix keeps primary-key b-tree inserts append-mostly where random v4 ids scatter
+  across the index, and the convention covers never-persisted identifiers too so the codebase reads one way
+  (ADR-0038). Flagging every site is deliberate: whether a given id becomes a key is not decidable at the
+  call site. **Upgrade impact:** a host building with `TreatWarningsAsErrors` will fail on existing
+  `Guid.NewGuid()` calls. Switch them to `Guid.CreateVersion7()`, or — where the id must be *unpredictable*,
+  since a v7 leaks its creation instant and carries only 74 random bits — keep v4 and suppress the rule at
+  that site with a justification:
+  `#pragma warning disable ELID001 // A share token must be unpredictable.`. There is deliberately no code
+  fix: the replacement is a one-token edit named in the message, and a fix provider would need a
+  `Microsoft.CodeAnalysis.Workspaces` reference RS1038 forbids in a compiler-loaded analyzer assembly.
+- **Opt-in EF value-shape conventions.** `Elarion.EntityFrameworkCore` gained three conveniences every EF
+  consumer otherwise hand-rolls. `ElarionValueComparers.Sequence<T>()`/`SequenceList<T>()` are the blessed
+  comparers for a converted collection property — consistently order-dependent (`SequenceEqual` equality, an
+  order-sensitive hash over the same elements, a shallow-copy snapshot that carries `null` through), because
+  the subtle bug is a comparer whose equality and hashing halves disagree and make change detection depend
+  on element order by accident. `PropertyBuilder<string[]>.HasElarionJsonStringArray()` configures a JSON
+  text column **and** attaches that comparer in one call — the pairing is the API, since a converted
+  collection with no comparer is compared by reference and misses every in-place edit. And
+  `ModelBuilder.UseElarionEnumStringConversions(params Assembly[])` stores enums as their names rather than
+  their ordinals, so a text column survives reordering or inserting enum members; pass the assemblies owning
+  your entities (the argument-less call rewrites *every* entity in the model, including types a third-party
+  package mapped into the same `DbContext`). Explicit configuration always wins, nullable enums are covered,
+  and there is no options bag beyond the scope. The sortable-`DateTimeOffset`-on-SQLite case stays a
+  documented recipe rather than an API: it is provider-specific and lossy.
 
 ### Fixed
 - **Blob listing under naming-convention plugins.** `PostgreSqlBlobStore.ListAsync` failed with
