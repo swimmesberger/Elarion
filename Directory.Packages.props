@@ -60,8 +60,8 @@
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.16.0"/>
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.16.0"/>
     <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.16.0"/>
-    <PackageVersion Include="Testcontainers.Azurite" Version="4.13.0"/>
-    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.13.0"/>
+    <PackageVersion Include="Testcontainers.Azurite" Version="4.14.0"/>
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.14.0"/>
     <PackageVersion Include="xunit.v3.mtp-v2" Version="3.2.2"/>
   </ItemGroup>
 </Project>
