@@ -32,8 +32,8 @@ three pages in order — each builds on the last.
 </Cards>
 
 <Callout type="warn">
-  **Don't learn from the Swerp repository.** The public `swimmesberger/Swerp` repository predates the
-  current generator model: it vendors an older copy of Elarion and hand-writes the per-module
+  **Don't learn from pre-generator examples.** Older Elarion codebases predate the current generator
+  model: they vendor an older copy of Elarion and hand-write the per-module
   `services.AddXHandlers()` / `AddXServices()` registrations that `[GenerateModuleBootstrapper]` and the
   generated `ConfigureDefaultServices` now emit for you — copying that pattern onto current packages
   duplicates registrations the generator already emits (see [Modules](/docs/concepts/modules)). Use the
