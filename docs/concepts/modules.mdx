@@ -79,10 +79,10 @@ skeleton is emitted unconditionally for every module, so the host call always co
 </Callout>
 
 <Callout type="warn">
-  **Looking at an older example?** Pre-generator Elarion (and external references such as the
-  `swimmesberger/Swerp` repository, which vendors an older copy) wired each module by hand-calling
+  **Looking at an older example?** Pre-generator Elarion codebases (including external examples that
+  vendor a pre-generator copy of the framework) wired each module by hand-calling
   `services.AddXHandlers()` / `AddXServices()` inside the module's `ConfigureServices`. Copying that
-  pattern onto current packages **double-registers** everything, because `ConfigureDefaultServices`
+  pattern onto current packages **duplicates registrations**, because `ConfigureDefaultServices`
   already calls those methods. On current Elarion a module class is minimal — just `[AppModule]` (plus an
   optional `GetJsonTypeInfoResolver` and a `ConfigureServices` reserved for non-generated registrations).
   For an up-to-date end-to-end reference, see the compiled sample under
