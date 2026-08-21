@@ -1,0 +1,255 @@
+---
+title: Archive & restore
+description: Soft delete done deliberately — a nullable ArchivedAt timestamp, explicit query predicates, restore as a first-class command, a real DELETE for retention, and the common alternatives this recipe rejects.
+---
+
+"Delete" in a product UI is usually not `DELETE` in SQL: the user wants the record out of the way,
+and someone else wants it back next quarter. That is a reversible **domain state** — *archived* — not
+a deletion, and modeling it honestly is the whole trick. There is deliberately no
+`Elarion.SoftDelete` package or `[SoftDelete]` attribute: the pattern is a **recipe** composed from
+pieces you already have — an entity property, a partial unique index, two small command handlers, a
+[scheduled job](/docs/capabilities/scheduling) — and a shipped convention could only hide the two
+decisions that actually matter (what each query returns, and what *delete* means in your domain).
+This page is the recommended shape, and — because every team has met `IsDeleted` and
+`HasQueryFilter` before — [why the usual alternatives are rejected](#alternatives-this-recipe-rejects).
+
+## 1. The state is a nullable timestamp
+
+One property: `ArchivedAt`, `null` while active. A timestamp costs the same as an `IsArchived`
+boolean and answers *when* for free — which the purge job below needs anyway. Add `ArchivedBy` only
+if the archived-items screen displays it; the [audit trail](/docs/concepts/auditing) already records
+who executed the command.
+
+```csharp
+public sealed class Customer : IArchivable {
+    public Guid Id { get; set; }
+    public required string Name { get; set; }
+    public required string Email { get; set; }
+    public DateTimeOffset? ArchivedAt { get; set; }
+}
+
+[EntityConfiguration]
+public sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer> {
+    public void Configure(EntityTypeBuilder<Customer> builder) {
+        builder.HasKey(c => c.Id);
+
+        // Partial unique index: only ACTIVE customers reserve an email, so archiving one
+        // frees the address for a new registration. Make this a per-key decision — an
+        // invoice *number* must stay reserved forever, so its index would have no filter.
+        builder.HasIndex(c => c.Email)
+            .IsUnique()
+            .HasFilter("\"ArchivedAt\" IS NULL");
+
+        // Partial index over the archived minority: serves the archived-items screen and
+        // the purge probe without taxing writes to active rows.
+        builder.HasIndex(c => c.ArchivedAt)
+            .HasFilter("\"ArchivedAt\" IS NOT NULL");
+    }
+}
+```
+
+`IArchivable` is a one-property interface in your shared persistence layer; its only job is to let a
+named, reusable predicate exist:
+
+```csharp
+public interface IArchivable {
+    DateTimeOffset? ArchivedAt { get; set; }
+}
+
+public static class ArchivableQueryExtensions {
+    public static IQueryable<T> WhereActive<T>(this IQueryable<T> query) where T : IArchivable =>
+        query.Where(e => e.ArchivedAt == null);
+
+    public static IQueryable<T> WhereArchived<T>(this IQueryable<T> query) where T : IArchivable =>
+        query.Where(e => e.ArchivedAt != null);
+}
+```
+
+Archive at the **aggregate root**. Line items, addresses, and other owned children are only reached
+through their root's queries, so they need no flag of their own; a flag on every child row is a sign
+the aggregate boundary — not the archive pattern — needs work.
+
+## 2. Every query says what it returns
+
+Filtering is **explicit at the call site**, and each read surface decides deliberately:
+
+```csharp
+// Lists, pickers, lookups, assignment targets: active only — visible in the query.
+var rows = await db.Customers.WhereActive()
+    .OrderBy(c => c.Name)
+    .Select(c => new Row(c.Id, c.Name))
+    .ToListAsync(ct);
+
+// The archived-items screen is just the other predicate.
+var archived = await db.Customers.WhereArchived()
+    .OrderByDescending(c => c.ArchivedAt)
+    .Select(c => new Row(c.Id, c.Name))
+    .ToListAsync(ct);
+```
+
+The **detail query deliberately has no filter**: a bookmarked link or a reference from an old
+invoice should land on the record with its state showing — "this customer is archived", with a
+restore action — not a bewildering 404. Return `ArchivedAt` in the response and let the client
+render the state. (Contrast [feature gates](/docs/concepts/feature-flags), where a generic
+`NotFound` is the point because the feature's existence must not leak; an archived record is a
+user-visible state, not a secret.)
+
+### Why not a global `HasQueryFilter`
+
+EF Core's model-level filter looks like the safer choice — "nobody can forget the predicate" — and
+is the most common way teams do this. This recipe rejects it, for three reasons that compound:
+
+- **It makes queries stop saying what SQL runs.** The same posture that rejects repositories and
+  `IAppDbContext` ([the database is application logic](/docs/why-elarion#the-database-is-application-logic-not-an-abstraction))
+  applies to rows: a handler reading `db.Customers.ToListAsync()` should mean *customers*, not
+  *customers minus whatever the model silently subtracts*. `WhereActive()` is six characters of
+  honesty per query.
+- **The "can't forget" guarantee is false exactly where Elarion sends you.** Query filters apply to
+  LINQ queries only. `SqlQuery` rollups, provider functions, [bulk COPY](/docs/capabilities/bulk-operations),
+  and the [AOT SQL tier](/docs/capabilities/sql-mapping) never see the filter — and raw SQL is an
+  *intended path* here, not an escape hatch. You end up with two classes of query that silently
+  disagree about which rows exist, which is worse than one class that states its predicate.
+- **Filtered navigations make rows vanish far from the cause.** The filter applies wherever the
+  entity appears, including joins and `Include`s: an active order referencing an archived customer
+  reads as "customer missing", and the resulting bug report never mentions archiving. The
+  all-or-nothing `IgnoreQueryFilters()` escape hatch drops *every* filter at once (EF 10's named
+  filters soften this one point), but the first two objections stand regardless.
+
+A global filter earns its keep when the predicate is a **security boundary** that must hold even
+when a developer forgets — multi-tenancy is the classic case. Archive visibility is not a security
+boundary; it is per-screen UX, and per-screen decisions belong at the call site.
+
+## 3. Archive and restore are ordinary commands
+
+Two handlers, nothing exotic: the [`TransactionDecorator`](/docs/concepts/persistence-and-transactions)
+owns the unit of work, the state change and the [integration event](/docs/capabilities/events) commit
+together, and both transitions are **naturally idempotent** — archiving an archived customer converges
+to success with no `[Idempotent]` machinery needed.
+
+```csharp
+[Handler("crm.customers.archive")]
+public sealed class ArchiveCustomer(AppDbContext db, TimeProvider clock, IIntegrationEventBus events)
+    : IHandler<ArchiveCustomer.Command> {
+
+    public sealed record Command(Guid Id) : ICommand;
+
+    public async ValueTask<Result> HandleAsync(Command command, CancellationToken ct) {
+        var customer = await db.Customers.FirstOrDefaultAsync(c => c.Id == command.Id, ct);
+        if (customer is null) {
+            return AppError.NotFound($"Customer {command.Id} was not found.");
+        }
+        if (customer.ArchivedAt is not null) {
+            return Result.Success();   // already archived — converged, not a conflict
+        }
+
+        customer.ArchivedAt = clock.GetUtcNow();
+        await events.PublishAsync(new CustomerArchived { CustomerId = customer.Id }, ct);
+        await db.SaveChangesAsync(ct);
+        return Result.Success();
+    }
+}
+```
+
+Restore is symmetric, plus the one check archiving created: the partial unique index freed the
+natural key, so someone may have taken it. The in-transaction check produces the friendly error;
+the index remains the authority if a race slips past it
+([business checks run inside the transaction](/docs/concepts/validation)):
+
+```csharp
+[Handler("crm.customers.restore")]
+public sealed class RestoreCustomer(AppDbContext db, IIntegrationEventBus events)
+    : IHandler<RestoreCustomer.Command> {
+
+    public sealed record Command(Guid Id) : ICommand;
+
+    public async ValueTask<Result> HandleAsync(Command command, CancellationToken ct) {
+        var customer = await db.Customers.FirstOrDefaultAsync(c => c.Id == command.Id, ct);
+        if (customer is null) {
+            return AppError.NotFound($"Customer {command.Id} was not found.");
+        }
+        if (customer.ArchivedAt is null) {
+            return Result.Success();   // already active
+        }
+
+        var emailTaken = await db.Customers.WhereActive()
+            .AnyAsync(c => c.Email == customer.Email, ct);
+        if (emailTaken) {
+            return AppError.Conflict(
+                $"Cannot restore: the email {customer.Email} is now used by an active customer.");
+        }
+
+        customer.ArchivedAt = null;
+        await events.PublishAsync(new CustomerRestored { CustomerId = customer.Id }, ct);
+        await db.SaveChangesAsync(ct);
+        return Result.Success();
+    }
+}
+```
+
+**Archived means read-only, enforced in handlers.** Every mutating command on the aggregate guards
+the state itself — the frontend hiding an Edit button is a
+[UX projection, never the enforcement](/docs/concepts/client-capabilities):
+
+```csharp
+if (customer.ArchivedAt is not null) {
+    return AppError.Conflict($"Customer {command.Id} is archived; restore it before editing.");
+}
+```
+
+The integration events are the projection seam: other modules react after commit, and a consumer can
+push a [client event](/docs/capabilities/events/client-events) hint so open list screens re-query —
+the same shape as the [time-series dashboard](/docs/capabilities/time-series#5-live-dashboards-client-events).
+Tag the two handlers [`[Auditable]`](/docs/concepts/auditing) if archiving is a compliance-relevant
+action; the trail then records who archived what, when, with no extra columns on the entity.
+
+## 4. Delete is still delete
+
+The flag never replaces `DELETE`; it *schedules* it. Two forms remain, both real:
+
+- **Retention purge** — a scheduled job hard-deletes rows archived beyond your retention window.
+  The window lives in configuration or [runtime settings](/docs/concepts/settings); on a cluster the
+  [per-occurrence claims](/docs/capabilities/scheduling/multi-node) make exactly one node run it.
+
+  ```csharp
+  public sealed class CustomerPurgeJob(AppDbContext db, TimeProvider clock) {
+      [ScheduledJob("crm.customers.purge", Cron = "0 0 3 * * *")]
+      public async ValueTask RunAsync(CancellationToken ct) {
+          var cutoff = clock.GetUtcNow().AddDays(-180);
+          await db.Customers
+              .Where(c => c.ArchivedAt != null && c.ArchivedAt < cutoff)
+              .ExecuteDeleteAsync(ct);
+      }
+  }
+  ```
+
+- **Erasure on request** — a GDPR-style erasure obligation is a hard delete (or anonymization)
+  executed *now*, as its own command. An `ArchivedAt` flag does not satisfy it, and neither does
+  waiting for the purge window.
+
+Naming the state *archived* rather than *deleted* is what keeps these honest: the UI can say
+"Archive" and "Delete" and mean two different, truthfully described operations.
+
+## Alternatives this recipe rejects
+
+- **A global `HasQueryFilter`** — the closest call, argued [above](#why-not-a-global-hasqueryfilter):
+  it hides the predicate from the call site, silently doesn't cover the raw-SQL and bulk paths
+  Elarion treats as first-class, and makes filtered navigations drop rows far from the cause.
+- **An `IsDeleted` flag ("soft delete" proper)** — the name lies in both directions: the user reads
+  *deleted* and believes the data is gone (it isn't — a compliance problem), while the code treats
+  it as retained state (so *actual* deletion never gets designed — the purge and erasure paths
+  above simply don't exist). Name the state what the domain means — archived, deactivated, closed —
+  and reserve *delete* for `DELETE`.
+- **Folding archive into a lifecycle enum** — adding `Archived` to `Status { Draft, Active, Paid }`
+  conflates two axes: archive is orthogonal to the domain lifecycle (a *paid* invoice gets archived
+  and must still read as paid after restore). One nullable timestamp beside the enum keeps both
+  axes; one merged enum multiplies states and loses the pre-archive value.
+- **Moving rows to an `_archive` table** — twice the schema to migrate, foreign keys that dangle or
+  duplicate, and restore becomes a cross-table insert racing the unique indexes. Row volume is not
+  a problem this pattern needs to solve at [Elarion's target tier](/docs/why-elarion); when cold-data
+  volume is genuinely the concern, that is retention/partitioning (see
+  [time-series](/docs/capabilities/time-series)), not archive semantics.
+- **Hard delete now, restore from the audit trail** — the [audit trail](/docs/concepts/auditing)
+  records *actions with diffs* for compliance; point-in-time reconstruction is an explicit
+  non-goal. "Undelete" via audit forensics means reassembling a row (and its children, and its
+  foreign keys) by hand under pressure. If restore is a product feature, the restorable state must
+  stay a row.
