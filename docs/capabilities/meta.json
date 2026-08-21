@@ -19,6 +19,7 @@
     "entity-framework",
     "bulk-operations",
     "pagination",
+    "archive-restore",
     "sql-migrations",
     "sql-mapping",
     "postgres-extensions",
