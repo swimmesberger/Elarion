@@ -36,6 +36,16 @@ minor releases may include breaking changes.
   `IEndpointConventionBuilder` (recompile; framework `Map*` extensions now return
   `IEndpointConventionBuilder` instead of `RouteHandlerBuilder`); hosts that relied on ASP.NET's
   automatic antiforgery requirement on form-binding endpoints must enforce antiforgery explicitly.
+- **`[ResourceFilter<T>]`, `WhereAuthorized`, and `IQueryAuthorizer<T>.Matches` moved from `Elarion.Paging`
+  to `Elarion.Abstractions.Authorization` (breaking).** None of them touch EF Core or pagination, and
+  `IQueryAuthorizer<T>` — the interface the attribute's generator implements — was already in Abstractions, so an
+  application that needed data-level authorization but did not paginate took the pagination package for one
+  attribute. Migration: replace `using Elarion.Paging;` with `using Elarion.Abstractions.Authorization;` where
+  these are used (keep both if the file also pages). A namespace is part of type identity, so no type-forward
+  softens this; `Elarion.Paging` is now exactly what its description says it is.
+- **`Elarion.EntityFrameworkCore` now depends on `Elarion.Abstractions`.** The tenancy contracts
+  (`ITenantScoped<T>`, `ITenantContext`) live in Abstractions, which has no runtime-integration dependencies, so
+  the reference adds nothing beyond the contracts themselves.
 - **`Elarion.EntityFrameworkCore` now depends on `Microsoft.EntityFrameworkCore`.** The package was
   marker-and-generator only; the new opt-in value-shape conventions (`UseElarionEnumStringConversions`,
   `HasElarionJsonStringArray`, `ElarionValueComparers`) configure a real `ModelBuilder`, so EF Core is now a
@@ -44,6 +54,23 @@ minor releases may include breaking changes.
   anyway.
 
 ### Added
+- **Ambient tenant scoping (ADR-0075).** Per-tenant isolation is now a property of the scope rather than
+  something every query and every `Add` has to remember. An entity implements `ITenantScoped<TTenantId>`
+  (`Guid`/`string`/`int`/`long`) and gets two legs from one marker: a **named EF Core query filter** attached by
+  `ApplyElarionTenantScoping` (emitted by `[GenerateElarionTenantScoping]` into the existing per-feature
+  model-configuration seam), and a **`SaveChanges` interceptor** that stamps the tenant on insert, verifies a
+  hand-set one, and refuses an update or delete that reaches outside the current tenant or moves a row between
+  tenants (`TenantScopeViolationException`). The filter compares against a *nullable* key, so an unresolved
+  tenant matches no rows instead of falling back to `Guid.Empty`/`0`. Work that legitimately spans tenants
+  declares it — `using var _ = tenant.SystemScope();` — so "every tenant" is greppable rather than being an
+  absent call; `tenant.Scope(tenantId)` enters one explicitly, which is how asynchronous resolution and
+  per-tenant workers opt in. The tenant comes from the `ITenantResolver` seam (`ClaimsTenantResolver` reads a
+  configurable claim; two tenant claims resolve to nothing rather than the first), and the scoped
+  `ITenantContext` reaches the model through the context's options, so registration is `AddElarionTenantScoping()`
+  plus `AddElarionTenantScopingEntityFrameworkCore<TDbContext>()`. This is the repository's only global query
+  filter, and the exception the [archive/restore recipe](docs/capabilities/archive-restore.mdx) already named.
+  Requires `AddDbContext` (not `AddDbContextPool`, which would pin every scope to the first one's tenant);
+  raw SQL, the AOT SQL tier, and bulk COPY bypass both legs, as they bypass `[ResourceFilter]` today.
 - **Per-endpoint HTTP conventions: the `CustomizeEndpoint` hook (ADR-0072).** An `[HttpEndpoint]` handler
   may declare `public static void CustomizeEndpoint(IEndpointConventionBuilder)`; the generated
   registration captures the endpoint builder and calls the hook after the emitted metadata chain, so one

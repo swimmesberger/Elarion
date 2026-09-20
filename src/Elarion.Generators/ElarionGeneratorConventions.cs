@@ -36,7 +36,8 @@ internal static class ElarionGeneratorConventions {
     /// <c>[ResourceFilter&lt;TEntity&gt;]</c> — discovered by the EF resource-filter generator (which emits the spec)
     /// <b>and</b> the manifest generator (which publishes the descriptor the host bootstrapper registers).
     /// </summary>
-    public const string ResourceFilterAttribute = "Elarion.Paging.ResourceFilterAttribute`1";
+    public const string ResourceFilterAttribute =
+        "Elarion.Abstractions.Authorization.ResourceFilterAttribute`1";
 
     // --- Transport response types -------------------------------------------------------------------------
 

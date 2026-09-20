@@ -221,6 +221,7 @@ Data-level authorization list-filter generation for `[ResourceFilter<TEntity>]`.
 | ELRES003 | Error | `Elarion.EntityFrameworkCore` | A `[ResourceFilter<TEntity>]`-annotated class is nested or non-partial. | Declare the `[ResourceFilter<T>]` class as a top-level `partial` class. |
 | ELRES004 | Error | `Elarion.EntityFrameworkCore` | A `[ResourceFilter]` declares no rules, so no authorization predicate can be generated. | Add at least one rule (`OwnerProperty`/`TenantProperty`/`Shared`) to the `[ResourceFilter]`. |
 | ELRES005 | Error | `Elarion.EntityFrameworkCore` | A `[ResourceFilter]` `Shared` rule omits `ResourceTypeName`, which the grants `EXISTS` subquery requires. | Set `ResourceTypeName` on the `[ResourceFilter]` `Shared` rule. |
+| ELTEN001 | Error | `Elarion.EntityFrameworkCore` | A context is annotated with `[GenerateElarionTenantScoping]` but not `[GenerateDbSets]`, so the model-configuration seam that applies the tenant filter is not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionTenantScoping]`. |
 
 ## ELCACHE — Handler caching
 

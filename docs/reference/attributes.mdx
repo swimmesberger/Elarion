@@ -568,7 +568,7 @@ Handler requirements are class attributes the handler-registration generator rea
 
 ### `[ResourceFilter<TEntity>]`
 
-- **Package:** `Elarion.Paging` · **Applies to:** class (generic attribute, `where TEntity : class`)
+- **Package:** `Elarion.Abstractions` · **Applies to:** class (generic attribute, `where TEntity : class`)
 - **Triggers:** the data-level **list filter** (Leg B). Declared on a dedicated partial class (the entity stays clean, like `[Keyset<T>]`); the EF Core generator completes it as an `IQueryAuthorizer<TEntity>` whose predicate composes the rules as `AND(scope rules) AND OR(grant rules)` and pushes it into SQL via `source.WhereAuthorized(authorizer, currentUser)` **before** paging. Diagnostics `ELRES001`–`ELRES005`.
 
 | Parameter | Type | Default | Meaning |
@@ -646,6 +646,13 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice> {
 | `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
 
 See [Resource authorization](/docs/concepts/resource-authorization) and [Identity](/docs/capabilities/identity).
+
+### `[GenerateElarionTenantScoping]`
+
+- **Package:** `Elarion.EntityFrameworkCore` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator implements the EF model-configuration seam with a call to `ApplyElarionTenantScoping`, which attaches a named query filter to every entity implementing `ITenantScoped<TTenantId>`. Takes no parameters — which entities are tenant-scoped is a property of the entities, not of the context. Covers the **read** leg only: register `AddElarionTenantScoping()` and `AddElarionTenantScopingEntityFrameworkCore<TDbContext>()` for the tenant value and the insert-time stamp. The hand-written equivalent is `modelBuilder.ApplyElarionTenantScoping(this)` as the last statement of `OnModelCreating`. Requires `[GenerateDbSets]` (else `ELTEN001`).
+
+See [Multi-tenancy](/docs/capabilities/multi-tenancy).
 
 ### `[GenerateElarionIdempotencyKeys]`
 

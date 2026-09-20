@@ -116,8 +116,9 @@ is the most common way teams do this. This recipe rejects it, for three reasons 
   filters soften this one point), but the first two objections stand regardless.
 
 A global filter earns its keep when the predicate is a **security boundary** that must hold even
-when a developer forgets — multi-tenancy is the classic case. Archive visibility is not a security
-boundary; it is per-screen UX, and per-screen decisions belong at the call site.
+when a developer forgets — multi-tenancy is the classic case, and the one place Elarion does use a
+global filter ([multi-tenancy](/docs/capabilities/multi-tenancy)). Archive visibility is not a
+security boundary; it is per-screen UX, and per-screen decisions belong at the call site.
 
 ## 3. Archive and restore are ordinary commands
 

@@ -1,7 +1,6 @@
-using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Identity;
 
-namespace Elarion.Paging;
+namespace Elarion.Abstractions.Authorization;
 
 /// <summary>
 /// Composes a data-level authorization predicate into an <see cref="IQueryable{T}"/> so the database filters

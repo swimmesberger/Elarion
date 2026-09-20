@@ -17,6 +17,7 @@
     "devices",
     "data-rate-shaping",
     "entity-framework",
+    "multi-tenancy",
     "bulk-operations",
     "pagination",
     "archive-restore",

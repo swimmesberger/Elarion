@@ -82,6 +82,10 @@ Either way, a row the caller neither owns nor was granted is never returned — 
   `.Select()` projection that discards the entity) returns **every** row — the classic BOLA/IDOR shape.
   Treat "every list query over an access-controlled entity starts with `WhereAuthorized`" as a review
   checklist item, and cover each list handler with a test asserting an unshared row is absent.
+
+  This is the right trade for *sharing*, where the decision is per feature. It is the wrong trade for
+  *tenancy*, where a forgotten call is a cross-tenant leak rather than a widened list — so tenancy gets
+  its own unconditional mechanism. See [multi-tenancy](/docs/capabilities/multi-tenancy).
 </Callout>
 
 For a rule beyond the conventional ones, write the `IQueryAuthorizer<T>` by hand — the logic is ordinary,

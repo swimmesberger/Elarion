@@ -14,3 +14,4 @@
  ELRES003 | Elarion.EntityFrameworkCore | Error    | ResourceFilter class must be a top-level partial class
  ELRES004 | Elarion.EntityFrameworkCore | Error    | ResourceFilter declares no rules
  ELRES005 | Elarion.EntityFrameworkCore | Error    | ResourceFilter Shared rule requires ResourceTypeName
+ ELTEN001 | Elarion.EntityFrameworkCore | Error    | [GenerateElarionTenantScoping] requires [GenerateDbSets]

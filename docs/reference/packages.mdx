@@ -51,9 +51,9 @@ no provider.
 
 | Package | Add it when |
 | --- | --- |
-| `Elarion.EntityFrameworkCore` | EF models need generated `DbSet`s, entity configuration application, key conventions, keyset paging support, or the opt-in value-shape conventions (`UseElarionEnumStringConversions`, `HasElarionJsonStringArray`, `ElarionValueComparers`). Depends on `Microsoft.EntityFrameworkCore` (provider-neutral) for those conventions. |
+| `Elarion.EntityFrameworkCore` | EF models need generated `DbSet`s, entity configuration application, key conventions, keyset paging support, ambient tenant scoping (`[GenerateElarionTenantScoping]`, `ITenantScoped<T>`), or the opt-in value-shape conventions (`UseElarionEnumStringConversions`, `HasElarionJsonStringArray`, `ElarionValueComparers`). Depends on `Microsoft.EntityFrameworkCore` (provider-neutral) for those conventions and on `Elarion.Abstractions` for the tenancy contracts. |
 | `Elarion.EntityFrameworkCore.UnitOfWork` | Handler transactions need the EF-backed `IUnitOfWork`, PostgreSQL lock timeout, and savepoints. |
-| `Elarion.Paging` | EF queries need keyset/offset execution, opaque cursors, sort maps, or authorization-aware list filtering. |
+| `Elarion.Paging` | EF queries need keyset/offset execution, opaque cursors, or sort maps. (`[ResourceFilter]` and `WhereAuthorized` moved to `Elarion.Abstractions`, so data-level authorization no longer pulls this in.) |
 | `Elarion.EntityFrameworkCore.BulkOperations` | EF code needs provider-neutral streaming `ExecuteInsertAsync` and the bulk provider seam. |
 | `Elarion.BulkOperations.PostgreSql` | EF bulk inserts should use PostgreSQL binary `COPY` on the context connection. |
 | `Elarion.Sql` | An EF-free NativeAOT host needs generated row mappers and injection-safe SQL interpolation with no reflection fallback. Also supplies the EF-free `IUnitOfWork` — `AddElarionSqlUnitOfWork()` registers a scoped `ISqlSession` so handler transactions commit atomically without EF. Stays Npgsql-free; `ISqlDatabase` is the application's database handle (the `DbContext`/`IDbContextFactory` counterpart): the scoped session opens from it, and `db.OpenSessionAsync()` serves singleton-eligible handlers. |

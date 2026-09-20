@@ -11,6 +11,13 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore"/>
   </ItemGroup>
 
+  <!-- Ambient tenant scoping binds the provider-neutral ITenantScoped/ITenantContext contracts to an EF model
+       and a SaveChanges interceptor, so this package carries the contract assembly. Abstractions has no
+       runtime-integration dependencies, so the reference adds nothing beyond the contracts themselves. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj"/>
+  </ItemGroup>
+
   <!-- Bundle the EF Core source generator's analyzer into this marker package. NuGet analyzer assets
        are not transitive, so shipping the generator inside the package that a configuration assembly
        already references (the [EntityConfiguration] marker package) makes the marker reference

@@ -4,10 +4,10 @@ using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Identity;
 using Elarion.Abstractions.Paging;
 using Elarion.Paging;
-using Elarion.Tests.Authorization;
+using Elarion.Tests.Paging;
 using Xunit;
 
-namespace Elarion.Tests.Paging;
+namespace Elarion.Tests.Authorization;
 
 public sealed class QueryableAuthorizationExtensionsTests {
     private static readonly Guid OwnerA = Guid.Parse("11111111-1111-1111-1111-111111111111");
