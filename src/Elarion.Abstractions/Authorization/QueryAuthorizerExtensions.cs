@@ -1,7 +1,6 @@
-using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Identity;
 
-namespace Elarion.Paging;
+namespace Elarion.Abstractions.Authorization;
 
 /// <summary>
 /// In-memory evaluation of an <see cref="IQueryAuthorizer{TEntity}"/> predicate against a single,

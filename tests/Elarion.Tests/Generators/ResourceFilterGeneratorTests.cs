@@ -17,7 +17,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public System.Guid OwnerId { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
                 public sealed partial class ContactAccess { }
             }
             """);
@@ -44,7 +44,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public System.Guid TenantId { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "OwnerId", TenantProperty = "TenantId")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId", TenantProperty = "TenantId")]
                 public sealed partial class ContactAccess { }
             }
             """);
@@ -69,7 +69,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public string OwnerId { get; set; } = "";
                 }
 
-                [Elarion.Paging.ResourceFilter<Note>(OwnerProperty = "OwnerId")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Note>(OwnerProperty = "OwnerId")]
                 public sealed partial class NoteAccess { }
             }
             """);
@@ -92,7 +92,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public int OwnerId { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Doc>(OwnerProperty = "OwnerId")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Doc>(OwnerProperty = "OwnerId")]
                 public sealed partial class DocAccess { }
             }
             """);
@@ -113,7 +113,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public string TenantId { get; set; } = "";
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(TenantProperty = "TenantId", TenantClaimType = "org")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(TenantProperty = "TenantId", TenantClaimType = "org")]
                 public sealed partial class ContactAccess { }
             }
             """);
@@ -137,7 +137,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public System.Guid Id { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "Missing")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "Missing")]
                 public sealed partial class ContactAccess { }
             }
             """);
@@ -156,7 +156,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public bool OwnerId { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
                 public sealed partial class ContactAccess { }
             }
             """);
@@ -175,7 +175,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public System.Guid? OwnerId { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
                 public sealed partial class ContactAccess { }
             }
             """);
@@ -194,7 +194,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public System.Guid OwnerId { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
                 public sealed class ContactAccess { }
             }
             """);
@@ -212,7 +212,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public System.Guid Id { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>]
                 public sealed partial class ContactAccess { }
             }
             """);
@@ -231,7 +231,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public System.Guid OwnerId { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "OwnerId", Shared = true, ResourceTypeName = "Contact")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId", Shared = true, ResourceTypeName = "Contact")]
                 public sealed partial class ContactAccess { }
             }
             """);
@@ -277,7 +277,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public System.Guid Id { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(Shared = true)]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(Shared = true)]
                 public sealed partial class ContactAccess { }
             }
             """);
@@ -296,7 +296,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public System.Guid OwnerId { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "OwnerId", Shared = true, ResourceTypeName = "Contact")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId", Shared = true, ResourceTypeName = "Contact")]
                 public sealed partial class ContactAccess { }
             }
             """);
@@ -330,7 +330,7 @@ public sealed class ResourceFilterGeneratorTests {
                     public System.Guid TenantId { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "OwnerId", TenantProperty = "TenantId")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId", TenantProperty = "TenantId")]
                 public sealed partial class ContactAccess { }
             }
             """);
@@ -356,25 +356,13 @@ public sealed class ResourceFilterGeneratorTests {
     public void ResourceFilter_ReusesOutputsAfterIrrelevantEdit() {
         var source =
             """
-            namespace Elarion.Paging {
-                [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-                public sealed class ResourceFilterAttribute<TEntity> : System.Attribute where TEntity : class {
-                    public string? OwnerProperty { get; set; }
-                    public string? TenantProperty { get; set; }
-                    public string TenantClaimType { get; set; } = "tenant";
-                    public bool Shared { get; set; }
-                    public string? ResourceTypeName { get; set; }
-                    public string IdProperty { get; set; } = "Id";
-                }
-            }
-
             namespace Sample.Domain {
                 public sealed class Contact {
                     public System.Guid Id { get; set; }
                     public System.Guid OwnerId { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
                 public sealed partial class ContactAccess { }
             }
             """;
@@ -388,18 +376,6 @@ public sealed class ResourceFilterGeneratorTests {
     private static GeneratorDriverRunResult Generate(string testSource) {
         var source =
             $$"""
-              namespace Elarion.Paging {
-                  [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-                  public sealed class ResourceFilterAttribute<TEntity> : System.Attribute where TEntity : class {
-                      public string? OwnerProperty { get; set; }
-                      public string? TenantProperty { get; set; }
-                      public string TenantClaimType { get; set; } = "tenant";
-                      public bool Shared { get; set; }
-                      public string? ResourceTypeName { get; set; }
-                      public string IdProperty { get; set; } = "Id";
-                  }
-              }
-
               {{testSource}}
               """;
 

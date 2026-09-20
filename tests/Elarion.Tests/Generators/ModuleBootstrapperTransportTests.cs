@@ -968,7 +968,7 @@ public sealed class ModuleBootstrapperTransportTests {
                     public Guid OwnerId { get; set; }
                 }
 
-                [Elarion.Paging.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
                 public sealed class ContactAccess : IQueryAuthorizer<Contact> {
                     public static ContactAccess Specification { get; } = new();
                     private ContactAccess() { }

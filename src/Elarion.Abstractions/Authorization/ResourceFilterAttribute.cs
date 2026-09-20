@@ -1,4 +1,4 @@
-namespace Elarion.Paging;
+namespace Elarion.Abstractions.Authorization;
 
 /// <summary>
 /// Declares a data-level authorization filter for <typeparamref name="TEntity"/> on the annotated partial

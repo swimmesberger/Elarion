@@ -1,0 +1,201 @@
+---
+title: Multi-tenancy
+description: Ambient per-tenant isolation — one marker interface attaches a model-level read filter and a write-time stamp, so a forgotten predicate cannot leak across tenants and a forgotten stamp cannot orphan a row.
+---
+
+Every row belongs to exactly one tenant — workspace, org, realm, account — and cross-tenant visibility
+is never legitimate. That is a different problem from [sharing](/docs/concepts/resource-authorization),
+where a row *some* users may see is a per-feature decision written at the query. Tenancy is
+unconditional, so Elarion makes it **ambient**: a property of the scope rather than something each
+query and each `Add` has to remember.
+
+<Callout type="info">
+  Tenancy and [resource authorization](/docs/concepts/resource-authorization) compose. Tenant scoping
+  decides *which tenant's rows exist at all*; `[ResourceFilter]` decides *which of them this user may
+  see* within that tenant.
+</Callout>
+
+## 1. Mark the entity
+
+One interface, on the entity. There is no attribute and nothing to declare per query.
+
+```csharp
+public sealed class Contact : ITenantScoped<Guid> {
+    public Guid Id { get; init; } = Guid.CreateVersion7();
+    public Guid TenantId { get; set; }          // stamped on insert, filtered on read
+    public required string Name { get; set; }
+}
+```
+
+The key may be `Guid`, `string`, `int`, or `long` — the same key types `[ResourceFilter]`'s tenant
+rule accepts. The property must be settable: the framework stamps it, and a hand-set value is
+*verified* rather than trusted.
+
+## 2. Wire it up
+
+Two registrations and one attribute. The split is deliberate — how a tenant is *resolved* is
+transport-neutral and lives in `Elarion`; how it reaches the database lives in the EF package.
+
+```csharp
+[GenerateDbSets]
+[GenerateElarionTenantScoping]
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+}
+```
+
+```csharp
+builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
+builder.Services.AddElarionTenantScoping();                                   // ITenantContext + claim resolver
+builder.Services.AddElarionTenantScopingEntityFrameworkCore<AppDbContext>();  // filter value + write stamp
+```
+
+<Callout type="warn">
+  Use `AddDbContext`, **not** `AddDbContextPool`. A pooled context builds its options once, so every
+  scope would serve the *first* scope's tenant — a silent cross-tenant leak. The registration fails
+  fast rather than degrading quietly.
+</Callout>
+
+A host that writes its own `OnModelCreating` can skip the attribute and call
+`modelBuilder.ApplyElarionTenantScoping(this)` as the last statement instead.
+
+## 3. Write handlers that say nothing about tenancy
+
+That is the point. Neither of these mentions the tenant, and both are correct:
+
+```csharp
+[Handler("crm.contacts.list")]
+public sealed class ListContacts(AppDbContext db) : IHandler<ListContacts.Query, Result<Page<ContactDto>>> {
+    public async ValueTask<Result<Page<ContactDto>>> HandleAsync(Query request, CancellationToken ct) =>
+        await db.Contacts                                    // already scoped to the caller's tenant
+            .Where(c => c.Name.Contains(request.Search))
+            .ToKeysetPageAsync(request, RecentContacts.Definition, c => new ContactDto(c.Id, c.Name), ct);
+}
+
+[Handler("crm.contacts.create")]
+public sealed class CreateContact(AppDbContext db) : IHandler<CreateContact.Command, Result<Guid>> {
+    public async ValueTask<Result<Guid>> HandleAsync(Command request, CancellationToken ct) {
+        var contact = new Contact { Name = request.Name };   // TenantId stamped on save
+        db.Contacts.Add(contact);
+        await db.SaveChangesAsync(ct);
+        return contact.Id;
+    }
+}
+```
+
+## How it holds
+
+### Reads — a named model-level filter
+
+`ApplyElarionTenantScoping` attaches a named EF Core query filter to every tenant-scoped root entity:
+
+```
+e => IsSystemScope(ctx) || e.TenantId == AsGuid(CurrentTenantId(ctx))
+```
+
+It is the one place this repository uses a global query filter, and the
+[archive/restore recipe](/docs/capabilities/archive-restore#why-not-a-global-hasqueryfilter) — which
+argues at length against them — names this exact exception: *a global filter earns its keep when the
+predicate is a security boundary that must hold even when a developer forgets.*
+
+Two properties matter:
+
+- **It fails closed.** The comparison is against a *nullable* key, so an unresolved tenant compares
+  against SQL `NULL` and matches nothing. Comparing against `Guid.Empty` instead would expose every
+  row that happens to carry it.
+- **It is named**, so your own filters on the same entity survive, and a query can drop only this one:
+  `db.Contacts.IgnoreQueryFilters([ElarionTenantScoping.QueryFilterKey])`. Prefer a
+  [system scope](#work-that-spans-every-tenant) — it says so once for a whole unit of work and covers
+  writes too.
+
+### Writes — a stamp and a guard
+
+A `SaveChanges` interceptor closes the other half:
+
+| Change | Behavior |
+|---|---|
+| Insert, tenant unset | Stamped with the tenant in scope |
+| Insert, tenant set by hand | Verified; a different tenant throws |
+| Insert with no tenant resolved | Throws — a row stamped with nothing fails the read filter forever |
+| Update or delete of another tenant's row | Throws, even for an entity attached without being loaded |
+| Changing an existing row's tenant | Throws — a row belongs to one tenant for its whole life |
+
+Violations raise `TenantScopeViolationException`. It is a fault, not an `AppError`: it means the
+isolation was bypassed, which no caller should handle and no client should see explained.
+
+## Work that spans every tenant
+
+Declare it. A background job crossing tenants is legitimate; *silently omitting a filter* is not, and
+the two must not look alike.
+
+```csharp
+[ScheduledJob("0 3 * * *")]
+public sealed class PurgeExpiredSessions(AppDbContext db, ITenantContext tenant) {
+    public async Task RunAsync(CancellationToken ct) {
+        using var _ = tenant.SystemScope();            // deliberately every tenant — greppable
+        await db.Sessions.Where(s => s.ExpiresAt < DateTimeOffset.UtcNow).ExecuteDeleteAsync(ct);
+    }
+}
+```
+
+To act as one tenant at a time instead — the usual shape for a per-tenant worker — enter each one:
+
+```csharp
+foreach (var tenantId in await LoadActiveTenantsAsync(ct)) {
+    using var _ = tenant.Scope(tenantId);
+    await RebuildDigestAsync(ct);
+}
+```
+
+## Resolving the tenant
+
+`ITenantResolver` produces the id. The shipped `ClaimsTenantResolver` reads a claim (`"tenant"` by
+default) from `ICurrentUser`, so it works identically under HTTP, JSON-RPC, MCP, and a connection
+adapter:
+
+```csharp
+builder.Services.AddElarionTenantScoping(o => o.ClaimType = "workspace");
+```
+
+Two tenant claims resolve to *nothing* rather than the first — an isolation boundary must not depend
+on claim ordering.
+
+### When the tenant is not a claim
+
+Resolution is **synchronous**, because a query filter is evaluated during query translation and cannot
+await. If your tenant comes from a membership table, resolve it where awaiting is legal and enter the
+scope with the result — do not synthesize a claim:
+
+```csharp
+app.Use(async (context, next) => {
+    var tenant = context.RequestServices.GetRequiredService<ITenantContext>();
+    var workspace = await memberships.ResolveAsync(context.User, context.RequestAborted);
+    using var _ = workspace is null ? null : tenant.Scope(workspace);
+    await next();
+});
+```
+
+Register your own `ITenantResolver` before `AddElarionTenantScoping()` and its `TryAdd` leaves the
+claim-based default out.
+
+## What this does not cover
+
+Both legs sit on the Entity Framework Core path. These bypass them, exactly as they bypass
+[`[ResourceFilter]`](/docs/concepts/resource-authorization):
+
+- **Raw SQL** (`FromSql`, `SqlQuery`) and the [AOT SQL tier](/docs/capabilities/sql-mapping) — scope
+  your own statements.
+- **Bulk COPY** ([bulk operations](/docs/capabilities/bulk-operations)) — set the tenant yourself.
+- **`ExecuteUpdate`/`ExecuteDelete`** run against the *filtered* query, so they cannot reach another
+  tenant's rows, but they are not stamped or guarded because they never reach `SaveChanges`.
+
+Tenant scoping is application-level isolation, not a database-level one. It is not a substitute for
+PostgreSQL row-level security in a threat model where the application itself is untrusted — which is
+the same posture [ADR-0013](/docs/decisions) takes for resource authorization.
+
+## Related
+
+- [Resource authorization](/docs/concepts/resource-authorization) — sharing *within* a tenant
+- [Archive & restore](/docs/capabilities/archive-restore) — why global query filters are otherwise rejected
+- [Entity Framework Core](/docs/capabilities/entity-framework) — the generated context and model seams
+- ADR-0075 — the design, the trade-offs, and the alternatives rejected
