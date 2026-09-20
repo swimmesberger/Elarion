@@ -4,7 +4,7 @@ namespace Elarion.Sql;
 /// A transactional session: every call on it — the full <see cref="SqlSessionExtensions"/> surface — runs
 /// inside its transaction. Commit is explicit; disposing without a commit rolls back (the same contract as the
 /// framework unit-of-work scope). Disposal releases what the transaction owns: opened directly from the
-/// database handle (<see cref="SqlDatabaseExtensions.BeginTransactionAsync"/>) it owns and returns its pooled
+/// database handle (<see cref="SqlDatabaseExtensions.BeginTransactionAsync(ISqlDatabase, System.Data.IsolationLevel?, System.Threading.CancellationToken)"/>) it owns and returns its pooled
 /// connection; begun on an owned session (<see cref="ISqlOwnedSession.BeginTransactionAsync"/>) it ends only
 /// the transaction — the session and its connection remain usable.
 /// </summary>

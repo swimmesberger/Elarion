@@ -103,6 +103,7 @@ public sealed partial class SqlRecordMapperGenerator : IIncrementalGenerator {
     // The static members the generated ISqlRecord<T> partial adds to the row type.
     private static readonly string[] ReservedMemberNames = ["SqlMapper", "Table", "Select"];
 
+    /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var records = context.SyntaxProvider
             .ForAttributeWithMetadataName(

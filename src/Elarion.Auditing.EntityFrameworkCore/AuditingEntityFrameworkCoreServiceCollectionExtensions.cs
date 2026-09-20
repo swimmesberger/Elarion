@@ -8,7 +8,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Elarion.Auditing.EntityFrameworkCore;
 
 /// <summary>
-/// Wires the durable EF Core audit trail over <typeparamref name="TDbContext"/> (ADR-0045): the sink, the
+/// Wires the durable EF Core audit trail over the host's <c>DbContext</c> (ADR-0045): the sink, the
 /// audit scope, automatic change capture, and the opt-in retention worker. The host maps the table in
 /// <c>OnModelCreating</c> (via <c>[GenerateElarionAuditing]</c> or <c>UseElarionAuditing</c>) and owns the
 /// migration; handlers opt in with <c>[Auditable]</c> (or <c>[assembly: ElarionAuditDefaults]</c>).

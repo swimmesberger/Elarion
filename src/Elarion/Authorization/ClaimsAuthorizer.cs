@@ -19,6 +19,11 @@ namespace Elarion.Authorization;
 /// authorizer. Both registrations use <c>TryAdd</c>, so a host registration that runs <b>before</b>
 /// <c>AddElarionAuthorization()</c> wins and no <c>RemoveAll</c> is needed.
 /// </remarks>
+/// <param name="user">The current principal, whose claims and roles the requirements are evaluated against.</param>
+/// <param name="policies">The registered named policies, matched by the name <c>[RequirePolicy]</c> declares.</param>
+/// <param name="resourceAuthorizer">The per-resource point-check seam used by <c>[RequireResource]</c>.</param>
+/// <param name="options">Claim-type configuration (the permission claim type, the default policy, and so on).</param>
+/// <param name="logger">Records denials, including the fail-closed paths.</param>
 /// <param name="globalRules">
 /// Cross-cutting rules evaluated in registration order after the authenticated gate and before the declared
 /// requirements. Optional: a host that registers none gets the previous behavior exactly.

@@ -15,7 +15,7 @@ namespace Elarion.AspNetCore;
 public static class JsonRpcServiceExtensions {
     /// <summary>
     /// Adds JSON-RPC 2.0 services to the DI container: options, batch strategy,
-    /// and a <see cref="JsonSerializerOptions"/> singleton.
+    /// and a <see cref="System.Text.Json.JsonSerializerOptions"/> singleton.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Optional configuration delegate for <see cref="JsonRpcOptions"/> (endpoint path,

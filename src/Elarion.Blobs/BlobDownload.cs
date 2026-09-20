@@ -12,8 +12,8 @@ namespace Elarion.Blobs;
 /// </para>
 /// <para>
 /// A buffered implementation passes an in-memory stream and no owned resource. A streaming
-/// implementation passes the backend's read stream plus the reader/command as
-/// <paramref name="ownedResource"/>, so those live exactly as long as the caller reads.
+/// implementation passes the backend's read stream plus the reader/command as the owned resource, so those
+/// live exactly as long as the caller reads.
 /// </para>
 /// </remarks>
 public sealed class BlobDownload : IAsyncDisposable {

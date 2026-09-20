@@ -1,8 +1,8 @@
 namespace Elarion.Abstractions.ClientEvents;
 
 /// <summary>
-/// Publishes a <see cref="IClientEvent"/> to the connected subscribers of its topic within
-/// <paramref name="scope"/>. Delivery is <b>immediate and at-most-once</b>: a client that is not connected
+/// Publishes a <see cref="IClientEvent"/> to the connected subscribers of its topic within the given
+/// <see cref="ClientEventScope"/>. Delivery is <b>immediate and at-most-once</b>: a client that is not connected
 /// misses the event, and that is by design — client events are hints, not facts of record.
 /// </summary>
 /// <remarks>

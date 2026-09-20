@@ -1,0 +1,16 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))"/>
+
+  <PropertyGroup>
+    <!-- Framework assemblies ship their XML documentation file, so the doc comments in this repository reach
+         consumers as IntelliSense, hover text and parameter help. That is the surface an Elarion API is
+         normally met through: handlers, source generators and analyzers mean a consumer (human or coding
+         agent) discovers types rather than browsing this source, and a bare signature loses the semantics the
+         comment already records. The SDK packs $(AssemblyName).xml into lib/$(TargetFramework) on its own.
+
+         It is set here rather than in the repository-root props so tests, benchmarks and samples — which have
+         no consumers and document nothing — are unaffected. It is set in .props rather than .targets because
+         the SDK derives $(DocumentationFile) from it before Directory.Build.targets is imported. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>

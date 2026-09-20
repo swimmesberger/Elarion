@@ -3,7 +3,7 @@ namespace Elarion.Abstractions.Authorization;
 /// <summary>
 /// The authorization requirements resolved for a handler: the requirements its attributes declare plus
 /// whether a default-authorization policy applies. Built by
-/// <see cref="AuthorizationDecorator{TRequest, TResponse}"/> and evaluated by an <see cref="IAuthorizer"/>.
+/// <c>AuthorizationDecorator&lt;TRequest, TResponse&gt;</c> and evaluated by an <see cref="IAuthorizer"/>.
 /// </summary>
 /// <param name="AllowAnonymous">When <see langword="true"/>, authorization is skipped entirely.</param>
 /// <param name="RequireAuthenticated">When <see langword="true"/>, the principal must be authenticated.</param>

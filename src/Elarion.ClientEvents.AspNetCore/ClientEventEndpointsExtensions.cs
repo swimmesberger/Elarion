@@ -24,7 +24,7 @@ namespace Elarion.ClientEvents.AspNetCore;
 /// <c>{"topic":"…","resource":"…?"}</c> — because <c>EventSource</c> cannot POST; changing the subscription
 /// set means reconnecting. Authorization is <b>fail-closed</b> at subscribe time: unauthenticated → 401;
 /// an unknown topic, a failed topic requirement, or a resource scope without a passing
-/// <see cref="IClientEventSubscriptionAuthorizer"/> → 404, so a topic's existence is never leaked (a topic
+/// <see cref="Elarion.Abstractions.ClientEvents.IClientEventSubscriptionAuthorizer"/> → 404, so a topic's existence is never leaked (a topic
 /// declaring <c>AllowAnyResource</c> skips the authorizer — its resource segment is a routing key). User
 /// scope is always the caller's own. Delivery is at-most-once.
 /// </para>

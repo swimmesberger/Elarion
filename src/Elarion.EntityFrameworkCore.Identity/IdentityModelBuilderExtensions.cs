@@ -14,7 +14,7 @@ namespace Elarion.EntityFrameworkCore.Identity;
 /// <remarks>
 /// This is the primitive the generated <c>[GenerateElarionIdentity]</c> code calls (with the attribute's
 /// types baked in); advanced hosts and tests may call it directly. The configuration mirrors the pinned
-/// ASP.NET Core Identity version. With <paramref name="snakeCase"/> it sets snake_case table, column, and
+/// ASP.NET Core Identity version. With <c>snakeCase</c> it sets snake_case table, column, and
 /// index names directly — fully self-contained, with no <c>EFCore.NamingConventions</c> dependency.
 /// </remarks>
 public static class IdentityModelBuilderExtensions {

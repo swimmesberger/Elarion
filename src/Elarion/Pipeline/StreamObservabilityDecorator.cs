@@ -15,6 +15,7 @@ public sealed class StreamObservabilityDecorator<TRequest, TItem>(
     IEnumerable<IHandlerContextEnricher> enrichers,
     ILoggerFactory? loggerFactory
 ) : IStreamHandler<TRequest, TItem> {
+    /// <inheritdoc />
     public async ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) {
         var parent = Activity.Current;
         var activity = HandlerTelemetry.Source.HasListeners()

@@ -17,7 +17,7 @@ namespace Elarion.Abstractions;
 /// </para>
 /// <para>
 /// Unlike the removed <c>RequestAsync</c> (whose responder was compile-time validated), the handler is resolved from
-/// DI at runtime: <see cref="SendAsync{TRequest,TResponse}"/> throws if no <see cref="IHandler{TRequest,TResponse}"/>
+/// DI at runtime: <see cref="SendAsync{TRequest, TResponse}(TRequest, System.Threading.CancellationToken)"/> throws if no <see cref="IHandler{TRequest,TResponse}"/>
 /// is registered for the requested types. Prefer injecting the specific <see cref="IHandler{TRequest, TResponse}"/>
 /// directly when you call only one — this is the convenience for code that dispatches several by type.
 /// </para>

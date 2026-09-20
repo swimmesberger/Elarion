@@ -2,7 +2,7 @@ namespace Elarion.Abstractions;
 
 /// <summary>
 /// Marker interface for the Result pattern, allowing behaviors to inspect
-/// success/failure without knowing the concrete <typeparamref name="T"/>.
+/// success/failure without knowing the concrete result type.
 /// </summary>
 public interface IResultLike {
     /// <summary>

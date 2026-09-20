@@ -8,6 +8,7 @@ public sealed class StreamValidationDecorator<TRequest, TItem>(
     IStreamHandler<TRequest, TItem> inner,
     IRequestValidator validator
 ) : IStreamHandler<TRequest, TItem> {
+    /// <inheritdoc />
     public async ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) {
         var errors = await validator.ValidateAsync(typeof(TRequest), request!, ct).ConfigureAwait(false);
         if (errors is not null)

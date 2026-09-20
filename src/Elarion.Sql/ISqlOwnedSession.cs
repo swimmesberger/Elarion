@@ -32,7 +32,7 @@ public interface ISqlOwnedSession : ISqlSession {
     /// <summary>
     /// Begins a transaction on the session's own connection and returns it as an <see cref="ISqlTransaction"/>:
     /// commit explicitly; disposing without a commit rolls back and the session continues autonomously (the
-    /// connection stays open — only <see cref="SqlDatabaseExtensions.BeginTransactionAsync"/>-opened
+    /// connection stays open — only <see cref="SqlDatabaseExtensions.BeginTransactionAsync(ISqlDatabase, System.Data.IsolationLevel?, System.Threading.CancellationToken)"/>-opened
     /// transactions own their connection). While the transaction is open, calls on this session enlist it too.
     /// </summary>
     /// <param name="isolationLevel">Optional isolation level; omit for the provider's default.</param>

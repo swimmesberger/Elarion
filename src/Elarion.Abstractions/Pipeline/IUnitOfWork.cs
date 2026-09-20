@@ -18,7 +18,7 @@ public readonly record struct UnitOfWorkOptions {
 
 /// <summary>
 /// A transport- and provider-neutral unit-of-work boundary. Implementations open a backend transaction so a
-/// decorator (the framework <see cref="TransactionDecorator{TRequest, TResponse}"/> or the idempotency
+/// decorator (the framework <c>TransactionDecorator&lt;TRequest, TResponse&gt;</c> or the idempotency
 /// decorator) can wrap a handler in one atomic commit/rollback, without depending on EF Core directly.
 /// </summary>
 /// <remarks>

@@ -8,7 +8,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Elarion.Idempotency.EntityFrameworkCore;
 
 /// <summary>
-/// Wires the durable EF Core idempotency store over <typeparamref name="TDbContext"/>: it replaces the in-memory
+/// Wires the durable EF Core idempotency store over the host's <c>DbContext</c>: it replaces the in-memory
 /// defaults with the transactional store and unit of work, and runs the retention purge worker. The host maps the
 /// table in <c>OnModelCreating</c> (via <c>[GenerateElarionIdempotencyKeys]</c> or
 /// <c>ApplyElarionIdempotencyKeys</c>) and owns the migration.

@@ -38,9 +38,16 @@ namespace Elarion.AspNetCore;
 public static class ElarionHttpEndpointBinder {
     /// <summary>How reading a JSON request body failed, when it did.</summary>
     public enum BodyFailure {
+        /// <summary>The body was read successfully.</summary>
         None,
+
+        /// <summary>The request declared a content type the endpoint does not accept; reported as 415.</summary>
         UnsupportedMediaType,
+
+        /// <summary>The endpoint requires a body and none was sent.</summary>
         MissingBody,
+
+        /// <summary>The body was not well-formed JSON, or did not match the request contract.</summary>
         InvalidJson
     }
 

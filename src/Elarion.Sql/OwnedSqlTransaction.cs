@@ -3,7 +3,7 @@ using System.Data.Common;
 namespace Elarion.Sql;
 
 /// <summary>
-/// The <see cref="ISqlTransaction"/> behind <see cref="SqlDatabaseExtensions.BeginTransactionAsync"/>: owns both
+/// The <see cref="ISqlTransaction"/> behind <see cref="SqlDatabaseExtensions.BeginTransactionAsync(ISqlDatabase, System.Data.IsolationLevel?, System.Threading.CancellationToken)"/>: owns both
 /// the pooled connection and the transaction begun on it. Every session call enlists the transaction (it is the
 /// <see cref="CurrentTransaction"/>); disposal without an explicit commit rolls back via ADO.NET's
 /// dispose-uncommitted-transaction contract, then returns the connection.

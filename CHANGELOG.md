@@ -164,6 +164,20 @@ minor releases may include breaking changes.
   references the other. Existing call shapes are unchanged; stores are opt-in.
 
 ### Fixed
+- **Packages now ship their XML documentation file, so doc comments reach consumers.**
+  `GenerateDocumentationFile` was never set, so every published package contained only the assembly and
+  consumers got no IntelliSense, hover text, or parameter help for any Elarion API — the surface an Elarion
+  API is normally met through, since handlers, generators and analyzers mean it is discovered rather than
+  browsed, and coding agents read exactly the metadata IntelliSense reads. It is enabled for everything under
+  `src/` (tests, benchmarks and samples are unaffected), and the SDK packs `$(AssemblyName).xml` into
+  `lib/$(TargetFramework)` on its own. Turning it on also surfaced documentation that had silently rotted:
+  crefs to types that moved (`TcpConnectionHandler.ConfigureConnectionAsync`,
+  `WebSocketConnectionHandler.ConfigureConnectionAsync`, `TcpOutboundWriter.WriteFrameAsync`,
+  `IAuthorizationPolicy.Name` — none of which exist), crefs that never resolved across the
+  Abstractions/core boundary, `paramref`/`typeparamref` tags naming parameters their type does not have, and
+  undocumented public members on `JsonRpcIdInfo`, `SqlInterpolatedStringHandler`, the stream decorators and
+  the HTTP body binder. All are fixed; the build stays warning-free with `TreatWarningsAsErrors`, with no
+  blanket `NoWarn CS1591`.
 - **Client-event subscriptions bypassed the authorizer for authenticated-only topics.**
   `ClientEventSubscriptionResolver` decided the "authenticated" requirement itself and consulted
   `IAuthorizer` only for topics declaring a permission, role, claim, policy, or resource requirement. Since

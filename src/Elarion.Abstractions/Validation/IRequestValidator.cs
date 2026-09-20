@@ -3,7 +3,7 @@ namespace Elarion.Abstractions.Validation;
 /// <summary>
 /// The request-validation seam: validates a request's declarative shape constraints (ADR-0027) and reports
 /// the violations keyed by wire-named field path. The framework's
-/// <see cref="Pipeline.ValidationDecorator{TRequest, TResponse}"/> calls this before the request reaches
+/// <c>ValidationDecorator&lt;TRequest, TResponse&gt;</c> calls this before the request reaches
 /// caching, the pipeline, or the transaction.
 /// </summary>
 /// <remarks>

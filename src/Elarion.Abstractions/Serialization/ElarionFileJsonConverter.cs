@@ -11,6 +11,7 @@ namespace Elarion.Abstractions.Serialization;
 /// naming policy; unknown properties are skipped on read.
 /// </summary>
 public sealed class ElarionFileJsonConverter : JsonConverter<ElarionFile> {
+    /// <inheritdoc />
     public override ElarionFile Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) {
         if (reader.TokenType != JsonTokenType.StartObject)
             throw new JsonException("Expected an object for an ElarionFile payload.");
@@ -56,6 +57,7 @@ public sealed class ElarionFileJsonConverter : JsonConverter<ElarionFile> {
         };
     }
 
+    /// <inheritdoc />
     public override void Write(Utf8JsonWriter writer, ElarionFile value, JsonSerializerOptions options) {
         writer.WriteStartObject();
         writer.WriteString("contentType"u8, value.ContentType);

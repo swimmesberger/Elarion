@@ -13,6 +13,7 @@ public sealed class StreamFeatureGateDecorator<TRequest, TItem>(
     StreamHandlerMetadata metadata,
     IFeatureFlagService features
 ) : IStreamHandler<TRequest, TItem> {
+    /// <inheritdoc />
     public async ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) {
         foreach (var gate in metadata.HandlerType.GetCustomAttributes<FeatureGateAttribute>(true)) {
             // Generator diagnostics make this visible at build time. At runtime an empty gate is deliberately

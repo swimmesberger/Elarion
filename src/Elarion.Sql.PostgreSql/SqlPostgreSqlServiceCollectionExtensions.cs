@@ -7,7 +7,8 @@ using Npgsql;
 namespace Elarion.Sql.PostgreSql;
 
 /// <summary>
-/// The single PostgreSQL provider registration for the EF-free tier: <see cref="AddElarionPostgreSql"/> picks
+/// The single PostgreSQL provider registration for the EF-free tier:
+/// <see cref="AddElarionPostgreSql(IServiceCollection, string, System.Action{NpgsqlSlimDataSourceBuilder}, string, long)"/> picks
 /// PostgreSQL for <b>every</b> subsystem at once. It registers one central <see cref="NpgsqlDataSource"/> — the
 /// shared core, analogous to how a <c>DbContext</c> is central in EF Core — plus the
 /// <see cref="ISqlDatabase"/> the <see cref="ISqlSession"/> access tier opens from and the

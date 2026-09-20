@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Elarion.EntityFrameworkCore.UnitOfWork;
 
 /// <summary>
-/// Registers the EF Core <see cref="IUnitOfWork"/> over <typeparamref name="TDbContext"/>, replacing any
+/// Registers the EF Core <see cref="IUnitOfWork"/> over the host's <c>DbContext</c>, replacing any
 /// default (in-memory) unit of work so the framework transaction and idempotency decorators use a real
 /// database transaction.
 /// </summary>
