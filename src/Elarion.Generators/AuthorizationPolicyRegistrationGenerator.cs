@@ -52,6 +52,7 @@ public sealed class AuthorizationPolicyRegistrationGenerator : IIncrementalGener
         public const string Combined = "AuthorizationPoliciesCombined";
     }
 
+    /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var policies = context.SyntaxProvider
             .ForAttributeWithMetadataName(

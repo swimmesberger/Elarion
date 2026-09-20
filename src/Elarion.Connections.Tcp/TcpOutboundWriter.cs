@@ -218,7 +218,7 @@ internal sealed class TcpOutboundWriter : IDisposable {
 
     /// <summary>
     /// Frames one caller-serialized message in place and physically writes it — the writer-send mirror of
-    /// <see cref="WriteFrameAsync"/>, with the same fault taxonomy: a serialization/framing failure never
+    /// <see cref="DrainQueueAsync"/>'s per-frame emit, with the same fault taxonomy: a serialization/framing failure never
     /// started the frame (non-fatal), a cancelled or failed physical write may have emitted a partial frame
     /// (fatal).
     /// </summary>

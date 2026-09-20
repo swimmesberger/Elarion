@@ -120,7 +120,7 @@ public sealed class HandlerDispatcher {
     /// Dispatches <paramref name="request"/> to the handler registered under <paramref name="name"/>, in the
     /// given <paramref name="scope"/>. Returns <see cref="AppError.NotFound"/> when no route matches — a
     /// name-routed transport that needs a distinct "method not found" wire code should check
-    /// <see cref="TryGetRoute"/> first.
+    /// <see cref="TryGetRoute(string, out HandlerRoute)"/> first.
     /// </summary>
     public ValueTask<Result<object>> DispatchAsync(
         string name, object request, IServiceProvider scope, CancellationToken ct) {

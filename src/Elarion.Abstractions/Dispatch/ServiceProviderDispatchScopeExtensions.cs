@@ -11,7 +11,7 @@ public static class ServiceProviderDispatchScopeExtensions {
     /// Creates an <see cref="AsyncServiceScope"/> from <paramref name="parent"/> and runs every registered
     /// <see cref="IDispatchScopeInitializer"/> against the new scope, passing <paramref name="context"/>
     /// (or <see cref="DispatchScopeContext.Empty"/> when <see langword="null"/>). Use this in place of a raw
-    /// <see cref="ServiceProviderServiceExtensions.CreateAsyncScope"/> at every dispatch site so scoped state
+    /// <see cref="ServiceProviderServiceExtensions.CreateAsyncScope(System.IServiceProvider)"/> at every dispatch site so scoped state
     /// (current user, tenant, …) is seeded consistently.
     /// </summary>
     /// <param name="parent">The provider to create the call scope from (the request scope, or app root for MCP).</param>

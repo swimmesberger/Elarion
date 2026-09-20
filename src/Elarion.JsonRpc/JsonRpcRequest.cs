@@ -3,24 +3,59 @@ using System.Text.Json.Serialization;
 
 namespace Elarion.JsonRpc;
 
+/// <summary>
+/// How a JSON-RPC message carried its <c>id</c> member. JSON-RPC 2.0 distinguishes an absent <c>id</c>
+/// (a notification, which must not be answered) from a present <c>id</c> whose value is <c>null</c>, a
+/// string, or a number, and a response must echo the id back in the shape it arrived in.
+/// </summary>
 public enum JsonRpcIdKind {
+    /// <summary>No <c>id</c> member was present: the message is a notification and gets no response.</summary>
     Missing,
+
+    /// <summary>The <c>id</c> member was present with the literal value <c>null</c>.</summary>
     Null,
+
+    /// <summary>The <c>id</c> member was a JSON string, and is echoed back as a string.</summary>
     String,
+
+    /// <summary>
+    /// The <c>id</c> member was a JSON number. The raw token text is kept verbatim so the echoed id is
+    /// identical to the one received: re-parsing through a numeric type would lose precision, the exponent
+    /// form, or a trailing zero.
+    /// </summary>
     Number
 }
 
+/// <summary>
+/// The <c>id</c> of a JSON-RPC message, kept in the shape it arrived in so a response can echo it exactly.
+/// </summary>
+/// <param name="Kind">Which JSON shape the <c>id</c> member had.</param>
+/// <param name="Value">
+/// The id as text, for both string and number ids; <see langword="null"/> when the id was absent or the JSON
+/// literal <c>null</c>.
+/// </param>
+/// <param name="Raw">
+/// The verbatim JSON token text for a <see cref="JsonRpcIdKind.Number"/> id, so it round-trips without
+/// precision or formatting loss; the value itself for a string id, and <see langword="null"/> otherwise.
+/// </param>
 public readonly record struct JsonRpcIdInfo(JsonRpcIdKind Kind, string? Value, string? Raw) {
+    /// <summary>Whether an <c>id</c> member was present — that is, the message is a call, not a notification.</summary>
     public bool HasId => Kind != JsonRpcIdKind.Missing;
 
+    /// <summary>The id of a notification: no <c>id</c> member at all.</summary>
     public static JsonRpcIdInfo Missing { get; } = new(JsonRpcIdKind.Missing, null, null);
 
+    /// <summary>A present <c>id</c> member whose value is the JSON literal <c>null</c>.</summary>
     public static JsonRpcIdInfo Null { get; } = new(JsonRpcIdKind.Null, null, null);
 
+    /// <summary>Creates a string <c>id</c>.</summary>
+    /// <param name="value">The id text.</param>
     public static JsonRpcIdInfo String(string? value) {
         return new JsonRpcIdInfo(JsonRpcIdKind.String, value, value);
     }
 
+    /// <summary>Creates a numeric <c>id</c> from its verbatim JSON token text.</summary>
+    /// <param name="raw">The number exactly as it appeared in the message, preserved for the echoed response.</param>
     public static JsonRpcIdInfo Number(string raw) {
         return new JsonRpcIdInfo(JsonRpcIdKind.Number, raw, raw);
     }

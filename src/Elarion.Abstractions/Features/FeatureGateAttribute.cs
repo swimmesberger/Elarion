@@ -23,7 +23,7 @@ namespace Elarion.Abstractions.Features;
 /// </code>
 /// </example>
 /// <para>
-/// The enforcing <see cref="FeatureGateDecorator{TRequest, TResponse}"/> is attached automatically by the handler
+/// The enforcing <c>FeatureGateDecorator&lt;TRequest, TResponse&gt;</c> is attached automatically by the handler
 /// source generator just inside the authorization gate, so a denied feature never reaches the handler, caching, or
 /// the rest of the pipeline. A handler whose response cannot represent failure (no
 /// <see cref="IResultFailureFactory{TSelf}"/>) is reported at build time.

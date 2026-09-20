@@ -189,7 +189,7 @@ public static class JsonRpcSchemaExporter {
     }
 
     /// <summary>
-    /// Replaces the schema node for <see cref="ElarionFile"/> — opaque to the exporter because the type
+    /// Replaces the schema node for <see cref="Elarion.Abstractions.ElarionFile"/> — opaque to the exporter because the type
     /// serializes through its custom converter — with the converter's fixed base64 envelope, wherever the type
     /// appears (a method's whole result, or a property inside a params/result DTO for uploads). <c>data</c>
     /// carries <c>format: "byte"</c> like <c>[Base64String]</c> properties, and the object is marked

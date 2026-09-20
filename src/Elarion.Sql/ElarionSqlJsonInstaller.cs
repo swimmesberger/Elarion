@@ -11,11 +11,13 @@ namespace Elarion.Sql;
 /// a JSON-free host pays nothing. DI-free hosts install it directly via <see cref="ElarionSqlJson.Use"/>.
 /// </summary>
 public sealed class ElarionSqlJsonInstaller(IElarionJsonSerialization serialization) : IHostedService {
+    /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken) {
         ElarionSqlJson.Use(serialization);
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken) {
         return Task.CompletedTask;
     }

@@ -10,7 +10,7 @@ namespace Elarion.Paging;
 /// </summary>
 /// <remarks>
 /// A sort map is a fixed whitelist that does not depend on the request, so build it once with
-/// <see cref="CreateBuilder{TKey}(string, Expression{Func{T, TKey}})"/> and reuse the result (for
+/// <see cref="CreateBuilder{TKey}(string, Expression{Func{T, TKey}}, SortDirection)"/> and reuse the result (for
 /// example in a <c>static readonly</c> field). The built map is backed by a
 /// <see cref="FrozenDictionary{TKey, TValue}"/> and is immutable, so <see cref="Apply"/> is safe to
 /// call concurrently from multiple requests.

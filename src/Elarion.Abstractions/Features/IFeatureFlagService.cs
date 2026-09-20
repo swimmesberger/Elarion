@@ -9,10 +9,10 @@ namespace Elarion.Abstractions.Features;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is the feature-flag analog of <c>IHandlerCache</c>/<c>IAuthorizer</c>: the contract and the
-/// <see cref="FeatureGateDecorator{TRequest, TResponse}"/> live in <c>Elarion.Abstractions</c> (which must stay
-/// free of any runtime feature-management dependency), while the concrete provider binding lives one layer up in
-/// an opt-in package.
+/// This is the feature-flag analog of <c>IHandlerCache</c>/<c>IAuthorizer</c>: this contract lives in
+/// <c>Elarion.Abstractions</c> and the enforcing <c>FeatureGateDecorator&lt;TRequest, TResponse&gt;</c> in
+/// <c>Elarion</c> core (both of which must stay free of any runtime feature-management dependency), while the
+/// concrete provider binding lives one layer up in an opt-in package.
 /// </para>
 /// <para>
 /// Targeting context (which user/segment a flag is evaluated for) is <b>ambient</b>, not a parameter: the default

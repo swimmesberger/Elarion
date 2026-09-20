@@ -7,7 +7,7 @@ namespace Elarion.EntityFrameworkCore.Generators;
 /// Per-assembly metadata for cross-assembly <c>[EntityConfiguration]</c> discovery, mirroring the
 /// <c>ElarionManifest</c> pattern: a project advertises each configuration (its configured entities and
 /// scopes) as an <c>[assembly: AssemblyMetadata(key, value)]</c> attribute, and a DbContext in another
-/// assembly reads them straight from reference metadata (via <see cref="MetadataReferencesProvider"/>)
+/// assembly reads them straight from reference metadata (via <c>MetadataReferencesProvider</c>)
 /// instead of walking the referenced assembly's symbol tree on every edit. Reading is cached per
 /// reference, so an edit that does not change a reference re-reads nothing. The entity set is derived
 /// from the configurations — there is no separate entity entry.

@@ -16,6 +16,7 @@ public sealed class StreamAuthorizationDecorator<TRequest, TItem>(
     bool requireAuthenticatedByDefault = false,
     IReadOnlyList<ResourceRequirementBinding<TRequest>>? resourceBindings = null
 ) : IStreamHandler<TRequest, TItem> {
+    /// <inheritdoc />
     public async ValueTask<Result<IAsyncEnumerable<TItem>>> HandleAsync(TRequest request, CancellationToken ct) {
         var type = metadata.HandlerType;
         var allowAnonymous = type.GetCustomAttribute<AllowAnonymousAttribute>(true) is not null;

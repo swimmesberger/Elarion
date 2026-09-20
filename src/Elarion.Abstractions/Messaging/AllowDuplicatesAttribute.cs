@@ -10,7 +10,7 @@ namespace Elarion.Abstractions.Messaging;
 /// <para>
 /// Integration delivery is at-least-once, so every handler-form consumer whose request is an
 /// <see cref="IIntegrationEvent"/> is deduplicated by default: the generator attaches an
-/// <see cref="Elarion.Abstractions.Idempotency.IdempotencyDecorator{TRequest, TResponse}"/> keyed per
+/// <c>IdempotencyDecorator&lt;TRequest, TResponse&gt;</c> keyed per
 /// <c>(consumer, message id)</c>, claimed inside the consumer's own transaction, so a redelivery replays the
 /// recorded success instead of re-running the effect.
 /// </para>

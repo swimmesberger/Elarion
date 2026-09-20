@@ -83,6 +83,7 @@ public sealed class ClientEventRegistrationGenerator : IIncrementalGenerator {
         public const string Combined = "ClientEventContractsCombined";
     }
 
+    /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         // Structural trigger: the marker is an interface, not an attribute, so discovery filters type
         // declarations with a base list and resolves the symbol in the transform.

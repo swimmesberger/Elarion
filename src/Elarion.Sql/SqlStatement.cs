@@ -114,6 +114,10 @@ public sealed class SqlStatement {
         return command;
     }
 
+    /// <summary>
+    /// Returns the parameterized statement <see cref="Text"/> — placeholders, never the bound values, so a
+    /// logged or debugger-inspected statement cannot leak them.
+    /// </summary>
     public override string ToString() {
         return Text;
     }

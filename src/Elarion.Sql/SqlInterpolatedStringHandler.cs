@@ -16,12 +16,17 @@ public struct SqlInterpolatedStringHandler {
     private readonly int _literalLength;
     private readonly int _formattedCount;
 
+    /// <summary>Creates the handler. Called by the compiler, not by application code.</summary>
+    /// <param name="literalLength">Total length of the literal text, supplied by the compiler.</param>
+    /// <param name="formattedCount">Number of interpolated holes, supplied by the compiler.</param>
     public SqlInterpolatedStringHandler(int literalLength, int formattedCount) {
         _segments = new List<SqlSegment>(formattedCount * 2 + 1);
         _literalLength = literalLength;
         _formattedCount = formattedCount;
     }
 
+    /// <summary>Appends literal SQL text verbatim. Called by the compiler for the non-interpolated parts.</summary>
+    /// <param name="value">The literal segment, which never carries a bound value.</param>
     public void AppendLiteral(string value) {
         _segments.Add(SqlSegment.OfLiteral(value));
     }

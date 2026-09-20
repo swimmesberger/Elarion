@@ -20,8 +20,8 @@ namespace Elarion.Connections.AspNetCore;
 /// the codec.
 /// </summary>
 /// <remarks>
-/// Requires <c>app.UseWebSockets()</c> and <c>AddElarionConnections()</c>; register the concrete
-/// <typeparamref name="THandler"/> in DI. A non-upgrade request gets a bodyless 400. Per-endpoint auth
+/// Requires <c>app.UseWebSockets()</c> and <c>AddElarionConnections()</c>; register the concrete handler
+/// type in DI. A non-upgrade request gets a bodyless 400. Per-endpoint auth
 /// conventions (e.g. <c>RequireAuthorization()</c> for cookie-carried browser links) are the host's to
 /// apply on the returned builder — device handshakes typically stay anonymous at the HTTP level and
 /// authenticate in-socket.

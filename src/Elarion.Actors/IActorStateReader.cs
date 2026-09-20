@@ -12,7 +12,7 @@ namespace Elarion.Actors;
 /// The returned value is the last written snapshot, not the actor's live in-memory state: mutations
 /// the actor has not yet persisted with <c>WriteStateAsync</c> are invisible here. That is the
 /// deliberate contract — queries read durable truth, commands go through the actor. The reader runs
-/// no actor code, so design <typeparamref name="TState"/> as <b>the query contract</b>: put
+/// no actor code, so design the state type as <b>the query contract</b>: put
 /// interpretation (constants, derived flags) and pure transitions on the record itself — the shared
 /// type carries that logic to every deserialization site — and keep actor methods to
 /// apply-write-side-effect. Interpretation left in actor methods is invisible to reader-based

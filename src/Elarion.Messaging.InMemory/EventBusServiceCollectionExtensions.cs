@@ -26,7 +26,8 @@ public static class EventBusServiceCollectionExtensions {
     /// </summary>
     /// <typeparam name="TContext">The application's EF Core context whose transaction gates Plane B delivery.</typeparam>
     /// <remarks>
-    /// Combines <see cref="AddElarionDomainEventBus"/> (from <c>Elarion</c>) with
+    /// Combines <see cref="Elarion.Messaging.EventBusServiceCollectionExtensions.AddElarionDomainEventBus"/>
+    /// (from <c>Elarion</c>) with
     /// <see cref="AddElarionInMemoryIntegrationEventBus{TContext}(IServiceCollection, EventBusOptions?)"/>. Generated event
     /// consumer descriptor registration must still be called separately.
     /// </remarks>
@@ -116,7 +117,7 @@ public static class EventBusServiceCollectionExtensions {
 
     /// <summary>
     /// Registers the integration-event bus building blocks (without attaching interceptors) using values from the
-    /// <c>EventBus</c> configuration section. Prefer the <typeparamref name="TContext"/> overload; see
+    /// <c>EventBus</c> configuration section. Prefer the generic context overload; see
     /// <see cref="AddElarionInMemoryIntegrationEventBus(IServiceCollection, EventBusOptions?)"/>.
     /// </summary>
     public static IServiceCollection AddElarionInMemoryIntegrationEventBus(

@@ -2,7 +2,7 @@ namespace Elarion.Connections.AspNetCore;
 
 /// <summary>
 /// Per-connection overrides of the endpoint's options, returned by
-/// <see cref="WebSocketConnectionHandler.ConfigureConnectionAsync"/> — every property is optional and
+/// <see cref="WebSocketConnectionSession.Settings"/> — every property is optional and
 /// <see langword="null"/> inherits the endpoint value. This is how one route serves connection tiers with
 /// different limits, keepalive cadences, or transport tags (e.g. device families distinguished by route
 /// value, query, or header): resolve the binding configuration from the upgrade request and return its

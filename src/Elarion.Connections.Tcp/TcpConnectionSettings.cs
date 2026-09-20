@@ -8,7 +8,7 @@ public readonly record struct TcpConnectionPeer(EndPoint? RemoteEndPoint, EndPoi
 
 /// <summary>
 /// Per-connection overrides of the endpoint's options, returned by
-/// <see cref="TcpConnectionHandler.ConfigureConnectionAsync"/> — every property is optional and
+/// <see cref="TcpConnectionSession.Settings"/> — every property is optional and
 /// <see langword="null"/> inherits the endpoint value. This is how one listening endpoint serves devices
 /// with different wire framings, size limits, or keepalive cadences: resolve the peer's binding
 /// configuration and return its settings.
