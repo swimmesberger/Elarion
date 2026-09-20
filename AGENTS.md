@@ -363,8 +363,13 @@ beyond the existing standard set need registration in `website/components/mdx.ts
 name a valid Lucide icon.
 
 ```bash
-cd website && npm install && npm run build
+cd website && npm install && npm run build && npm run check:links
 ```
+
+**Run `check:links` too, not just the build.** `deploy-docs.yml` runs it as a separate step, and it fails the
+deploy on a broken internal route or anchor — which a successful `npm run build` does not catch. Link an ADR by
+its absolute GitHub blob URL (`https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0013-….md`):
+`docs/decisions/` is not published as a site route, so `/docs/decisions/…` is always a broken link.
 
 The static export is `website/out`; `npm run dev` serves localhost. Pushes to `main` that touch `docs/**` or
 `website/**` trigger `deploy-docs.yml`.

@@ -191,11 +191,12 @@ Both legs sit on the Entity Framework Core path. These bypass them, exactly as t
 
 Tenant scoping is application-level isolation, not a database-level one. It is not a substitute for
 PostgreSQL row-level security in a threat model where the application itself is untrusted — which is
-the same posture [ADR-0013](/docs/decisions) takes for resource authorization.
+the same posture [ADR-0013](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0013-resource-and-data-level-authorization.md) takes for resource
+authorization.
 
 ## Related
 
 - [Resource authorization](/docs/concepts/resource-authorization) — sharing *within* a tenant
 - [Archive & restore](/docs/capabilities/archive-restore) — why global query filters are otherwise rejected
 - [Entity Framework Core](/docs/capabilities/entity-framework) — the generated context and model seams
-- ADR-0075 — the design, the trade-offs, and the alternatives rejected
+- [ADR-0075: Ambient tenant scoping](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0075-ambient-tenant-scoping.md) — the design, the trade-offs, and the alternatives rejected
