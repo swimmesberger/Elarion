@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-09-25
+
 ### Changed
 - **Generator-owned HTTP endpoint binding (ADR-0071, breaking).** `[HttpEndpoint]` registrations no longer
   emit typed minimal-API lambdas that relied on ASP.NET Core's Request Delegate Generator for AOT safety —
@@ -1654,7 +1656,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.7
 [0.2.6]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.6
 [0.2.5]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.5
 [0.2.4]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.4
