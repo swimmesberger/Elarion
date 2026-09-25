@@ -133,7 +133,8 @@ Requires the `NUGET_USER` repository variable (or secret) — the NuGet.org prof
 
 ### npm trusted publishing
 
-The npm trusted publisher for `@swimmesberger/elarion-jsonrpc-client-generator`:
+The npm trusted publisher for each npm package (`@swimmesberger/elarion-jsonrpc-client-generator`,
+`@swimmesberger/elarion-contributions`, `@swimmesberger/elarion-webpush`):
 
 | Field | Value |
 | --- | --- |

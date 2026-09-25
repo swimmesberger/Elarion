@@ -301,6 +301,15 @@ pre-assigned at issue; redeem atomically mints the per-device key; codes stored 
 app-owned and must be rate-limited; sweep expired codes with a `[ScheduledJob]` calling
 `IPairingCodeStore.DeleteExpiredAsync`.
 
+Don't hand-roll Web Push either — `Elarion.WebPush` owns notifying users whose app is **closed** (ADR-0076):
+`AddElarionWebPushEntityFrameworkCore<TDbContext>(o => o.Subject = "mailto:…")` + `[GenerateElarionWebPush]`
+on the context, `app.MapElarionWebPush()` (or three `[Handler]`s delegating to `WebPushSubscriptionService`),
+then `IWebPushSender.SendToUsersAsync(userIds, new WebPushMessage { Title, Body, Url, Tag }, ct)` from the
+consumer/job that owns the trigger — dead subscriptions are cleaned up for you. Browser side:
+`@swimmesberger/elarion-webpush` (`pushAvailability()`, `enablePush(api)` straight from the click handler,
+`refreshOnStart(api)`) and `registerWebPushHandlers(self)` from its `/sw` export in the service worker. Live
+updates for users who have the app open stay client events.
+
 ## Rules that don't change
 
 - **Errors are values.** Return `Result<T>`; fail with `AppError.Validation / NotFound / Conflict /
@@ -364,7 +373,8 @@ High-value pages (paths under `/docs/`, same layout in the repo's `docs/`):
 | EF, transactions, pagination | `capabilities/entity-framework`, `concepts/persistence-and-transactions`, `capabilities/pagination` |
 | Bulk insert (imports, backfills) | `capabilities/bulk-operations` |
 | Events, outbox, idempotency | `capabilities/events/`, `concepts/idempotency` |
-| Client events (browser push / SSE) | `capabilities/events/client-events` |
+| Client events (live browser updates / SSE) | `capabilities/events/client-events` |
+| Web Push (notify closed apps / PWAs) | `capabilities/web-push` |
 | Errors | `concepts/results-and-errors` |
 | Actors (stateful in-memory) | `concepts/actors` |
 | Attribute / diagnostic / package tables | `reference/attributes`, `reference/diagnostics`, `reference/packages` |

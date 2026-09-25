@@ -1,0 +1,49 @@
+{
+  "name": "@swimmesberger/elarion-webpush",
+  "version": "0.1.0",
+  "description": "The browser half of Elarion Web Push: push availability detection (including the iOS Home Screen requirement), gesture-safe permission and subscribe/unsubscribe/refresh helpers over a pluggable server API, and a service-worker module for push, notificationclick, and pushsubscriptionchange.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./sw": {
+      "types": "./dist/sw.d.ts",
+      "import": "./dist/sw.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.sw-test.json",
+    "test": "npm run typecheck && vitest run",
+    "prepack": "npm run build",
+    "prepare": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swimmesberger/Elarion.git",
+    "directory": "src/elarion-webpush"
+  },
+  "bugs": {
+    "url": "https://github.com/swimmesberger/Elarion/issues"
+  },
+  "homepage": "https://github.com/swimmesberger/Elarion#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

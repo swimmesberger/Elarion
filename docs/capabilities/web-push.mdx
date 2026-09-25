@@ -1,0 +1,203 @@
+---
+title: Web Push
+description: Notify users whose app is closed — VAPID keys, the subscription store, encrypted delivery with dead-subscription cleanup, and the browser/service-worker half, without a third-party push service.
+---
+
+[Client events](/docs/capabilities/events/client-events) reach a user who has the app **open**. Web Push
+(RFC 8030, encrypted per RFC 8291, authenticated with VAPID per RFC 8292) reaches one who does **not**: a
+browser or installed PWA subscribes once, and the server can notify it later with the app closed — "your
+deploy failed", "time to feed the starter". It is what an installed PWA on a phone needs to be useful.
+
+Every piece of that is framework-shaped, so Elarion owns it (ADR-0076): the VAPID key pair, the subscription
+store, the send loop with cleanup, the subscribe endpoints, and the browser and service-worker plumbing.
+**Who** receives a notification, **when**, and **what** it says stay in the application.
+
+| Package | Role |
+| --- | --- |
+| `Elarion.WebPush` | `IWebPushSender`, `WebPushSubscriptionService`, VAPID keys, the store seams, in-memory defaults. |
+| `Elarion.WebPush.EntityFrameworkCore` | Durable `elarion_push_subscriptions` and `elarion_vapid_keys` tables (PostgreSQL). |
+| `Elarion.WebPush.AspNetCore` | `MapElarionWebPush()` — the public-key/subscribe/unsubscribe endpoints. |
+| `@swimmesberger/elarion-webpush` | Availability detection, permission and subscription helpers, and the service-worker module. |
+
+## Wiring
+
+```csharp
+// The DbContext maps the two tables:
+[GenerateDbSets]
+[GenerateElarionWebPush]
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options) {
+    protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
+}
+
+builder.Services.AddElarionWebPushEntityFrameworkCore<AppDbContext>(options =>
+    options.Subject = "mailto:ops@example.com");   // required: the VAPID contact
+
+app.MapElarionWebPush().RequireAuthorization();    // GET public-key, POST subscribe/unsubscribe under /webpush
+```
+
+`AddElarionWebPush(...)` alone registers the same services over **in-memory** stores — fine for tests and a
+single-node demo, but both the subscriptions and the key pair vanish on restart.
+
+### The VAPID key pair
+
+Browsers bind every subscription to the server's public key, so the key pair must be **stable**: rotating it
+invalidates every subscription. `IVapidKeyProvider` resolves it in this order:
+
+1. **Configuration** — `options.PublicKey` and `options.PrivateKey` (base64url; set both or neither). Use this
+   to keep the private key in a secret store.
+2. **The store** — the `elarion_vapid_keys` row.
+3. **Generated on first use** and stored. Two nodes racing the first start both insert with
+   `ON CONFLICT DO NOTHING` and read the row back, so they agree on one pair.
+
+The private key is stored in plain text in that table; restrict who can read it, or configure the keys
+instead. `VapidKeys.Generate()` mints a pair if you want to pin one from the start.
+
+## Sending
+
+Resolve `IWebPushSender` (scoped) wherever the trigger lives — a handler, an integration-event consumer, a
+scheduled job:
+
+```csharp
+[ConsumeEvent]
+public sealed class NotifyOnFailedDeploy(IWebPushSender push, AppDbContext db) : IHandler<DeployFailed> {
+    public async ValueTask<Result> HandleAsync(DeployFailed e, CancellationToken ct) {
+        var operators = await db.Operators.Select(o => o.UserId).ToListAsync(ct);
+        await push.SendToUsersAsync(operators, new WebPushMessage {
+            Title = "Deploy failed",
+            Body = $"{e.Service}@{e.Version} failed its health check.",
+            Url = $"/deploys/{e.DeployId}",
+            Tag = $"deploy-{e.DeployId}",
+            Urgency = WebPushUrgency.High,
+        }, ct);
+        return Result.Success();
+    }
+}
+```
+
+The sender loads the users' subscriptions, encrypts the `{title, body, url, tag}` payload for each, and sends
+them with bounded concurrency (`MaxConcurrentSends`, default 8). The returned `WebPushResult` counts what
+happened:
+
+| Push service answer | Outcome | Subscription |
+| --- | --- | --- |
+| 2xx | `Delivered` | kept |
+| 404 / 410 | `Removed` | **deleted** — the browser unsubscribed or the subscription expired |
+| malformed keys, disallowed endpoint | `Removed` | **deleted** — it can never be delivered to |
+| 429, 5xx, timeout, network error, other 4xx | `Failed` | kept |
+
+Web Push is **best-effort**: "delivered" means the push service accepted the message, not that the device
+showed it, and a failed send is not retried. If a notification must not be lost, send it from a durable
+trigger (an integration event through the outbox, a job) so the retry is yours.
+
+Message fields map onto the protocol:
+
+- `Tag` replaces rather than stacks: the browser replaces a displayed notification with the same tag, and the
+  tag is also sent as the RFC 8030 `Topic`, so the push service replaces an undelivered one too. A tag longer
+  than 32 URL-safe characters is hashed into a stable topic.
+- `Urgency` (`VeryLow` … `High`) tells the device how urgently to wake up. `High` costs battery; reserve it.
+- `TimeToLive` is how long the push service holds the message for an offline device; it defaults to
+  `options.DefaultTimeToLive` (one day). `TimeSpan.Zero` means "now or never".
+- The payload must fit one 4 KiB push message (about 3,990 bytes of JSON); a longer one throws. Put the details
+  behind `Url`.
+
+`SendToCurrentUserAsync(message)` sends to the caller's own devices — the "send a test notification" button.
+
+## Subscribing
+
+Subscriptions belong to the current user (`ICurrentUser`); subscribing requires an authenticated caller.
+`MapElarionWebPush()` maps:
+
+| Endpoint | Body | Result |
+| --- | --- | --- |
+| `GET /webpush/public-key` | — | `200 {"publicKey":"…"}` |
+| `POST /webpush/subscribe` | `subscription.toJSON()` | `204`; `400` invalid; `401` anonymous |
+| `POST /webpush/unsubscribe` | `{"endpoint":"…"}` | `204`; `401` anonymous |
+
+Subscribing is an upsert **by endpoint**: the same device re-subscribing refreshes its keys and last-seen
+time, and re-subscribing under a *different* account reassigns the row instead of colliding on the unique
+endpoint. Unsubscribing only ever deletes the caller's own subscription.
+
+An application whose API is `[Handler]`s can skip the ASP.NET package and expose the same three operations as
+handlers, delegating to `WebPushSubscriptionService` — they then appear in the JSON-RPC schema and the
+generated TypeScript client like every other handler:
+
+```csharp
+[Handler("webPush.subscribe")]
+public sealed class SubscribeToPush(WebPushSubscriptionService subscriptions) : IHandler<PushSubscriptionRequest> {
+    public ValueTask<Result> HandleAsync(PushSubscriptionRequest request, CancellationToken ct) =>
+        subscriptions.SubscribeAsync(request, cancellationToken: ct);
+}
+```
+
+### Endpoint allow-list
+
+The server POSTs to whatever endpoint a browser hands it, so an unrestricted endpoint would let any signed-in
+user aim server-side requests at an internal address. Subscriptions are therefore accepted only for **https**
+endpoints on the known push services (Google FCM, Mozilla, Apple, Windows) and their subdomains, and the
+delivery client does not follow redirects. Add a host to `options.AllowedEndpointHosts` for another push
+service, or set `options.AllowAnyEndpointHost` only if every caller that can subscribe is trusted.
+
+The deliveries use the named `HttpClient` `WebPushOptions.HttpClientName`; configure it
+(`services.AddHttpClient(WebPushOptions.HttpClientName)…`) to add a proxy or resilience handler.
+
+## Browser
+
+```ts
+import { enablePush, fetchWebPushApi, pushAvailability, refreshOnStart } from '@swimmesberger/elarion-webpush'
+
+const api = fetchWebPushApi()          // the MapElarionWebPush endpoints
+void refreshOnStart(api)               // every app start: heals rotated or cleaned-up subscriptions
+
+switch (pushAvailability()) {
+  case 'available':                    // offer the switch
+    toggle.onclick = async () => showOutcome(await enablePush(api))   // 'subscribed' | 'denied' | 'dismissed'
+    break
+  case 'install-first':                // iOS/iPadOS Safari outside a Home Screen app
+    hint.textContent = 'Add this app to your Home Screen to turn on notifications.'
+    break
+  case 'unsupported':                  // hide the switch
+}
+```
+
+- `pushAvailability()` returns `install-first` on iOS/iPadOS 16.4+ Safari outside a Home Screen install, where
+  `PushManager` does not exist yet — say "add to Home Screen first" instead of offering a switch that can
+  never turn on. Before 16.4 it is `unsupported`.
+- `enablePush` requests permission **before its first `await`**, because Safari only honours a permission
+  request made synchronously inside the user gesture. Call it straight from the click handler.
+- `subscribe`, `unsubscribe`, and `isSubscribed` are the building blocks; `refreshOnStart` never prompts.
+- With your own handlers, adapt the generated client instead of `fetchWebPushApi()`:
+
+```ts
+const api: WebPushServerApi = {
+  getPublicKey: async () => (await rpc.webPush.publicKey({})).publicKey,
+  subscribe: async (subscription) => { await rpc.webPush.subscribe(subscription) },
+  unsubscribe: async (endpoint) => { await rpc.webPush.unsubscribe({ endpoint }) },
+}
+```
+
+### Service worker
+
+```ts
+import { registerWebPushHandlers } from '@swimmesberger/elarion-webpush/sw'
+
+registerWebPushHandlers(self, { icon: '/icons/192.png', badge: '/icons/badge.png' })
+```
+
+- **`push`** shows the notification (a push that shows nothing is penalized by browsers, so an unreadable
+  payload still shows its text).
+- **`notificationclick`** focuses a window already at the notification's URL, otherwise navigates an open app
+  window there, otherwise opens one.
+- **`pushsubscriptionchange`** re-subscribes when the push service rotates the subscription and sends the new
+  one to the server. It authenticates with same-origin cookies; a bearer-token app passes `api: null` and
+  relies on `refreshOnStart`.
+
+The module is ESM: bundle the worker (for example vite-plugin-pwa `injectManifest`) or register it with
+`navigator.serviceWorker.register('/sw.js', { type: 'module' })`.
+
+## Limits
+
+- One node sends from one database: the fan-out is in-process and bounded, which covers the 1–10 node tier. A
+  mass-notification service (millions of devices, campaigns, analytics) is a job for a dedicated provider.
+- Delivery is at-most-once per send and there is no read receipt — Web Push has none.
+- A user who is online still gets the push; choosing between a client event and a push per call site is the
+  application's decision for now.

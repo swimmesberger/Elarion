@@ -82,9 +82,15 @@
     <Project Path="src/Elarion.Generators/Elarion.Generators.csproj"/>
     <Project Path="src/Elarion.JsonRpc/Elarion.JsonRpc.csproj"/>
     <Project Path="src/Elarion.Validation/Elarion.Validation.csproj"/>
+    <Project Path="src/Elarion.WebPush/Elarion.WebPush.csproj"/>
+    <Project Path="src/Elarion.WebPush.AspNetCore/Elarion.WebPush.AspNetCore.csproj"/>
+    <Project Path="src/Elarion.WebPush.EntityFrameworkCore/Elarion.WebPush.EntityFrameworkCore.csproj"/>
+    <Project
+      Path="src/Elarion.WebPush.EntityFrameworkCore.Generators/Elarion.WebPush.EntityFrameworkCore.Generators.csproj"/>
     <Project Path="src/Elarion/Elarion.csproj"/>
     <Project Path="src/elarion-contributions/elarion-contributions.csproj"/>
     <Project Path="src/elarion-jsonrpc-client-generator/elarion-jsonrpc-client-generator.csproj"/>
+    <Project Path="src/elarion-webpush/elarion-webpush.csproj"/>
   </Folder>
   <Folder Name="/samples/">
     <File Path="samples/Directory.Build.props"/>
