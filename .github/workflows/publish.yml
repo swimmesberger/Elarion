@@ -133,6 +133,7 @@ jobs:
         package:
           - src/elarion-jsonrpc-client-generator
           - src/elarion-contributions
+          - src/elarion-webpush
 
     defaults:
       run:

@@ -126,11 +126,11 @@ public package, grouped by capability, with the reason to add each one.
 | Hosting and transports      | `Elarion.JsonRpc`, `Elarion.AspNetCore`            | OpenAPI, MCP, schema generation, Identity, `Elarion.Grpc` for unary/server-streaming mapping, or a custom transport |
 | Persistence                 | `Elarion.EntityFrameworkCore`                      | Unit of work, paging, bulk operations, authorization, idempotency, auditing, scheduling, and coordination           |
 | NativeAOT SQL               | `Elarion.Sql`, `Elarion.Migrations`                | PostgreSQL or SQLite migrations for an EF-free host                                                                 |
-| Events and live clients     | `Elarion.Messaging.Outbox`, `Elarion.ClientEvents` | PostgreSQL fan-out and SSE transport                                                                                |
+| Events and live clients     | `Elarion.Messaging.Outbox`, `Elarion.ClientEvents` | PostgreSQL fan-out and SSE transport; `Elarion.WebPush` to notify users whose app is closed                        |
 | Live state and device links | `Elarion.Actors`, `Elarion.Connections`            | PostgreSQL actor state/home, WebSocket/TCP adapters, simulation, and device identity                                |
 | Blob storage                | `Elarion.Blobs`                                    | PostgreSQL or Azure storage plus direct HTTP or tus upload transports                                               |
 | Runtime settings            | `Elarion.Settings`                                 | EF persistence, configuration reload, and PostgreSQL cross-node notifications                                       |
-| Frontend tooling            | `@swimmesberger/elarion-jsonrpc-client-generator`  | Typed frontend contributions and framework bindings                                                                 |
+| Frontend tooling            | `@swimmesberger/elarion-jsonrpc-client-generator`  | Typed frontend contributions and framework bindings; `@swimmesberger/elarion-webpush` for browser push              |
 
 Package names follow capability boundaries: neutral contracts and runtimes do not pull provider or host
 dependencies; `.PostgreSql`, `.EntityFrameworkCore`, `.AspNetCore`, and other suffixes make those choices

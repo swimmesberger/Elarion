@@ -96,3 +96,4 @@ designs that are not yet implemented.
 - [ADR-0073: Leased work rows are a recognized pattern, extracted on second demand](0073-leased-work-rows.md)
 - [ADR-0074: Reactive client capabilities — stores over values, with the registry left pure](0074-reactive-client-capabilities.md)
 - [ADR-0075: Ambient tenant scoping — a model-level filter and a write-time stamp, not a per-call-site rule](0075-ambient-tenant-scoping.md)
+- [ADR-0076: Web Push is a framework package — native crypto, a fail-closed endpoint allow-list, and a pluggable browser transport](0076-web-push.md)

@@ -414,6 +414,14 @@ Device-identity-table generation for `[GenerateElarionDeviceIdentity]` (ADR-0054
 | --- | --- | --- | --- |
 | ELDEV001 | Error | A context is annotated with `[GenerateElarionDeviceIdentity]` but not `[GenerateDbSets]`, so the device identity `DbSet`s and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionDeviceIdentity]`. |
 
+## ELWP — Web Push (EF Core)
+
+Web Push table generation for `[GenerateElarionWebPush]` (ADR-0076). See [Web Push](/docs/capabilities/web-push).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELWP001 | Error | A context is annotated with `[GenerateElarionWebPush]` but not `[GenerateDbSets]`, so the Web Push `DbSet`s and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionWebPush]`. |
+
 ## ELCEV — Client events
 
 Generated client-event topic registration for `IClientEvent` contracts. See

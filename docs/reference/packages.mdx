@@ -76,9 +76,13 @@ no provider.
 | `Elarion.ClientEvents` | Browsers need authorized at-most-once re-query hints, topic registration, subscription lifecycle, and in-process delivery. |
 | `Elarion.ClientEvents.PostgreSql` | Client-event hints must fan out across roughly 1–10 nodes over PostgreSQL `LISTEN/NOTIFY`. |
 | `Elarion.ClientEvents.AspNetCore` | Client events should stream to browsers over authorized Server-Sent Events. |
+| `Elarion.WebPush` | Users should be notified while the app is closed: Web Push (VAPID) delivery to their browsers/PWAs with dead-subscription cleanup, a subscription-store seam, and an in-memory default. |
+| `Elarion.WebPush.EntityFrameworkCore` | Push subscriptions and the VAPID key pair need durable EF/PostgreSQL tables. |
+| `Elarion.WebPush.AspNetCore` | The browser package's default transport should call `MapElarionWebPush` endpoints rather than application handlers. |
 
 See [events and messaging](/docs/capabilities/events) for domain events, integration events, outbox,
-client events, and ordered streams.
+client events, and ordered streams, and [Web Push](/docs/capabilities/web-push) for notifying users
+whose app is closed.
 
 ## Actors, connections, and devices
 
@@ -124,6 +128,7 @@ Read the [actor decision guide](/docs/concepts/actors) before adding the actor p
 | --- | --- |
 | `@swimmesberger/elarion-jsonrpc-client-generator` | A TypeScript client should be generated from `rpc-schema.json` with Zod validation and typed client-event subscriptions. |
 | `@swimmesberger/elarion-contributions` | A frontend needs typed extension points, declarative module contributions, capability gating, and optional React/Angular/TanStack Router bindings. |
+| `@swimmesberger/elarion-webpush` | A browser/PWA should subscribe to Web Push: availability detection (including the iOS Home Screen requirement), gesture-safe permission, subscribe/refresh helpers, and the service-worker handlers. |
 
 ## Dependency rules
 
@@ -146,4 +151,4 @@ Read the [actor decision guide](/docs/concepts/actors) before adding the actor p
 | EF-free NativeAOT host (PostgreSQL) | `Elarion.Sql` + `Elarion.Sql.PostgreSql` + `Elarion.Migrations` |
 | EF-free NativeAOT host (SQLite, single-node / edge) | `Elarion.Sql` + `Elarion.Sql.Sqlite` + `Elarion.Migrations` |
 | ASP.NET Core host | `Elarion`, `Elarion.JsonRpc`, `Elarion.AspNetCore`; opt in to OpenAPI, MCP, schema generation, Identity, SSE, and blob transports as needed |
-| Frontend | `@swimmesberger/elarion-jsonrpc-client-generator`; optionally `@swimmesberger/elarion-contributions` |
+| Frontend | `@swimmesberger/elarion-jsonrpc-client-generator`; optionally `@swimmesberger/elarion-contributions` and `@swimmesberger/elarion-webpush` |

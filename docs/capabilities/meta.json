@@ -15,6 +15,7 @@
     "coordination",
     "connections",
     "devices",
+    "web-push",
     "data-rate-shaping",
     "entity-framework",
     "multi-tenancy",
