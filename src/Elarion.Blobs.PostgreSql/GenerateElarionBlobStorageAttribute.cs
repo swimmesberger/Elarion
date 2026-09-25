@@ -20,20 +20,20 @@ namespace Elarion.Blobs.PostgreSql;
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class GenerateElarionBlobStorageAttribute : Attribute {
     /// <summary>Whether to use snake_case table/column names. Defaults to <c>true</c>.</summary>
-    public bool SnakeCase { get; set; } = true;
+    public bool SnakeCase { get; init; } = true;
 
     /// <summary>
     /// The metadata table name, or <c>null</c> for the default (<c>stored_blobs</c> /
     /// <c>StoredBlobs</c> depending on <see cref="SnakeCase"/>).
     /// </summary>
-    public string? TableName { get; set; }
+    public string? TableName { get; init; }
 
     /// <summary>
     /// The content table name, or <c>null</c> for the default (<c>blob_contents</c> /
     /// <c>BlobContents</c> depending on <see cref="SnakeCase"/>).
     /// </summary>
-    public string? ContentTableName { get; set; }
+    public string? ContentTableName { get; init; }
 
     /// <summary>The schema, or <c>null</c> for the provider's default schema.</summary>
-    public string? Schema { get; set; }
+    public string? Schema { get; init; }
 }

@@ -43,7 +43,7 @@ public sealed class ConfigurationVariantAttribute(string key) : Attribute {
     /// The configured value this implementation is selected for (matched case-insensitively). When omitted,
     /// this implementation is the <i>default</i>, used when the key is absent or its value matches no variant.
     /// </summary>
-    public string? Value { get; set; }
+    public string? Value { get; init; }
 
     /// <summary>
     /// Marks this implementation as the default <i>in addition to</i> its <see cref="Value"/> — a <b>named
@@ -52,5 +52,5 @@ public sealed class ConfigurationVariantAttribute(string key) : Attribute {
     /// the default — has a writable, validatable name (e.g. <c>Value = "smtp", IsDefault = true</c> lets an
     /// admin switch back to SMTP by writing <c>"smtp"</c> rather than by removing the key).
     /// </summary>
-    public bool IsDefault { get; set; }
+    public bool IsDefault { get; init; }
 }

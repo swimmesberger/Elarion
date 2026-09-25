@@ -127,7 +127,7 @@ pending outbox deliveries or inbox claims. Two overloads on the same service wit
 event type would share that identity and are rejected by `ELEVT006`; rename or split one consumer.
 
 A class-level `[ConsumeEvent]` on a non-handler class, or a method-form consumer not on a `[Service]`, is
-reported (`ELEVT001`/`ELEVT005`); an invalid signature is `ELEVT002`.
+reported (`ELEVT005`/`ELEVT001`); an invalid signature is `ELEVT002`.
 
 <Callout type="info">
   What the `CancellationToken` *means* differs by plane. For **domain** consumers it is the originating
@@ -140,10 +140,12 @@ reported (`ELEVT001`/`ELEVT005`); an invalid signature is `ELEVT002`.
 
 Integration delivery is **at-least-once**: a consumer can see the same message more than once — a worker
 crash after the consumer ran but before its delivery was finalized, or a lease that expired under
-multiple instances. Outbox retries are independent per consumer, so a failed sibling no longer re-runs
-completed siblings. There is no exactly-once
+multiple instances — or a fan-out sibling that failed: consumers sharing a target group (in the common
+unbound case, every consumer of the event) share one retry boundary, so a retry re-runs the siblings that
+already completed. There is no exactly-once
 *delivery*; exactly-once *effect* comes from deduplication on the consumer side. Every redelivery carries
-the **same** `IEventContext.MessageId` (the durable message identity — for the outbox, the row's id), so
+the **same** `IEventContext.MessageId` (the durable message identity — for the outbox, the published
+message's id, shared by every target group of one publish), so
 that id is the deduplication key. (`CorrelationId` is a *tracing* identifier — don't key dedup on it.)
 
 **Handler-form consumers get this for free: the inbox is on by default.** Every handler-form consumer
@@ -156,9 +158,9 @@ the loser waits on the winner's uncommitted claim and then replays it — only a
 acknowledged.
 
 Why this must live in *your* transaction rather than the outbox row: the outbox row has the wrong
-**grain**. It is one row per *event*, finalized by the delivery worker per **message**, on the worker's
-own connection, *after* your consumer's transaction has already committed — and only once **every**
-fan-out consumer has run. Your effect is a fact per *(message, consumer)*, and only a write inside your
+**grain**. It is one row per *event* (per target group), finalized by the delivery worker per **group**, on
+the worker's own connection, *after* your consumer's transaction has already committed — and only once
+**every** fan-out consumer in that group has run. Your effect is a fact per *(message, consumer)*, and only a write inside your
 consumer's own transaction can atomically couple "already processed" to the effect itself. The inbox is
 exactly that write, done for you.
 
@@ -310,6 +312,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 builder.Services.AddScoped<InvoiceNotifications>();
 builder.Services.AddSingleton(new EventSubscriptionDescriptor {
+    ConsumerId  = "MyApp.InvoiceNotifications.OnInvoiceCreated(MyApp.InvoiceCreated)", // stable; the outbox requires it
     EventType   = typeof(InvoiceCreated),
     Plane       = EventPlane.Integration,          // or EventPlane.Domain — same descriptor, either plane
     ServiceType = typeof(InvoiceNotifications),

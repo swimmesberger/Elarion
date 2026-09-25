@@ -127,7 +127,7 @@ authorization, so a second transport can never fork the rules. The adapter parse
 frame and hands the requests to the bridge; delivery framing is the adapter's choice:
 
 ```csharp
-var result = await bridge.SubscribeAsync(connection.Connection, requests,
+var result = await bridge.SubscribeAsync(connection, requests,
     (envelope, ct) => connection.SendTextAsync($"event:{envelope.Topic}:{envelope.Payload}", ct), ct);
 ```
 

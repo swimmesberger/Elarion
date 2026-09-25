@@ -21,7 +21,7 @@ transport; modules own application logic.
 
 ## Generated host partial
 
-A single partial class tells the generator to emit the cross-module wiring in the host assembly:
+A single assembly attribute tells the generator to emit the cross-module wiring in the host assembly:
 
 ```csharp
 using Elarion.AspNetCore;
@@ -51,9 +51,9 @@ var builder = WebApplication.CreateSlimBuilder(args);
 builder.Services.AddDbContext<AppDbContext>(/* provider setup */);
 builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
-builder.Services.AddMyAppApplicationScheduledJobs();
-builder.Services.AddMyAppApplicationResiliencePolicies();
+// Scheduled-job descriptors are registered per module by AddElarion below; the host picks the runtime.
 builder.Services.AddElarionScheduler(builder.Configuration);
+builder.Services.AddMyApp_ApplicationResiliencePolicies();
 builder.AddMyAppPlatformCapabilities();
 // Also contributes every enabled module's source-generated JSON context to the canonical serializer.
 builder.Services.AddElarion(builder.Configuration);
@@ -102,7 +102,7 @@ Every transport — services, HTTP, JSON-RPC, and MCP — is wired through
 ungated map: a host that conceptually has "no modules" simply declares a single **core** `[AppModule]`
 (core modules map unconditionally), which gives the same always-on behavior while keeping one consistent
 path. Handlers whose namespace falls under no module are reported (`ELHTTP003`/`ELRPC001`) so they are
-never silently dropped. The `ELRPC001` message now refers to `[Handler]`.
+never silently dropped.
 
 The bootstrapper discovers modules and handlers both from **referenced module assemblies** (through
 their per-assembly Elarion manifests) and from the **host compilation itself**, so the project layout is

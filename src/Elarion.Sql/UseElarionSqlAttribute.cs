@@ -25,5 +25,5 @@ public enum SqlProvider {
 [AttributeUsage(AttributeTargets.Assembly)]
 public sealed class UseElarionSqlAttribute : Attribute {
     /// <summary>The provider to emit for; defaults to <see cref="SqlProvider.Portable"/>.</summary>
-    public SqlProvider Provider { get; set; }
+    public SqlProvider Provider { get; init; }
 }

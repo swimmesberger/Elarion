@@ -49,7 +49,7 @@ registration list.
   </Card>
   <Card title="Modules own their surface" href="/docs/concepts/modules">
     A module is a namespace plus an `[AppModule]` marker. Add a handler under it and the module
-    publishes it automatically through generated `Add{Module}…()` methods.
+    publishes it automatically through its generated `ConfigureDefaultServices`.
   </Card>
   <Card title="Transport-neutral results" href="/docs/concepts/results-and-errors">
     Handlers return `Result<T>` with a transport-agnostic `AppError`. The host maps failures to
@@ -80,12 +80,12 @@ registration list.
   </Card>
   <Card title="Resource & data-level access control" href="/docs/concepts/resource-authorization">
     Point-check a resource with `[RequireResource]`, or filter whole result sets at the database with
-    `[ResourceFilter<TEntity>]` + `WhereAuthorized(spec, user)` — owner/tenant/role sharing compiled into
+    `[ResourceFilter<TEntity>]` + `WhereAuthorized(authorizer, user)` — owner/tenant/role sharing compiled into
     EF Core predicates, no in-memory post-filter.
   </Card>
   <Card title="Blob storage" href="/docs/capabilities/blob-storage">
-    Depend on provider-neutral blob contracts in application code and choose PostgreSQL-backed
-    storage in the host.
+    Depend on provider-neutral blob contracts in application code and choose PostgreSQL- or
+    Azure-backed storage in the host.
   </Card>
   <Card title="Observable by default" href="/docs/capabilities/telemetry">
     JSON-RPC, scheduling, caching, and resilience emit OpenTelemetry-compatible traces and metrics

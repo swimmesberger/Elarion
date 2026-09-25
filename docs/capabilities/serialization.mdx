@@ -81,7 +81,8 @@ behind a polymorphic `object` slot: `AppError.Data` is typed `object`, so when a
 the `object` breaks static reachability.
 
 `ElarionFrameworkJsonContext` holds these types (currently `ValidationErrorData`, produced by
-`AppError.Validation(message, errors)`) and is **seeded into the canonical resolver chain automatically** — so a
+`AppError.Validation(message, errors)`, plus the idempotency `StoredResult` replay envelope, the `AppError` it
+carries, and `ElarionFile`) and is **seeded into the canonical resolver chain automatically** — so a
 validation failure serializes under source generation with **no per-app registration** and no reflection, even on
 an AOT-strict host. Payloads you attach yourself (via `AppError.Validation(message, data)` /
 `AppError.BusinessRule(...)`) are your own types, so they still belong in your module/host context.

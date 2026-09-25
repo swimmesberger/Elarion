@@ -35,8 +35,9 @@ For a non-ASP.NET host, reference `Elarion.Grpc` directly and call
 `GrpcHandlerInvoker` or `GrpcStreamHandlerInvoker` into the service and use their equivalent
 `InvokeUnaryAsync<TRequest,TResponse>(request, context)` or
 `InvokeServerStreamingAsync<TRequest,TItem>(request, context)` methods. Requests carrying a self-typed
-marker (`IQuery<TSelf, TResponse>` / `IStreamRequest<TSelf, TItem>`) need no explicit generic arguments:
-`InvokeUnaryAsync(request, context)` infers both.
+marker (`IQuery<TSelf, TResponse>`, `ICommand<TSelf, TResponse>`, or `IStreamRequest<TSelf, TItem>`) need
+no explicit generic arguments: `InvokeUnaryAsync(request, context)` and
+`InvokeServerStreamingAsync(request, context)` infer both.
 
 ## Map a generated service explicitly
 

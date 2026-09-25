@@ -87,7 +87,7 @@ public sealed class SchedulerRegistrationGenerator : IIncrementalGenerator {
         "ELSG010",
         "Scheduled job is not in any module",
         "Scheduled job '{0}' is annotated with [ScheduledJob] but its namespace is not under any [AppModule]; "
-        + "under a module-bootstrapper host it will not be registered (only the flat Add{Assembly}ScheduledJobs method registers it)",
+        + "jobs are registered per module, so it will not be registered",
         "Elarion.Generators",
         DiagnosticSeverity.Warning,
         true);

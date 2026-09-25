@@ -44,7 +44,7 @@ public sealed class ListContacts(AppDbContext db, ICurrentUser user, IQueryAutho
         await db.Contacts
             .WhereAuthorized(access, user)                           // owner OR shared-with-user OR shared-with-role
             .Where(c => c.Category == request.Category)             // your business filters
-            .ToKeysetPageAsync(request, RecentContacts.Definition, c => new ContactDto(c.Id), ct);
+            .ToKeysetPageAsync(request, RecentContacts.Definition, c => new ContactDto(c.Id), cancellationToken: ct);
 }
 ```
 
@@ -185,18 +185,20 @@ override on all three: `[RequireResource(typeof(Contact), ResourceTypeName = "Co
 
 ## The escape hatch — validate before a write
 
-Inject `IResourceAuthorizer` (or use the in-memory `IQueryAuthorizer<T>.Matches` for owner/field rules) to run
+Inject `IResourceAuthorizer` (or compose the injected `IQueryAuthorizer<T>` with `WhereAuthorized`) to run
 your own check in a handler before writing — this is the deliberate alternative to a hidden write interceptor:
 
 ```csharp
 // grant-aware check by id (an EXISTS — no full load)
 if (!await resourceAuth.AuthorizeResourceAsync(
-        new ResourceAuthorizationContext(currentUser, typeof(Contact), ResourceOperation.Update, request.Id), ct))
+        new ResourceAuthorizationContext(currentUser, typeof(Contact), "Contact", ResourceOperation.Update, request.Id), ct))
     return Result.Failure(AppError.Forbidden("Not allowed to update this contact."));
 
-// or, for owner/tenant rules, in memory after loading
-var contact = await db.Contacts.FindAsync([request.Id], ct);
-if (contact is null || !ContactAccess.Specification.Matches(contact, currentUser, ResourceOperation.Update))
+// or reuse the filter's own predicate for the operation
+var allowed = await db.Contacts
+    .WhereAuthorized(access, currentUser, ResourceOperation.Update)
+    .AnyAsync(c => c.Id == request.Id, ct);
+if (!allowed)
     return Result.Failure(AppError.Forbidden("Not allowed to update this contact."));
 ```
 

@@ -83,7 +83,7 @@ AppError.Internal("Failed to render the document.");
 different deployments can translate the same domain failure differently:
 
 ```csharp
-// The framework default: AppError → JSON-RPC error code (Elarion.AppErrorMapper)
+// The framework default: AppError → JSON-RPC error code (Elarion.JsonRpc.AppErrorMapper)
 var code = error.Kind switch {
     ErrorKind.Validation   => -32602,        // spec "Invalid params"
     ErrorKind.NotFound     => -32001,        // server range

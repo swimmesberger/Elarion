@@ -71,7 +71,7 @@ command/transaction/`BindParameters` ceremony:
 ```csharp
 await db.InsertAsync(order, ct);                                   // one row
 await db.InsertManyAsync(orders, " ON CONFLICT DO NOTHING", ct);   // batch, one transaction
-long open = await db.ExecuteScalarAsync<long>($"SELECT count(*) FROM {Order.Table} WHERE status = {open}", ct);
+long open = await db.ExecuteScalarAsync<long>($"SELECT count(*) FROM {Order.Table} WHERE status = {OrderStatus.Open}", ct);
 ```
 
 ## What the generator emits

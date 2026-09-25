@@ -53,6 +53,20 @@ minor releases may include breaking changes.
   and every assembly that already declared `[EntityConfiguration]`/`[GenerateDbSets]` referenced EF Core
   anyway.
 
+- **Attribute properties are `init`-only (breaking).** The remaining settable properties on framework attributes —
+  `[RequireResource]`, `[ResourceFilter]`, `[ElarionAuthorizationDefaults]`, `[FeatureGate]`, `[FeatureVariant]`,
+  `[ConfigurationVariant]`, `[UseElarionSql]`, and every `[GenerateElarion*]` table attribute — are now `init`,
+  matching the rest of the attribute surface. Attribute usage (`[FeatureGate("x", Negate = true)]`) is unchanged;
+  only code that assigned these properties on a constructed attribute instance must move the value into an
+  object initializer.
+
+- **Dependency refresh.** .NET 10 servicing packages to 10.0.12 (`Microsoft.Extensions.*` 10.10.0 where
+  versioned separately), `Microsoft.OpenApi` 2.12.2 (the floor `Microsoft.AspNetCore.OpenApi` 10.0.12
+  now requires), `ModelContextProtocol.AspNetCore` 2.2.0, gRPC 2.84.0, OpenTelemetry 1.19,
+  `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3, OpenFeature 2.14.1, and current test tooling (xunit v3
+  4.0.1 on MTP v2, Testcontainers 4.15.0). The generator Roslyn floor stays at 5.6.0 to match the
+  `global.json` SDK band (10.0.3xx). The TypeScript packages build with TypeScript 6 and test with Vitest 5.
+
 ### Added
 - **Web Push (ADR-0076, #162).** Notify users whose app is closed — the half of browser delivery that client
   events cannot cover. **`Elarion.WebPush`** ships `IWebPushSender` (`SendToUsersAsync`/`SendToCurrentUserAsync`

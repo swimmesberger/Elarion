@@ -42,20 +42,20 @@ public sealed class ResourceFilterAttribute<TEntity> : Attribute
     /// accessible when this column equals the current principal's <c>UserId</c>. The property type may be
     /// <see cref="System.Guid"/>, <see cref="string"/>, <see cref="int"/>, or <see cref="long"/>.
     /// </summary>
-    public string? OwnerProperty { get; set; }
+    public string? OwnerProperty { get; init; }
 
     /// <summary>
     /// The entity property holding the tenant id (a <b>scope</b> rule, AND-combined): every accessible row
     /// must have this column equal to the current principal's tenant claim (see <see cref="TenantClaimType"/>).
     /// The property type may be <see cref="System.Guid"/>, <see cref="string"/>, <see cref="int"/>, or <see cref="long"/>.
     /// </summary>
-    public string? TenantProperty { get; set; }
+    public string? TenantProperty { get; init; }
 
     /// <summary>
     /// The claim type the tenant value is read from when <see cref="TenantProperty"/> is set. Defaults to
     /// <c>"tenant"</c>.
     /// </summary>
-    public string TenantClaimType { get; set; } = "tenant";
+    public string TenantClaimType { get; init; } = "tenant";
 
     /// <summary>
     /// Enables a <b>shared-grant</b> rule (OR-combined with <see cref="OwnerProperty"/>): a row is also
@@ -71,18 +71,18 @@ public sealed class ResourceFilterAttribute<TEntity> : Attribute
     /// generated filter a <b>scoped service</b> (it injects the grants source), so consume it via an injected
     /// <c>IQueryAuthorizer&lt;TEntity&gt;</c> rather than a static <c>Specification</c>.
     /// </remarks>
-    public bool Shared { get; set; }
+    public bool Shared { get; init; }
 
     /// <summary>
     /// The resource type discriminator stored in the grants table (e.g. <c>"Contact"</c>), used by the
     /// <see cref="Shared"/> rule's <c>EXISTS</c>. Required when <see cref="Shared"/> is <see langword="true"/>.
     /// </summary>
-    public string? ResourceTypeName { get; set; }
+    public string? ResourceTypeName { get; init; }
 
     /// <summary>
     /// The entity key property whose stringified value is matched against the grants table's resource id for the
     /// <see cref="Shared"/> rule. Defaults to <c>"Id"</c>. The property type may be
     /// <see cref="System.Guid"/>, <see cref="string"/>, <see cref="int"/>, or <see cref="long"/>.
     /// </summary>
-    public string IdProperty { get; set; } = "Id";
+    public string IdProperty { get; init; } = "Id";
 }

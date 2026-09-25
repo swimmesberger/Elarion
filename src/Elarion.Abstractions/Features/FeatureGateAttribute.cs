@@ -55,5 +55,5 @@ public sealed class FeatureGateAttribute : Attribute {
     /// When <c>true</c>, the gate is satisfied when the feature(s) are <i>disabled</i> rather than enabled —
     /// useful for fencing off a legacy path while a replacement rolls out. Defaults to <c>false</c>.
     /// </summary>
-    public bool Negate { get; set; }
+    public bool Negate { get; init; }
 }

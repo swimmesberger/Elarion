@@ -120,7 +120,8 @@ stream; partial rows are never left behind.
 | Thousands to millions, import-shaped | `ExecuteInsertAsync` |
 
 Note that bulk-inserted rows bypass everything that hangs off the change tracker: audit change capture
-(`SaveChangesInterceptor`), domain events raised from tracked entities, and concurrency tokens. That is
+(`SaveChangesInterceptor`), [tenant stamping](/docs/capabilities/multi-tenancy) (set the tenant on each
+entity yourself), domain events raised from tracked entities, and concurrency tokens. That is
 the point — but it means bulk insert is for *ingestion*, not for domain mutations that other machinery
 must observe.
 

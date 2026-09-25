@@ -68,6 +68,9 @@ internal sealed class DeviceTwinAttachment(IActorSystem actors) : IClientConnect
 
     public ValueTask OnDisconnectedAsync(ClientConnection connection, CancellationToken ct = default) =>
         new(actors.Get<IDeviceTwin>(connection.PrincipalId!).ChannelDown(connection.ConnectionId));
+
+    public ValueTask OnIdentityPromotedAsync(ClientConnection previous, ClientConnection current,
+        CancellationToken ct = default) => ValueTask.CompletedTask;   // links here authenticate at connect
 }
 
 // services.TryAddEnumerable(ServiceDescriptor.Singleton<IClientConnectionObserver, DeviceTwinAttachment>());

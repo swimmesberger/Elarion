@@ -147,25 +147,22 @@ grouped documentation page is now the one maintained inventory; this overview st
 
 ## Documentation
 
-Full guides live at [elarion.wimmesberger.dev](https://elarion.wimmesberger.dev/docs/) and in [
-`docs/`](https://github.com/swimmesberger/Elarion/tree/main/docs):
+Full guides live at [elarion.wimmesberger.dev](https://elarion.wimmesberger.dev/docs/) and in
+[`docs/`](https://github.com/swimmesberger/Elarion/tree/main/docs):
 
-- **[Introduction](https://elarion.wimmesberger.dev/docs/)** · *
-  *[Why Elarion](https://elarion.wimmesberger.dev/docs/why-elarion/)** · *
-  *[Installation](https://elarion.wimmesberger.dev/docs/getting-started/installation/)** · *
-  *[Quickstart](https://elarion.wimmesberger.dev/docs/getting-started/quickstart/)**
-- **Concepts
-  ** — [source generation](https://elarion.wimmesberger.dev/docs/concepts/source-generation/), [handlers](https://elarion.wimmesberger.dev/docs/concepts/handlers/), [results & errors](https://elarion.wimmesberger.dev/docs/concepts/results-and-errors/), [modules](https://elarion.wimmesberger.dev/docs/concepts/modules/), [services](https://elarion.wimmesberger.dev/docs/concepts/services/), [validation](https://elarion.wimmesberger.dev/docs/concepts/validation/), [pipelines](https://elarion.wimmesberger.dev/docs/concepts/decorator-pipelines/), [cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication/)
-- **Capabilities
-  ** — [hosting](https://elarion.wimmesberger.dev/docs/capabilities/hosting/), [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints/), [JSON-RPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/json-rpc/), [gRPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/grpc/), [MCP server](https://elarion.wimmesberger.dev/docs/capabilities/transports/mcp/), [authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization/), [feature flags](https://elarion.wimmesberger.dev/docs/capabilities/feature-flags/), [identity](https://elarion.wimmesberger.dev/docs/capabilities/identity/), [scheduling](https://elarion.wimmesberger.dev/docs/capabilities/scheduling/), [resilience](https://elarion.wimmesberger.dev/docs/capabilities/resilience/), [events & messaging](https://elarion.wimmesberger.dev/docs/capabilities/events/), [EF Core](https://elarion.wimmesberger.dev/docs/capabilities/entity-framework/), [bulk operations](https://elarion.wimmesberger.dev/docs/capabilities/bulk-operations/), [caching](https://elarion.wimmesberger.dev/docs/capabilities/caching/), [current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user/), [blob storage](https://elarion.wimmesberger.dev/docs/capabilities/blob-storage/), [telemetry](https://elarion.wimmesberger.dev/docs/capabilities/telemetry/)
-- **Reference
-  ** — [packages](https://elarion.wimmesberger.dev/docs/reference/packages/), [configuration](https://elarion.wimmesberger.dev/docs/reference/configuration/), [troubleshooting](https://elarion.wimmesberger.dev/docs/reference/troubleshooting/)
+- **[Introduction](https://elarion.wimmesberger.dev/docs/)** ·
+  **[Why Elarion](https://elarion.wimmesberger.dev/docs/why-elarion/)** ·
+  **[Installation](https://elarion.wimmesberger.dev/docs/getting-started/installation/)** ·
+  **[Quickstart](https://elarion.wimmesberger.dev/docs/getting-started/quickstart/)**
+- **Concepts** — [source generation](https://elarion.wimmesberger.dev/docs/concepts/source-generation/), [handlers](https://elarion.wimmesberger.dev/docs/concepts/handlers/), [results & errors](https://elarion.wimmesberger.dev/docs/concepts/results-and-errors/), [modules](https://elarion.wimmesberger.dev/docs/concepts/modules/), [services](https://elarion.wimmesberger.dev/docs/concepts/services/), [validation](https://elarion.wimmesberger.dev/docs/concepts/validation/), [pipelines](https://elarion.wimmesberger.dev/docs/concepts/decorator-pipelines/), [cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication/)
+- **Capabilities** — [hosting](https://elarion.wimmesberger.dev/docs/capabilities/hosting/), [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints/), [JSON-RPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/json-rpc/), [gRPC](https://elarion.wimmesberger.dev/docs/capabilities/transports/grpc/), [MCP server](https://elarion.wimmesberger.dev/docs/capabilities/transports/mcp/), [authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization/), [feature flags](https://elarion.wimmesberger.dev/docs/capabilities/feature-flags/), [identity](https://elarion.wimmesberger.dev/docs/capabilities/identity/), [scheduling](https://elarion.wimmesberger.dev/docs/capabilities/scheduling/), [resilience](https://elarion.wimmesberger.dev/docs/capabilities/resilience/), [events & messaging](https://elarion.wimmesberger.dev/docs/capabilities/events/), [EF Core](https://elarion.wimmesberger.dev/docs/capabilities/entity-framework/), [bulk operations](https://elarion.wimmesberger.dev/docs/capabilities/bulk-operations/), [caching](https://elarion.wimmesberger.dev/docs/capabilities/caching/), [current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user/), [blob storage](https://elarion.wimmesberger.dev/docs/capabilities/blob-storage/), [telemetry](https://elarion.wimmesberger.dev/docs/capabilities/telemetry/)
+- **Reference** — [packages](https://elarion.wimmesberger.dev/docs/reference/packages/), [configuration](https://elarion.wimmesberger.dev/docs/reference/configuration/), [troubleshooting](https://elarion.wimmesberger.dev/docs/reference/troubleshooting/)
 
 ## Requirements
 
 - .NET 10 SDK or later
 - ASP.NET Core for the JSON-RPC HTTP transport
-- Node.js 18+ for the TypeScript client generator
+- Node.js 20.11+ for the TypeScript client generator and frontend contributions packages
 
 ## Contributing
 

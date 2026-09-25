@@ -14,11 +14,12 @@ through an async DI scope, receives a cancellation token, is tracked during shut
 
 ## Implementation-neutral by design
 
-The source-generation surface is implementation-neutral. Application assemblies reference
-`Elarion.Abstractions` plus the generator analyzer to use `[ScheduledJob]`,
-`IScheduledJob<TPayload>`, generated descriptors, and scheduler contracts — without referencing the
-default in-memory scheduler. A host then chooses a runtime by registering `AddElarionScheduler(...)`
-or a custom `IJobScheduler` / `IJobSchedulerInspector` that consumes the generated descriptors.
+The source-generation surface is implementation-neutral. `[ScheduledJob]`,
+`IScheduledJob<TPayload>`, and the scheduler contracts live in `Elarion.Abstractions`; application
+assemblies reference `Elarion` (which bundles the generator), and the generated descriptors never
+choose the default in-memory scheduler. A host then chooses a runtime by registering
+`AddElarionScheduler(...)` or a custom `IJobScheduler` / `IJobSchedulerInspector` that consumes the
+generated descriptors.
 
 ## Enabling and registering
 
@@ -30,16 +31,20 @@ using Elarion.Abstractions;
 [assembly: UseElarion]
 ```
 
-Register the generated descriptors and the chosen scheduler runtime in the host:
+Jobs are registered per [module](/docs/concepts/modules): the generator emits an
+`Add{Module}ScheduledJobs` method for each `[AppModule]` and calls it from that module's generated
+`ConfigureDefaultServices`, so the bootstrapper's `AddElarion` registers the descriptors of every
+enabled module. A job whose namespace falls under no module is reported (`ELSG010`, warning) because
+it would never be registered. The host adds only the chosen scheduler runtime:
 
 ```csharp
-builder.Services.AddMyAppApplicationScheduledJobs();   // descriptors only
-builder.Services.AddElarionScheduler(builder.Configuration);
+builder.Services.AddElarion(builder.Configuration);            // module descriptors, gated per module
+builder.Services.AddElarionScheduler(builder.Configuration);   // the in-memory runtime
 ```
 
 <Callout type="info">
-  `AddMyAppApplicationScheduledJobs()` is descriptor registration only — it does not start a
-  scheduler, register a hosted service, or choose `InMemoryScheduler`. That separation is intentional
+  The generated `Add{Module}ScheduledJobs` methods are descriptor registration only — they do not start
+  a scheduler, register a hosted service, or choose `InMemoryScheduler`. That separation is intentional
   so a different scheduler runtime can reuse the same generated descriptors.
 </Callout>
 

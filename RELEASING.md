@@ -13,8 +13,9 @@ to `main` publishes it as a preview, and a single workflow promotes it to a stab
 | Run the **Release** workflow | `0.1.1` | **stable `0.1.1`**, git tag `v0.1.1` | **`0.1.1`** |
 | After release (automatic) | `0.1.2` | `0.1.2-preview.*` on next push | `0.1.1` |
 
-The docs always pin the **latest stable release** because the release workflow rewrites every
-`Version="…"` package-reference literal in `README.md` and `docs/**` as part of cutting the release.
+The docs always pin the **latest stable release** because the release workflow rewrites the
+`Version="…"` literal and `dotnet add package … --version …` argument of every `Elarion*` package reference
+in `README.md` and `docs/**` as part of cutting the release. Third-party package references in snippets keep their own versions.
 Preview versions are never written into the docs.
 
 > A preview package (`0.1.1-preview.42`) and the stable package (`0.1.1`) are distinct versions in

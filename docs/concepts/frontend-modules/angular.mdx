@@ -16,7 +16,8 @@ import { provideContributions } from "@swimmesberger/elarion-contributions/angul
 
 const registry = createContributionRegistry(appModules.map((m) => m.manifest), caps)
 bootstrapApplication(AppComponent, { providers: [provideContributions(registry)] })
-// snapshot can change at runtime? provideContributions(signal(registry)) and .set(...) on login.
+// snapshot can change at runtime? provideContributions(createContributionRegistryStore(manifests, capabilityStore))
+// and capabilityStore.set(...) on login (a Signal<ContributionRegistry> you drive yourself also works).
 ```
 
 The sidebar is the same move as in React — wherever you'd `@for` over a hard-coded array, read the point
@@ -80,7 +81,7 @@ export class ExtensionSlotDirective<TItem> {
 }
 ```
 
-The slot site then reads like TanStack's `<ExtensionSlot>`, with the contribution as the template's
+The slot site then reads like the React bindings' `<ExtensionSlot>`, with the contribution as the template's
 implicit value:
 
 ```html

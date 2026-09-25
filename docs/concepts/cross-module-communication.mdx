@@ -111,7 +111,9 @@ public partial interface ISalesApi;
 internal sealed class CustomerLookup(ISalesApi api) : ICustomerLookup {
     public async ValueTask<Result<Customer>> GetAsync(CustomerId id, CancellationToken ct = default) {
         var result = await api.GetCustomer(new GetCustomer.Query(id.Value), ct);  // full handler pipeline
-        return result.Map(r => new Customer(r.Id, r.Name));                       // module-owned mapping
+        if (!result.IsSuccess) return result.Error;                               // AppError converts to Result<T>
+        var r = result.Value;
+        return new Customer(r.Id, r.Name);                                        // module-owned mapping
     }
 }
 ```

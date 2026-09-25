@@ -176,9 +176,10 @@ public sealed record InvoiceCreated(Guid InvoiceId) : IIntegrationEvent;
 A consumer is a handler whose request *is* the event — an `IHandler<InvoiceCreated>` annotated with a
 class-level `[ConsumeEvent]`, returning `Result`. It runs on a fresh scope once the invoice has
 committed, so it reads its own data and its failures never touch the original command. Its request is
-an `IIntegrationEvent`, which `TransactionDecorator`'s `AppliesTo` predicate
-([defined earlier](/docs/tutorial/features#define-the-decorator-pipeline)) matches — so it runs inside
-a transaction: a consumer that *writes* commits atomically, while this read-only one simply doesn't use it:
+an `IIntegrationEvent`, so the default [inbox](/docs/capabilities/events/consuming-events) wraps it in
+place of the [transaction decorator](/docs/tutorial/features#define-the-decorator-pipeline): it runs inside a
+transaction that records the delivery, so a consumer that *writes* commits atomically with its dedup claim,
+while this read-only one simply doesn't use it:
 
 ```csharp title="src/Billing.Application/Modules/Invoicing/Events/InvoiceNotifications.cs"
 using Billing.Application.Domain;

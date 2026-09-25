@@ -26,7 +26,7 @@ wire the runtime in your host.
     Compose per-module JSON contexts into one AOT-friendly serializer shared across transports.
   </Card>
   <Card title="Transports" href="/docs/capabilities/transports">
-    Map the same handler over HTTP, JSON-RPC, or MCP — and decide which one fits.
+    Map the same handler over HTTP, JSON-RPC, MCP, or gRPC — and decide which one fits.
   </Card>
 </Cards>
 
@@ -81,7 +81,7 @@ wire the runtime in your host.
     Pairing codes, per-device keys, and the connect-time HMAC handshake for device gateways.
   </Card>
   <Card title="Data-rate shaping" href="/docs/capabilities/data-rate-shaping">
-    Batch high-frequency samples to the database and conflate hot values to the UI, latest-wins per key.
+    Batch samples to the database, conflate hot values to the UI, and feed or flush producer-owned hot state.
   </Card>
 </Cards>
 
@@ -91,11 +91,17 @@ wire the runtime in your host.
   <Card title="Entity Framework Core" href="/docs/capabilities/entity-framework">
     Generated `DbSet`s and entity configuration on your concrete `DbContext`.
   </Card>
+  <Card title="Multi-tenancy" href="/docs/capabilities/multi-tenancy">
+    Ambient per-tenant isolation — a read filter and a write-time stamp from one marker interface.
+  </Card>
   <Card title="Bulk operations" href="/docs/capabilities/bulk-operations">
     Non-tracking `ExecuteInsertAsync` at PostgreSQL binary COPY speed.
   </Card>
   <Card title="Pagination" href="/docs/capabilities/pagination">
     Transport-neutral keyset and offset paging that produces a `Page<T>`.
+  </Card>
+  <Card title="Archive & restore" href="/docs/capabilities/archive-restore">
+    Deliberate soft delete — an `ArchivedAt` timestamp, explicit predicates, and restore as a command.
   </Card>
   <Card title="SQL migrations" href="/docs/capabilities/sql-migrations">
     Startup-applied SQL migrations for EF-free (NativeAOT) hosts, PostgreSQL or SQLite — no repair command, no undo.

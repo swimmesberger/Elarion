@@ -13,5 +13,5 @@ namespace Elarion.Abstractions.Authorization;
 [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
 public sealed class ElarionAuthorizationDefaultsAttribute : Attribute {
     /// <summary>Whether in-scope handlers require an authenticated principal by default. Defaults to <c>true</c>.</summary>
-    public bool RequireAuthenticated { get; set; } = true;
+    public bool RequireAuthenticated { get; init; } = true;
 }

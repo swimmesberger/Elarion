@@ -69,7 +69,8 @@ public sealed class ListContacts(AppDbContext db) : IHandler<ListContacts.Query,
     public async ValueTask<Result<Page<ContactDto>>> HandleAsync(Query request, CancellationToken ct) =>
         await db.Contacts                                    // already scoped to the caller's tenant
             .Where(c => c.Name.Contains(request.Search))
-            .ToKeysetPageAsync(request, RecentContacts.Definition, c => new ContactDto(c.Id, c.Name), ct);
+            .ToKeysetPageAsync(request, RecentContacts.Definition, c => new ContactDto(c.Id, c.Name),
+                cancellationToken: ct);
 }
 
 [Handler("crm.contacts.create")]
@@ -129,8 +130,8 @@ Declare it. A background job crossing tenants is legitimate; *silently omitting 
 the two must not look alike.
 
 ```csharp
-[ScheduledJob("0 3 * * *")]
 public sealed class PurgeExpiredSessions(AppDbContext db, ITenantContext tenant) {
+    [ScheduledJob("sessions.purgeExpired", Cron = "0 3 * * *")]
     public async Task RunAsync(CancellationToken ct) {
         using var _ = tenant.SystemScope();            // deliberately every tenant — greppable
         await db.Sessions.Where(s => s.ExpiresAt < DateTimeOffset.UtcNow).ExecuteDeleteAsync(ct);

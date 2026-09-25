@@ -19,14 +19,14 @@ namespace Elarion.Settings.EntityFrameworkCore;
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class GenerateElarionSettingsAttribute : Attribute {
     /// <summary>Whether to use snake_case table/column names. Defaults to <c>true</c>.</summary>
-    public bool SnakeCase { get; set; } = true;
+    public bool SnakeCase { get; init; } = true;
 
     /// <summary>
     /// The table name, or <c>null</c> for the default (<c>elarion_settings</c> /
     /// <c>ElarionSettings</c> depending on <see cref="SnakeCase"/>).
     /// </summary>
-    public string? TableName { get; set; }
+    public string? TableName { get; init; }
 
     /// <summary>The schema, or <c>null</c> for the provider's default schema.</summary>
-    public string? Schema { get; set; }
+    public string? Schema { get; init; }
 }

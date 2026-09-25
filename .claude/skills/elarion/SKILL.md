@@ -214,15 +214,17 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
   `ConfigureAwait(false)` inside a reentrant actor.
 - **Single-node by design**: in-memory activations on N nodes are N independent states (with
   `IActorState` they share one ETag-guarded snapshot row — safe, but optimistic). For one
-  authoritative activation app-wide, mark it `[Actor(SingleHomed = true)]` and register the home
+  authoritative activation app-wide, mark it `[Actor(Placement = ActorPlacementMode.SingleHome)]` and register the home
   lease (`AddElarionPostgreSqlActorHome<AppDbContext>()` + `[GenerateElarionRoleLeases]` on the
   context — the home is the `"actors"` role of the generic `IRoleLease` leader-election primitive in
   `Elarion.Coordination.PostgreSql`): one instance is elected home, calls elsewhere fail with
   `ActorNotHomedException` (for HTTP endpoints, bridge with the role-holder proxy —
   `app.UseElarionRoleHolderProxy("actors", "/live-prefixes…")` before routing + `AddElarionInstanceAddress()`
   on every instance; installs nothing without a lease, and the prefix list is the future ingress rule), and
-  event delivery follows the lease via
-  `AddElarionOutbox<T>(o => o.DeliveryGate = (sp, _) => ValueTask.FromResult(sp.GetRequiredService<IActorHomeLease>().IsHeld))`.
+  event delivery follows the lease automatically: each generated actor-consumer outbox target group records
+  the `"actors"` target role, so only the holder claims it (plain `AddElarionOutbox<T>()`, no gate to wire).
+  Keyed actors that need spread instead use `Placement = ActorPlacementMode.VirtualShards` +
+  `AddElarionPostgreSqlActorSharding<AppDbContext>()` (fixed `actors:partition-N` role leases, ADR-0061).
   Reads from any instance use `IActorStateReader.ReadAsync<TState>(key)` (snapshot, no activation).
   For true placement/forwarding move to Orleans/Akka.NET/Proto.Actor instead of bending this.
   Stateless parallelism never belongs in actors — that's handlers + `Task.WhenAll`.

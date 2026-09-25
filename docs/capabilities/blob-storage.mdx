@@ -248,7 +248,7 @@ class leaks one pool per host until PostgreSQL answers `53300: too many clients 
 
 | Table | Purpose |
 | --- | --- |
-| `stored_blobs` | Metadata: id, container, name, content type, size, and created timestamp. |
+| `stored_blobs` | Metadata: id, container, name, content type, size, created timestamp, and the lifecycle state, expiry, and owner id used by [blob uploads](/docs/capabilities/blob-uploads). |
 | `blob_contents` | Content bytes keyed by blob id, with cascade delete from `stored_blobs`. |
 
 `UseElarionBlobStorage` takes optional `tableName` and `contentTableName` parameters to rename either

@@ -44,8 +44,8 @@ public interface ITenantContext {
     /// </remarks>
     /// <example>
     /// <code>
-    /// [ScheduledJob("0 3 * * *")]
     /// public sealed class PurgeExpired(AppDbContext db, ITenantContext tenant) {
+    ///     [ScheduledJob("sessions.purgeExpired", Cron = "0 3 * * *")]
     ///     public async Task RunAsync(CancellationToken ct) {
     ///         using var _ = tenant.SystemScope();          // deliberately every tenant
     ///         await db.Sessions.Where(s =&gt; s.ExpiresAt &lt; now).ExecuteDeleteAsync(ct);

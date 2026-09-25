@@ -142,13 +142,14 @@ the compilation references `Elarion.Validation`) and the handler generator auto-
 
 ## Auto-wiring: `ConfigureDefaultServices`
 
-Under `[GenerateModuleBootstrapper]`, a module's discovered **handlers, services, validation metadata,
-scheduled jobs, and event consumers** are registered automatically — you do **not** hand-write `Add{Module}…()` calls.
+Under `[GenerateModuleBootstrapper]`, a module's discovered **handlers (including stream handlers), services,
+validation metadata, scheduled jobs, event consumers, and other generated module content** are registered automatically — you do **not** hand-write `Add{Module}…()` calls.
 
 - `ModuleDefaultServicesGenerator` emits, per `[AppModule]`, a sibling `static partial class
   {ModuleType}ElarionModuleServices` with `ConfigureDefaultServices(IServiceCollection)` that calls one
-  `static partial void` hook per category (`AddHandlers`, `AddServices`, `AddValidators`, `AddScheduledJobs`,
-  `AddEventConsumers`, `AddModuleApi`).
+  `static partial void` hook per category (`AddHandlers`, `AddStreamHandlers`, `AddServices`,
+  `AddVariantServices`, `AddValidators`, `AddScheduledJobs`, `AddEventConsumers`, `AddAuthorizationPolicies`,
+  `AddPermissions`, `AddModuleApi`, `AddActors`, `AddClientEvents`, `AddJsonTypeInfoResolver`).
 - Each category generator contributes a filler partial implementing its hook; unimplemented hooks elide to
   no-ops, so a module pays nothing for categories it does not use.
 - The generated host bootstrapper calls `{Module}.ConfigureDefaultServices(services)` gated by

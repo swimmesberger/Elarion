@@ -83,6 +83,15 @@ jobs, and event consumers, and gate all of it per module (`Modules:{Name}:Enable
 "isn't found" at runtime, the cause is its namespace not being under a module, the module being
 disabled, or a build diagnostic you skipped — never a missing `AddScoped`.
 
+For module-less infrastructure seams (N implementations of one contract composed into a dispatch
+table at boot — packet bindings, codec catalogs, pipeline stages), don't wrap them in a fake module:
+author a `static partial IServiceCollection AddMyBindings(this IServiceCollection services);`
+extension method annotated `[GenerateContractSetRegistration(typeof(IMyBinding))]` — the generator
+fills in the body with every implementation in the assembly — and call it from the host's
+composition root, exactly once. It is unconditional (never config-gated) and
+`TryAddEnumerable`-idempotent. See the services concept ("module services vs. contract sets") for
+when to use which.
+
 Host wiring is a few generated calls (copy the current form from the quickstart doc — these names
 have evolved before). Project layout is your choice: the bootstrapper discovers handlers from
 referenced module assemblies **and from the host compilation itself**, so a tiny app can be one
@@ -205,15 +214,17 @@ var result = await order.Ship(info, ct);                    // mailbox-serialize
   `ConfigureAwait(false)` inside a reentrant actor.
 - **Single-node by design**: in-memory activations on N nodes are N independent states (with
   `IActorState` they share one ETag-guarded snapshot row — safe, but optimistic). For one
-  authoritative activation app-wide, mark it `[Actor(SingleHomed = true)]` and register the home
+  authoritative activation app-wide, mark it `[Actor(Placement = ActorPlacementMode.SingleHome)]` and register the home
   lease (`AddElarionPostgreSqlActorHome<AppDbContext>()` + `[GenerateElarionRoleLeases]` on the
   context — the home is the `"actors"` role of the generic `IRoleLease` leader-election primitive in
   `Elarion.Coordination.PostgreSql`): one instance is elected home, calls elsewhere fail with
   `ActorNotHomedException` (for HTTP endpoints, bridge with the role-holder proxy —
   `app.UseElarionRoleHolderProxy("actors", "/live-prefixes…")` before routing + `AddElarionInstanceAddress()`
   on every instance; installs nothing without a lease, and the prefix list is the future ingress rule), and
-  event delivery follows the lease via
-  `AddElarionOutbox<T>(o => o.DeliveryGate = (sp, _) => ValueTask.FromResult(sp.GetRequiredService<IActorHomeLease>().IsHeld))`.
+  event delivery follows the lease automatically: each generated actor-consumer outbox target group records
+  the `"actors"` target role, so only the holder claims it (plain `AddElarionOutbox<T>()`, no gate to wire).
+  Keyed actors that need spread instead use `Placement = ActorPlacementMode.VirtualShards` +
+  `AddElarionPostgreSqlActorSharding<AppDbContext>()` (fixed `actors:partition-N` role leases, ADR-0061).
   Reads from any instance use `IActorStateReader.ReadAsync<TState>(key)` (snapshot, no activation).
   For true placement/forwarding move to Orleans/Akka.NET/Proto.Actor instead of bending this.
   Stateless parallelism never belongs in actors — that's handlers + `Task.WhenAll`.
@@ -230,7 +241,11 @@ subscriptions over the connection with the exact same topic catalog + fail-close
 The WebSocket endpoint means you write two things — an authenticator and a codec:
 
 ```csharp
-public sealed class GatewayHandler(...) : WebSocketConnectionHandler {
+public sealed class GatewayHandler(...) : WebSocketConnectionHandler {      // factory: one session per link
+    public override ValueTask<WebSocketConnectionSession?> CreateSessionAsync(
+        HttpContext context, CancellationToken ct) => ...new GatewaySession(...);  // null = reject (403)
+}
+public sealed class GatewaySession(...) : WebSocketConnectionSession {      // per-connection state lives here
     public override async ValueTask<ClientConnectionTicket?> AuthenticateAsync(
         WebSocketHandshakeContext handshake, CancellationToken ct) { ... }   // null = reject
     public override IClientConnectionProtocol CreateProtocol(WebSocketClientConnection c) =>
@@ -244,6 +259,39 @@ Set `PrincipalId` to the device id — a device's parallel channels all register
 (`registry.GetForPrincipal(deviceId)`), and a digital-twin **actor keyed by device id** serializes the
 shared state across channels and user-triggered commands. Facts still travel as client events, even
 over a connection; the sink (`SendAsync`/`InvokeAsync`) is for conversation traffic only.
+
+Raw TCP devices use `Elarion.Connections.Tcp` — same authenticator/codec seams over
+`AddElarionTcpConnectionListener/Dialer<THandler>` (or `TcpConnectionEndpoints.Apply*` for
+bindings-as-data), plus a required `Framer` because TCP has no message boundaries. What the adapter owns
+so you don't: optional **TLS before framing** (`o.Tls = new TcpServerTlsOptions/TcpClientTlsOptions { … }`
+— fresh BCL options per connection, fail-closed validation, no plaintext fallback), **late
+authentication** (register the ticket anonymous, then `registry.PromoteAsync(connectionId, identity)` —
+one-way, exactly once, authenticated tickets always need a `PrincipalId`; client-event subscriptions drop
+so the peer resubscribes), **bounded backpressure** (`MaxPendingSends` admission throws
+`TcpSendQueueFullException` at capacity; a completed send means the frame was physically written; FIFO by
+admission order, so "reply, then follow-ups" is just admitting them in order from one codec/actor turn),
+and **deterministic shutdown** (`ShutdownGracePeriod`, then abort — no leaked connection tasks). For
+request/reply into the device, correlate with
+`ConnectionPendingRequests.SendAndWaitAsync(key, sendCt => connection.SendBinaryAsync(frame, sendCt))` —
+registration before send, withdrawal when the send fails. Dispatch decoded commands through a
+per-connection `new ConnectionHandlerInvoker(services, connection)` —
+`invoker.InvokeAsync(decoded, ct)` infers both generic arguments when the request carries a self-typed
+marker (`ICommand<TSelf, TResponse>`/`IQuery<TSelf, TResponse>`); marker-free requests use
+`invoker.InvokeAsync<TRequest, TResponse>`, named traffic `invoker.InvokeNamedAsync(dispatcher, name,
+request, ct)` (full pipeline per message; named routes need `HandlerTransports.Connection`). Test codecs
+socket-free with `InMemoryTcpLink`. High-rate connections (game-server tier) opt into the
+**low-allocation profile** (ADR-0066), each piece independent: construct the invoker with
+`new ConnectionHandlerInvokerOptions { ScopeMode = ConnectionDispatchScopeMode.PerConnection }` (one
+reused dispatch scope + cached chain; sequential dispatch; `await invoker.DisposeAsync()` on close;
+transaction/idempotency pipelines warn — they assume per-message scoping), declare hot handlers
+`[Handler(Scope = ServiceScope.Singleton)]` (compile-time verified, ELSG011–013: all ctor deps provably
+singleton, no scope-dependent pipeline features) and `[HandlerTelemetry(HandlerTelemetryMode.None)]`
+(also on the module class or assembly, nearest wins), and serialize outbound payloads straight into the
+framed buffer with `connection.SendBinaryAsync(state, static (s, output) => …, ct)` (identical
+backpressure; custom `TcpMessageFramer`s implement `BeginMessage`/`CompleteMessage`). The full profile
+dispatches at 0 B/op; inbound `OnBinaryAsync` memory is pooled and call-scoped on every adapter — copy
+it if the codec defers work. Hot value-type requests use the explicit-generic `InvokeAsync` overload
+(the marker overload boxes a struct request).
 
 Don't hand-roll device provisioning — `Elarion.Devices` owns the identity chain (ADR-0054):
 `AddElarionDeviceIdentityEntityFrameworkCore<TDbContext>()` + `[GenerateElarionDeviceIdentity]` on the
@@ -281,7 +329,9 @@ updates for users who have the app open stay client events.
   `IEntityTypeConfiguration<T>` marked `[EntityConfiguration]` with `[GenerateDbSets]` on the
   DbContext. Commands already run in a framework transaction — don't open your own.
 - **In-process calls are typed.** Inject `IHandler<TReq, Result<TRes>>` (or `IHandlerSender`) so a
-  rename is a compile error; never dispatch by string name. Cross-module calls go through a
+  rename is a compile error; never dispatch by string name. A request declared with a self-typed marker
+  (`Query : IQuery<Query, Response>`) gets fully inferred dispatch — `sender.SendAsync(new Query(id), ct)`
+  with no generic arguments. Cross-module calls go through a
   `[ModuleContract]` — the analyzer (ELMOD002) flags reaching into another module's internals.
 - **Two event planes.** Same-transaction reaction → domain event (inline, a failure rolls the
   command back). After-commit side effect → integration event (outbox, retried, deduped). Pub/sub

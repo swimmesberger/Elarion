@@ -86,7 +86,7 @@ shared data layer, not feature-owned) — see [Solution structure](/docs/concept
 ## Prerequisites
 
 - **.NET 10 SDK** or later (see [Installation](/docs/getting-started/installation)).
-- **Node.js 20+** and **npm** for the frontend and client generator.
+- **Node.js 20.11+** and **npm** for the frontend and client generator.
 - **Docker** or **Podman** — the .NET Aspire app host provisions PostgreSQL in a container.
 - The EF Core CLI for migrations: `dotnet tool install --global dotnet-ef`.
 
@@ -158,12 +158,13 @@ cd src/Billing.Application
 dotnet add package Npgsql.EntityFrameworkCore.PostgreSQL
 dotnet add package Microsoft.EntityFrameworkCore.Design
 dotnet add package Elarion.Messaging.Outbox
+dotnet add package Elarion.Auditing.EntityFrameworkCore
 cd ../..
 ```
 
 The **host** project references the JSON-RPC transport, the ASP.NET Core integration, and the MCP
 server. It also references `Elarion` directly so the bundled generator runs in the host (it emits the
-RPC map and module bootstrapper), and registers the scheduler, the Microsoft resilience runtime, and
+RPC map and module bootstrapper), and registers the scheduler, the opt-in resilience and handler-caching runtimes, and
 EF Core design-time tooling.
 
 ```bash
@@ -172,7 +173,9 @@ dotnet add package Elarion
 dotnet add package Elarion.JsonRpc
 dotnet add package Elarion.AspNetCore
 dotnet add package Elarion.AspNetCore.Mcp
-dotnet add package Microsoft.Extensions.Resilience
+dotnet add package Elarion.Resilience
+dotnet add package Elarion.Caching
+dotnet add package Elarion.EntityFrameworkCore.UnitOfWork
 dotnet add package Microsoft.EntityFrameworkCore.Design
 cd ../..
 ```

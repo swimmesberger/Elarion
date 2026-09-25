@@ -36,12 +36,13 @@ namespace Elarion.Session;
 /// [JsonSerializable(typeof(TenantSection))]
 /// public sealed partial class TenantSectionJsonContext : JsonSerializerContext;
 ///
-/// public sealed class TenantSectionContributor(ITenantContext tenants) : IClientSnapshotContributor {
+/// public sealed class TenantSectionContributor(ITenantContext tenant, ITenantDirectory directory) : IClientSnapshotContributor {
 ///     public string SectionName => "tenant";
 ///
 ///     public async ValueTask&lt;object?&gt; GetSectionAsync(CancellationToken ct) {
-///         var tenant = await tenants.GetCurrentAsync(cancellationToken);
-///         return tenant is null ? null : new TenantSection { Name = tenant.Name, Theme = tenant.Theme };
+///         if (tenant.TenantId is not { } id) return null;
+///         var info = await directory.FindAsync(id, ct);   // app-owned lookup; ITenantContext only carries the id
+///         return info is null ? null : new TenantSection { Name = info.Name, Theme = info.Theme };
 ///     }
 /// }
 ///

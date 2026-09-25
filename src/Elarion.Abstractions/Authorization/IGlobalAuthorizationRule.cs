@@ -47,10 +47,11 @@ namespace Elarion.Abstractions.Authorization;
 /// </remarks>
 /// <example>
 /// <code>
-/// public sealed class ActiveSubscriptionRule(ITenantContext tenants) : IGlobalAuthorizationRule {
+/// public sealed class ActiveSubscriptionRule(ITenantContext tenant, ITenantDirectory directory) : IGlobalAuthorizationRule {
 ///     public async ValueTask&lt;AppError?&gt; EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
-///         var tenant = await tenants.GetCurrentAsync(ct);
-///         return tenant.IsSuspended ? AppError.Forbidden("This workspace is suspended.") : null;
+///         // ITenantDirectory is app-owned; ITenantContext only carries the ambient TenantId.
+///         var suspended = tenant.TenantId is { } id &amp;&amp; await directory.IsSuspendedAsync(id, ct);
+///         return suspended ? AppError.Forbidden("This workspace is suspended.") : null;
 ///     }
 /// }
 ///

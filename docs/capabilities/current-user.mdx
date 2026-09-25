@@ -8,8 +8,9 @@ Handlers often need to know who is calling — for authorization, auditing, or
 `ICurrentUser` abstraction so application code never depends on `HttpContext` or
 `IHttpContextAccessor`.
 
-This follows the framework's boundary rule: `Elarion` owns the abstraction; `Elarion.AspNetCore`
-owns the HTTP integration that fills it in.
+This follows the framework's boundary rule: `Elarion.Abstractions` owns the abstraction, `Elarion` owns
+the transport-neutral claims-based default, and `Elarion.AspNetCore` owns the HTTP integration that fills
+it in.
 
 ## The abstraction
 
@@ -54,7 +55,8 @@ app.UseElarionCurrentUser();   // after authentication, before endpoints
 app.UseAuthorization();
 ```
 
-`UseElarionCurrentUser()` copies claim values into a scoped `CurrentUserSnapshot` once per request.
+`UseElarionCurrentUser()` seeds the scoped `ClaimsPrincipalCurrentUser` with the request principal once
+per request.
 Application handlers then read the snapshot, so they never touch `HttpContext` and stay testable —
 in a unit test you simply register a fake `ICurrentUser`.
 
@@ -79,7 +81,10 @@ parses at most once — no duplicate work. Authorization rides the same path, si
 ### Carrying your own scoped state
 
 The same rail is the extension point for other per-call state (tenant, correlation id, …). Capture it at
-the boundary and seed it with an `IDispatchScopeInitializer`, registered with `TryAddEnumerable`:
+the boundary and seed it with an `IDispatchScopeInitializer`, registered with `TryAddEnumerable`. (For
+tenant isolation of EF Core data specifically, prefer the built-in
+[ambient tenant scoping](/docs/capabilities/multi-tenancy), whose `ClaimsTenantResolver` already reads the
+tenant claim from `ICurrentUser`.)
 
 ```csharp
 internal sealed class TenantScopeInitializer : IDispatchScopeInitializer {

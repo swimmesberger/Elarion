@@ -26,15 +26,15 @@ public sealed class RequireResourceAttribute(Type resourceType) : Attribute {
     /// <c>[ResourceFilter].ResourceTypeName</c> and on every <c>IResourceGrantStore</c> grant for the resource —
     /// all three paths must agree. Compared with <see cref="System.StringComparison.Ordinal"/>.
     /// </summary>
-    public string? ResourceTypeName { get; set; }
+    public string? ResourceTypeName { get; init; }
 
     /// <summary>The operation name (an open <see cref="ResourceOperation"/> value). Defaults to <c>"read"</c>.</summary>
-    public string Operation { get; set; } = "read";
+    public string Operation { get; init; } = "read";
 
     /// <summary>
     /// The request property path identifying the resource id, as a compile-checked path — typically
     /// <c>nameof(Req.Id)</c>, or a dotted path (<c>nameof(Req.Customer) + "." + nameof(Customer.Id)</c>).
     /// Defaults to <c>"Id"</c>. A path that names no such member is a generator diagnostic (ELAUTH002).
     /// </summary>
-    public string Id { get; set; } = "Id";
+    public string Id { get; init; } = "Id";
 }

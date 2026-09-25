@@ -80,11 +80,14 @@ using Elarion.AspNetCore;
 using Elarion.AspNetCore.Identity;
 using Elarion.AspNetCore.Mcp;
 using Elarion.Auditing.EntityFrameworkCore;
+using Elarion.Authorization;
 using Elarion.Caching;
+using Elarion.EntityFrameworkCore.UnitOfWork;
 using Elarion.Messaging.Outbox;
 using Elarion.JsonRpc;
 using Elarion.Resilience;
 using Elarion.Scheduling;
+using Elarion.Validation;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -98,7 +101,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 // handlers inject the concrete BillingDbContext. Provider registration (UseNpgsql + connection) is the host's job.
 builder.Services.AddDbContext<BillingDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("billing")));
-builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
+// The unit of work behind Elarion.Pipeline.TransactionDecorator (and the inbox/idempotency decorators):
+// every transactional handler begins, commits, and rolls back on the billing context.
+builder.Services.AddElarionUnitOfWork<BillingDbContext>();
 
 // Integration events: durable, after-commit delivery via the EF Core outbox on the billing context.
 builder.Services.AddElarionOutbox<BillingDbContext>();
@@ -137,6 +142,9 @@ builder.Services.AddAuthentication("Bearer")
         options.Audience = builder.Configuration["Auth:Audience"];
     });
 builder.Services.AddAuthorization();
+
+// Handler authorization: the IAuthorizer that the generated decorator consults for [RequirePermission].
+builder.Services.AddElarionAuthorization();
 
 // Compose every module's services — handlers, services, validation metadata, scheduled jobs, and event
 // consumers — each gated by Modules:{Name}:Enabled. This also contributes every enabled module's
@@ -250,7 +258,7 @@ to the repo root whenever the host compiles. The frontend client is generated fr
 
 ```xml title="src/Billing.Api/Billing.Api.csproj"
 <ItemGroup>
-  <PackageReference Include="Elarion.AspNetCore.SchemaGeneration" PrivateAssets="all" />
+  <PackageReference Include="Elarion.AspNetCore.SchemaGeneration" Version="0.2.6" PrivateAssets="all" />
 </ItemGroup>
 
 <PropertyGroup>

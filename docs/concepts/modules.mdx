@@ -47,11 +47,17 @@ extra manifest metadata.
 | Hook | Registers |
 | --- | --- |
 | `AddHandlers` | The module's [handlers](/docs/concepts/handlers) (and their decorator pipeline). |
+| `AddStreamHandlers` | The module's [request-driven stream handlers](/docs/capabilities/transports/server-streaming). |
 | `AddServices` | The module's `[Service]` registrations — see [services](/docs/concepts/services). |
+| `AddVariantServices` | The module's `[FeatureVariant]`/`[ConfigurationVariant]` implementations — see [variant service injection](/docs/concepts/feature-flags#variant-service-injection). |
 | `AddValidators` | The module's generated [request-validation](/docs/concepts/validation) resolver — the DataAnnotations metadata for its handlers' request types. |
 | `AddScheduledJobs` | The module's [scheduled jobs](/docs/capabilities/scheduling). |
 | `AddEventConsumers` | The module's [event consumers](/docs/capabilities/events/consuming-events). |
+| `AddAuthorizationPolicies` | The module's `[AuthorizationPolicy]` classes — see [named policies](/docs/concepts/authorization#named-policies). |
+| `AddPermissions` | The module's slice of the runtime [permission catalog](/docs/concepts/authorization#permission-catalog). |
 | `AddModuleApi` | The module's generated [module API](/docs/concepts/cross-module-communication) facades. |
+| `AddActors` | The module's [actors](/docs/concepts/actors). |
+| `AddClientEvents` | The module's [client-event](/docs/capabilities/events/client-events) topics. |
 | `AddJsonTypeInfoResolver` | The module's `GetJsonTypeInfoResolver()` context, contributed through `ConfigureElarionJson` — see [serialization](/docs/capabilities/serialization). |
 
 The JSON hook is what makes module composition **self-contained**: registering a module brings its
@@ -116,7 +122,7 @@ predicate that reads `Modules:{Name}:Enabled`, defaulting to `true`. Every surfa
 predicate, so a disabled feature module disappears completely and consistently:
 
 - its generated default services (handlers, `[Service]` registrations, validation metadata, scheduled
-  jobs, event consumers, module API) are never registered;
+  jobs, event consumers, module API, actors, client-event topics) are never registered;
 - its hand-written `ConfigureServices` is never called;
 - its `MapEndpoints` routes and its generated `[HttpEndpoint]` routes are never mapped;
 - its `[Handler]` JSON-RPC operations are never registered;
@@ -195,8 +201,8 @@ public static partial class BillingModule {
 A module's handlers expose themselves over a transport with `[Handler]`
 ([JSON-RPC](/docs/capabilities/transports/json-rpc) and [MCP](/docs/capabilities/transports/mcp)) or
 `[HttpEndpoint]` ([HTTP](/docs/capabilities/transports/http-endpoints)). A single `[Handler]` covers
-both dispatcher transports; choose which ones with `[Handler(Transports = ...)]` (default: both
-JSON-RPC and MCP). The generated bootstrapper associates each handler with a module by namespace and
+every name-routed transport; choose which ones with `[Handler(Transports = ...)]` (default:
+`HandlerTransports.All` — JSON-RPC, MCP, and [bidirectional connections](/docs/capabilities/connections)). The generated bootstrapper associates each handler with a module by namespace and
 maps its operation/tool only when the module is enabled — the same feature gate that governs the
 module's services.
 

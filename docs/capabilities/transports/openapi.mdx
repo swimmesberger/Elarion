@@ -53,8 +53,8 @@ of that `AddElarionOpenApi()` contributes the parts that make it *Elarion's* con
 - **Validation constraints, for free.** The DataAnnotations attributes on your request DTOs (see
   [Validation](/docs/concepts/validation)) appear in the document natively — Microsoft's schema generation maps
   `[Range]`, `[MinLength]`/`[MaxLength]`/`[Length]`/`[StringLength]`, `[RegularExpression]`, `[Url]`, and
-  `[Base64String]` onto the JSON Schema keywords, verified to work reflection-off. Elarion adds a small schema
-  transformer for `[EmailAddress]` → `format: "email"` parity, so the OpenAPI document and the JSON-RPC schema
+  `[Base64String]` onto the JSON Schema keywords, verified to work reflection-off. Elarion adds small schema
+  transformers for `[EmailAddress]` → `format: "email"` and `[AllowedValues]` → `enum` parity, so the OpenAPI document and the JSON-RPC schema
   never diverge on the same DTO.
 - **Module tags.** Each operation is tagged with its owning `[AppModule]`, so tools group your API by module —
   the REST analog of JSON-RPC's module grouping.
@@ -84,7 +84,7 @@ Elarion does not ship its own for OpenAPI:
 ```xml
 <ItemGroup>
   <!-- Version tracks your .NET SDK (10.0.x for net10.0) -->
-  <PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="0.2.6" />
+  <PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.*" />
 </ItemGroup>
 
 <PropertyGroup>

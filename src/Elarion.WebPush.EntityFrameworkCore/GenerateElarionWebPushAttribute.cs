@@ -15,14 +15,14 @@ namespace Elarion.WebPush.EntityFrameworkCore;
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class GenerateElarionWebPushAttribute : Attribute {
     /// <summary>Whether table/column names default to snake_case (the Elarion default).</summary>
-    public bool SnakeCase { get; set; } = true;
+    public bool SnakeCase { get; init; } = true;
 
     /// <summary>Overrides the push subscription table name; defaults per <see cref="SnakeCase"/>.</summary>
-    public string? SubscriptionTableName { get; set; }
+    public string? SubscriptionTableName { get; init; }
 
     /// <summary>Overrides the VAPID key table name; defaults per <see cref="SnakeCase"/>.</summary>
-    public string? VapidKeyTableName { get; set; }
+    public string? VapidKeyTableName { get; init; }
 
     /// <summary>Optional schema.</summary>
-    public string? Schema { get; set; }
+    public string? Schema { get; init; }
 }

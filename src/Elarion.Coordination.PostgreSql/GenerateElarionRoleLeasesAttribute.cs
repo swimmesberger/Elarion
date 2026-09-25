@@ -15,11 +15,11 @@ namespace Elarion.Coordination.PostgreSql;
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class GenerateElarionRoleLeasesAttribute : Attribute {
     /// <summary>Whether table/column names default to snake_case (the Elarion default).</summary>
-    public bool SnakeCase { get; set; } = true;
+    public bool SnakeCase { get; init; } = true;
 
     /// <summary>Overrides the table name; defaults per <see cref="SnakeCase"/>.</summary>
-    public string? TableName { get; set; }
+    public string? TableName { get; init; }
 
     /// <summary>Optional schema.</summary>
-    public string? Schema { get; set; }
+    public string? Schema { get; init; }
 }

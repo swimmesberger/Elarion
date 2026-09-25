@@ -133,7 +133,8 @@ Read the [actor decision guide](/docs/concepts/actors) before adding the actor p
 ## Dependency rules
 
 - `Elarion.Abstractions` contains implementation-neutral contracts; `Elarion` supplies dependency-light
-  runtime behavior and the one bundled analyzer.
+  runtime behavior and bundles the core generator (`Elarion.Generators`); provider packages such as
+  `Elarion.EntityFrameworkCore` and `Elarion.Sql` bundle their own generators.
 - Provider-neutral cores (`Blobs`, `Connections`, `ClientEvents`, settings seams) never depend on a
   concrete provider or wire adapter.
 - `Elarion.JsonRpc` has no ASP.NET dependency; `Elarion.AspNetCore` owns HTTP hosting.

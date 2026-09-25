@@ -32,8 +32,10 @@ property must support literals *and* configuration placeholders.
 | `Overlap` | What to do when the same job already has an active occurrence. Defaults to `Skip`. |
 | `MisfirePolicy` | What to do when a grid occurrence is so late that later ones are also due. Defaults to `FireOnce`. |
 | `MaxConcurrentRuns` | Job-local cap when `Overlap = AllowConcurrent`. `0` means no job-local cap. |
+| `Placement` | `JobPlacement.Cluster` (default — one node per occurrence when a coordinator is registered) or `EveryNode`. See [Multi-node coordination](/docs/capabilities/scheduling/multi-node). |
 
-See [Overlap & misfire](/docs/capabilities/scheduling/overlap-and-misfire) for the last few in detail.
+See [Overlap & misfire](/docs/capabilities/scheduling/overlap-and-misfire) for `Group`, `Overlap`,
+`MisfirePolicy`, and `MaxConcurrentRuns` in detail.
 
 ## Examples
 

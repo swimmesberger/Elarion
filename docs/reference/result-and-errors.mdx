@@ -7,15 +7,15 @@ A lookup reference for the result and error types. For the conceptual model and 
 through handlers and decorators, see [Results & errors](/docs/concepts/results-and-errors).
 
 All four core types live in `Elarion.Abstractions`. The two mappers live in the transport packages:
-`Elarion.AppErrorMapper` (JSON-RPC) and `Elarion.AspNetCore.HttpAppErrorMapper` (HTTP).
+`Elarion.JsonRpc.AppErrorMapper` (JSON-RPC) and `Elarion.AspNetCore.HttpAppErrorMapper` (HTTP).
 
 ## `Result<T>`
 
 `Elarion.Abstractions.Result<T>` — a `readonly struct` wrapping either a success value or an
-`AppError`. It implements `IResultLike` and `IResultFailureFactory<Result<T>>`.
+`AppError`. It implements `IResultLike`, `IResultError`, and `IResultFailureFactory<Result<T>>`.
 
 ```csharp title="Result<T>"
-public readonly struct Result<T> : IResultLike, IResultFailureFactory<Result<T>> {
+public readonly struct Result<T> : IResultLike, IResultError, IResultFailureFactory<Result<T>> {
     public bool IsSuccess { get; }
     public T Value { get; }       // valid only when IsSuccess is true
     public AppError Error { get; } // valid only when IsSuccess is false
@@ -42,7 +42,7 @@ returned by the `IHandler<T>` convenience interface. It converts to `Result<Unit
 enters the generic dispatch/decorator pipeline.
 
 ```csharp title="Result"
-public readonly struct Result : IResultLike, IResultFailureFactory<Result> {
+public readonly struct Result : IResultLike, IResultError, IResultFailureFactory<Result> {
     public bool IsSuccess { get; }
     public AppError Error { get; } // valid only when IsSuccess is false
 
@@ -177,7 +177,7 @@ the `Internal` row.
 
 ### JSON-RPC error code
 
-From `Elarion.AppErrorMapper.MapToCode(ErrorKind)`. Protocol-level kinds reuse the JSON-RPC 2.0 spec
+From `Elarion.JsonRpc.AppErrorMapper.MapToCode(ErrorKind)`. Protocol-level kinds reuse the JSON-RPC 2.0 spec
 codes; the remaining application kinds use the reserved server range (`-32000` to `-32099`).
 `AppErrorMapper.ToRpcError(AppError)` wraps the code with the error's `Message` and `Data`.
 
