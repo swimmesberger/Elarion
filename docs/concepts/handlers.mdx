@@ -266,7 +266,7 @@ Prefer these everywhere in application code. The whole point is that a rename or
 `HandlerDispatcher` — the [named request/reply bus](/docs/capabilities/transports) — maps an operation
 **name** (a string) to a handler. It exists so that **name-keyed transports** (JSON-RPC and MCP, whose
 wire carries a method/tool name) can reach a handler without referencing its type. HTTP does *not* use it:
-a `[HttpEndpoint]` route resolves its handler typed-directly (`[FromServices] IHandler<…>`), because the
+a `[HttpEndpoint]` route resolves its handler typed-directly (`IHandler<…>` from the request services), because the
 route already pins the type at generation time.
 
 The bus is a registered singleton, so you *can* inject it and call `DispatchAsync(name, request, scope, ct)`

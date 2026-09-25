@@ -33,7 +33,7 @@ public sealed class ArchiveInvoice(
         await db.SaveChangesAsync(ct);
 
         // Both of these run on the SAME connection + transaction as the delete above.
-        await settings.SetAsync($"invoice:{command.Id}:archived", "true", ct);
+        await settings.SetAsync($"invoice:{command.Id}:archived", "true", cancellationToken: ct);
         await blobs.SaveAsync(ArchiveRequest(command.Id), command.Pdf, ct);
 
         await tx.CommitAsync(ct);   // all three commit together
@@ -60,7 +60,7 @@ public sealed class ArchiveInvoice(
     public async ValueTask<Result<Unit>> HandleAsync(Command command, CancellationToken ct) {
         db.Invoices.Remove(await db.Invoices.FindAsync([command.Id], ct));
         await db.SaveChangesAsync(ct);
-        await settings.SetAsync($"invoice:{command.Id}:archived", "true", ct);
+        await settings.SetAsync($"invoice:{command.Id}:archived", "true", cancellationToken: ct);
         await blobs.SaveAsync(ArchiveRequest(command.Id), command.Pdf, ct);
         return Result.Success();   // commit; a failed Result or throw rolls all three back
     }
@@ -69,9 +69,10 @@ public sealed class ArchiveInvoice(
 
 The decorator attaches only where a new unit of work belongs — its compile-time
 `AppliesTo` predicate matches **commands and integration-event handlers** and skips queries,
-domain-event handlers (they run inline inside the publisher's transaction), and `[Idempotent]`
-handlers (they own the boundary themselves, so a handler is never wrapped in two nested
-transactions).
+domain-event handlers (they run inline inside the publisher's transaction), `[Idempotent]`
+handlers, and integration-event consumers under the default-on inbox (both own the boundary
+themselves, so a handler is never wrapped in two nested transactions — only an `[AllowDuplicates]`
+consumer gets the plain transaction).
 
 Under the hood it composes the EF-free `IUnitOfWork`/`IUnitOfWorkScope` seam
 (`Elarion.Abstractions.Pipeline`). `EfUnitOfWork<TDbContext>` implements it over

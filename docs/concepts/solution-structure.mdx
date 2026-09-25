@@ -212,6 +212,7 @@ assemblies) rather than the analyzer, which is the heavier guarantee real data s
 - [Entity Framework Core](/docs/capabilities/entity-framework) — `[EntityConfiguration]`, `[GenerateDbSets]`, and
   configuration discovery.
 - The runnable [`samples/Billing`](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing)
-  app follows this layout — entities in `Billing.Application.Domain`, the persistence layer (configuration,
-  `BillingDbContext`, and migrations) in `Billing.Application.Persistence`, and the SMTP adapter in
+  app follows this layout — entities in `Billing.Application.Domain`, the persistence layer (configuration and
+  `BillingDbContext`; the sample uses `EnsureCreated` instead of migrations) in
+  `Billing.Application.Persistence`, and the SMTP adapter in
   `Billing.Infrastructure`.

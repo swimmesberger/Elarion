@@ -4,10 +4,10 @@ description: Wire a feature-flag backend into the host so [FeatureGate] handlers
 ---
 
 Feature flags gate a **handler** behind one or more flags with `[FeatureGate]`, and can swap a service
-implementation per user with `[FeatureVariant]`. The attributes, the `IFeatureFlagService` seam, and the
-generated decorators ship in `Elarion.Abstractions` and carry **no** feature-management dependency — so
-gating is free to declare and the host picks the backend. This page covers the host wiring; for the gate
-semantics, multiple-flag forms, and variant injection in depth see
+implementation per user with `[FeatureVariant]`. The attributes and the `IFeatureFlagService` seam ship in
+`Elarion.Abstractions` and the gate decorator in `Elarion` core; neither carries **any** feature-management
+dependency — so gating is free to declare and the host picks the backend. This page covers the host
+wiring; for the gate semantics, multiple-flag forms, and variant injection in depth see
 [Feature flags & variants](/docs/concepts/feature-flags).
 
 ## Choose a provider
@@ -67,8 +67,8 @@ the gate and every imperative check follow.
 
 ## Gate a handler
 
-Once a backend is wired, annotate the handler. The generated `FeatureGateDecorator` evaluates the flag
-**just inside the authorization gate**, before caching, validation, and the handler body:
+Once a backend is wired, annotate the handler. The `FeatureGateDecorator` the generator inserts evaluates the
+flag **just inside the authorization gate**, before caching, validation, and the handler body:
 
 ```csharp
 [Handler("billing.export")]

@@ -63,9 +63,6 @@ builder.Services.AddElarionPostgreSqlRoleLease<AppDbContext>(options => {
 Duplicate registration of the same role in one process fails at startup. The defaults are sized so
 the old holder stops acting before a successor may legitimately take over:
 
-Role names are validated against the lease table's 128-character limit during registration. Fixed
-partitions validate their generated `{name}:partition-N` roles before adding any services.
-
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `LeaseDuration` | 30 s | How long one successful acquisition remains valid; also the crash-failover bound. |
@@ -75,6 +72,9 @@ partitions validate their generated `{name}:partition-N` roles before adding any
 | `AdvertisedAddress` | `null` | Explicit holder address for proxying; otherwise an `IInstanceAddressProvider` may supply it. |
 
 `LeaseDuration` must be greater than `RenewInterval + HeldSafetyMargin`.
+
+Role names are validated against the lease table's 128-character limit during registration. Fixed
+partitions validate their generated `{name}:partition-N` roles before adding any services.
 
 ## Register a fixed role partition
 

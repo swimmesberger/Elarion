@@ -41,7 +41,7 @@ npm install @swimmesberger/elarion-contributions
 ## What you import vs. what you own
 
 This package ships the *machinery* with fixed semantics; your application owns the *points* and the shell
-(Elarion deliberately ships no UI kit and no router integration):
+(Elarion deliberately ships no UI kit and no route system — only the optional route guard):
 
 | You import (fixed semantics)                                                      | You own (copy from the sample)                                                              |
 |-----------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
@@ -245,6 +245,6 @@ plain registry or a store. See ADR-0074.
 
 ## Reference usage
 
-The [Billing sample](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing/web) is the
+The [Billing sample](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing/Billing.Web) is the
 living reference: module folders, a shell-owned sidebar point, a cross-module row-action point with a
 lazily-chunked contributed dialog, and TanStack Router route subtrees composed per module.

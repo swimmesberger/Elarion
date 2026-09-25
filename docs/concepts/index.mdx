@@ -68,6 +68,7 @@ application policy and host mechanics. The full comparison with idiomatic ASP.NE
 The pages in this section cover each building block:
 
 <Cards>
+  <Card title="Source generation" href="/docs/concepts/source-generation">How generators turn attributes and conventions into inspectable registration code.</Card>
   <Card title="Handlers" href="/docs/concepts/handlers">The primary use-case unit.</Card>
   <Card title="Results & errors" href="/docs/concepts/results-and-errors">`Result<T>` and transport-agnostic `AppError`.</Card>
   <Card title="Modules" href="/docs/concepts/modules">Application boundaries and their lifecycle.</Card>
@@ -77,6 +78,8 @@ The pages in this section cover each building block:
   <Card title="Authorization" href="/docs/concepts/authorization">Declarative, transport-neutral handler authorization.</Card>
   <Card title="Resource authorization" href="/docs/concepts/resource-authorization">Per-resource point checks and data-level list filtering.</Card>
   <Card title="Feature flags" href="/docs/concepts/feature-flags">Gate handlers with `[FeatureGate]` over any OpenFeature provider.</Card>
+  <Card title="Client capabilities" href="/docs/concepts/client-capabilities">One bootstrap snapshot of modules, flags, and grants for UX-only frontend adaptation.</Card>
+  <Card title="Frontend modules" href="/docs/concepts/frontend-modules">Typed extension points and capability-gated contributions for the web app.</Card>
   <Card title="Idempotency" href="/docs/concepts/idempotency">Exactly-once command replay with `[Idempotent]` and a single-transaction, unique-constrained key store.</Card>
   <Card title="Audit trail" href="/docs/concepts/auditing">Who did what: `[Auditable]` records with field-level change capture, committed with the transaction.</Card>
   <Card title="Settings" href="/docs/concepts/settings">Runtime-changeable, DB-backed key/value settings.</Card>

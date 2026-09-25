@@ -279,7 +279,7 @@ See [Actors](/docs/concepts/actors).
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `tags` | `params string[]` (ctor) → `Tags` | empty | Logical cache tags to invalidate after a successful handler result. |
-| `Scope` | `HandlerCacheScope` (init) | `CurrentUser` | Whether invalidation applies to the current user's entries or globally shared entries. |
+| `Scope` | `HandlerCacheScope` (init) | `Global` | `Global` evicts the globally shared entries **and** every user's `CurrentUser`-scoped entries for the tags (safe over-invalidation — the mutating caller is usually not the user whose cached read must be evicted); `CurrentUser` clears only the invoking user's entries. |
 
 <Callout type="warn">
   **Runtime:** the cache itself was extracted out of Elarion core ([ADR-0017](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0017-dependency-light-core.md)). `[Cacheable]`/`[CacheInvalidate]`
@@ -564,6 +564,7 @@ Handler requirements are class attributes the handler-registration generator rea
 | --- | --- | --- | --- |
 | `resourceType` | `Type` (ctor) → `ResourceType` | required | The resource type being accessed, e.g. `typeof(Contact)`. |
 | `Operation` | `string` (init) | `"read"` | The operation name (an open `ResourceOperation` value). |
+| `ResourceTypeName` | `string?` (init) | `null` | Explicit grants-table discriminator overriding the default (`ResourceType.FullName`). Set the same string on the matching `[ResourceFilter].ResourceTypeName` and on every stored grant; compared ordinally. |
 | `Id` | `string` (init) | `"Id"` | Request property path naming the resource id, e.g. `nameof(Query.Id)` or a dotted path of existing properties. |
 
 ### `[ResourceFilter<TEntity>]`

@@ -14,7 +14,7 @@ namespace Elarion.Abstractions;
 /// </remarks>
 /// <example>
 /// <code>
-/// [Handler]                                                  // inferred name; JSON-RPC + MCP (default)
+/// [Handler]                                                  // inferred name; all name-routed transports (default)
 /// public sealed class CreateClient(...) : IHandler&lt;CreateClient.Command, Result&lt;CreateClient.Response&gt;&gt; { ... }
 ///
 /// [Handler("clients.list", Transports = HandlerTransports.JsonRpc)]  // explicit name, JSON-RPC only
@@ -39,7 +39,7 @@ public sealed class HandlerAttribute : Attribute {
 
     /// <summary>
     /// The name-routed transports that expose this handler. Defaults to <see cref="HandlerTransports.All"/>
-    /// (JSON-RPC and MCP).
+    /// (JSON-RPC, MCP, and connections).
     /// </summary>
     public HandlerTransports Transports { get; init; } = HandlerTransports.All;
 

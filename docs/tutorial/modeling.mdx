@@ -236,7 +236,7 @@ you add handlers — each module contributes its own [source-generated JSON meta
 ### Create the migration
 
 With the model and context in place, generate the initial migration and apply it. The host is the
-startup project (it owns the connection string); the migration lands in infrastructure.
+startup project (it owns the connection string); the migration lands in the application's persistence layer beside `BillingDbContext`.
 
 The host needs to register `BillingDbContext` before EF tooling can find it. Add this to
 `Program.cs` for now (the [Host the API](/docs/tutorial/hosting) step fleshes the rest out):
@@ -250,18 +250,17 @@ var builder = WebApplication.CreateSlimBuilder(args);
 
 builder.Services.AddDbContext<BillingDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("billing")));
-builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<BillingDbContext>());
 
 var app = builder.Build();
 app.Run();
 ```
 
-Handlers inject `BillingDbContext` directly; `DbContext` is also exposed so the transaction decorator
-(added next) can begin transactions without knowing the concrete type.
+Handlers inject `BillingDbContext` directly. The transaction boundary does not need the context at all: it
+goes through the `IUnitOfWork` seam, which [Host the API](/docs/tutorial/hosting) registers over this context.
 
 ```bash
 dotnet ef migrations add Initial \
-  --project src/Billing.Infrastructure \
+  --project src/Billing.Application \
   --startup-project src/Billing.Api
 ```
 

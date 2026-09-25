@@ -30,14 +30,14 @@ writes); method-form and opted-out consumers must absorb duplicates themselves �
 
 ## In-memory integration bus
 
-Register the in-memory tier with `AddElarionInMemoryEventBus()` from `Elarion.Messaging.InMemory`. This wires the
+Register the in-memory tier with `AddElarionInMemoryEventBus<TContext>()` from `Elarion.Messaging.InMemory`. This wires the
 domain plane (`AddElarionDomainEventBus`) **plus** the in-memory integration plane, whose after-commit
 delivery is commit-gated by the database transaction without a hand-written decorator: the package's EF
-Core interceptors are registered automatically and flush buffered events after the `DbContext` commits and
-discard them on rollback.
+Core interceptors are attached to `TContext` automatically and flush buffered events after the `DbContext`
+commits and discard them on rollback.
 
 ```csharp title="Program.cs"
-builder.Services.AddElarionInMemoryEventBus();   // domain plane + in-memory integration plane (interceptors included)
+builder.Services.AddElarionInMemoryEventBus<BillingDbContext>();   // domain plane + in-memory integration plane (interceptors included)
 ```
 
 `InMemoryIntegrationEventBus.PublishAsync` buffers each event into a per-scope `EventDispatchScope`; the
@@ -50,11 +50,11 @@ A configuration overload reads the `EventBus` section — `EventBus:Enabled` (de
 events) — and throws on a non-boolean/non-integer value:
 
 ```csharp
-builder.Services.AddElarionInMemoryEventBus(builder.Configuration);
+builder.Services.AddElarionInMemoryEventBus<BillingDbContext>(builder.Configuration);
 ```
 
 If you only need the integration tier (the domain plane is already wired elsewhere), call
-`AddElarionInMemoryIntegrationEventBus()` directly; it registers `IIntegrationEventBus`, the scope buffer, the
+`AddElarionInMemoryIntegrationEventBus<TContext>()` directly; it registers `IIntegrationEventBus`, the scope buffer, the
 pump, and the two interceptors, sharing the same `EventSubscriptionRegistry`.
 
 <Callout type="warn">
@@ -141,7 +141,7 @@ builder.Services.AddElarionOutbox<BillingDbContext>(); // integration plane (dur
 
 Consumer **descriptors** are registered separately — automatically and feature-gated when you use
 `[GenerateModuleBootstrapper]` (see [Module gating](/docs/capabilities/events#module-gating)), or
-explicitly via the generated `Add{Assembly}EventConsumers()`. If you only publish integration events you
+explicitly via each module's generated `Add{Module}EventConsumers()`. If you only publish integration events you
 don't need the in-memory tier at all — the outbox and the consumer descriptors are enough. Publishing
 requires the descriptors because it resolves consumers into target groups before persistence.
 

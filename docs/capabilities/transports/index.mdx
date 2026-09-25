@@ -43,8 +43,9 @@ gRPC adds explicit generated protobuf-to-application mapping in the service over
 
 JSON-RPC and MCP share a single identity. A handler opts into them with one `[Handler("module.action")]`
 attribute (the operation name is optional — `[Handler]` alone is valid and the name is inferred by
-convention), and the `Transports` flag (`HandlerTransports.JsonRpc`, `HandlerTransports.Mcp`, or
-`HandlerTransports.All`, the default) selects which of the two surface it. HTTP is a separate opt-in via
+convention), and the `Transports` flag (`HandlerTransports.JsonRpc`, `HandlerTransports.Mcp`,
+`HandlerTransports.Connection`, or `HandlerTransports.All`, the default) selects which name-routed
+surfaces expose it. HTTP is a separate opt-in via
 `[HttpEndpoint]` because it needs route, verb, and parameter binding that do not fit a flags enum.
 
 Under the hood, JSON-RPC and MCP are not two parallel stacks. There is one transport-neutral

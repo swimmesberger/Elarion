@@ -75,7 +75,7 @@ load-bearing:
 
 | Convention | Why it matters |
 | --- | --- |
-| Types live **under a module namespace** | Namespace containment decides which module owns a type and which generated `Add{Module}…()` method registers it. |
+| Types live **under a module namespace** | Namespace containment decides which module owns a type and whose generated `ConfigureDefaultServices` registers it. |
 | Handlers implement `IHandler<TRequest, TResponse>` | The handler generator matches on this interface, and reads the request/response shape from it — the types may be nested in the handler or top-level. |
 | Services are annotated with `[Service]` | Marks the type for registration and contract resolution. |
 | Request DTOs carry `DataAnnotations` attributes | The generators attach the validation decorator and emit the module's validation metadata from them — see [Validation](/docs/concepts/validation). |

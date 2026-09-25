@@ -16,7 +16,7 @@ dotnet build Elarion.slnx --configuration Release
 ```
 
 You need the **.NET 10 SDK** (see [`global.json`](global.json) for the exact version) and, for the
-TypeScript client generator, **Node.js 18+**.
+npm packages, **Node.js 20.11+** (the `engines` floor in their `package.json`).
 
 ## Validation
 
@@ -28,7 +28,7 @@ dotnet build Elarion.slnx --configuration Release
 dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release
 dotnet pack Elarion.slnx --configuration Release --no-build
 
-# TypeScript client generator
+# npm packages — run in both src/elarion-jsonrpc-client-generator and src/elarion-contributions
 cd src/elarion-jsonrpc-client-generator
 npm ci
 npm run build
@@ -133,7 +133,8 @@ Requires the `NUGET_USER` repository variable (or secret) — the NuGet.org prof
 
 ### npm trusted publishing
 
-The npm trusted publisher for `@swimmesberger/elarion-jsonrpc-client-generator`:
+The npm trusted publisher for `@swimmesberger/elarion-jsonrpc-client-generator` and
+`@swimmesberger/elarion-contributions` (each package has its own policy with the same values):
 
 | Field | Value |
 | --- | --- |

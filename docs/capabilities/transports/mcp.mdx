@@ -97,8 +97,8 @@ they share the JSON-RPC schema builder, so an agent sees the same shape contract
 
 A handler declares its operation once with `[Handler]` (the name is optional — see
 [name inference](/docs/capabilities/transports/json-rpc#the-operation-name-is-optional)) and selects its
-adapter surfaces with the `HandlerTransports` flags (`JsonRpc`, `Mcp`, or `All`). The default is `All` —
-both JSON-RPC and MCP:
+adapter surfaces with the `HandlerTransports` flags (`JsonRpc`, `Mcp`, `Connection`, or `All`). The default
+is `All` — JSON-RPC, MCP, and bidirectional connection adapters:
 
 ```csharp
 using Elarion.Abstractions;

@@ -27,8 +27,8 @@ transport-neutral `HandlerDispatcher` when messages route by operation name.
 | Seam | Package | Purpose |
 | --- | --- | --- |
 | `IHandler<TRequest,TResponse>`, `Result<T>`, `AppError` | `Elarion.Abstractions` | Application contract and error model |
-| `HandlerDispatcher` | `Elarion.Abstractions.Dispatch` | Named request/reply bus with no wire format |
-| `DispatchScopeContext`, `CreateDispatchScope`, `SeedScope` | `Elarion.Abstractions.Dispatch` | Per-call scope-seeding rail |
+| `HandlerDispatcher` | `Elarion.Abstractions` (namespace `Elarion.Abstractions.Dispatch`) | Named request/reply bus with no wire format |
+| `DispatchScopeContext`, `CreateDispatchScope`, `SeedScope` | `Elarion.Abstractions` (namespace `Elarion.Abstractions.Dispatch`) | Per-call scope-seeding rail |
 | `HandlerInvoker` | `Elarion` | Typed scope + resolve + invoke + dispose helper |
 | `IStreamHandler<TRequest,TItem>`, `StreamHandlerInvoker` | `Elarion.Abstractions`, `Elarion` | Typed startup + scoped server-streaming invocation |
 | `ConnectionHandlerInvoker` | `Elarion` | Connection-boundary variant of the invokers, bound once per connection: each call captures one `ClientConnection` snapshot, seeds it (plus its `ClaimsPrincipal`) under exact types so adapter enrichment cannot spoof framework identity, and filters named dispatch through `HandlerTransports.Connection` |
@@ -101,7 +101,7 @@ Dynamic adapters map and dispatch names:
 
 ```csharp
 dispatcher.Map<CreateClientCommand, ClientDto>("clients.create");
-dispatcher.MapDelegate<PingRequest, PongResponse>("ping", (request, ct) => HandlePing(request, ct));
+dispatcher.MapDelegate<PingRequest, PongResponse>("ping", (request, services, ct) => HandlePing(request, ct));
 
 var response = await dispatcher.DispatchAsync(
     "clients.create", command, scope.ServiceProvider, ct);

@@ -2,7 +2,7 @@
 
 A complete, **current-pattern** Elarion application — the compiled counterpart of the
 [tutorial](../../docs/tutorial), which explains every piece of this code. It builds as part of
-`Elarion.slnx` and follows the [recommended solution structure](../../docs/concepts/solution-structure):
+`Elarion.slnx` and follows the [recommended solution structure](../../docs/concepts/solution-structure.mdx):
 a shared-kernel domain namespace, feature modules that own their handlers **and** schema configuration,
 infrastructure for platform capabilities, and a thin host — orchestrated by **.NET Aspire** against a
 real PostgreSQL database.
@@ -22,7 +22,7 @@ Entities live in a shared-kernel **namespace** and the whole persistence layer (
 separate projects; the Core module publishes its credit policy as an `IAccountStanding`
 `[ModuleContract]` (a genuine cross-module domain call — distinct from the framework audit trail, which
 needs no contract), while `Infrastructure` holds only the intent-only SMTP adapter. See
-[Solution structure](../../docs/concepts/solution-structure) for the reasoning and
+[Solution structure](../../docs/concepts/solution-structure.mdx) for the reasoning and
 for when each would graduate to its own assembly.
 
 ## What it demonstrates
@@ -36,7 +36,7 @@ for when each would graduate to its own assembly.
 - **Framework audit trail** — `[Auditable]` on `CreateClient`/`CreateInvoice` + `[Audited]` on the entities
   (`Elarion.Auditing.EntityFrameworkCore`) records a compliance entry per invocation, committed atomically,
   denials included, with automatic field capture — no hand-rolled logging. See the
-  [audit-trail concept doc](../../docs/concepts/auditing).
+  [audit-trail concept doc](../../docs/concepts/auditing.mdx).
 - **Vertical-slice modules** — `Core` (always-on foundation, publishes the credit policy), `Clients`, and `Invoicing`,
   each auto-registered and feature-gated; no hand-written `Add{Module}…()` calls.
 - **The full cross-cutting machinery** — a one-line decorator pipeline (logging → transaction, attached
@@ -148,4 +148,4 @@ npm --prefix samples/Billing/Billing.Web run gen:rpc
 
 > The tutorial wires this as a build-time step (`Elarion.AspNetCore.SchemaGeneration` on the host); the
 > sample commits the generated artifacts and regenerates on demand to keep the solution build fast and
-> Docker-free. See [Build the frontend](../../docs/tutorial/frontend).
+> Docker-free. See [Build the frontend](../../docs/tutorial/frontend.mdx).

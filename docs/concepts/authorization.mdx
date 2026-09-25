@@ -32,7 +32,7 @@ Annotate the handler class:
 
 ```csharp
 [Handler("tenants.create")]
-[RequirePermission("tenants.write")]
+[RequirePermission("tenants", Verbs.Write)]
 public sealed class CreateTenant(AppDbContext db)
     : IHandler<CreateTenant.Command, Result<CreateTenant.Response>> { /* ... */ }
 ```
@@ -40,7 +40,7 @@ public sealed class CreateTenant(AppDbContext db)
 | Attribute | Requires |
 |---|---|
 | `[RequireClaim(type, values…)]` | A claim of `type`. With values, at least one must match (**OR**); with none, the claim must merely be present. The general form. |
-| `[RequirePermission("x")]` | Sugar for `[RequireClaim(PermissionClaimType, "x")]` over the configured permission claim type (default `"permission"`). The common case. |
+| `[RequirePermission("x", Verbs.Read)]` | Sugar for `[RequireClaim(PermissionClaimType, "x.read")]` — the composed `{resource}.{verb}` claim over the configured permission claim type (default `"permission"`). The common case. |
 | `[RequireRole("Admin")]` | Role membership (`ICurrentUser.IsInRole`). |
 | `[RequirePolicy("AtLeast21")]` | A named [`IAuthorizationPolicy`](#named-policies) — custom logic over the user and the request. |
 | `[AllowAnonymous]` | Nothing — the handler is public (see [secure-by-default](#secure-by-default)). |
@@ -153,10 +153,11 @@ all: a suspended tenant, a lapsed subscription, a read-only maintenance window. 
 the declared permission/role/claim/policy/resource checks:
 
 ```csharp
-public sealed class ActiveSubscriptionRule(ITenantContext tenants) : IGlobalAuthorizationRule {
+public sealed class ActiveSubscriptionRule(ITenantContext tenant, ITenantDirectory directory) : IGlobalAuthorizationRule {
     public async ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
-        var tenant = await tenants.GetCurrentAsync(ct);
-        return tenant.IsSuspended ? AppError.Forbidden("This workspace is suspended.") : null;   // null => pass
+        // ITenantDirectory is app-owned; ITenantContext only carries the ambient TenantId.
+        var suspended = tenant.TenantId is { } id && await directory.IsSuspendedAsync(id, ct);
+        return suspended ? AppError.Forbidden("This workspace is suspended.") : null;   // null => pass
     }
 }
 

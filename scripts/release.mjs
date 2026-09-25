@@ -58,13 +58,19 @@ function docFiles() {
   return files;
 }
 
-// Rewrite every `Version="x.y.z"` package-reference literal to the released version.
+// Rewrite the version of every Elarion package reference to the released version: the `Version="x.y.z"`
+// literal of a <PackageReference> and the `--version x.y.z` of a `dotnet add package` command.
+// Scoped to Elarion packages so third-party references in snippets keep their own versions.
 function syncDocVersions(version) {
-  const literal = /(\bVersion=")(?:\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)(")/g;
+  const semver = String.raw`\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?`;
+  const literals = [
+    new RegExp(String.raw`(\bInclude="Elarion(?:\.[A-Za-z0-9.]+)?"\s+Version=")(?:${semver})(")`, 'g'),
+    new RegExp(String.raw`(\bpackage Elarion(?:\.[A-Za-z0-9.]+)?\s+--version )(?:${semver})()`, 'g'),
+  ];
   let changed = 0;
   for (const path of docFiles()) {
     const before = read(path);
-    const after = before.replace(literal, `$1${version}$2`);
+    const after = literals.reduce((text, literal) => text.replace(literal, `$1${version}$2`), before);
     if (after !== before) {
       write(path, after);
       changed += 1;

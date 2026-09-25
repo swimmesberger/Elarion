@@ -152,7 +152,7 @@ In hand-written or test code you map directly onto a `HandlerDispatcher` with th
 
 ```csharp
 dispatcher.Map<CreateClient.Command, CreateClient.Response>("clients.create");
-dispatcher.MapDelegate<Ping.Request, Ping.Response>("diagnostics.ping", (req, ct) => /* ... */);
+dispatcher.MapDelegate<Ping.Request, Ping.Response>("diagnostics.ping", (req, services, ct) => /* ... */);
 ```
 
 ## File payloads
@@ -188,12 +188,12 @@ the deliberate scope of `ElarionFile` — small files, up to a few megabytes. Pa
 [staged-blob tier](/docs/capabilities/blob-storage): upload into the pending area and pass the handler a
 blob reference; export as a pending blob and return its reference for a streamed download.
 
-## Errors are mapped by the host
+## Errors map once, centrally
 
-Each host provides the bridge from Elarion application results to JSON-RPC errors, so different
-applications can map domain failures to transport codes in their own way. Handlers stay
-transport-agnostic and return [`Result<T>`](/docs/concepts/results-and-errors); the host translates
-`AppError.Kind` into JSON-RPC error codes.
+Handlers stay transport-agnostic and return [`Result<T>`](/docs/concepts/results-and-errors); the
+dispatcher translates `AppError.Kind` into a JSON-RPC error code through the default
+`IAppErrorTranslator<RpcError>` (`AppErrorMapper`). A host that needs different codes registers its own
+`IAppErrorTranslator<RpcError>`, which the JSON-RPC and MCP adapters resolve instead of the default.
 
 ## In this section
 

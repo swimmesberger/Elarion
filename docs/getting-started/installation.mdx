@@ -3,21 +3,22 @@ title: Installation
 description: Add Elarion's packages and source generators to an application project and an ASP.NET Core host.
 ---
 
-Elarion is distributed as a set of focused NuGet packages plus one npm package for TypeScript
-client generation. You only install the pieces you use.
+Elarion is distributed as a set of focused NuGet packages plus npm packages for TypeScript
+client generation and frontend contributions. You only install the pieces you use.
 
 ## Prerequisites
 
 - **.NET 10 SDK** or later. The framework targets `net10.0`; the source generators target
   `netstandard2.0` so they load in the Roslyn analyzer host.
 - An **ASP.NET Core** host project if you want the JSON-RPC HTTP transport (`Elarion.AspNetCore`).
-- **Node.js 18+** only if you generate the TypeScript JSON-RPC client.
+- **Node.js 20.11+** only if you use the npm packages (the TypeScript JSON-RPC client generator or
+  frontend contributions).
 
 ## Packages
 
 | Package | Install in | Purpose |
 | --- | --- | --- |
-| `Elarion.Abstractions` | Application | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
+| `Elarion.Abstractions` | Contract-only assemblies (comes transitively with `Elarion`) | Attributes and contracts: `[AppModule]`, `[Service]`, `[ScheduledJob]`, `IHandler<,>`, `Result<T>`, `AppError`. |
 | `Elarion` | Application / host | Runtime primitives: decorators, the in-memory scheduler, current-user abstraction, and the default authorizer. Depends only on `Microsoft.Extensions.*` abstractions (ADR-0017). **Bundles the Elarion source generator** (handlers, services, modules, RPC/HTTP/MCP maps, validation resolvers, resilience policies, scheduled jobs, event consumers). |
 | `Elarion.Caching` | Application / host | `HybridCache`-backed default `IHandlerCache` for handler result caching — `services.AddElarionHandlerCaching()`. **Required by `[Cacheable]`/`[CacheInvalidate]`** (extracted from core, ADR-0017). |
 | `Elarion.Resilience` | Application / host | Microsoft/Polly-backed default `IResiliencePipelineRunner` — `services.AddElarionResilience()`. **Required by `[Resilient]` handlers and deferred scheduler retries** (extracted from core, ADR-0017). |
@@ -33,7 +34,7 @@ client generation. You only install the pieces you use.
 | `Elarion.AspNetCore.SchemaGeneration` | Host (build tooling) | MSBuild target that exports `rpc-schema.json` during `dotnet build`. |
 | `Elarion.EntityFrameworkCore` | Application | Marker attributes for generated `DbSet`s and entity inclusion. **Bundles the EF Core source generator** (`DbSet` properties, entity configuration, keyset pagination). |
 | `@swimmesberger/elarion-jsonrpc-client-generator` | Frontend (npm) | Generates TypeScript method contracts, constraint-aware Zod params/result schemas, and a params-pre-validating fetch client from a schema export. |
-| `@swimmesberger/elarion-contributions` | Frontend (npm) | The frontend contribution model: typed extension points, declarative module manifests, and capability-gated resolution; React bindings under `/react`. See [Frontend modules](/docs/concepts/frontend-modules). |
+| `@swimmesberger/elarion-contributions` | Frontend (npm) | The frontend contribution model: typed extension points, declarative module manifests, and capability-gated resolution; optional bindings under `/react`, `/angular`, and `/tanstack-router`. See [Frontend modules](/docs/concepts/frontend-modules). |
 
 <Callout type="info">
   The source generators ship **inside** their runtime packages — the Elarion generator in `Elarion`

@@ -27,7 +27,7 @@ instead of discovering the semantics in production.
 | **Runtime one-off** | `IJobScheduler.EnqueueAsync` / `ScheduleAsync` | **The node that accepted the call** — no other node knows the job exists | **No — lost** | No — lost | Trivially at-most-once (only one node holds it) |
 | Durable "run this later" today | Outbox [integration event](/docs/capabilities/events/backends) | Whichever node's delivery worker claims the lease | **Yes** | **Yes** | At-least-once — consumer must be idempotent |
 
-Three consequences worth internalizing:
+Four consequences worth internalizing:
 
 - **Recurring jobs are a *suppression* model, not a *guarantee* model.** Coordination ensures an
   occurrence never runs twice; it does not ensure it runs at all. A winner that crashes mid-run is
@@ -62,7 +62,7 @@ occurrence fires normally on any node. If half-done work is unacceptable, make t
 derive its work from state so the next occurrence completes it.
 
 **The claims database is unreachable at fire time.** The node **fails closed**: it skips the
-occurrence (recorded as `claimed-elsewhere`-style skip with an error log) rather than running
+occurrence (recorded as a `claimed-elsewhere` skip with an error log) rather than running
 unconfirmed — running anyway would reintroduce the duplication coordination exists to prevent, and a
 job that needs the database would fail anyway. The next occurrence retries.
 

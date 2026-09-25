@@ -24,15 +24,15 @@ public sealed class GenerateElarionIdentityAttribute<TUser, TRole, TKey> : Attri
     where TRole : IdentityRole<TKey>
     where TKey : IEquatable<TKey> {
     /// <summary>Whether to use snake_case table/column/index names. Defaults to <c>true</c>.</summary>
-    public bool SnakeCase { get; set; } = true;
+    public bool SnakeCase { get; init; } = true;
 
     /// <summary>The schema for all seven Identity tables, or <c>null</c> for the provider's default schema.</summary>
-    public string? Schema { get; set; }
+    public string? Schema { get; init; }
 
     /// <summary>
     /// An optional prefix prepended verbatim to every Identity table name (for example <c>"auth_"</c> →
     /// <c>auth_users</c>), or <c>null</c> for none. Because Identity spans seven tables, the prefix is the
     /// table-name override — there is no per-table name parameter.
     /// </summary>
-    public string? TablePrefix { get; set; }
+    public string? TablePrefix { get; init; }
 }

@@ -30,7 +30,7 @@ protocol lives only at the HTTP layer.
 | `Elarion.Blobs.PostgreSql` | Infrastructure / host | The lifecycle on the PostgreSQL store (`state`/`expires_at` columns with a partial index, `AddElarionPostgreSqlBlobLifecycle`) and durable staged-upload staging (`UseElarionStagedUploads`, `AddElarionPostgreSqlStagedUploads`) so in-progress uploads survive restarts. |
 | `Elarion.Blobs.Azure` | Infrastructure / host | The same two roles on Azure Blob Storage: blob store + lifecycle over blob metadata, and native staging over append blobs (`AddElarionAzureBlobLifecycle`, `AddElarionAzureStagedUploads`). |
 | `Elarion.Blobs.Tus` | Host | The tus 1.0 resumable transport (`MapElarionResumableBlobUploads`, `AddElarionResumableBlobUploads`) — a pure protocol adapter over the staging seam. |
-| `Elarion.Blobs.AspNetCore` | Host | The minimal direct-upload endpoint (`MapElarionBlobUploads`, `AddElarionBlobUploads`). |
+| `Elarion.Blobs.AspNetCore` | Host | The minimal direct-upload endpoint (`MapElarionBlobUploads`, `AddElarionBlobUploads`) and the owner-scoped streaming download endpoint (`MapElarionBlobDownloads`). |
 
 ```xml
 <ItemGroup>
@@ -211,7 +211,7 @@ is never committed is garbage-collected after its TTL.
 The read side is the owner-scoped streaming download endpoint:
 
 ```csharp
-app.MapElarionBlobDownloads().RequireAuthorization();   // GET {prefix}/{blobId}
+app.MapElarionBlobDownloads().RequireAuthorization();   // GET {prefix}/{blobId}; requires AddElarionBlobUploads
 ```
 
 `GET /{blobId}` streams the blob with its content type and leaf file name (`Content-Disposition:

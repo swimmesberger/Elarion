@@ -102,10 +102,12 @@ type's validation metadata as **constant-constructed attribute arrays** (no runt
 reflection), registered through the module's gated `ConfigureDefaultServices` — a
 [disabled module](/docs/concepts/modules) contributes no validation metadata.
 
-The framework-owned `ValidationDecorator<TRequest, TResponse>` (`Elarion.Abstractions.Pipeline`) is
+The framework-owned `ValidationDecorator<TRequest, TResponse>` (`Elarion.Pipeline`) is
 auto-attached by the handler generator **just inside the feature gate** — the pipeline runs
-observability → authorization → feature gate → **validation** → your `[DefaultPipeline]` decorators →
-handler — for any handler whose request type graph carries validation attributes. Two consequences:
+observability → audit → authorization → feature gate → **validation** → cache invalidation → resilience →
+idempotency → your `[DefaultPipeline]` decorators → handler (the full order is in
+[Decorator pipelines](/docs/concepts/decorator-pipelines#order-matters)) — for any handler whose request type
+graph carries validation attributes. Two consequences:
 
 - **Validation runs pre-transaction.** A bad request is rejected before caching, your pipeline, or a
   unit of work is ever touched.

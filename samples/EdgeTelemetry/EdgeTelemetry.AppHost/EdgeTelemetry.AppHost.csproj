@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.6"/>
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.4"/>
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -15,6 +15,10 @@
          hygiene, but Aspire.Hosting's orchestrator (DCP dependency check) deserializes with
          reflection — the AppHost is dev orchestration tooling, so turn it back on here. -->
     <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- Aspire.AppHost.Sdk defaults AspireUseCliBundle to false (DCP/dashboard come from NuGet), while
+         Aspire.Hosting.AppHost 13.5+ warns about that default. The sample runs with plain `dotnet run`
+         and does not need the Aspire CLI bundle. -->
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);ASPIRE010</MSBuildWarningsAsMessages>
   </PropertyGroup>
 
   <ItemGroup>

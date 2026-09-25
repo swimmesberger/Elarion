@@ -38,7 +38,7 @@ public sealed class FeatureVariantAttribute(string feature) : Attribute {
     /// The variant name this implementation is selected for. When omitted, this implementation is the
     /// <i>default</i> (used when no variant is allocated to the current user).
     /// </summary>
-    public string? Variant { get; set; }
+    public string? Variant { get; init; }
 
     /// <summary>
     /// Marks this implementation as the default <i>in addition to</i> its <see cref="Variant"/> — a <b>named
@@ -46,5 +46,5 @@ public sealed class FeatureVariantAttribute(string feature) : Attribute {
     /// allocation. Useful when the flag backend names the control group explicitly (e.g.
     /// <c>Variant = "control", IsDefault = true</c>).
     /// </summary>
-    public bool IsDefault { get; set; }
+    public bool IsDefault { get; init; }
 }

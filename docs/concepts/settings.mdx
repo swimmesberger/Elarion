@@ -48,8 +48,8 @@ posture as current-user handler caching.
 ## Keys
 
 Keys are flat strings with a `:` separator, exactly like `IConfiguration` (`"app:smtp:host"`). The
-hierarchy is virtual — the store treats keys as opaque; only prefix watching and (future) adapters
-interpret the tree. Watch a prefix to observe a whole subtree.
+hierarchy is virtual — the store treats keys as opaque; only prefix watching and the `IConfiguration`
+adapter interpret the tree. Watch a prefix to observe a whole subtree.
 
 ## Using the typed accessor
 
