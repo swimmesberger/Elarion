@@ -54,6 +54,22 @@ minor releases may include breaking changes.
   anyway.
 
 ### Added
+- **Web Push (ADR-0076, #162).** Notify users whose app is closed — the half of browser delivery that client
+  events cannot cover. **`Elarion.WebPush`** ships `IWebPushSender` (`SendToUsersAsync`/`SendToCurrentUserAsync`
+  with a `WebPushMessage` of title, body, url, tag, urgency, and TTL): RFC 8291 `aes128gcm` encryption and RFC
+  8292 VAPID signing on the .NET crypto primitives (AOT-safe, no third-party push SDK, pinned to the RFC test
+  vector), bounded-concurrency fan-out, and deletion of subscriptions the push service reports gone (404/410) or
+  that are malformed, while transient failures keep them. VAPID keys resolve configuration → store → generate,
+  race-safe across nodes. `WebPushSubscriptionService` binds subscriptions to `ICurrentUser` (upsert by
+  endpoint, reassigning a device that re-subscribes under another account) for application `[Handler]`s, and
+  endpoints are restricted to https on the known push services by default (a fail-closed SSRF guard,
+  `AllowedEndpointHosts`/`AllowAnyEndpointHost` to widen it). **`Elarion.WebPush.EntityFrameworkCore`** adds the
+  `elarion_push_subscriptions`/`elarion_vapid_keys` tables via `[GenerateElarionWebPush]` (new diagnostic
+  `ELWP001`) or `modelBuilder.UseElarionWebPush()`; **`Elarion.WebPush.AspNetCore`** maps
+  `MapElarionWebPush()`. The new npm package **`@swimmesberger/elarion-webpush`** provides
+  `pushAvailability()` (including iOS "add to Home Screen first"), gesture-safe `enablePush`,
+  `subscribe`/`unsubscribe`/`isSubscribed`/`refreshOnStart` over a pluggable server API, and a service-worker
+  module (`/sw`) for `push`, `notificationclick`, and `pushsubscriptionchange`.
 - **Ambient tenant scoping (ADR-0075).** Per-tenant isolation is now a property of the scope rather than
   something every query and every `Add` has to remember. An entity implements `ITenantScoped<TTenantId>`
   (`Guid`/`string`/`int`/`long`) and gets two legs from one marker: a **named EF Core query filter** attached by

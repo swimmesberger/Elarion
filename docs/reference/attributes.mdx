@@ -786,6 +786,20 @@ See [Actors — multiple instances and single-homing](/docs/concepts/actors/stat
 
 See [Device identity](/docs/capabilities/devices).
 
+### `[GenerateElarionWebPush]`
+
+- **Package:** `Elarion.WebPush.EntityFrameworkCore` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `DbSet<PushSubscriptionEntity>`/`DbSet<VapidKeyEntity>` and applies the Web Push model configuration through the EF generator's model-config seam — the tables backing `IPushSubscriptionStore` and `IVapidKeyStore` (ADR-0076). The hand-written equivalent is `modelBuilder.UseElarionWebPush()`. Mirrors `[GenerateElarionDeviceIdentity]`. Requires `[GenerateDbSets]` (else `ELWP001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column names use snake_case. |
+| `SubscriptionTableName` | `string?` (init) | `null` | The push subscription table name, or `null` for the default (`elarion_push_subscriptions` / `ElarionPushSubscriptions` depending on `SnakeCase`). |
+| `VapidKeyTableName` | `string?` (init) | `null` | The VAPID key table name, or `null` for the default (`elarion_vapid_keys` / `ElarionVapidKeys` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [Web Push](/docs/capabilities/web-push).
+
 ### `[Keyset<TEntity>]`
 
 - **Package:** `Elarion.Paging` · **Applies to:** class (generic attribute, `where TEntity : class`)

@@ -65,6 +65,10 @@
     <ProjectReference Include="../../src/Elarion.Devices/Elarion.Devices.csproj"/>
     <ProjectReference Include="../../src/Elarion.Devices.EntityFrameworkCore/Elarion.Devices.EntityFrameworkCore.csproj"/>
     <ProjectReference Include="../../src/Elarion.Devices.EntityFrameworkCore.Generators/Elarion.Devices.EntityFrameworkCore.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.WebPush/Elarion.WebPush.csproj"/>
+    <ProjectReference Include="../../src/Elarion.WebPush.AspNetCore/Elarion.WebPush.AspNetCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.WebPush.EntityFrameworkCore/Elarion.WebPush.EntityFrameworkCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.WebPush.EntityFrameworkCore.Generators/Elarion.WebPush.EntityFrameworkCore.Generators.csproj"/>
     <ProjectReference Include="../../src/Elarion.JsonRpc/Elarion.JsonRpc.csproj"/>
     <ProjectReference Include="../../src/Elarion.AspNetCore.OpenApi/Elarion.AspNetCore.OpenApi.csproj"/>
     <ProjectReference Include="../../src/Elarion.Paging/Elarion.Paging.csproj"/>
