@@ -11,3 +11,4 @@
  ELSQL007 | Elarion.Sql | Error    | Annotated property is not writable
  ELSQL010 | Elarion.Sql | Error    | [SqlRecord] type must be partial for self-mapping members
  ELSQL011 | Elarion.Sql | Error    | [SqlRecord] type declares a reserved member name (SqlMapper/Table/Select)
+ ELSQL012 | Elarion.Sql | Warning  | Collection interpolated where SQL expects an array value (ANY/ALL, @>, <@, &&)
