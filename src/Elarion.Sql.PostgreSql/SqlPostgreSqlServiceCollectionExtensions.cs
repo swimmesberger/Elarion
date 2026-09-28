@@ -20,7 +20,8 @@ namespace Elarion.Sql.PostgreSql;
 public static class SqlPostgreSqlServiceCollectionExtensions {
     /// <summary>
     /// Registers a container-owned <see cref="NpgsqlDataSource"/> built from <paramref name="connectionString"/>
-    /// (command logging wired from the container's logger factory) and, over it, the
+    /// (command logging wired from the container's logger factory, array type mappings enabled so
+    /// <see cref="SqlArray"/> parameters bind as PostgreSQL arrays) and, over it, the
     /// <see cref="ISqlDatabase"/> (for the access tier) and the
     /// <see cref="IMigrationDatabaseFactory"/> (for migrations). Pair with the neutral
     /// <c>AddElarionSqlUnitOfWork()</c> and <c>AddElarionMigrations(configure)</c>.
@@ -67,6 +68,8 @@ public static class SqlPostgreSqlServiceCollectionExtensions {
         services.TryAddSingleton<NpgsqlDataSource>(sp => {
             var builder = new NpgsqlSlimDataSourceBuilder(resolvedConnectionString);
             builder.UseLoggerFactory(sp.GetService<ILoggerFactory>());
+            // The slim builder leaves array mappings out; SqlArray parameters (= ANY(@p0)) need them.
+            builder.EnableArrays();
             configure?.Invoke(builder);
             return builder.Build();
         });
@@ -95,7 +98,9 @@ public static class SqlPostgreSqlServiceCollectionExtensions {
     /// <see cref="AddElarionPostgreSql(IServiceCollection, string, Action{NpgsqlSlimDataSourceBuilder}, string, long)"/>
     /// for a host that already built its data source; it is registered as the shared core (the container does not
     /// dispose an externally-created instance). There is no <c>schema</c> argument here — the data source's own
-    /// <c>Search Path</c> is the setting, and migrations read it from there.
+    /// <c>Search Path</c> is the setting, and migrations read it from there. A source built with
+    /// <see cref="NpgsqlSlimDataSourceBuilder"/> needs <c>EnableArrays()</c> for <see cref="SqlArray"/>
+    /// parameters; <see cref="NpgsqlDataSourceBuilder"/> and <c>NpgsqlDataSource.Create</c> include them.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="dataSource">The data source to use as the shared core.</param>

@@ -433,11 +433,12 @@ Generated client-event topic registration for `IClientEvent` contracts. See
 | ELCEV002 | Error | Two `IClientEvent` contracts resolve to the same topic name; the colliding topics are withheld. | Rename one contract, or disambiguate with an explicit `[ClientEvent("…")]` name. |
 | ELCEV003 | Warning | The compilation declares `IClientEvent` contracts but does not reference `Elarion.ClientEvents`, so no topics are registered. | Reference `Elarion.ClientEvents` (and map the endpoint from `Elarion.ClientEvents.AspNetCore`), or remove the contracts. |
 
-## ELSQL — SQL row mapping
+## ELSQL — SQL row mapping and interpolation
 
-Mapper generation for `[SqlRecord]` types (ADR-0058). See [SQL mapping](/docs/capabilities/sql-mapping).
-There is deliberately no runtime fallback behind these errors: an unmapped type has no mapper to call,
-so every gap surfaces at build time.
+Mapper generation for `[SqlRecord]` types (ADR-0058) and checks on interpolated SQL statements
+(ADR-0077). See [SQL mapping](/docs/capabilities/sql-mapping). There is deliberately no runtime
+fallback behind the mapper errors: an unmapped type has no mapper to call, so every gap surfaces at
+build time.
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
@@ -450,3 +451,4 @@ so every gap surfaces at build time.
 | ELSQL007 | Error | A property carries `[SqlColumn]`/`[SqlJson]` but has no accessible setter or initializer. | Add `set`/`init`, or remove the mapping attribute (derived members are skipped silently). |
 | ELSQL010 | Error | A `[SqlRecord]` type is not `partial`, so the self-mapping members (`ISqlRecord<T>.SqlMapper`, `Table`, `Select`) cannot be generated. | Add the `partial` modifier. (The mapper still generates, so the explicit-mapper overloads keep working meanwhile.) |
 | ELSQL011 | Error | A `[SqlRecord]` type declares a member named `SqlMapper`, `Table`, or `Select`, colliding with a generated self-mapping member. | Rename the member; a mapped column can keep its SQL name via `[SqlColumn("…")]`. |
+| ELSQL012 | Warning | A collection is interpolated where the SQL expects a single array value — directly inside `ANY(`, `ALL(`, or `SOME(` (any case, optional whitespace), or as an operand of `@>`, `<@`, or `&&`. A collection hole always expands to an `IN` list, so this renders `= ANY((@p0, @p1))`, which the database rejects at run time. Only the literal SQL adjacent to the hole in the same interpolated string is inspected. | Write `IN {collection}` for a list, or bind one array parameter with `{SqlArray.Of(collection)}` (PostgreSQL). |

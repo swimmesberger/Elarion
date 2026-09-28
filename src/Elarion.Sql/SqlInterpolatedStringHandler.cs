@@ -49,7 +49,18 @@ public struct SqlInterpolatedStringHandler {
         where?.ToSql().AddAsSegmentTo(_segments);
     }
 
-    /// <summary>Binds a value as a parameter; collections expand to a parameter list for <c>IN</c>.</summary>
+    /// <summary>
+    /// Binds the wrapped collection as one array-valued parameter (<c>= ANY({SqlArray.Of(ids)})</c>) instead of
+    /// expanding it to an <c>IN</c> list.
+    /// </summary>
+    public void AppendFormatted(SqlArray array) {
+        _segments.Add(SqlSegment.OfArray(array.Values));
+    }
+
+    /// <summary>
+    /// Binds a value as a parameter; collections expand to a parameter list for <c>IN</c>. Wrap a collection in
+    /// <see cref="SqlArray.Of{T}(T[])"/> to bind it as one array value instead.
+    /// </summary>
     public void AppendFormatted<T>(T value) {
         switch (value) {
             case SqlStatement fragment:
@@ -57,6 +68,11 @@ public struct SqlInterpolatedStringHandler {
                 break;
             case SqlWhere where:
                 where.ToSql().AddAsSegmentTo(_segments);
+                break;
+            // Reached when the static type hides the wrapper (object, a generic T); the typed overload above
+            // handles the direct case.
+            case SqlArray array:
+                _segments.Add(SqlSegment.OfArray(array.Values));
                 break;
             // string and byte[] are IEnumerable but always scalar values.
             case IEnumerable items and not (string or byte[]):

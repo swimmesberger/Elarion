@@ -102,6 +102,25 @@ public sealed class SqliteSqlSessionIntegrationTests : IDisposable {
     }
 
     [Fact]
+    public async Task SqlArrayParameter_FailsBeforeExecuting_OnAProviderWithoutArrays() {
+        var id = Guid.CreateVersion7();
+        await using var session = NewSession();
+        await session.InsertAsync(new SqlWidget { Id = id, Name = "array-probe" }, Ct);
+
+        // SQLite has no array type: the statement must fail at bind time with the IN-list alternative named,
+        // never expand silently or reach the driver's own type-mapping error.
+        var act = () => session.QueryAsync<SqlWidget>(
+            $"SELECT id, name FROM sql_widgets WHERE id = ANY({SqlArray.Of(new[] { id })})", Ct);
+
+        await act.Should().ThrowAsync<NotSupportedException>().WithMessage("*IN {ids}*");
+
+        // The IN-list spelling is the portable alternative and works on the same session.
+        var found = await session.QueryAsync<SqlWidget>(
+            $"SELECT id, name FROM sql_widgets WHERE id IN {new[] { id }}", Ct);
+        found.Should().ContainSingle().Which.Id.Should().Be(id);
+    }
+
+    [Fact]
     public async Task AddElarionSqlite_RegistersASession_AndTheMigrationFactory() {
         var services = new ServiceCollection();
         services.AddLogging();

@@ -54,6 +54,15 @@ public class SqlStatementBuildingBenchmarks {
         return sql.Text.Length + sql.ParameterValues.Count;
     }
 
+    // Array parameter — the same collection bound as ONE array value (= ANY(@p0)) instead of an IN list:
+    // one placeholder and one parameter value whatever the length, and the caller's array is bound by
+    // reference, so it must not cost more than the IN expansion.
+    [Benchmark]
+    public int ArrayParameter() {
+        var sql = new SqlStatement($"{SelectPrefix} WHERE device_id = ANY({SqlArray.Of(_ids)})");
+        return sql.Text.Length + sql.ParameterValues.Count;
+    }
+
     // The dynamic-WHERE gate: SqlWhere accumulation of 3 optional predicates, spliced into a query.
     // Build-path only; must stay a small constant per call (no per-row cost).
     [Benchmark]
