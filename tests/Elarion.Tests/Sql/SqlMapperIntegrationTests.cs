@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using Elarion.Abstractions.Serialization;
 using Elarion.Sql;
+using Elarion.Sql.PostgreSql;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
@@ -99,6 +100,64 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
             Ct);
 
         read.Select(i => i.Id).Should().BeEquivalentTo(wanted);
+    }
+
+    [Fact]
+    public async Task Interpolation_SqlArray_BindsOneArrayParameterForAny() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+
+        var items = await InsertItemsAsync(10);
+        var wanted = items.Take(3).Select(i => i.Id).ToArray();
+
+        await using var connection = fixture.CreateConnection();
+        var db = connection.AsSqlSession();
+        var read = await db.QueryAsync(
+            Mapper,
+            $"{SqlItem.Select} WHERE id = ANY({SqlArray.Of(wanted)})",
+            Ct);
+
+        read.Select(i => i.Id).Should().BeEquivalentTo(wanted);
+    }
+
+    [Fact]
+    public async Task Interpolation_SqlArray_BindsThroughTheProviderRegistration() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+
+        // AddElarionPostgreSql builds its source with the slim builder, which omits array mappings unless they
+        // are enabled — this pins that the registration enables them.
+        var items = await InsertItemsAsync(6);
+        var sequences = items.Where(i => i.Quantity % 2 == 1).Select(i => i.Sequence).ToList();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddElarionPostgreSql(fixture.ConnectionString);
+        services.AddElarionSqlSession();
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ISqlSession>();
+
+        var matched = await db.QueryAsync(
+            Mapper, $"{SqlItem.Select} WHERE sequence = ANY({SqlArray.Of(sequences)})", Ct);
+        var excluded = await db.ExecuteScalarAsync<long>(
+            $"SELECT count(*) FROM sql_items WHERE sequence <> ALL({SqlArray.Of(sequences)})", Ct);
+
+        matched.Select(i => i.Sequence).Should().BeEquivalentTo(sequences);
+        excluded.Should().Be(items.Count - sequences.Count);
+    }
+
+    [Fact]
+    public async Task Interpolation_SqlArray_EmptyArrayKeepsAnyAndAllCorrect() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+
+        var items = await InsertItemsAsync(4);
+        var none = SqlArray.Of(Array.Empty<Guid>());
+
+        await using var connection = fixture.CreateConnection();
+        var db = connection.AsSqlSession();
+        var any = await db.ExecuteScalarAsync<long>($"SELECT count(*) FROM sql_items WHERE id = ANY({none})", Ct);
+        var all = await db.ExecuteScalarAsync<long>($"SELECT count(*) FROM sql_items WHERE id <> ALL({none})", Ct);
+
+        any.Should().Be(0);
+        all.Should().Be(items.Count);
     }
 
     [Fact]

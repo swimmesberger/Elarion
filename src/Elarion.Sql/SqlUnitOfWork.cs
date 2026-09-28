@@ -69,7 +69,7 @@ internal sealed class SqlUnitOfWork(SqlSession session) : IUnitOfWork {
     // The SQL tier takes no Npgsql dependency, so detect PostgreSQL structurally by the ADO.NET provider's
     // connection type. Non-Npgsql providers skip lock_timeout (they have no equivalent transaction-scoped knob).
     private static bool IsPostgres(DbConnection connection) {
-        return connection.GetType().FullName?.StartsWith("Npgsql.", StringComparison.Ordinal) == true;
+        return SqlProviderDetection.IsNpgsql(connection);
     }
 
     private static async Task ApplyLockTimeoutAsync(

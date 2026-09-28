@@ -1,5 +1,7 @@
 using AwesomeAssertions;
 using Elarion.Sql;
+using Microsoft.Data.Sqlite;
+using Npgsql;
 using Xunit;
 
 namespace Elarion.Tests.SqlMapping;
@@ -207,5 +209,105 @@ public sealed class SqlTests {
 
         page.Text.Should().Be("SELECT * FROM t WHERE (status = @p0) LIMIT @p1");
         count.Text.Should().Be("SELECT count(*) FROM t WHERE (status = @p0)");
+    }
+
+    [Fact]
+    public void SqlArray_BindsTheWholeCollectionAsOneParameter() {
+        long[] ids = [1, 2, 3];
+
+        var sql = new SqlStatement($"SELECT * FROM orders WHERE id = ANY({SqlArray.Of(ids)}) AND status = {"open"}");
+
+        sql.Text.Should().Be("SELECT * FROM orders WHERE id = ANY(@p0) AND status = @p1");
+        sql.ParameterValues.Should().HaveCount(2);
+        // An existing array is bound by reference, not copied.
+        sql.ParameterValues[0].Should().BeSameAs(ids);
+        sql.ParameterValues[1].Should().Be("open");
+    }
+
+    [Fact]
+    public void SqlArray_MaterializesASequenceIntoATypedArray() {
+        var names = new List<string> { "a", "b" };
+
+        var sql = new SqlStatement($"SELECT * FROM t WHERE name <> ALL({SqlArray.Of(names)})");
+
+        sql.Text.Should().Be("SELECT * FROM t WHERE name <> ALL(@p0)");
+        sql.ParameterValues[0].Should().BeOfType<string[]>().Which.Should().Equal("a", "b");
+    }
+
+    [Fact]
+    public void SqlArray_EmptyArrayBindsInsteadOfFailing() {
+        // Unlike an empty IN list, an empty array keeps both = ANY (matches nothing) and <> ALL (matches
+        // everything) correct, so it binds.
+        var sql = new SqlStatement($"SELECT * FROM t WHERE id = ANY({SqlArray.Of(Array.Empty<Guid>())})");
+
+        sql.Text.Should().Be("SELECT * FROM t WHERE id = ANY(@p0)");
+        sql.ParameterValues[0].Should().BeOfType<Guid[]>().Which.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SqlArray_HiddenBehindObject_StillBindsAsOneParameter() {
+        object wrapped = SqlArray.Of(new[] { 7, 8 });
+
+        var sql = new SqlStatement($"SELECT * FROM t WHERE id = ANY({wrapped})");
+
+        sql.Text.Should().Be("SELECT * FROM t WHERE id = ANY(@p0)");
+        sql.ParameterValues[0].Should().BeOfType<int[]>().Which.Should().Equal(7, 8);
+    }
+
+    [Fact]
+    public void SqlArray_InsideAFragment_RenumbersWithTheStatement() {
+        var predicate = new SqlStatement($"id = ANY({SqlArray.Of(new[] { 1L, 2L })})");
+        var where = new SqlWhere();
+        where.And($"status = {"open"}");
+        where.And(predicate);
+
+        var sql = new SqlStatement($"SELECT * FROM t {where}");
+
+        sql.Text.Should().Be("SELECT * FROM t WHERE (status = @p0) AND (id = ANY(@p1))");
+        sql.ParameterValues[1].Should().BeOfType<long[]>();
+    }
+
+    [Fact]
+    public void SqlArray_Default_FailsAtBuildTime() {
+        var sql = new SqlStatement($"SELECT * FROM t WHERE id = ANY({default(SqlArray)})");
+
+        var act = () => sql.Text;
+        act.Should().Throw<InvalidOperationException>().WithMessage("*SqlArray.Of*");
+    }
+
+    [Fact]
+    public void SqlArray_ByteElements_AreRejected() {
+        // A byte[] binds as a scalar binary value (bytea/BLOB), so a byte-element array would change meaning.
+        var act = () => SqlArray.Of(new byte[] { 1, 2 });
+        act.Should().Throw<ArgumentException>().WithMessage("*scalar binary value*");
+
+        var fromSequence = () => SqlArray.Of<byte>(new List<byte> { 1 });
+        fromSequence.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void SqlArray_AppliedToAnNpgsqlCommand_BindsOneArrayParameter() {
+        long[] ids = [4, 5];
+        var sql = new SqlStatement($"SELECT 1 WHERE 4 = ANY({SqlArray.Of(ids)})");
+        using var command = new NpgsqlCommand();
+
+        sql.ApplyTo(command);
+
+        command.CommandText.Should().Be("SELECT 1 WHERE 4 = ANY(@p0)");
+        command.Parameters.Count.Should().Be(1);
+        command.Parameters[0].Value.Should().BeSameAs(ids);
+    }
+
+    [Fact]
+    public void SqlArray_AppliedToAProviderWithoutArrays_FailsWithAnActionableMessage() {
+        var sql = new SqlStatement($"SELECT 1 WHERE 4 = ANY({SqlArray.Of(new[] { 4L })})");
+        using var command = new SqliteCommand();
+
+        var act = () => sql.ApplyTo(command);
+
+        act.Should().Throw<NotSupportedException>()
+            .WithMessage("*SqlArray*Microsoft.Data.Sqlite.SqliteCommand*IN {ids}*");
+        command.Parameters.Count.Should().Be(0);
+        command.CommandText.Should().BeEmpty();
     }
 }

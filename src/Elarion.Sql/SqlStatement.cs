@@ -18,6 +18,9 @@ namespace Elarion.Sql;
 /// <item>A collection (except <see cref="string"/> and <see cref="T:byte[]"/>) expands to a
 /// parenthesized parameter list for <c>IN</c>; an empty collection throws at build time (no SQL
 /// spelling keeps both <c>IN</c> and <c>NOT IN</c> correct for the empty set — guard the query).</item>
+/// <item>A <see cref="SqlArray"/> (<c>{SqlArray.Of(ids)}</c>) binds the whole collection as <b>one</b>
+/// array-valued parameter, for SQL that expects an array value such as <c>= ANY(…)</c>; it needs a provider
+/// with array parameters (PostgreSQL) and fails at bind time on any other.</item>
 /// <item>A nested <see cref="SqlStatement"/> value splices as a fragment — a reusable <c>WHERE</c> piece is
 /// just a value; parameters are renumbered on composition. A pure-literal fragment (from
 /// <see cref="Verbatim"/> or a generated <c>Table</c>/<c>Select</c>) inlines with no recursion.</item>
@@ -95,10 +98,22 @@ public sealed class SqlStatement {
     }
 
     /// <summary>Sets <see cref="Text"/> as the command text and adds one parameter per value.</summary>
+    /// <exception cref="NotSupportedException">The statement binds a <see cref="SqlArray"/> and
+    /// <paramref name="command"/>'s provider has no array parameters.</exception>
     public void ApplyTo(DbCommand command) {
         Materialize();
-        command.CommandText = _text!;
         var values = _parameterValues!;
+        // An array value other than byte[] can only come from a SqlArray (or from expanding a collection OF
+        // arrays), and binds as an array parameter either way. A type test per value finds it without widening
+        // every statement by a flag field, and the provider check runs before the command is touched.
+        foreach (var value in values) {
+            if (value is not Array || value is byte[]) continue;
+
+            SqlProviderDetection.ThrowIfArrayParametersUnsupported(command);
+            break;
+        }
+
+        command.CommandText = _text!;
         for (var i = 0; i < values.Count; i++) {
             var parameter = command.CreateParameter();
             parameter.ParameterName = ParameterName(i);
@@ -187,6 +202,12 @@ public sealed class SqlStatement {
                     break;
                 case SqlSegmentKind.Expansion:
                     AppendExpansion(builder, values, (IEnumerable)segment.Value!);
+                    break;
+                case SqlSegmentKind.Array:
+                    // default(SqlArray) is the only way to get here without values; binding it as NULL would
+                    // silently match nothing, so it fails with the other build-time guards.
+                    AppendParameter(builder, values, segment.Value ?? throw new InvalidOperationException(
+                        "default(SqlArray) carries no values — create the array parameter with SqlArray.Of(…)."));
                     break;
                 case SqlSegmentKind.Fragment:
                     ((SqlStatement)segment.Value!).AppendTo(builder, values);

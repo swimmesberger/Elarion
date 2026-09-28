@@ -14,6 +14,12 @@ internal enum SqlSegmentKind : byte {
     /// </summary>
     Expansion,
 
+    /// <summary>
+    /// A <see cref="SqlArray"/>: the whole collection bound as one array-valued <c>@pN</c> parameter, for SQL
+    /// that expects an array value (<c>= ANY(…)</c>) rather than an <c>IN</c> list.
+    /// </summary>
+    Array,
+
     /// <summary>A nested <see cref="SqlStatement"/> fragment, spliced with its parameters renumbered.</summary>
     Fragment
 }
@@ -34,6 +40,10 @@ internal readonly struct SqlSegment(SqlSegmentKind kind, string? literal, object
 
     internal static SqlSegment OfExpansion(object value) {
         return new SqlSegment(SqlSegmentKind.Expansion, null, value);
+    }
+
+    internal static SqlSegment OfArray(System.Array? values) {
+        return new SqlSegment(SqlSegmentKind.Array, null, values);
     }
 
     internal static SqlSegment OfFragment(SqlStatement fragment) {
