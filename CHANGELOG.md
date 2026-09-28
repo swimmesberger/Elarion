@@ -8,6 +8,20 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **SQL array parameters (ADR-0077).** `SqlArray.Of(collection)` binds a collection as **one** array-valued
+  parameter instead of the `IN`-list expansion a collection hole gets: `WHERE id = ANY({SqlArray.Of(ids)})`
+  renders `= ANY(@p0)` with a typed `T[]` value — one parameter and one cached plan whatever the length, and an
+  empty array keeps both `= ANY` and `<> ALL` correct. PostgreSQL binds it as the matching array type
+  (`AddElarionPostgreSql` now enables the slim builder's array mappings); every other provider fails with
+  `NotSupportedException` when the statement is bound, before anything executes, naming the `IN {collection}`
+  alternative. The wrapper is a value type and statements without arrays allocate exactly as before
+  (`SqlStatementBuildingBenchmarks.ArrayParameter`).
+- **`ELSQL012` analyzer warning.** A collection interpolated where the SQL expects an array value — inside
+  `ANY(`/`ALL(`/`SOME(` or next to `@>`, `<@`, `&&` — is reported at build time instead of failing in the
+  database at run time; the message names both `IN {collection}` and `SqlArray.Of(…)`. Under
+  `TreatWarningsAsErrors` this fails the build for existing statements with that mistake.
+
 ## [0.2.7] - 2026-09-25
 
 ### Changed

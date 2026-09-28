@@ -123,11 +123,44 @@ var page = await db.QueryAsync<Order>($"{Order.Select} {where} LIMIT {limit}", c
 - A **collection** hole expands to a parenthesized parameter list for `IN`. An **empty** collection
   throws at build time: no SQL spelling keeps both `IN` (match nothing) and `NOT IN` (match
   everything) correct for the empty set, so guard the query instead of shipping silently wrong rows.
+- A **`SqlArray`** hole binds a whole collection as **one** array parameter — see
+  [Array parameters](#array-parameters).
 - A **`SqlStatement`** hole splices as a fragment with its parameters renumbered — a reusable `WHERE`
   piece is just a value. A pure-literal fragment (`Verbatim`, `Order.Select`) inlines with no cost.
 - Trusted identifiers (a validated sort column) splice via **`SqlStatement.Verbatim(col)`** — never a
   raw `string`. There is no `:raw` format and no `SqlStatement(string)` constructor: a plain string
   interpolated into a query always binds as a parameter, so injection is structurally impossible.
+
+### Array parameters
+
+Where SQL expects a single **array value** rather than a list — PostgreSQL's `= ANY(…)`, `<> ALL(…)`,
+and the array operators `@>`, `<@`, `&&` — wrap the collection in `SqlArray.Of(…)`:
+
+```csharp
+long[] ids = [1, 2, 3];
+var orders = await db.QueryAsync<Order>($"{Order.Select} WHERE id = ANY({SqlArray.Of(ids)})", ct);
+// renders … WHERE id = ANY(@p0)   with @p0 = bigint[] {1, 2, 3}
+```
+
+The statement carries one parameter whatever the length (one cached plan), and an empty array is
+valid: `= ANY` matches nothing and `<> ALL` matches everything, both correct for the empty set. An
+existing `T[]` is bound by reference — leave it unmodified until the statement has executed; any other
+sequence is copied once when wrapped. `byte` elements are rejected, since a `byte[]` always binds as a
+scalar binary value.
+
+<Callout type="warn">
+  A bare collection in an array position — `WHERE id = ANY({ids})` — expands to an `IN` list and
+  renders `= ANY((@p0, @p1, @p2))`, which PostgreSQL rejects at run time (*op ANY/ALL (array) requires
+  array on right side*). The `ELSQL012` analyzer reports it at build time; write `IN {ids}` or
+  `ANY({SqlArray.Of(ids)})`.
+</Callout>
+
+Array parameters need a provider with array types. PostgreSQL binds the matching array type
+(`long[]` → `bigint[]`, `Guid[]` → `uuid[]`, …); `AddElarionPostgreSql(connectionString)` enables the
+array mappings its slim data-source builder leaves out, and a host that passes its own
+`NpgsqlSlimDataSourceBuilder`-built source calls `EnableArrays()` itself. Every other provider (SQLite
+included) fails with `NotSupportedException` when the statement is bound, before anything executes —
+use `IN {collection}` there.
 
 ### Optional filters without a query DSL
 

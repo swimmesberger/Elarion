@@ -97,3 +97,4 @@ designs that are not yet implemented.
 - [ADR-0074: Reactive client capabilities — stores over values, with the registry left pure](0074-reactive-client-capabilities.md)
 - [ADR-0075: Ambient tenant scoping — a model-level filter and a write-time stamp, not a per-call-site rule](0075-ambient-tenant-scoping.md)
 - [ADR-0076: Web Push is a framework package — native crypto, a fail-closed endpoint allow-list, and a pluggable browser transport](0076-web-push.md)
+- [ADR-0077: SQL array parameters are an explicit wrapper, backed by a build-time diagnostic](0077-sql-array-parameters.md)
