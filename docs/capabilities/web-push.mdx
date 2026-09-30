@@ -91,9 +91,11 @@ trigger (an integration event through the outbox, a job) so the retry is yours.
 
 Message fields map onto the protocol:
 
-- `Tag` replaces rather than stacks: the browser replaces a displayed notification with the same tag, and the
-  tag is also sent as the RFC 8030 `Topic`, so the push service replaces an undelivered one too. A tag longer
-  than 32 URL-safe characters is hashed into a stable topic.
+- `Tag` replaces rather than stacks: the browser replaces a displayed notification with the same tag. It is
+  deliberately **not** sent as the RFC 8030 `Topic` header — Apple's push service (`web.push.apple.com`)
+  rejects every request that carries one with `400 BadWebPushTopic`, whatever its value — so the push service
+  keeps each undelivered message, and a device coming back online receives them in turn, each replacing the
+  last. Keep `TimeToLive` short for messages that go stale.
 - `Urgency` (`VeryLow` … `High`) tells the device how urgently to wake up. `High` costs battery; reserve it.
 - `TimeToLive` is how long the push service holds the message for an offline device; it defaults to
   `options.DefaultTimeToLive` (one day). `TimeSpan.Zero` means "now or never".

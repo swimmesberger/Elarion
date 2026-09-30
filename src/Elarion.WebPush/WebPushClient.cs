@@ -3,7 +3,6 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Extensions.Logging;
 
 namespace Elarion.WebPush;
@@ -30,8 +29,6 @@ internal sealed class WebPushClient(
     VapidTokenFactory tokenFactory,
     WebPushOptions options,
     ILogger<WebPushClient> logger) {
-    private const int TopicMaxLength = 32;
-
     public async ValueTask<WebPushDeliveryStatus> SendAsync(
         PushSubscription subscription, ReadOnlyMemory<byte> payload, WebPushMessage message,
         CancellationToken cancellationToken) {
@@ -64,7 +61,9 @@ internal sealed class WebPushClient(
         request.Headers.TryAddWithoutValidation("TTL",
             ((long)Math.Max(0, timeToLive.TotalSeconds)).ToString(CultureInfo.InvariantCulture));
         request.Headers.TryAddWithoutValidation("Urgency", FormatUrgency(message.Urgency));
-        if (message.Tag is { Length: > 0 } tag) request.Headers.TryAddWithoutValidation("Topic", ToTopic(tag));
+        // No RFC 8030 Topic header, even for a tagged message: Apple's push service rejects every request
+        // that carries one (400 BadWebPushTopic), whatever its value. The tag travels in the payload, where
+        // the browser still replaces a displayed notification with the same tag.
         request.Content = new ByteArrayContent(body);
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         request.Content.Headers.ContentEncoding.Add("aes128gcm");
@@ -100,18 +99,5 @@ internal sealed class WebPushClient(
             WebPushUrgency.High => "high",
             _ => "normal"
         };
-    }
-
-    /// <summary>
-    /// RFC 8030 §5.4 limits a topic to 32 URL-safe base64 characters. A conforming tag passes through
-    /// unchanged; any other tag is hashed, which keeps equal tags equal (the property replacement needs).
-    /// </summary>
-    internal static string ToTopic(string tag) {
-        if (tag.Length <= TopicMaxLength && tag.All(IsUrlSafeBase64Char)) return tag;
-        return Base64Url.EncodeToString(SHA256.HashData(Encoding.UTF8.GetBytes(tag)))[..TopicMaxLength];
-    }
-
-    private static bool IsUrlSafeBase64Char(char c) {
-        return char.IsAsciiLetterOrDigit(c) || c is '-' or '_';
     }
 }

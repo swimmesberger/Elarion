@@ -8,6 +8,14 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **Web Push reaches Apple devices with a tag.** `WebPushMessage.Tag` was also sent as the RFC 8030 `Topic`
+  header, and Apple's push service (`web.push.apple.com`) rejects every request that carries one with
+  `400 BadWebPushTopic` — so every tagged message to Safari or an iOS home-screen app counted as `Failed` and
+  never arrived. The header is no longer sent; the tag still travels in the payload and replaces a displayed
+  notification on the device. A device that was offline may now receive each queued message instead of only
+  the latest, each replacing the last as it is shown.
+
 ### Added
 - **SQL array parameters (ADR-0077).** `SqlArray.Of(collection)` binds a collection as **one** array-valued
   parameter instead of the `IN`-list expansion a collection hole gets: `WHERE id = ANY({SqlArray.Of(ids)})`
