@@ -9,6 +9,14 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Changed
+- **The EF Web Push subscription store joins the caller's unit of work.** `EfCorePushSubscriptionStore` is now
+  scoped over the caller's `TDbContext` instead of a singleton that opened its own scope and connection per
+  operation. A subscribe, unsubscribe, or dead-subscription cleanup inside a command now commits or rolls back
+  with it — and on SQLite no longer waits for the command's write lock until `database is locked`. The sender
+  removes dead subscriptions after the parallel fan-out, sequentially, since a context allows one operation at a
+  time. `AddElarionWebPushEntityFrameworkCore` also resolves the VAPID key pair at host start (a hosted service),
+  so its first-use insert never runs inside a request. A singleton that injected `IPushSubscriptionStore` must
+  resolve it from a scope now.
 - **Web Push logs why a push service refused a message.** The delivery warning for a refusal now carries the
   service's reason from the response body (Apple's `{"reason":"BadDeviceToken"}`, FCM's sentence) instead of
   only the status code — capped at 256 characters and flattened to one line.

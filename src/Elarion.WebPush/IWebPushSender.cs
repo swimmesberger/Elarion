@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Elarion.Abstractions.Identity;
@@ -32,7 +33,10 @@ public interface IWebPushSender {
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>The default <see cref="IWebPushSender"/>: a bounded-concurrency fan-out over the subscription store.</summary>
+/// <summary>
+/// The default <see cref="IWebPushSender"/>: a bounded-concurrency fan-out over the subscription store. The store
+/// is only ever called sequentially — it may be the caller's own DbContext.
+/// </summary>
 internal sealed class WebPushSender(
     IPushSubscriptionStore store,
     WebPushClient client,
@@ -49,7 +53,8 @@ internal sealed class WebPushSender(
         var subscriptions = await store.ListByUsersAsync(userIds, cancellationToken).ConfigureAwait(false);
         if (subscriptions.Count == 0) return WebPushResult.Empty;
 
-        int delivered = 0, removed = 0, failed = 0;
+        int delivered = 0, failed = 0;
+        var dead = new ConcurrentQueue<string>();
         await Parallel.ForEachAsync(
                 subscriptions,
                 new ParallelOptions {
@@ -61,9 +66,7 @@ internal sealed class WebPushSender(
                             Interlocked.Increment(ref delivered);
                             break;
                         case WebPushDeliveryStatus.Dead:
-                            // By endpoint regardless of owner: a dead endpoint is dead for whoever holds it now.
-                            if (await store.RemoveAsync(subscription.Endpoint, cancellationToken: ct).ConfigureAwait(false))
-                                Interlocked.Increment(ref removed);
+                            dead.Enqueue(subscription.Endpoint);
                             break;
                         default:
                             Interlocked.Increment(ref failed);
@@ -71,6 +74,15 @@ internal sealed class WebPushSender(
                     }
                 })
             .ConfigureAwait(false);
+
+        // Only the HTTP calls run in parallel. The store may sit on the caller's DbContext, which allows one
+        // operation at a time, so the cleanup follows the fan-out, one removal after another. By endpoint
+        // regardless of owner: a dead endpoint is dead for whoever holds it now.
+        var removed = 0;
+        foreach (var endpoint in dead) {
+            if (await store.RemoveAsync(endpoint, cancellationToken: cancellationToken).ConfigureAwait(false))
+                removed++;
+        }
 
         return new WebPushResult {
             Attempted = subscriptions.Count, Delivered = delivered, Removed = removed, Failed = failed

@@ -73,6 +73,18 @@ use a generated candidate is inserted with `ON CONFLICT DO NOTHING` and read bac
 one pair without a lock. The in-memory default loses the pair on restart, which is acceptable only because the
 in-memory subscription store loses the subscriptions with it.
 
+*Amended — which connection the EF stores write on.* The stores were first singletons that opened a fresh DI
+scope per operation, so neither a subscribe nor the mid-send cleanup would join a caller's unit of work. That
+was wrong in two ways. On PostgreSQL a subscribe inside a command committed even when the command rolled back.
+On SQLite it could not work at all: a command's transaction holds the database's single write lock, and the
+store's write on a second connection waited for it until the busy timeout. The subscription store is now scoped
+over the caller's context: its statements run on that connection, inside the unit of work when there is one.
+Losing a cleanup to a rolled-back command costs nothing — the endpoint is found dead again on the next send —
+and because the context takes one operation at a time, the sender removes dead subscriptions after the fan-out,
+one after another. The key store keeps its own scope on purpose: the provider caches the pair for the process,
+so it must be committed independently of any caller. The EF registration resolves it at host start, so its
+first-use insert never runs inside a request either.
+
 ### Subscriptions belong to the current user; authorization stays the host's
 
 `WebPushSubscriptionService` binds subscriptions to `ICurrentUser`, returns ordinary `Result`/`AppError`

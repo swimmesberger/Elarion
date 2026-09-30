@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Elarion.WebPush.EntityFrameworkCore;
 
@@ -10,12 +9,20 @@ namespace Elarion.WebPush.EntityFrameworkCore;
 /// <see cref="PushSubscriptionEntity"/> via <c>UseElarionWebPush</c>.
 /// </summary>
 /// <remarks>
-/// A singleton that opens a fresh DI scope per operation: subscribes arrive from endpoints and handlers, and
-/// the dead-subscription cleanup runs in the middle of a fan-out, neither of which should join a caller's
-/// unit of work. Writes are change-tracker-free — the upsert is one <c>INSERT … ON CONFLICT (endpoint) DO
-/// UPDATE</c>, removal an <c>ExecuteDelete</c>.
+/// <para>
+/// Scoped, and it works on the caller's own context: every statement runs on that context's connection, so
+/// inside a unit of work (a command handler) a subscribe, an unsubscribe or a dead-subscription cleanup joins
+/// the transaction and commits or rolls back with the caller's other writes; outside one it commits on its
+/// own. A second connection would not just break that atomicity — on SQLite, whose single write lock the
+/// caller's open transaction already holds, its write would wait for that lock until the busy timeout.
+/// </para>
+/// <para>
+/// Writes are change-tracker-free — the upsert is one <c>INSERT … ON CONFLICT (endpoint) DO UPDATE</c>, removal
+/// an <c>ExecuteDelete</c> — so they neither flush nor disturb what the caller has tracked. Like the context,
+/// the store is not safe for concurrent use; the sender calls it sequentially.
+/// </para>
 /// </remarks>
-public sealed class EfCorePushSubscriptionStore<TDbContext>(IServiceScopeFactory scopeFactory) : IPushSubscriptionStore
+public sealed class EfCorePushSubscriptionStore<TDbContext>(TDbContext dbContext) : IPushSubscriptionStore
     where TDbContext : DbContext {
     // Provider- and schema-specific (delimited identifiers, resolved column names), so built once per model.
     private static readonly ConcurrentDictionary<IModel, string> UpsertSqlCache = new();
@@ -23,8 +30,6 @@ public sealed class EfCorePushSubscriptionStore<TDbContext>(IServiceScopeFactory
     /// <inheritdoc />
     public async ValueTask UpsertAsync(PushSubscription subscription, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(subscription);
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
         var sql = UpsertSqlCache.GetOrAdd(
             dbContext.Model,
             static (_, context) => WebPushEntitySql.BuildSubscriptionUpsertSql(context),
@@ -45,8 +50,6 @@ public sealed class EfCorePushSubscriptionStore<TDbContext>(IServiceScopeFactory
     public async ValueTask<bool> RemoveAsync(string endpoint, string? userId = null,
         CancellationToken cancellationToken = default) {
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
         var query = dbContext.Set<PushSubscriptionEntity>().Where(entity => entity.Endpoint == endpoint);
         if (userId is not null) query = query.Where(entity => entity.UserId == userId);
         return await query.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false) > 0;
@@ -58,8 +61,6 @@ public sealed class EfCorePushSubscriptionStore<TDbContext>(IServiceScopeFactory
         ArgumentNullException.ThrowIfNull(userIds);
         if (userIds.Count == 0) return [];
         var owners = userIds.Distinct(StringComparer.Ordinal).ToList();
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
         return await dbContext.Set<PushSubscriptionEntity>()
             .AsNoTracking()
             .Where(entity => owners.Contains(entity.UserId))

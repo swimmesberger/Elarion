@@ -10,8 +10,17 @@ namespace Elarion.WebPush.EntityFrameworkCore;
 /// <see cref="VapidKeyEntity"/> via <c>UseElarionWebPush</c>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The first-use race is settled by the primary key: every node inserts its candidate with
 /// <c>ON CONFLICT DO NOTHING</c> and then reads the row back, so all of them adopt the single winner.
+/// </para>
+/// <para>
+/// Unlike the subscription store, a singleton on its own DI scope, deliberately outside any caller's unit of
+/// work: the provider caches the pair for the life of the process, so it must be stored for good before it is
+/// used — a caller's rollback must never un-store a key that browsers already subscribed against. To keep that
+/// first write away from callers entirely (on SQLite it would wait for a caller's write lock), the pair is
+/// resolved when the host starts; see <c>AddElarionWebPushEntityFrameworkCore</c>.
+/// </para>
 /// </remarks>
 public sealed class EfCoreVapidKeyStore<TDbContext>(
     IServiceScopeFactory scopeFactory,

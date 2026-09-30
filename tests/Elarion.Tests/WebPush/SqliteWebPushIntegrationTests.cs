@@ -18,7 +18,8 @@ public sealed class SqliteWebPushFixture : IAsyncLifetime, IWebPushStoreFixture<
         Path.GetTempPath(), "elarion_sqlite_webpush_" + Guid.CreateVersion7().ToString("N") + ".db");
 
     public string ConnectionString =>
-        new SqliteConnectionStringBuilder { DataSource = _path, Pooling = false }.ConnectionString;
+        // A short busy timeout: a write that waits for another connection's lock fails fast instead of hanging.
+        new SqliteConnectionStringBuilder { DataSource = _path, Pooling = false, DefaultTimeout = 2 }.ConnectionString;
 
     public bool IsAvailable => true;
 
@@ -75,8 +76,8 @@ public sealed class SqliteWebPushIntegrationTests(SqliteWebPushFixture fixture)
         using var subscriber = new TestPushSubscriber(NewEndpoint());
         var seen = new DateTimeOffset(2026, 9, 30, 19, 0, 0, TimeSpan.Zero);
 
-        await provider.GetRequiredService<IPushSubscriptionStore>()
-            .UpsertAsync(subscriber.ToSubscription(user) with { CreatedAt = seen, LastSeenAt = seen }, TestToken);
+        await using (var scope = provider.CreateAsyncScope())
+            await scope.ServiceProvider.GetRequiredService<IPushSubscriptionStore>().UpsertAsync(subscriber.ToSubscription(user) with { CreatedAt = seen, LastSeenAt = seen }, TestToken);
 
         // What the column literally holds: the converter's integer, not the provider's default text.
         await using var connection = new SqliteConnection(fixture.ConnectionString);
