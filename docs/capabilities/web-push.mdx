@@ -15,7 +15,7 @@ store, the send loop with cleanup, the subscribe endpoints, and the browser and 
 | Package | Role |
 | --- | --- |
 | `Elarion.WebPush` | `IWebPushSender`, `WebPushSubscriptionService`, VAPID keys, the store seams, in-memory defaults. |
-| `Elarion.WebPush.EntityFrameworkCore` | Durable `elarion_push_subscriptions` and `elarion_vapid_keys` tables (PostgreSQL). |
+| `Elarion.WebPush.EntityFrameworkCore` | Durable `elarion_push_subscriptions` and `elarion_vapid_keys` tables (PostgreSQL or SQLite). |
 | `Elarion.WebPush.AspNetCore` | `MapElarionWebPush()` — the public-key/subscribe/unsubscribe endpoints. |
 | `@swimmesberger/elarion-webpush` | Availability detection, permission and subscription helpers, and the service-worker module. |
 
@@ -34,6 +34,11 @@ builder.Services.AddElarionWebPushEntityFrameworkCore<AppDbContext>(options =>
 
 app.MapElarionWebPush().RequireAuthorization();    // GET public-key, POST subscribe/unsubscribe under /webpush
 ```
+
+The EF stores write with `INSERT … ON CONFLICT` statements, which run on **PostgreSQL** and **SQLite** (3.24+).
+Their parameters are created from the model's own type mappings, so a context-wide value converter applies to
+them as it does to a tracked insert — a SQLite application that stores `DateTimeOffset` as a sortable integer
+keeps doing so. Another provider implements `IPushSubscriptionStore` and `IVapidKeyStore` itself.
 
 `AddElarionWebPush(...)` alone registers the same services over **in-memory** stores — fine for tests and a
 single-node demo, but both the subscriptions and the key pair vanish on restart.

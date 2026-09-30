@@ -77,7 +77,7 @@ no provider.
 | `Elarion.ClientEvents.PostgreSql` | Client-event hints must fan out across roughly 1–10 nodes over PostgreSQL `LISTEN/NOTIFY`. |
 | `Elarion.ClientEvents.AspNetCore` | Client events should stream to browsers over authorized Server-Sent Events. |
 | `Elarion.WebPush` | Users should be notified while the app is closed: Web Push (VAPID) delivery to their browsers/PWAs with dead-subscription cleanup, a subscription-store seam, and an in-memory default. |
-| `Elarion.WebPush.EntityFrameworkCore` | Push subscriptions and the VAPID key pair need durable EF/PostgreSQL tables. |
+| `Elarion.WebPush.EntityFrameworkCore` | Push subscriptions and the VAPID key pair need durable EF tables (PostgreSQL or SQLite). |
 | `Elarion.WebPush.AspNetCore` | The browser package's default transport should call `MapElarionWebPush` endpoints rather than application handlers. |
 
 See [events and messaging](/docs/capabilities/events) for domain events, integration events, outbox,

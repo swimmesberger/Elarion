@@ -35,11 +35,12 @@ public sealed class EfCoreVapidKeyStore<TDbContext>(
             dbContext.Model,
             static (_, context) => WebPushEntitySql.BuildVapidKeyInsertSql(context),
             dbContext);
-        await dbContext.Database.ExecuteSqlRawAsync(
-                sql,
-                [VapidKeyEntity.DefaultName, candidate.PublicKey, candidate.PrivateKey, timeProvider.GetUtcNow()],
-                cancellationToken)
-            .ConfigureAwait(false);
+        var parameters = WebPushEntitySql.Parameters(dbContext, typeof(VapidKeyEntity),
+            (nameof(VapidKeyEntity.Name), VapidKeyEntity.DefaultName),
+            (nameof(VapidKeyEntity.PublicKey), candidate.PublicKey),
+            (nameof(VapidKeyEntity.PrivateKey), candidate.PrivateKey),
+            (nameof(VapidKeyEntity.CreatedOnUtc), timeProvider.GetUtcNow()));
+        await dbContext.Database.ExecuteSqlRawAsync(sql, parameters, cancellationToken).ConfigureAwait(false);
         return await ReadAsync(dbContext, cancellationToken).ConfigureAwait(false)
                ?? throw new InvalidOperationException("The VAPID key row vanished right after it was inserted.");
     }

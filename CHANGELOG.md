@@ -9,6 +9,11 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Fixed
+- **Web Push EF stores honor value converters and run on SQLite.** The subscription upsert and the VAPID key
+  insert are raw statements, and their parameters were plain CLR values — so a model-wide value converter was
+  skipped (a context storing `DateTimeOffset` as an integer got text in those columns, which it could not read
+  back), and a null could not be typed. The parameters are now created from each column's own type mapping.
+  The same statements run on SQLite (3.24+), which the store tests now exercise alongside PostgreSQL.
 - **Web Push reaches Apple devices with a tag.** `WebPushMessage.Tag` was also sent as the RFC 8030 `Topic`
   header, and Apple's push service (`web.push.apple.com`) rejects every request that carries one with
   `400 BadWebPushTopic` — so every tagged message to Safari or an iOS home-screen app counted as `Failed` and

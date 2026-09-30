@@ -29,18 +29,16 @@ public sealed class EfCorePushSubscriptionStore<TDbContext>(IServiceScopeFactory
             dbContext.Model,
             static (_, context) => WebPushEntitySql.BuildSubscriptionUpsertSql(context),
             dbContext);
-        await dbContext.Database.ExecuteSqlRawAsync(sql, [
-                Guid.CreateVersion7(),
-                subscription.Endpoint,
-                subscription.P256dh,
-                subscription.Auth,
-                subscription.UserId,
-                // Never null: raw SQL cannot type a null parameter, so the statement maps "" to NULL itself.
-                subscription.UserAgent ?? "",
-                subscription.CreatedAt,
-                subscription.LastSeenAt
-            ], cancellationToken)
-            .ConfigureAwait(false);
+        var parameters = WebPushEntitySql.Parameters(dbContext, typeof(PushSubscriptionEntity),
+            (nameof(PushSubscriptionEntity.Id), Guid.CreateVersion7()),
+            (nameof(PushSubscriptionEntity.Endpoint), subscription.Endpoint),
+            (nameof(PushSubscriptionEntity.P256dh), subscription.P256dh),
+            (nameof(PushSubscriptionEntity.Auth), subscription.Auth),
+            (nameof(PushSubscriptionEntity.UserId), subscription.UserId),
+            (nameof(PushSubscriptionEntity.UserAgent), string.IsNullOrEmpty(subscription.UserAgent) ? null : subscription.UserAgent),
+            (nameof(PushSubscriptionEntity.CreatedOnUtc), subscription.CreatedAt),
+            (nameof(PushSubscriptionEntity.LastSeenOnUtc), subscription.LastSeenAt));
+        await dbContext.Database.ExecuteSqlRawAsync(sql, parameters, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
