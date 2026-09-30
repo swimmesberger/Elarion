@@ -5,6 +5,7 @@ using Elarion.Abstractions.Identity;
 using Elarion.Tests.Authorization;
 using Elarion.WebPush;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Elarion.Tests.WebPush;
@@ -12,6 +13,7 @@ namespace Elarion.Tests.WebPush;
 public sealed class WebPushSenderTests {
     private const string FcmEndpoint = "https://fcm.googleapis.com/fcm/send/device-1";
     private const string MozillaEndpoint = "https://updates.push.services.mozilla.com/wpush/v2/device-2";
+    private const string AppleEndpoint = "https://web.push.apple.com/device-3";
 
     private static readonly WebPushMessage Message = new() {
         Title = "Deploy failed", Body = "api@4f2c1e failed its health check.", Url = "/deploys/4f2c1e"
@@ -88,6 +90,35 @@ public sealed class WebPushSenderTests {
 
         result.Should().Be(new WebPushResult { Attempted = 1, Failed = 1 });
         (await store.ListByUsersAsync(["alice"], TestToken)).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Send_Refused_LogsThePushServicesReason() {
+        var pushService = new FakePushService();
+        pushService.Respond(AppleEndpoint, HttpStatusCode.BadRequest, "{\"reason\":\"BadDeviceToken\"}\n");
+        var log = new WarningCollector();
+        await using var provider = CreateProvider(pushService, log: log);
+        using var subscriber = new TestPushSubscriber(AppleEndpoint);
+        await provider.GetRequiredService<IPushSubscriptionStore>().UpsertAsync(subscriber.ToSubscription("alice"), TestToken);
+
+        await Send(provider, ["alice"], Message);
+
+        log.Warnings.Should().ContainSingle().Which.Should()
+            .Contain("400").And.Contain("{\"reason\":\"BadDeviceToken\"}").And.NotContain("\n");
+    }
+
+    [Fact]
+    public async Task Send_RefusedWithAnErrorPage_LogsOnlyTheStartOfIt() {
+        var pushService = new FakePushService();
+        pushService.Respond(FcmEndpoint, HttpStatusCode.BadRequest, "<html>" + new string('x', 10_000));
+        var log = new WarningCollector();
+        await using var provider = CreateProvider(pushService, log: log);
+        using var subscriber = new TestPushSubscriber(FcmEndpoint);
+        await provider.GetRequiredService<IPushSubscriptionStore>().UpsertAsync(subscriber.ToSubscription("alice"), TestToken);
+
+        await Send(provider, ["alice"], Message);
+
+        log.Warnings.Should().ContainSingle().Which.Length.Should().BeLessThan(WebPushClient.MaxReasonLength + 200);
     }
 
     [Fact]
@@ -183,9 +214,12 @@ public sealed class WebPushSenderTests {
         pushService.Requests.Should().BeEmpty();
     }
 
-    internal static ServiceProvider CreateProvider(FakePushService pushService, ICurrentUser? currentUser = null) {
+    internal static ServiceProvider CreateProvider(
+        FakePushService pushService, ICurrentUser? currentUser = null, ILoggerProvider? log = null) {
         var services = new ServiceCollection();
-        services.AddLogging();
+        services.AddLogging(builder => {
+            if (log is not null) builder.AddProvider(log);
+        });
         services.AddElarionWebPush(options => options.Subject = "mailto:ops@example.com");
         services.AddHttpClient(WebPushOptions.HttpClientName).ConfigurePrimaryHttpMessageHandler(pushService.CreateHandler);
         if (currentUser is not null) services.AddScoped(_ => currentUser);
