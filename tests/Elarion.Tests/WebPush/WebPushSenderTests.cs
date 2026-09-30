@@ -40,7 +40,8 @@ public sealed class WebPushSenderTests {
         request.Headers["Content-Encoding"].Should().Be("aes128gcm");
         request.Headers["TTL"].Should().Be("86400");
         request.Headers["Urgency"].Should().Be("high");
-        request.Headers["Topic"].Should().Be("deploy-4f2c1e");
+        // Apple's push service rejects any request with a Topic header; the tag belongs in the payload.
+        request.Headers.Should().NotContainKey("Topic");
         var publicKey = (await provider.GetRequiredService<IVapidKeyProvider>().GetAsync(TestToken)).PublicKey;
         request.Headers["Authorization"].Should().StartWith("vapid t=").And.EndWith($", k={publicKey}");
 
@@ -123,20 +124,20 @@ public sealed class WebPushSenderTests {
     }
 
     [Fact]
-    public async Task Send_LongTag_IsHashedIntoAValidStableTopic() {
+    public async Task Send_Tag_TravelsInThePayloadAndNeverAsATopicHeader() {
         var pushService = new FakePushService();
         await using var provider = CreateProvider(pushService);
         using var subscriber = new TestPushSubscriber(FcmEndpoint);
         await provider.GetRequiredService<IPushSubscriptionStore>().UpsertAsync(subscriber.ToSubscription("alice"), TestToken);
-        var tag = "workspace:42/starter feeding reminder (Sauerteig)";
+        var tag = "workspace:42/feeding reminder (not a valid RFC 8030 topic)";
 
         await Send(provider, ["alice"], Message with { Tag = tag, TimeToLive = TimeSpan.Zero });
-        await Send(provider, ["alice"], Message with { Tag = tag });
 
-        var topics = pushService.Requests.Select(request => request.Headers["Topic"]).ToArray();
-        topics[0].Should().MatchRegex("^[A-Za-z0-9_-]{32}$");
-        topics[1].Should().Be(topics[0]);
-        pushService.Requests.First().Headers["TTL"].Should().Be("0");
+        var request = pushService.Requests.Single();
+        request.Headers.Should().NotContainKey("Topic");
+        request.Headers["TTL"].Should().Be("0");
+        using var payload = JsonDocument.Parse(subscriber.Decrypt(request.Body));
+        payload.RootElement.GetProperty("tag").GetString().Should().Be(tag);
     }
 
     [Fact]

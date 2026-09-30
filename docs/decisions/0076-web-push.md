@@ -45,8 +45,14 @@ fan-out to a thousand FCM subscriptions signs once.
 429/5xx/timeouts/other rejections keep the subscription and count as failed; nothing is retried. A caller that
 must not lose a notification drives it from its own durable record (outbox consumer, job), which already has
 retry semantics — building a second retry queue into the sender would duplicate them. `WebPushMessage.Tag` is
-both the notification tag and the RFC 8030 `Topic` (hashed when it is not a valid topic), so "replace, don't
-stack" holds at the push service and on the device alike.
+the notification tag, so "replace, don't stack" holds on the device.
+
+*Amended:* the tag was first also sent as the RFC 8030 `Topic` (hashed when it was not a valid topic), so the
+push service would replace an undelivered message too. Apple's push service rejects every request carrying a
+`Topic` header (`400 BadWebPushTopic`, whatever the value), which made every tagged message undeliverable to
+Safari and iOS home-screen apps. Replacement at the push service only matters for a device that was offline,
+and the device-side tag already collapses what it then shows — so the header was dropped rather than sent
+per vendor.
 
 The fan-out is in-process with bounded concurrency. That covers the 1–10-node tier (ADR-0025); a
 mass-notification workload replaces the `IWebPushSender` seam with a dedicated provider rather than growing

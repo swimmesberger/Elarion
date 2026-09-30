@@ -30,10 +30,10 @@ public sealed record WebPushMessage {
     public string? Url { get; init; }
 
     /// <summary>
-    /// A replacement key. The browser replaces a displayed notification with the same tag, and the push
-    /// service replaces an undelivered message with the same tag (it is sent as the RFC 8030
-    /// <c>Topic</c> header — verbatim when it is at most 32 URL-safe base64 characters, otherwise as a
-    /// stable hash), so a burst of updates for one thing reaches the device as its latest state.
+    /// A replacement key: the browser replaces a displayed notification with the same tag, so a burst of
+    /// updates for one thing shows as its latest state. It travels in the payload only — never as the
+    /// RFC 8030 <c>Topic</c> header, which Apple's push service rejects — so a device that was offline may
+    /// still receive every queued message, each replacing the last as it is shown.
     /// </summary>
     public string? Tag { get; init; }
 
