@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Security.Cryptography;
 using Elarion.WebPush;
+using Microsoft.Extensions.Logging;
 
 namespace Elarion.Tests.WebPush;
 
@@ -99,8 +100,10 @@ internal sealed class FakePushService {
 
     public ConcurrentQueue<RecordedPushRequest> Requests { get; } = new();
 
-    public void Respond(string endpoint, HttpStatusCode status) {
-        _responses[endpoint] = () => new HttpResponseMessage(status);
+    public void Respond(string endpoint, HttpStatusCode status, string? body = null) {
+        _responses[endpoint] = () => new HttpResponseMessage(status) {
+            Content = body is null ? null : new StringContent(body)
+        };
     }
 
     public void Throw(string endpoint) {
@@ -123,6 +126,34 @@ internal sealed class FakePushService {
             return service._responses.TryGetValue(request.RequestUri!.ToString(), out var respond)
                 ? respond()
                 : new HttpResponseMessage(HttpStatusCode.Created);
+        }
+    }
+}
+
+/// <summary>Collects the formatted warnings every logger writes, for asserting what an operator would see.</summary>
+internal sealed class WarningCollector : ILoggerProvider {
+    public ConcurrentQueue<string> Warnings { get; } = new();
+
+    public ILogger CreateLogger(string categoryName) {
+        return new Collector(Warnings);
+    }
+
+    public void Dispose() {
+    }
+
+    private sealed class Collector(ConcurrentQueue<string> warnings) : ILogger {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel) {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) {
+            if (logLevel == LogLevel.Warning) warnings.Enqueue(formatter(state, exception));
         }
     }
 }

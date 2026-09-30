@@ -8,6 +8,11 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Changed
+- **Web Push logs why a push service refused a message.** The delivery warning for a refusal now carries the
+  service's reason from the response body (Apple's `{"reason":"BadDeviceToken"}`, FCM's sentence) instead of
+  only the status code — capped at 256 characters and flattened to one line.
+
 ### Fixed
 - **Web Push reaches Apple devices with a tag.** `WebPushMessage.Tag` was also sent as the RFC 8030 `Topic`
   header, and Apple's push service (`web.push.apple.com`) rejects every request that carries one with

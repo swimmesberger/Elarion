@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Extensions.Logging;
 
 namespace Elarion.WebPush;
@@ -29,6 +30,9 @@ internal sealed class WebPushClient(
     VapidTokenFactory tokenFactory,
     WebPushOptions options,
     ILogger<WebPushClient> logger) {
+    /// <summary>How much of a refusal's body goes into the log — enough for a reason, not for an error page.</summary>
+    internal const int MaxReasonLength = 256;
+
     public async ValueTask<WebPushDeliveryStatus> SendAsync(
         PushSubscription subscription, ReadOnlyMemory<byte> payload, WebPushMessage message,
         CancellationToken cancellationToken) {
@@ -79,8 +83,9 @@ internal sealed class WebPushClient(
                 return WebPushDeliveryStatus.Dead;
             }
 
-            logger.LogWarning("Web Push delivery to user {UserId} on {Host} failed with {StatusCode}.",
-                subscription.UserId, endpoint.Host, (int)response.StatusCode);
+            var reason = await ReadReasonAsync(response, cancellationToken).ConfigureAwait(false);
+            logger.LogWarning("Web Push delivery to user {UserId} on {Host} failed with {StatusCode}: {Reason}",
+                subscription.UserId, endpoint.Host, (int)response.StatusCode, reason ?? "(no reason given)");
             return WebPushDeliveryStatus.Failed;
         }
         catch (Exception ex) when (ex is HttpRequestException
@@ -89,6 +94,28 @@ internal sealed class WebPushClient(
             logger.LogWarning(ex, "Web Push delivery to user {UserId} on {Host} failed.", subscription.UserId,
                 endpoint.Host);
             return WebPushDeliveryStatus.Failed;
+        }
+    }
+
+    /// <summary>
+    /// Push services say why they refused a message in the body — Apple as <c>{"reason":"BadWebPushTopic"}</c>,
+    /// FCM and Mozilla as a sentence — and nowhere else, so the reason belongs in the warning: a bare status
+    /// code leaves "every push to iPhones fails with 400" undiagnosable. Read bounded and flattened to one
+    /// line, so neither a large error page nor a line break ends up in the log.
+    /// </summary>
+    internal static async ValueTask<string?> ReadReasonAsync(HttpResponseMessage response, CancellationToken cancellationToken) {
+        try {
+            var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            await using (stream.ConfigureAwait(false)) {
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                var buffer = new char[MaxReasonLength];
+                var read = await reader.ReadBlockAsync(buffer, cancellationToken).ConfigureAwait(false);
+                var reason = new string(buffer, 0, read).ReplaceLineEndings(" ").Trim();
+                return reason.Length == 0 ? null : reason;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or HttpRequestException) {
+            return null;
         }
     }
 

@@ -85,6 +85,10 @@ happened:
 | malformed keys, disallowed endpoint | `Removed` | **deleted** — it can never be delivered to |
 | 429, 5xx, timeout, network error, other 4xx | `Failed` | kept |
 
+A refused message (any non-2xx other than 404/410) is logged as a warning with the push service's own reason
+from the response body — Apple answers with `{"reason":"…"}`, FCM and Mozilla with a sentence — capped at 256
+characters and flattened to one line. That reason is the only place a push service says *why*.
+
 Web Push is **best-effort**: "delivered" means the push service accepted the message, not that the device
 showed it, and a failed send is not retried. If a notification must not be lost, send it from a durable
 trigger (an integration event through the outbox, a job) so the retry is yours.
