@@ -1,11 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>EF Core-backed Web Push stores for Elarion (ADR-0076): the elarion_push_subscriptions table (upsert-by-endpoint that reassigns a re-subscribed device) and the elarion_vapid_keys table (race-safe first-use key generation across nodes) on the one PostgreSQL the app already runs, mapped through [GenerateElarionWebPush] or modelBuilder.UseElarionWebPush().</Description>
+    <Description>EF Core-backed Web Push stores for Elarion (ADR-0076): the elarion_push_subscriptions table (upsert-by-endpoint that reassigns a re-subscribed device) and the elarion_vapid_keys table (race-safe first-use key generation across nodes, the private key protected at rest through ISettingValueProtector) on the one PostgreSQL the app already runs, mapped through [GenerateElarionWebPush] or modelBuilder.UseElarionWebPush().</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Elarion.WebPush\Elarion.WebPush.csproj"/>
+    <!-- ISettingValueProtector is the framework's at-rest protection seam (ADR-0078); the VAPID private key goes through it. -->
+    <ProjectReference Include="..\Elarion.Settings\Elarion.Settings.csproj"/>
   </ItemGroup>
 
   <ItemGroup>

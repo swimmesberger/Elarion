@@ -1,7 +1,10 @@
 using System.Net;
 using AwesomeAssertions;
+using Elarion.Settings;
+using Elarion.Settings.DataProtection;
 using Elarion.WebPush;
 using Elarion.WebPush.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -227,9 +230,128 @@ public abstract class WebPushStoreTestBase<TContext>(IWebPushStoreFixture<TConte
         (await provider.GetRequiredService<IVapidKeyStore>().GetAsync(TestToken)).Should().NotBeNull();
     }
 
-    private protected ServiceProvider CreateProvider(FakePushService? pushService = null) {
+    [Fact]
+    public async Task VapidKeyStore_PrivateKey_IsProtectedAtRestAndRoundtrips() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await ClearKeysAsync();
+        await using var provider = CreateProvider();
+
+        var keys = await provider.GetRequiredService<IVapidKeyProvider>().GetAsync(TestToken);
+
+        await using var context = fixture.CreateContext();
+        var row = await context.Set<VapidKeyEntity>().AsNoTracking().SingleAsync(TestToken);
+        row.PublicKey.Should().Be(keys.PublicKey);
+        row.PrivateKey.Should().NotBe(keys.PrivateKey).And.NotContain(keys.PrivateKey);
+        row.Protection.Should().Be(DataProtectionSettingValueProtector.SchemeId);
+        (await provider.GetRequiredService<IVapidKeyStore>().GetAsync(TestToken)).Should().Be(keys);
+        await using var otherNode = CreateProvider();
+        (await otherNode.GetRequiredService<IVapidKeyStore>().GetAsync(TestToken))!.PrivateKey.Should().Be(keys.PrivateKey);
+    }
+
+    [Fact]
+    public async Task VapidKeyStore_LegacyPlaintextRow_IsAcceptedAndReprotectedInPlace() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await ClearKeysAsync();
+        var legacy = VapidKeys.Generate();
+        await using (var context = fixture.CreateContext()) {
+            context.Add(new VapidKeyEntity {
+                Name = VapidKeyEntity.DefaultName,
+                PublicKey = legacy.PublicKey,
+                PrivateKey = legacy.PrivateKey,
+                CreatedOnUtc = DateTimeOffset.UtcNow
+            });
+            await context.SaveChangesAsync(TestToken);
+        }
+
+        await using var provider = CreateProvider();
+        var resolved = await provider.GetRequiredService<IVapidKeyProvider>().GetAsync(TestToken);
+
+        resolved.Should().Be(legacy);
+        await using var verify = fixture.CreateContext();
+        var row = await verify.Set<VapidKeyEntity>().AsNoTracking().SingleAsync(TestToken);
+        row.Protection.Should().Be(DataProtectionSettingValueProtector.SchemeId);
+        row.PrivateKey.Should().NotContain(legacy.PrivateKey);
+        (await provider.GetRequiredService<IVapidKeyStore>().GetAsync(TestToken)).Should().Be(legacy);
+    }
+
+    [Fact]
+    public async Task VapidKeyStore_UnreadablePayload_FailsClosedInsteadOfGeneratingAReplacement() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await ClearKeysAsync();
+        await using (var first = CreateProvider())
+            await first.GetRequiredService<IVapidKeyProvider>().GetAsync(TestToken);
+
+        // A different key ring cannot read the row; it must not mint a new pair over the stored one.
+        await using var foreign = CreateProvider(protector: NewProtector());
+        var act = async () => await foreign.GetRequiredService<IVapidKeyProvider>().GetAsync(TestToken);
+
+        await act.Should().ThrowAsync<SettingProtectionException>();
+        await using var context = fixture.CreateContext();
+        (await context.Set<VapidKeyEntity>().CountAsync(TestToken)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task VapidKeyStore_WithoutAProtector_FailsClosed() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddDbContext<TContext>(fixture.Configure);
+        services.AddElarionWebPushEntityFrameworkCore<TContext>(options => options.Subject = "mailto:ops@example.com");
+        await using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IVapidKeyStore>();
+
+        act.Should().Throw<SettingProtectionException>().WithMessage("*ISettingValueProtector*");
+    }
+
+    [Fact]
+    public async Task VapidKeyStore_ACustomStoreRegisteredAfterwards_NeedsNoProtector() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<TContext>(fixture.Configure);
+        services.AddElarionWebPushEntityFrameworkCore<TContext>(options => options.Subject = "mailto:ops@example.com");
+        services.AddSingleton<IVapidKeyStore, InMemoryVapidKeyStore>();
+        await using var provider = services.BuildServiceProvider();
+
+        var keys = await provider.GetRequiredService<IVapidKeyProvider>().GetAsync(TestToken);
+
+        keys.PublicKey.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task VapidKeyStore_WorksWithTheShippedDataProtectionRegistration() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await ClearKeysAsync();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddElarionSettingsDataProtection(o => o.ReprotectOnStartup = false);
+        services.AddDbContext<TContext>(fixture.Configure);
+        services.AddElarionWebPushEntityFrameworkCore<TContext>(options => options.Subject = "mailto:ops@example.com");
+        await using var provider = services.BuildServiceProvider();
+
+        var keys = await provider.GetRequiredService<IVapidKeyProvider>().GetAsync(TestToken);
+
+        (await provider.GetRequiredService<IVapidKeyStore>().GetAsync(TestToken)).Should().Be(keys);
+    }
+
+    private async Task ClearKeysAsync() {
+        await using var context = fixture.CreateContext();
+        await context.Set<VapidKeyEntity>().ExecuteDeleteAsync(TestToken);
+    }
+
+    // One key ring for the whole class, so providers standing in for nodes can read each other's rows.
+    private static readonly ISettingValueProtector SharedProtector = NewProtector();
+
+    private static ISettingValueProtector NewProtector() {
+        return new DataProtectionSettingValueProtector(new EphemeralDataProtectionProvider());
+    }
+
+    private protected ServiceProvider CreateProvider(FakePushService? pushService = null,
+        ISettingValueProtector? protector = null) {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(protector ?? SharedProtector);
         services.AddDbContext<TContext>(fixture.Configure);
         services.AddElarionWebPushEntityFrameworkCore<TContext>(options => options.Subject = "mailto:ops@example.com");
         if (pushService is not null)

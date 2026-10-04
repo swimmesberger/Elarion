@@ -38,8 +38,9 @@ internal static class WebPushEntitySql {
         var (table, column) = Resolve(context, typeof(VapidKeyEntity));
         // DO NOTHING: when another node won the first insert, the loser reads the winner back.
         return $"INSERT INTO {table} ({column(nameof(VapidKeyEntity.Name))}, {column(nameof(VapidKeyEntity.PublicKey))}, " +
-               $"{column(nameof(VapidKeyEntity.PrivateKey))}, {column(nameof(VapidKeyEntity.CreatedOnUtc))}) " +
-               "VALUES ({0}, {1}, {2}, {3}) " +
+               $"{column(nameof(VapidKeyEntity.PrivateKey))}, {column(nameof(VapidKeyEntity.Protection))}, " +
+               $"{column(nameof(VapidKeyEntity.CreatedOnUtc))}) " +
+               "VALUES ({0}, {1}, {2}, {3}, {4}) " +
                $"ON CONFLICT ({column(nameof(VapidKeyEntity.Name))}) DO NOTHING";
     }
 

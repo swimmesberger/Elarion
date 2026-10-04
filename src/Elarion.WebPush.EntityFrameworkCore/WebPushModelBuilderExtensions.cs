@@ -67,8 +67,12 @@ public static class WebPushModelBuilderExtensions {
             builder.Property(entity => entity.PublicKey)
                 .HasColumnName(snakeCase ? "public_key" : "PublicKey")
                 .HasMaxLength(128);
+            // A protected payload (for example Data Protection's) is several times longer than the 43-character scalar.
             builder.Property(entity => entity.PrivateKey)
                 .HasColumnName(snakeCase ? "private_key" : "PrivateKey")
+                .HasMaxLength(1024);
+            builder.Property(entity => entity.Protection)
+                .HasColumnName(snakeCase ? "protection" : "Protection")
                 .HasMaxLength(64);
             builder.Property(entity => entity.CreatedOnUtc)
                 .HasColumnName(snakeCase ? "created_on_utc" : "CreatedOnUtc");

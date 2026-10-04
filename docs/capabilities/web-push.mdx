@@ -29,6 +29,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
     protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
 }
 
+builder.Services.AddElarionSettingsDataProtection();   // protects the VAPID private key at rest (any ISettingValueProtector)
 builder.Services.AddElarionWebPushEntityFrameworkCore<AppDbContext>(options =>
     options.Subject = "mailto:ops@example.com");   // required: the VAPID contact
 
@@ -65,8 +66,17 @@ resolved it is cached for the life of the process, so it must be stored for good
 inside a request's transaction, whose rollback could un-store a key browsers already subscribed against. If the
 tables do not exist yet at start, that is logged and the pair is resolved on first use instead.
 
-The private key is stored in plain text in that table; restrict who can read it, or configure the keys
-instead. `VapidKeys.Generate()` mints a pair if you want to pin one from the start.
+The private key is **protected at rest** (ADR-0078's seam): the EF store writes it through the registered
+`ISettingValueProtector` — `AddElarionSettingsDataProtection()` is the shipped implementation over ASP.NET Core
+Data Protection, whose key ring you must persist and share between nodes — bound to the pair's public key, with
+the protector's scheme in the row's `protection` column. The store **fails closed**: without a protector it cannot
+be resolved, and a payload that does not decrypt (a lost key ring) throws instead of minting a replacement pair,
+which would invalidate every subscription. A row written before protection existed (no `protection` value) is
+accepted once and re-protected in place, as is a payload under a retired Data Protection key. Upgrading adds
+the nullable `protection` column and widens `private_key` to 1024 characters — add an EF migration.
+Keys configured through `options.PublicKey`/`PrivateKey` never touch the store, and an application with its own
+`IVapidKeyStore` (a vault, a KMS) registers it after `AddElarionWebPushEntityFrameworkCore` and needs no protector.
+`VapidKeys.Generate()` mints a pair if you want to pin one from the start.
 
 ## Sending
 

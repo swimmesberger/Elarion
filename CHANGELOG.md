@@ -23,6 +23,16 @@ minor releases may include breaking changes.
   application can fan out to an audience without querying the store's table. **BREAKING for a custom
   `IPushSubscriptionStore`:** implement the new member.
 
+- **Web Push: the VAPID private key is protected at rest.** `EfCoreVapidKeyStore` writes the private key through
+  the registered `ISettingValueProtector` (ADR-0078's seam; `AddElarionSettingsDataProtection()` is the shipped
+  implementation), bound to the public key, with the scheme in a new nullable `protection` column on
+  `elarion_vapid_keys`. It fails closed: no protector means the store cannot be resolved, and an undecryptable
+  payload throws instead of generating a replacement pair. Legacy plaintext rows (and payloads under a retired key)
+  are re-protected in place on read. **BREAKING:** `Elarion.WebPush.EntityFrameworkCore` now references
+  `Elarion.Settings`; a host must register an `ISettingValueProtector` (or its own `IVapidKeyStore`, or configure
+  `WebPushOptions.PublicKey`/`PrivateKey`); add an EF migration for the `protection` column and the widened
+  `private_key` (1024).
+
 ### Fixed
 - **Settings projection no longer loses every stored setting because of one bad row.** Bulk resolution now flags a
   stored value that is not valid for its definition's type as unreadable (`ResolvedSetting.IsUnreadable`,
