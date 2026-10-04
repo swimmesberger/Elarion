@@ -56,8 +56,8 @@ Adopt a **two-tier validation model** and remove the FluentValidation integratio
 
 **Tier 1 — wire-shape constraints are declarative, on the request DTO, as `System.ComponentModel.DataAnnotations`
 attributes.** One declarative source feeds four surfaces: the generated runtime validator, the JSON-RPC schema,
-the OpenAPI document, and the generated Zod client. Requiredness comes from nullability + the `required`
-modifier (already exported); `[Required]` is not needed. Reusable custom constraints subclass the mapped
+the OpenAPI document, and the generated Zod client. Requiredness comes from nullability (refined by
+[ADR-0082](0082-requiredness-comes-from-nullability-in-both-directions.md): the `required` modifier no longer changes the schema); `[Required]` is not needed. Reusable custom constraints subclass the mapped
 attributes (e.g. a `[Slug]` deriving from `RegularExpressionAttribute` gets enforcement *and* every schema
 surface for free).
 

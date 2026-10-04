@@ -173,7 +173,7 @@ When adding or changing a generator:
   They may hide or adapt UI, but never enforce a permission or feature decision; the handler gate remains the
   authority.
 - Validation is two-tier. Standard DataAnnotations express wire-contract rules and flow to schema surfaces;
-  NRT plus `required` expresses requiredness. Cross-field, conditional, asynchronous, and database/business
+  nullability expresses requiredness (ADR-0082). Cross-field, conditional, asynchronous, and database/business
   rules live in the handler or a domain service and return `AppError.Validation`/`Conflict` **inside the
   transaction**. A pre-handler async check is a TOCTOU bug.
 - The validation provider receives wire-named paths and produces structured errors. Do not reintroduce runtime
