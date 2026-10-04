@@ -29,9 +29,9 @@ const batteries: {
     icon: 'shield',
   },
   {
-    seam: 'IFeatureFlagService',
+    seam: 'IBackendFeatureFlagEvaluator',
     name: 'OpenFeature underneath',
-    body: '[FeatureGate] works against any OpenFeature provider. Microsoft.FeatureManagement ships as the batteries-included, config-driven default.',
+    body: 'Backend-evaluated flags work against any OpenFeature provider. Microsoft.FeatureManagement ships as the batteries-included, config-driven default.',
     packages: 'Elarion.FeatureFlags.*',
     icon: 'toggle',
   },

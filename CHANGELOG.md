@@ -60,6 +60,22 @@ minor releases may include breaking changes.
   `key:property`), never secrets, and is skipped by the resolver so it cannot pin. `SettingsConfigurationProvider.Apply`
   takes a key/value dictionary and reloads only on change; `SettingsConfigurationRefresher` also takes
   `IConfiguration`. Register it after your other configuration sources.
+- **Every feature flag is declared once and has exactly one owner (ADR-0079).** A flag is declared with
+  `[FeatureFlag]` on an `IFeatureFlagResolver` class (code-defined) or `[BackendFeatureFlag]` (evaluated by the
+  host's backend), with a description and `ExposeToClient`. Source generators build a catalog into the manifest,
+  register each module's flags with the module, emit an `ElarionFeatureFlags` registry (`[assembly:
+  GenerateFeatureFlags]`, in `[UseElarion]`) of typed `FeatureFlagKey`s, and report a flag used by
+  `[FeatureGate]`/`[FeatureVariant]` but undeclared (`ELFLAG001`), declared twice incl. across assemblies
+  (`ELFLAG002`), without an owner (`ELFLAG003`), outside a module (`ELFLAG004`), or blank (`ELFLAG005`).
+  Evaluation takes an explicit `FeatureEvaluationContext` (user, roles, tenant, attributes, services); gates, the
+  session snapshot and application code share one `IFeatureFlagService`/`IFeatureFlagCatalog`. An unknown name is
+  disabled and logged once. **Breaking:** `[ClientFeatures]` and `ClientModuleManifest.Features` are removed
+  (use `ExposeToClient = true` on the declaration); `IFeatureVariantService` is removed (`IFeatureFlagService`
+  now has `GetVariantAsync`, context overloads and `CreateContext`); `OpenFeatureFeatureFlagService` and
+  `OpenFeatureFeatureVariantService` are replaced by `OpenFeatureFlagEvaluator` (`IBackendFeatureFlagEvaluator`),
+  and `ElarionEvaluationContext.Create` takes a `FeatureEvaluationContext`. Migration: declare every flag you
+  gate on, expose, or select variants by; a host with backend flags still registers
+  `AddElarionFeatureManagement`/`AddElarionOpenFeature` and now fails at startup without one.
 - **The EF Web Push subscription store joins the caller's unit of work.** `EfCorePushSubscriptionStore` is now
   scoped over the caller's `TDbContext` instead of a singleton that opened its own scope and connection per
   operation. A subscribe, unsubscribe, or dead-subscription cleanup inside a command now commits or rolls back

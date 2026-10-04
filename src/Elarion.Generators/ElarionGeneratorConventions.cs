@@ -16,13 +16,6 @@ internal static class ElarionGeneratorConventions {
     public const string AppModuleAttribute = "Elarion.Abstractions.Modules.AppModuleAttribute";
 
     /// <summary>
-    /// <c>[ClientFeatures]</c> — declared on an <c>[AppModule]</c> type and read by the manifest generator
-    /// (which publishes the exposed names) <b>and</b> the bootstrapper generator (which emits the client-capability
-    /// manifest the session handler consumes). See ADR-0020.
-    /// </summary>
-    public const string ClientFeaturesAttribute = "Elarion.Abstractions.Modules.ClientFeaturesAttribute";
-
-    /// <summary>
     /// <c>[ModuleEndpoints("Name")]</c> — declared on a static class contributing endpoint hooks to a module from
     /// outside its assembly; read by the manifest generator (which publishes the contributor) <b>and</b> the
     /// bootstrapper generator (which calls the hooks inside the module's feature gate).

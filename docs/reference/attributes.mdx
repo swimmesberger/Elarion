@@ -31,17 +31,6 @@ The class may optionally implement convention-based statics: `ConfigureServices(
 
 See [Modules](/docs/concepts/modules).
 
-### `[ClientFeatures]`
-
-- **Package:** `Elarion.Abstractions` (Modules) · **Applies to:** class (alongside `[AppModule]`)
-- **Triggers:** opts named feature flags and variants into the generated client-capability manifest. The list is the complete client-visible vocabulary for that module: internal flags are not exposed by discovery, and a disabled module contributes none. A listed name may be a pure UI flag; it does not need a server-side `[FeatureGate]`.
-
-| Parameter | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `features` | `params string[]` (ctor) → `Features` (`IReadOnlyList<string>`) | empty | Feature flag or variant names the session endpoint may evaluate and return for this module. |
-
-See [Client capabilities](/docs/concepts/client-capabilities).
-
 ### `[Service]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class
@@ -328,10 +317,31 @@ See [Resilience](/docs/capabilities/resilience).
 
 ## Feature flags
 
+### `[FeatureFlag]`
+
+- **Package:** `Elarion.Abstractions` (Features) · **Applies to:** class (not inherited)
+- **Triggers:** declares a **code-defined** flag and makes the class its owner. The class must be a concrete, non-generic `IFeatureFlagResolver` (`ELFLAG003` otherwise) under an `[AppModule]` namespace of its assembly (`ELFLAG004`). The generator registers it into the module's default services, so the flag exists exactly when the module is enabled, and publishes it in the manifest so duplicates across assemblies are rejected (`ELFLAG002`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `name` | `string` (ctor) → `Name` | required | The flag name; blank is `ELFLAG005`. |
+| `Description` | `string?` (init) | `null` | What the flag controls. |
+| `ExposeToClient` | `bool` (init) | `false` | Whether the session snapshot evaluates and returns the flag to the frontend. |
+
+### `[BackendFeatureFlag]`
+
+- **Package:** `Elarion.Abstractions` (Features) · **Applies to:** class (`AllowMultiple`, not inherited)
+- **Triggers:** declares a **backend-evaluated** flag owned by the host's `IBackendFeatureFlagEvaluator` (`Elarion.FeatureFlags.FeatureManagement`/`.OpenFeature`). Same parameters and declaration rules as `[FeatureFlag]`; place it on the module type or any class under the module's namespace. A host that declares backend flags without registering a backend fails at startup.
+
+### `[assembly: GenerateFeatureFlags]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** assembly (included in `[assembly: UseElarion]`)
+- **Triggers:** emits the `ElarionFeatureFlags` registry: typed `FeatureFlagKey` members, a `Names` class of constants and `All` descriptors, aggregated across referenced assemblies.
+
 ### `[FeatureGate]`
 
 - **Package:** `Elarion.Abstractions` (Features) · **Applies to:** class (`AllowMultiple`, inherited)
-- **Triggers:** gates a handler behind one or more feature flags. The handler-registration generator auto-attaches the `FeatureGateDecorator<TRequest, TResponse>` **just inside the authorization gate** so the flag is evaluated *before* the handler runs (before caching and the rest of the pipeline). When the gate is not satisfied the call short-circuits to `AppError.NotFound` (404) — a disabled feature is indistinguishable from a missing one, so the feature name is **never leaked** (MS-MVC-style "hide the roadmap"). Transport-neutral: identical under JSON-RPC, MCP, and HTTP. Stacking multiple `[FeatureGate]` attributes ANDs them. The flag is evaluated through the `IFeatureFlagService` seam; the default provider ships in `Elarion.FeatureFlags.OpenFeature`.
+- **Triggers:** gates a handler behind one or more feature flags. The handler-registration generator auto-attaches the `FeatureGateDecorator<TRequest, TResponse>` **just inside the authorization gate** so the flag is evaluated *before* the handler runs (before caching and the rest of the pipeline). When the gate is not satisfied the call short-circuits to `AppError.NotFound` (404) — a disabled feature is indistinguishable from a missing one, so the feature name is **never leaked** (MS-MVC-style "hide the roadmap"). Transport-neutral: identical under JSON-RPC, MCP, and HTTP. Stacking multiple `[FeatureGate]` attributes ANDs them. Every name must be a declared flag (`ELFLAG001`); it is evaluated through `IFeatureFlagService` by the flag's single owner.
 
 The attribute has two constructors:
 

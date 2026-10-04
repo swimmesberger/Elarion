@@ -563,7 +563,7 @@ public sealed class ModuleBootstrapperTransportTests {
         // A web companion assembly publishes its [ModuleEndpoints] contributor through the manifest; the host
         // bootstrapper calls it without the companion being part of the host compilation.
         var module = EncodeFields(
-            "Manifest", "ManifestOnly", "global::ManifestOnly.ManifestModule", null, "0", "0", "0", "0", "0", "");
+            "Manifest", "ManifestOnly", "global::ManifestOnly.ManifestModule", null, "0", "0", "0", "0", "0");
         var hooks = EncodeFields("Manifest", "global::ManifestOnly.ManifestWebEndpoints", "1", "0");
 
         var librarySource = $$"""
@@ -1002,31 +1002,30 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
-    public void Bootstrapper_EmitsClientCapabilityManifest_FromReferencedClientFeatures() {
-        // A module declaring [ClientFeatures] in a referenced assembly — the names must survive the manifest
-        // round-trip (encode → image → decode), and every module appears with its IsModuleEnabled state.
+    public void Bootstrapper_EmitsClientCapabilityManifest_FromReferencedModules() {
+        // Modules of a referenced assembly must survive the manifest round-trip (encode → image → decode), and
+        // every module appears with its IsModuleEnabled state; flags are not part of this manifest (ADR-0079).
         var modulesReference = CompileToImage(
             """
             using Elarion.Abstractions.Modules;
 
-            namespace Sample.ClientFeatures {
+            namespace Sample.ClientModules {
                 [AppModule("Billing")]
-                [ClientFeatures("new-checkout", "dashboard-v2")]
                 public static class BillingModule { }
 
                 [AppModule("Core", Kind = AppModuleKind.Core)]
                 public static class CoreModule { }
             }
             """,
-            "Sample.ClientFeatures");
+            "Sample.ClientModules");
 
         var generated = RunGenerator([modulesReference], out var compilationWithGenerated);
 
         var method = Slice(generated, "GetClientCapabilityManifest(");
         method.Should().Contain(
-                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\"), Features = new string[] { \"new-checkout\", \"dashboard-v2\" } }")
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\") }")
             .And.Contain(
-                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Core\", Enabled = IsModuleEnabled(configuration, \"Core\"), Features = global::System.Array.Empty<string>() }");
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Core\", Enabled = IsModuleEnabled(configuration, \"Core\") }");
 
         // The generated code references the real Elarion.Session manifest types, so it compiles.
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
@@ -1035,17 +1034,17 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
-    public void Bootstrapper_EmitsModulesOnlyClientCapabilityManifest_WhenNoModuleExposesClientFeatures() {
-        // No module declares [ClientFeatures], but the method is still emitted with a modules-only manifest so
+    public void Bootstrapper_EmitsModulesOnlyClientCapabilityManifest_ForTheHostsModules() {
+        // The method is emitted with a modules-only manifest so
         // AddElarionSession(configuration.GetClientCapabilityManifest()) compiles for every host — the session
         // bootstrap still projects per-user module enablement from it (an empty manifest would drop that).
         var generated = RunGenerator(out var compilationWithGenerated);
 
         var method = Slice(generated, "GetClientCapabilityManifest(");
         method.Should().Contain(
-                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\"), Features = global::System.Array.Empty<string>() }")
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\") }")
             .And.Contain(
-                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Shipping\", Enabled = IsModuleEnabled(configuration, \"Shipping\"), Features = global::System.Array.Empty<string>() }");
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Shipping\", Enabled = IsModuleEnabled(configuration, \"Shipping\") }");
 
         // The generated code references the real Elarion.Session manifest types, so it compiles.
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
@@ -1286,9 +1285,7 @@ public sealed class ModuleBootstrapperTransportTests {
             "0",
             "0",
             "0",
-            "0",
-            // The client-features blob (10th field) — empty for a module with no [ClientFeatures].
-            "");
+            "0");
         // The nested binding-members blob (ADR-0071): GetManifest.Query's one member, `required Guid Id`,
         // bound from the query string as an IParsable value type — eleven fields per member, the last the
         // (here empty) nested validation-attribute blob.
@@ -1370,7 +1367,7 @@ public sealed class ModuleBootstrapperTransportTests {
     private static string ResourceFilterLibSource() {
         // A feature module (IsCore = 0) so its filter registration is gated by the module flag.
         var module = EncodeFields(
-            "FilterLib", "FilterLib", "global::FilterLib.FilterModule", null, "0", "0", "0", "0", "0", "");
+            "FilterLib", "FilterLib", "global::FilterLib.FilterModule", null, "0", "0", "0", "0", "0");
         var owner = EncodeFields(
             "global::FilterLib.ContactAccess", "global::FilterLib.Contact", "FilterLib", "0");
         var shared = EncodeFields(

@@ -112,7 +112,7 @@ builder.Services.AddCors(o => o.AddPolicy(DevCorsPolicy, p =>
 builder.Services.AddElarion(builder.Configuration);
 
 // Client-capability bootstrap (ADR-0030): a framework-shipped handler that returns module enablement, the
-// [ClientFeatures] flags/variants, and the user's grants for the frontend. The manifest is built once from the
+// the client-exposed declared flags/variants, and the user's grants for the frontend. The manifest is built once from the
 // generated bootstrapper; the handler evaluates the flags per user.
 builder.Services.AddElarionSession(builder.Configuration.GetClientCapabilityManifest());
 

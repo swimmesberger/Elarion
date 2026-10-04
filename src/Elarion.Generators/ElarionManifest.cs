@@ -39,6 +39,7 @@ internal static class ElarionManifest {
     // setting definitions across referenced assemblies (a container that is not public cannot be referenced from
     // another assembly, so it contributes nothing there). ADR-0078.
     public sealed record SettingContainer(string ContainerFqn, bool IsPublic);
+    public const string FeatureFlagKey = "Elarion.Manifest.FeatureFlag.v1";
 
     // A [RequirePermission(resource, verb)]/[RequireRole] declared by a handler, carried so the host-side
     // ElarionPermissions static can aggregate the permission catalog across referenced module assemblies.
@@ -62,6 +63,20 @@ internal static class ElarionManifest {
         bool ContractIsPublic
     );
 
+    // A declared feature flag ([FeatureFlag] on a resolver class, or [BackendFeatureFlag]), carried so every
+    // assembly that gates on or aggregates flags sees the declarations of its references: the host-side
+    // "used but undeclared" and "declared twice" checks (ELFLAG001/ELFLAG002) and the ElarionFeatureFlags
+    // registry resolve against the union of this assembly's declarations and these. Namespace is the declaring
+    // type's namespace (the consumer resolves the owning module by longest prefix); IsCode distinguishes a
+    // code-defined flag (resolver class) from a backend-evaluated one.
+    public sealed record FeatureFlag(
+        string Namespace,
+        string Name,
+        string? Description,
+        bool ExposeToClient,
+        bool IsCode
+    );
+
     // A generated [ResourceFilter] data-level authorizer that the host bootstrapper registers as
     // IQueryAuthorizer<TEntity>. The emitted-member contract: a non-shared spec exposes a static
     // `Specification` singleton (registered AddSingleton); a shared spec is a scoped service with a
@@ -82,8 +97,7 @@ internal static class ElarionManifest {
         bool HasConfigureServices,
         bool HasMapEndpoints,
         bool HasGetJsonTypeInfoResolver,
-        bool HasConfigureEndpointGroup,
-        EquatableArray<string> ClientFeatures
+        bool HasConfigureEndpointGroup
     );
 
     // A [ModuleEndpoints("Name")] static class contributing endpoint hooks to a module from another assembly
@@ -105,14 +119,16 @@ internal static class ElarionManifest {
         IReadOnlyList<Permission> Permissions,
         IReadOnlyList<Role> Roles,
         IReadOnlyList<Variant> Variants,
-        IReadOnlyList<SettingContainer> SettingContainers
+        IReadOnlyList<SettingContainer> SettingContainers,
+        IReadOnlyList<FeatureFlag> FeatureFlags
     ) {
-        public static readonly Data Empty = new([], [], [], [], [], [], [], [], []);
+        public static readonly Data Empty = new([], [], [], [], [], [], [], [], [], []);
 
         public bool HasEntries =>
             Modules.Count > 0 || ModuleEndpointHooks.Count > 0 || HttpEndpoints.Count > 0 || RpcMethods.Count > 0
             || ResourceFilters.Count > 0 || Permissions.Count > 0 || Roles.Count > 0 || Variants.Count > 0
-            || SettingContainers.Count > 0;
+            || SettingContainers.Count > 0
+            || FeatureFlags.Count > 0;
 
         public static Data Combine(IEnumerable<Data> manifests) {
             var modules = new List<Module>();
@@ -124,6 +140,7 @@ internal static class ElarionManifest {
             var roles = new List<Role>();
             var variants = new List<Variant>();
             var settingContainers = new List<SettingContainer>();
+            var featureFlags = new List<FeatureFlag>();
 
             foreach (var manifest in manifests) {
                 modules.AddRange(manifest.Modules);
@@ -135,6 +152,7 @@ internal static class ElarionManifest {
                 roles.AddRange(manifest.Roles);
                 variants.AddRange(manifest.Variants);
                 settingContainers.AddRange(manifest.SettingContainers);
+                featureFlags.AddRange(manifest.FeatureFlags);
             }
 
             modules.Sort(static (a, b) => {
@@ -198,9 +216,14 @@ internal static class ElarionManifest {
             settingContainers.Sort(static (a, b) =>
                 string.Compare(a.ContainerFqn, b.ContainerFqn, StringComparison.Ordinal));
 
+            featureFlags.Sort(static (a, b) => {
+                var byName = string.Compare(a.Name, b.Name, StringComparison.Ordinal);
+                return byName != 0 ? byName : string.Compare(a.Namespace, b.Namespace, StringComparison.Ordinal);
+            });
+
             return new Data(
                 modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions, roles,
-                variants, settingContainers);
+                variants, settingContainers, featureFlags);
         }
     }
 
@@ -214,10 +237,7 @@ internal static class ElarionManifest {
             EncodeBool(module.HasConfigureServices),
             EncodeBool(module.HasMapEndpoints),
             EncodeBool(module.HasGetJsonTypeInfoResolver),
-            EncodeBool(module.HasConfigureEndpointGroup),
-            // The exposed client-feature names ride a nested length-prefixed blob (like RPC parameters), so a
-            // name containing a separator can never corrupt the outer field framing.
-            ElarionManifestCodec.EncodeFields([.. module.ClientFeatures]));
+            EncodeBool(module.HasConfigureEndpointGroup));
     }
 
     public static string EncodeModuleEndpoints(ModuleEndpoints hooks) {
@@ -361,6 +381,28 @@ internal static class ElarionManifest {
         return true;
     }
 
+    public static string EncodeFeatureFlag(FeatureFlag flag) {
+        return ElarionManifestCodec.EncodeFields(
+            flag.Namespace,
+            flag.Name,
+            flag.Description,
+            EncodeBool(flag.ExposeToClient),
+            EncodeBool(flag.IsCode));
+    }
+
+    public static bool TryDecodeFeatureFlag(string value, out FeatureFlag? flag) {
+        flag = null;
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 5)
+            return false;
+        if (fields[0] is null || fields[1] is null)
+            return false;
+        if (!TryDecodeBool(fields[3], out var exposeToClient) || !TryDecodeBool(fields[4], out var isCode))
+            return false;
+
+        flag = new FeatureFlag(fields[0]!, fields[1]!, fields[2], exposeToClient, isCode);
+        return true;
+    }
+
     public static string EncodeRole(Role role) {
         return ElarionManifestCodec.EncodeFields(role.Namespace, role.Value);
     }
@@ -378,7 +420,7 @@ internal static class ElarionManifest {
 
     public static bool TryDecodeModule(string value, out Module? module) {
         module = null;
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 10)
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 9)
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null)
             return false;
@@ -389,17 +431,6 @@ internal static class ElarionManifest {
             !TryDecodeBool(fields[8], out var hasConfigureEndpointGroup))
             return false;
 
-        var clientFeatures = EquatableArray<string>.Empty;
-        if (fields[9] is { Length: > 0 } encodedFeatures &&
-            ElarionManifestCodec.TryDecodeFields(encodedFeatures, out var featureFields)) {
-            var names = new List<string>();
-            foreach (var name in featureFields)
-                if (name is not null)
-                    names.Add(name);
-
-            clientFeatures = names.ToEquatableArray();
-        }
-
         module = new Module(
             fields[0]!,
             fields[1]!,
@@ -409,8 +440,7 @@ internal static class ElarionManifest {
             hasConfigureServices,
             hasMapEndpoints,
             hasGetJsonTypeInfoResolver,
-            hasConfigureEndpointGroup,
-            clientFeatures);
+            hasConfigureEndpointGroup);
         return true;
     }
 
@@ -692,6 +722,7 @@ internal static class ElarionManifestReader {
         var roles = new List<ElarionManifest.Role>();
         var variants = new List<ElarionManifest.Variant>();
         var settingContainers = new List<ElarionManifest.SettingContainer>();
+        var featureFlags = new List<ElarionManifest.FeatureFlag>();
 
         var entries = AssemblyMetadataReader.ReadRawEntries(reference, ct);
 
@@ -724,12 +755,12 @@ internal static class ElarionManifestReader {
         foreach (var (key, value) in entries)
             AddEntry(
                 key, value, modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions,
-                roles, variants, settingContainers);
+                roles, variants, settingContainers, featureFlags);
 
         return new ManifestReadResult(
             CreateData(
                 modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions, roles,
-                variants, settingContainers),
+                variants, settingContainers, featureFlags),
             null);
     }
 
@@ -742,7 +773,8 @@ internal static class ElarionManifestReader {
             or ElarionManifest.PermissionKey
             or ElarionManifest.RoleKey
             or ElarionManifest.VariantKey
-            or ElarionManifest.SettingContainerKey;
+            or ElarionManifest.SettingContainerKey
+            or ElarionManifest.FeatureFlagKey;
     }
 
     private static string DescribeReference(MetadataReference reference) {
@@ -761,12 +793,13 @@ internal static class ElarionManifestReader {
         List<ElarionManifest.Permission> permissions,
         List<ElarionManifest.Role> roles,
         List<ElarionManifest.Variant> variants,
-        List<ElarionManifest.SettingContainer> settingContainers) {
+        List<ElarionManifest.SettingContainer> settingContainers,
+        List<ElarionManifest.FeatureFlag> featureFlags) {
         return ElarionManifest.Data.Combine(
         [
             new ElarionManifest.Data(
                 modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions, roles,
-                variants, settingContainers)
+                variants, settingContainers, featureFlags)
         ]);
     }
 
@@ -781,7 +814,8 @@ internal static class ElarionManifestReader {
         List<ElarionManifest.Permission> permissions,
         List<ElarionManifest.Role> roles,
         List<ElarionManifest.Variant> variants,
-        List<ElarionManifest.SettingContainer> settingContainers) {
+        List<ElarionManifest.SettingContainer> settingContainers,
+        List<ElarionManifest.FeatureFlag> featureFlags) {
         switch (key) {
             case ElarionManifest.SchemaKey:
                 break;
@@ -824,6 +858,10 @@ internal static class ElarionManifestReader {
                 if (ElarionManifest.TryDecodeSettingContainer(value, out var settingContainer)
                     && settingContainer is not null)
                     settingContainers.Add(settingContainer);
+                break;
+            case ElarionManifest.FeatureFlagKey:
+                if (ElarionManifest.TryDecodeFeatureFlag(value, out var featureFlag) && featureFlag is not null)
+                    featureFlags.Add(featureFlag);
                 break;
         }
     }

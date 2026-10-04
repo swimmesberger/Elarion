@@ -81,7 +81,8 @@ convention (here `clients.get`), while an explicit name is recommended for stabl
   generated from your handlers and `[Description]` attributes at compile time — no separate tool layer, no
   duplicated schemas, no runtime reflection. Choose a handler's transports with
   `[Handler(Transports = …)]` (JSON-RPC, MCP, or both) and rename a tool with `[McpHandler]`.
-- **Feature flags & variants** — gate any handler with `[FeatureGate]`; a generated decorator
+- **Feature flags & variants** — every flag is declared once with exactly one owner (a resolver class or
+  the host's backend) and checked at compile time; gate any handler with `[FeatureGate]`; a generated decorator
   evaluates the flag before the handler runs and a closed gate returns **404 Not Found**, so a
   disabled feature is indistinguishable from one that doesn't exist (the name is never leaked).
   `[FeatureVariant]` swaps a `[Service]` implementation per user behind a flag. Both work identically

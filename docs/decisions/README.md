@@ -100,3 +100,4 @@ designs that are not yet implemented.
 - [ADR-0077: SQL array parameters are an explicit wrapper, backed by a build-time diagnostic](0077-sql-array-parameters.md)
 - [ADR-0081: One migration plan — SQL, code and EF steps share a version sequence, a history and a lock — Proposed](0081-one-migration-plan.md)
 - [ADR-0078: Settings are declared definitions with one effective-value resolver — Proposed](0078-settings-definitions-and-effective-value-resolver.md)
+- [ADR-0079: Every feature flag is declared and has exactly one owner — Proposed](0079-every-feature-flag-is-declared-and-has-exactly-one-owner.md)

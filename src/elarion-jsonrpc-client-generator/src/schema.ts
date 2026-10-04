@@ -45,7 +45,7 @@ export interface RpcCapabilityPermission {
 
 /**
  * The capability vocabulary block emitted by the server exporter (ADR-0032): module names with the
- * `[ClientFeatures]` each exposes, the structured permission catalog, and role names. All optional — older
+ * client-exposed flag each declares, the structured permission catalog, and role names. All optional — older
  * schemas (or hosts without the session/authorization registrations) simply omit it.
  */
 export interface RpcSchemaCapabilities {

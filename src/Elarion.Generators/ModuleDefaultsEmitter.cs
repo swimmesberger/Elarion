@@ -35,6 +35,7 @@ internal static class ModuleDefaultsEmitter {
     public const string AddModuleApiMethod = "AddModuleApi";
     public const string AddActorsMethod = "AddActors";
     public const string AddClientEventsMethod = "AddClientEvents";
+    public const string AddFeatureFlagsMethod = "AddFeatureFlags";
     public const string AddJsonTypeInfoResolverMethod = "AddJsonTypeInfoResolver";
 
     public const string ServiceCollectionFqn =
@@ -57,6 +58,7 @@ internal static class ModuleDefaultsEmitter {
         AddModuleApiMethod,
         AddActorsMethod,
         AddClientEventsMethod,
+        AddFeatureFlagsMethod,
         AddJsonTypeInfoResolverMethod
     ];
 

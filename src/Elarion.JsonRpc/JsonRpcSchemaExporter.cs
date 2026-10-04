@@ -105,7 +105,7 @@ public static class JsonRpcSchemaExporter {
     }
 
     /// <summary>
-    /// Builds the <c>capabilities</c> vocabulary block — module names with their exposed <c>[ClientFeatures]</c>
+    /// Builds the <c>capabilities</c> vocabulary block — module names with their client-exposed feature flags
     /// (enabled modules only, matching the method gating), the structured permission catalog, and the role names —
     /// or <see langword="null"/> when nothing was supplied, keeping vocabulary-free schemas byte-identical. All
     /// collections are emitted in a deterministic ordinal order.
@@ -121,7 +121,11 @@ public static class JsonRpcSchemaExporter {
                          .Where(static m => m.Enabled)
                          .OrderBy(static m => m.Name, StringComparer.Ordinal)) {
                 var features = new JsonArray();
-                foreach (var feature in module.Features.OrderBy(static f => f, StringComparer.Ordinal))
+                var exposed = (exportOptions.FeatureFlags?.All ?? [])
+                    .Where(f => f.ExposeToClient && string.Equals(f.Module, module.Name, StringComparison.Ordinal))
+                    .Select(static f => f.Name)
+                    .OrderBy(static name => name, StringComparer.Ordinal);
+                foreach (var feature in exposed)
                     features.Add((JsonNode?)JsonValue.Create(feature));
 
                 modules[module.Name] = new JsonObject { ["features"] = features };

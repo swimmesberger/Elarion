@@ -78,6 +78,12 @@
  ELPERM002  | Elarion.Abstractions.Authorization | Warning  | Permission produces a duplicate typed accessor
  ELFEAT001  | Elarion.Abstractions.Features      | Error    | Feature-gated handler response cannot represent failure
  ELFEAT002  | Elarion.Abstractions.Features      | Warning  | FeatureGate declares no feature name
+ ELFLAG001  | Elarion.Abstractions.Features      | Error    | Feature flag is used but not declared
+ ELFLAG002  | Elarion.Abstractions.Features      | Error    | Feature flag is declared more than once
+ ELFLAG003  | Elarion.Abstractions.Features      | Error    | Feature flag has no owner
+ ELFLAG004  | Elarion.Abstractions.Features      | Error    | Feature flag is not declared under a module
+ ELFLAG005  | Elarion.Abstractions.Features      | Error    | Feature flag declares a blank name
+ ELFLAG006  | Elarion.Abstractions.Features      | Warning  | Feature flag registry accessor collision
  ELVAR001   | Elarion.Abstractions.Features      | Error    | Duplicate variant key
  ELVAR003   | Elarion.Abstractions.Features      | Warning  | Variant contract has no default implementation
  ELVAR004   | Elarion.Abstractions.Features      | Error    | Conflicting variant selector

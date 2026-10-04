@@ -6,6 +6,7 @@ using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.ClientEvents;
 using Elarion.Abstractions.Modules;
 using Elarion.JsonRpc;
+using Elarion.Tests.Features;
 using Xunit;
 
 namespace Elarion.Tests.AspNetCore;
@@ -194,12 +195,17 @@ public sealed class JsonRpcSchemaExporterTests {
         var exportOptions = new JsonRpcSchemaExportOptions {
             ClientCapabilities = new ClientCapabilityManifest {
                 Modules = [
-                    new ClientModuleManifest { Name = "Invoicing", Enabled = true, Features = ["late-fees"] },
-                    new ClientModuleManifest
-                        { Name = "Clients", Enabled = true, Features = ["client-portal-v2", "bulk-import"] },
-                    new ClientModuleManifest { Name = "Experiments", Enabled = false, Features = ["beta-x"] }
+                    new ClientModuleManifest { Name = "Invoicing", Enabled = true },
+                    new ClientModuleManifest { Name = "Clients", Enabled = true },
+                    new ClientModuleManifest { Name = "Experiments", Enabled = false }
                 ]
             },
+            FeatureFlags = new StubFeatureFlagCatalog(
+                StubFeatureFlagCatalog.Flag("late-fees", "Invoicing"),
+                StubFeatureFlagCatalog.Flag("client-portal-v2", "Clients"),
+                StubFeatureFlagCatalog.Flag("bulk-import", "Clients"),
+                StubFeatureFlagCatalog.Flag("internal-only", "Clients", expose: false),
+                StubFeatureFlagCatalog.Flag("beta-x", "Experiments")),
             PermissionCatalog = new FakePermissionCatalog(
                 [
                     new PermissionCatalogEntry { Permission = "invoices.read", Resource = "invoices", Verb = "read" },

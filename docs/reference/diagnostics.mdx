@@ -246,6 +246,19 @@ Feature-gate decorator attachment for `[FeatureGate]`. See [Feature flags](/docs
 | ELFEAT001 | Error | A handler declares a `[FeatureGate]` but its response type does not implement `IResultFailureFactory<T>`, so the gate cannot short-circuit and would be silently skipped. | Return `Result<T>` or `Result` from the gated handler so the gate can short-circuit to `AppError.NotFound`. |
 | ELFEAT002 | Warning | A handler declares a `[FeatureGate]` with no feature name (or a blank one); the gate has no effect. | Pass at least one non-blank feature name to `[FeatureGate]`, or remove it. |
 
+## ELFLAG — Feature-flag declarations
+
+Declaration, ownership and wiring of feature flags (ADR-0079). See [Feature flags](/docs/concepts/feature-flags).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELFLAG001 | Error | A name used by `[FeatureGate]` or `[FeatureVariant]` is declared by no `[FeatureFlag]`/`[BackendFeatureFlag]` in this assembly or a referenced one. | Declare the flag once under its module, or fix the misspelled name. |
+| ELFLAG002 | Error | The same flag name is declared more than once — within one assembly or across referenced assemblies (read from the manifest). Neither declaration is registered. | Keep a single declaration; a flag has exactly one owner. |
+| ELFLAG003 | Error | `[FeatureFlag]` sits on a class that cannot own the flag: it does not implement `IFeatureFlagResolver`, or is abstract, static or generic. | Implement `IFeatureFlagResolver` on a concrete class, or use `[BackendFeatureFlag]` to leave evaluation to the backend. |
+| ELFLAG004 | Error | A flag is declared outside every `[AppModule]` namespace of its assembly, so no module registers it. | Move the declaration under its module's namespace. |
+| ELFLAG005 | Error | A flag declaration has a blank name. | Give the flag a non-blank name. |
+| ELFLAG006 | Warning | Two flag names map to the same `ElarionFeatureFlags` accessor (PascalCase collision); the second is omitted from the typed accessors but stays in `All`. | Rename one flag so the PascalCased accessors differ. |
+
 ## ELVAL — Request validation
 
 Validation-decorator attachment for handlers whose request DTO carries DataAnnotations validation

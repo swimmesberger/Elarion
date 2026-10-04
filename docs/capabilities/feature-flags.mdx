@@ -1,36 +1,44 @@
 ---
 title: Feature flag providers
-description: Wire a feature-flag backend into the host so [FeatureGate] handlers and variant services evaluate against the provider of your choice.
+description: Declare feature flags in modules, then give backend-evaluated flags an owner by wiring a feature-flag backend into the host.
 ---
 
-Feature flags gate a **handler** behind one or more flags with `[FeatureGate]`, and can swap a service
-implementation per user with `[FeatureVariant]`. The attributes and the `IFeatureFlagService` seam ship in
-`Elarion.Abstractions` and the gate decorator in `Elarion` core; neither carries **any** feature-management
-dependency — so gating is free to declare and the host picks the backend. This page covers the host
-wiring; for the gate semantics, multiple-flag forms, and variant injection in depth see
-[Feature flags & variants](/docs/concepts/feature-flags).
+Every feature flag is **declared once** and has **exactly one owner**: a resolver class in its module
+(`[FeatureFlag]`, code-defined) or the host's backend (`[BackendFeatureFlag]`, evaluated by
+Microsoft.FeatureManagement or an OpenFeature provider). The attributes, the evaluation contracts and
+`IFeatureFlagService` ship in `Elarion.Abstractions`/`Elarion` core with **no** feature-management dependency; this
+page covers the host wiring for backend-evaluated flags. For declarations, gates, the evaluation context and the
+compile-time checks see [Feature flags & variants](/docs/concepts/feature-flags).
 
-## Choose a provider
+## Code-defined flags need no package
 
-The gate evaluates against `IFeatureFlagService`, whose default implementation targets
-[OpenFeature](https://openfeature.dev) — the CNCF vendor-neutral standard. Two opt-in packages provide a
-backend; both go through the same seam, so switching one for the other never touches a `[FeatureGate]`.
+A class that implements `IFeatureFlagResolver` and carries `[FeatureFlag]` is wired by the module generator —
+nothing to register in the host:
+
+```csharp
+[FeatureFlag("beta-reports", ExposeToClient = true)]
+public sealed class BetaReportsFlag(IBetaRoster roster) : IFeatureFlagResolver { /* ... */ }
+```
+
+## Choose a backend for backend-evaluated flags
+
+A host that declares `[BackendFeatureFlag]`s must register exactly one `IBackendFeatureFlagEvaluator`, otherwise it
+fails at startup. Two opt-in packages provide one, built on [OpenFeature](https://openfeature.dev); the backend
+answers only for the flags declared as backend-evaluated, so switching one for the other never touches a
+`[FeatureGate]`.
 
 <Cards>
   <Card title="Batteries-included: FeatureManagement">
     `Elarion.FeatureFlags.FeatureManagement` wires the OpenFeature Microsoft.FeatureManagement provider
-    so `[FeatureGate]` reads config-driven flags out of the box. Best for getting started.
+    so declared flags read config-driven values out of the box. Best for getting started.
   </Card>
   <Card title="Bring your own provider: OpenFeature">
-    `Elarion.FeatureFlags.OpenFeature` registers the seam over any OpenFeature provider you configure
-    (LaunchDarkly, ConfigCat, flagd, Flagsmith, …). Best when a flag platform is already in play.
+    `Elarion.FeatureFlags.OpenFeature` registers the evaluator over any OpenFeature provider you configure
+    (LaunchDarkly, ConfigCat, flagd, Flagsmith, ...). Best when a flag platform is already in play.
   </Card>
 </Cards>
 
 ### Config-driven flags (FeatureManagement)
-
-One call wires the provider and reads flags from the conventional `FeatureManagement` configuration
-section:
 
 ```csharp
 builder.Services.AddElarionFeatureManagement(builder.Configuration);
@@ -45,24 +53,30 @@ builder.Services.AddElarionFeatureManagement(builder.Configuration);
 }
 ```
 
-### Any OpenFeature provider
+with the names declared in a module:
 
-Register your provider with `AddOpenFeature(...)`, then wire the Elarion seam over it:
+```csharp
+[AppModule("Billing")]
+[BackendFeatureFlag("new-export")]
+[BackendFeatureFlag("new-dashboard")]
+public static class BillingModule { }
+```
+
+### Any OpenFeature provider
 
 ```csharp
 builder.Services.AddOpenFeature(b => b.AddProvider(/* LaunchDarkly, ConfigCat, flagd, ... */));
 builder.Services.AddElarionOpenFeature();
 ```
 
-`AddElarionFeatureManagement` is just sugar over `AddOpenFeature(...) + AddElarionOpenFeature()`. To
-replace the backend wholesale (a custom store, a test double), register your own `IFeatureFlagService` —
-the gate and every imperative check follow.
+`AddElarionFeatureManagement` is sugar over `AddOpenFeature(...) + AddElarionOpenFeature()`. To replace the
+backend wholesale (a custom store, a test double), register your own `IBackendFeatureFlagEvaluator`.
 
 <Callout type="info">
-  Targeting is **ambient**: the default provider derives the OpenFeature evaluation context from the
-  current [`ICurrentUser`](/docs/capabilities/current-user) — the user id becomes the targeting key (plus
-  `UserId`/`Groups` attributes) — so percentage and targeting rollouts work off-HTTP the same as on, with
-  no `HttpContext`.
+  Targeting comes from the **explicit** `FeatureEvaluationContext`: the OpenFeature context is built from its
+  user id (targeting key, plus `UserId`/`Groups`), tenant id (`TenantId`) and custom attributes. For the ambient
+  request that context is derived from [`ICurrentUser`](/docs/capabilities/current-user) and the tenant scope, so
+  rollouts work off-HTTP the same as on, with no `HttpContext`.
 </Callout>
 
 ## Gate a handler

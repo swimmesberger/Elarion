@@ -1,31 +1,73 @@
 ---
 title: Feature flags & variants
-description: Declarative, transport-neutral feature-flag gating for handlers — [FeatureGate] over an OpenFeature-backed IFeatureFlagService, with any provider behind it.
+description: Every feature flag is declared once with exactly one owner — a resolver class or the host's backend — and gates, the client snapshot, and variants all evaluate through the same catalog.
 ---
 
 Feature flags in Elarion gate a **handler** behind one or more flags. You annotate the handler with
 `[FeatureGate(...)]`; a generated decorator evaluates the flags before the handler runs, under every
 transport (JSON-RPC, MCP, HTTP) identically. A disabled feature short-circuits to a `404 Not Found` — a
 gated-off operation is indistinguishable from one that doesn't exist, so a flag doubles as a hide-the-roadmap
-switch, exactly like Microsoft's MVC `[FeatureGate]`, but as a transport-neutral handler gate.
+switch.
 
-The flag *backend* is not baked in. The gate evaluates against a thin `IFeatureFlagService` seam whose default
-implementation targets [OpenFeature](https://openfeature.dev) — the CNCF vendor-neutral standard — so the same
-`[FeatureGate]` works against Microsoft.FeatureManagement, LaunchDarkly, ConfigCat, flagd, Flagsmith, or any
-other OpenFeature provider without touching your handlers.
+A flag is not a string you sprinkle around. It is **declared once** — name, description, whether the frontend
+may see it, and **who owns its value** — and the source generators build a catalog from those declarations,
+check every use against it at compile time, and wire it into DI. Exactly one owner answers for each flag, so
+there is no provider precedence to reason about. See
+[ADR-0079](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0079-every-feature-flag-is-declared-and-has-exactly-one-owner.md).
 
 ## Handler gates vs. module flags
 
-Elarion has two distinct flag mechanisms; reach for the right one:
-
 - **Module flags** (`Modules:{Name}:Enabled`) are **compose-time**: a disabled feature module disappears
-  entirely — its services, endpoints, JSON-RPC/MCP operations, jobs, and consumers are never registered. See
-  [modules](/docs/concepts/modules).
+  entirely — its services, endpoints, operations, jobs, consumers, **and declared feature flags** are never
+  registered. See [modules](/docs/concepts/modules).
 - **Feature gates** (`[FeatureGate]`) are **runtime**: the handler is always registered, but each call is
-  evaluated against the flag provider, so you get gradual rollouts, targeting, percentage rollouts, and kill
-  switches that flip without a redeploy.
+  evaluated against the flag's owner, so you get gradual rollouts, targeting, and kill switches that flip
+  without a redeploy.
 
-## Declaring gates
+## Declaring a flag
+
+There are two kinds of owner. Declare each flag with exactly one of them, under the module that owns it.
+
+**Code-defined** — the class that carries `[FeatureFlag]` *is* the owner and implements `IFeatureFlagResolver`:
+
+```csharp
+[FeatureFlag("beta-reports", Description = "Early access to the reports redesign.", ExposeToClient = true)]
+public sealed class BetaReportsFlag(IBetaRoster roster) : IFeatureFlagResolver {
+    public async ValueTask<bool> IsEnabledAsync(FeatureEvaluationContext context, CancellationToken ct) =>
+        context.UserId is { } id && await roster.ContainsAsync(id, ct);
+}
+```
+
+The resolver is a scoped service, so it can inject a `DbContext`, settings, or a clock.
+
+**Backend-evaluated** — the value lives in an external system (Microsoft.FeatureManagement, LaunchDarkly, …) and
+the host's `IBackendFeatureFlagEvaluator` owns it. Declare the name on any class under the module:
+
+```csharp
+[AppModule("Billing")]
+[BackendFeatureFlag("new-export", Description = "The streaming invoice export.")]
+[BackendFeatureFlag("dashboard-v2", ExposeToClient = true)]
+public static class BillingModule { }
+```
+
+A flag is a **variant flag** when its owner allocates a variant (`IFeatureFlagResolver.GetVariantAsync`, or the
+backend's allocation); `[FeatureVariant]` then selects service implementations by it (below).
+
+### What the compiler checks
+
+| Mistake | Diagnostic |
+| --- | --- |
+| A name in `[FeatureGate]`/`[FeatureVariant]` that nothing declares | `ELFLAG001` |
+| The same name declared twice — in one assembly or across referenced assemblies | `ELFLAG002` |
+| `[FeatureFlag]` on a class that is not a concrete `IFeatureFlagResolver` (no owner) | `ELFLAG003` |
+| A declaration outside every `[AppModule]` namespace of its assembly | `ELFLAG004` |
+| A blank flag name | `ELFLAG005` |
+| Two names mapping to the same generated accessor | `ELFLAG006` (warning) |
+
+Declarations of referenced assemblies are read from the Elarion manifest, never by scanning symbols, so the
+checks cross assembly boundaries: declare a flag in the assembly that gates on it, or in one it references.
+
+## Gating handlers
 
 Annotate the handler class. The attribute mirrors the familiar ASP.NET MVC `[FeatureGate]`:
 
@@ -44,66 +86,67 @@ public sealed class ExportInvoices(AppDbContext db)
 | `[FeatureGate("legacy", Negate = true)]` | `legacy` is **disabled** (fence off a legacy path during rollout) |
 
 The attribute is `AllowMultiple`, so stacking several `[FeatureGate]` attributes ANDs them. When any gate is
-unsatisfied the call returns `AppError.NotFound` and the handler never runs.
+unsatisfied the call returns `AppError.NotFound` and the handler never runs. The gate sits just inside the
+authorization gate, so an unauthenticated caller is never told whether a gated feature exists, and a disabled
+feature never touches caching, validation, or the handler.
 
-The gate sits in the decorator pipeline **just inside the authorization gate** (authorization stays the
-outermost functional gate), so authorization runs first — an unauthenticated caller is never told whether a
-gated feature exists — and a disabled feature still never touches caching, validation, or the handler.
-
-A handler whose response type cannot represent failure (no `IResultFailureFactory<T>`, i.e. not a `Result<T>`
-/ `Result`) is reported at build time as **`ELFEAT001`** — the gate could not short-circuit, so it would be
-silently skipped. A `[FeatureGate]` with no feature name is **`ELFEAT002`** (the gate has no effect).
+A handler whose response type cannot represent failure is reported as **`ELFEAT001`**; a `[FeatureGate]` with no
+feature name is **`ELFEAT002`**.
 
 ## Checking a flag at runtime
 
-The same seam is injectable, so application code can branch on a flag imperatively:
+`IFeatureFlagService` is the one entry point. It looks the flag up in the catalog and dispatches to its owner:
 
 ```csharp
-public sealed class Dashboard(IFeatureFlagService features) {
+public sealed class Dashboard(IFeatureFlagService flags) {
     public async Task<View> RenderAsync(CancellationToken ct) =>
-        await features.IsEnabledAsync("new-dashboard", ct)
-            ? RenderNew()
-            : RenderClassic();
+        await flags.IsEnabledAsync(ElarionFeatureFlags.DashboardV2, ct) ? RenderNew() : RenderClassic();
 }
 ```
+
+`[assembly: GenerateFeatureFlags]` (included in `[assembly: UseElarion]`) emits the **`ElarionFeatureFlags`**
+registry: a typed `FeatureFlagKey` per declared flag (so a misspelled or removed flag fails the build), a
+`Names` class of `const string`s for attribute arguments, and the descriptors aggregated across referenced
+assemblies. A raw string still works; a name the catalog does not contain — undeclared, or declared by a
+disabled module — evaluates as **disabled** and is logged once.
+
+### Explicit evaluation context
+
+Owners never reach into the ambient DI scope for *who is asking*; they receive a `FeatureEvaluationContext`:
+
+| Member | Meaning |
+| --- | --- |
+| `UserId` / `IsAuthenticated` | the subject (`null` for an anonymous caller) |
+| `Roles` | the subject's roles |
+| `TenantId` | the tenant, when [tenant scoping](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0075-ambient-tenant-scoping.md) resolved one and the scope is not a system scope |
+| `Attributes` | extra targeting attributes you supply |
+| `Services` | the scope's services, for resolvers that need them |
+
+The overloads without a context use `flags.CreateContext()` (the current request). Pass your own to evaluate for
+someone else — an admin previewing another user's experience, a job acting for a user:
 
 ```csharp
-public interface IFeatureFlagService {
-    ValueTask<bool> IsEnabledAsync(string feature, CancellationToken ct = default);
-}
+var asVip = flags.CreateContext() with { UserId = "u-vip" };
+var enabled = await flags.IsEnabledAsync("beta-reports", asVip, ct);
 ```
 
-Targeting is **ambient**: the default provider derives the OpenFeature evaluation context from the current
-[`ICurrentUser`](/docs/concepts/handlers) — the user id becomes the targeting key (and the `UserId`/`Groups`
-attributes the Microsoft.FeatureManagement provider reads), so percentage and targeting rollouts work off-HTTP
-the same as on, with no `HttpContext`.
+`[FeatureGate]`, the session snapshot ([client capabilities](/docs/concepts/client-capabilities)), and your own
+checks all evaluate through the same service and catalog, so a flag cannot answer differently depending on the
+entry point.
 
-## Choosing a provider
+## Choosing a backend
 
-The seam (`IFeatureFlagService`, `[FeatureGate]`) lives in `Elarion.Abstractions` and the enforcing
-`FeatureGateDecorator` in `Elarion` core; neither carries a feature-management dependency. Two opt-in packages provide a backend:
+Backend-evaluated flags need exactly one `IBackendFeatureFlagEvaluator`. The host fails at startup if it
+declares backend flags and registers none. Two opt-in packages provide one; see
+[feature flag providers](/docs/capabilities/feature-flags):
 
-- **`Elarion.FeatureFlags.FeatureManagement`** — the batteries-included default. One call wires the OpenFeature
-  Microsoft.FeatureManagement provider so `[FeatureGate]` reads config-driven flags out of the box:
+- **`Elarion.FeatureFlags.FeatureManagement`** — `builder.Services.AddElarionFeatureManagement(builder.Configuration);`
+  reads flags from the `FeatureManagement` configuration section.
+- **`Elarion.FeatureFlags.OpenFeature`** — `AddOpenFeature(...)` + `AddElarionOpenFeature()` over any OpenFeature
+  provider (LaunchDarkly, ConfigCat, flagd, …).
 
-  ```csharp
-  builder.Services.AddElarionFeatureManagement(builder.Configuration);
-  ```
-
-  Flags are defined in the conventional `FeatureManagement` configuration section.
-
-- **`Elarion.FeatureFlags.OpenFeature`** — the provider-neutral base. Bring your own OpenFeature provider and register our
-  service over it:
-
-  ```csharp
-  builder.Services.AddOpenFeature(b => b.AddProvider(/* LaunchDarkly, ConfigCat, flagd, ... */));
-  builder.Services.AddElarionOpenFeature();
-  ```
-
-`AddElarionFeatureManagement` is just sugar over `AddOpenFeature(...) + AddElarionOpenFeature()`. Because both
-go through the same `IFeatureFlagService` seam, switching providers never touches a `[FeatureGate]`. To replace
-the backend wholesale (a custom store, a test double), register your own `IFeatureFlagService` — the gate and
-all imperative checks follow.
+The backend only ever sees flags declared with `[BackendFeatureFlag]`; it is never a fallback for a code-owned or
+undeclared name.
 
 ## Variant service injection
 
@@ -128,6 +171,8 @@ public sealed class RunForecast(IForecastAlgorithm algorithm)                 //
 ```
 
 The user allocated the `neural` variant gets `NeuralForecast`; everyone else gets the default `LinearForecast`.
+The named flag (`ForecastAlgorithm`) must be declared like any other (`ELFLAG001` otherwise), and whoever owns it
+allocates the variant: its resolver's `GetVariantAsync`, or the backend.
 
 <Callout type="info">
 **Vary behavior with a variant *service*, not a variant *handler*.** There is no "pick handler A vs handler B by
@@ -396,6 +441,7 @@ Everything else injects the contract and follows the switch.
 
 ## See also
 
+- [ADR-0079: Every feature flag is declared and has exactly one owner](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0079-every-feature-flag-is-declared-and-has-exactly-one-owner.md) — declaration as the single source, one owner per flag, explicit evaluation context.
 - [ADR-0016: Feature-flag gating](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0016-feature-flag-gating.md) — why a thin Elarion seam over OpenFeature rather than `IFeatureManager` directly.
 - [ADR-0019: Variant service injection](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0019-variant-service-injection.md) — transparent per-variant implementation injection via the async-resolving handler proxy.
 - [ADR-0028: Configuration-selected service variants](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0028-configuration-selected-service-variants.md) — the synchronous, proxy-free `[ConfigurationVariant]` axis and why it reads `IConfiguration` rather than the settings API or `IOptionsMonitor`.

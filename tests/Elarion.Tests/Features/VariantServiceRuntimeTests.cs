@@ -203,7 +203,7 @@ public sealed class VariantServiceRuntimeTests {
     private static ServiceCollection BuildVariantServices(string userId) {
         var services = new ServiceCollection();
         services.AddSingleton<ICurrentUser>(new FakeCurrentUser { IsAuthenticated = true, UserId = userId });
-        services.AddScoped<IFeatureVariantService, FakeVariantService>();
+        services.AddScoped<IFeatureFlagService, FakeVariantService>();
         services.AddElarionVariantService<IAlgorithm>("ForecastAlgorithm");
         services.AddKeyedScoped<IAlgorithm, NeuralAlgorithm>("neural");
         services.AddKeyedScoped<IAlgorithm, LinearAlgorithm>(VariantServiceKeys.Default);
@@ -227,9 +227,25 @@ public sealed class VariantServiceRuntimeTests {
     }
 
     // Allocates "neural" only to user u-A; everyone else gets no variant (→ default fallback).
-    private sealed class FakeVariantService(ICurrentUser currentUser) : IFeatureVariantService {
-        public ValueTask<string?> GetVariantAsync(string feature, CancellationToken ct = default) {
+    private sealed class FakeVariantService(ICurrentUser currentUser) : IFeatureFlagService {
+        public FeatureEvaluationContext CreateContext() {
+            return new FeatureEvaluationContext { Services = null! };
+        }
+
+        public ValueTask<bool> IsEnabledAsync(string flag, CancellationToken ct = default) {
+            return new ValueTask<bool>(false);
+        }
+
+        public ValueTask<bool> IsEnabledAsync(string flag, FeatureEvaluationContext context, CancellationToken ct = default) {
+            return new ValueTask<bool>(false);
+        }
+
+        public ValueTask<string?> GetVariantAsync(string flag, CancellationToken ct = default) {
             return new ValueTask<string?>(currentUser.UserId == "u-A" ? "neural" : null);
+        }
+
+        public ValueTask<string?> GetVariantAsync(string flag, FeatureEvaluationContext context, CancellationToken ct = default) {
+            return GetVariantAsync(flag, ct);
         }
     }
 
