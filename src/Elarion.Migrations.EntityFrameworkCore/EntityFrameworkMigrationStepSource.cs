@@ -1,7 +1,10 @@
+using System.Reflection;
 using Elarion.Migrations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Elarion.Migrations.EntityFrameworkCore;
@@ -23,6 +26,7 @@ internal sealed class EntityFrameworkMigrationStepSource<TContext> : IMigrationS
     public MigrationStepSet Discover(IServiceProvider services) {
         var errors = new List<MigrationValidationError>();
         var steps = new List<MigrationStep>();
+        var suppressing = new HashSet<string>(StringComparer.Ordinal);
 
         IReadOnlyList<string> ids;
         using (var scope = services.CreateScope()) {
@@ -39,10 +43,17 @@ internal sealed class EntityFrameworkMigrationStepSource<TContext> : IMigrationS
                 };
             }
 
-            ids = context.GetService<IMigrationsAssembly>().Migrations.Keys.Order(StringComparer.Ordinal).ToList();
+            var assembly = context.GetService<IMigrationsAssembly>();
+            ids = assembly.Migrations.Keys.Order(StringComparer.Ordinal).ToList();
+            var provider = context.Database.ProviderName;
+            foreach (var id in ids) {
+                // A migration that suppresses the transaction (CREATE INDEX CONCURRENTLY and friends) cannot join the
+                // plan's transaction, so its step opts out of one — the plan's rule for such work (ADR-0081).
+                var migration = assembly.CreateMigration(assembly.Migrations[id], provider!);
+                if (migration.UpOperations.OfType<SqlOperation>().Any(o => o.SuppressTransaction)) suppressing.Add(id);
+            }
         }
 
-        string? previous = null;
         foreach (var id in ids) {
             var separator = id.IndexOf('_', StringComparison.Ordinal);
             var versionPart = separator < 0 ? id : id[..separator];
@@ -56,8 +67,7 @@ internal sealed class EntityFrameworkMigrationStepSource<TContext> : IMigrationS
             }
 
             var name = separator < 0 || separator + 1 >= id.Length ? id : id[(separator + 1)..];
-            steps.Add(new EntityFrameworkMigrationStep<TContext>(id, versionPart, name, previous));
-            previous = id;
+            steps.Add(new EntityFrameworkMigrationStep<TContext>(id, versionPart, name, !suppressing.Contains(id)));
         }
 
         return new MigrationStepSet { Steps = steps, Errors = errors };
@@ -65,15 +75,17 @@ internal sealed class EntityFrameworkMigrationStepSource<TContext> : IMigrationS
 }
 
 /// <summary>
-/// One EF Core migration as a plan step. It executes the migration's own generated SQL — the same script
-/// <c>dotnet ef migrations script</c> produces for that single migration — on the plan's connection inside the
-/// plan's transaction, so the migration and the plan's history row commit atomically. EF's
-/// <c>__EFMigrationsHistory</c> row is written by that script too, which keeps EF tooling truthful; the plan's
-/// history stays the authority. On a database that EF migrated before the plan existed, the step is
+/// One EF Core migration as a plan step. It executes the migration's own generated commands — the ones
+/// <c>Database.MigrateAsync()</c> executes — on the plan's connection inside the plan's transaction, so the
+/// migration and the plan's history row commit atomically. Every command runs as its own statement, exactly as
+/// EF's migrator runs it, so a raw <c>migrationBuilder.Sql("...")</c> without a trailing <c>;</c> cannot run into
+/// the next operation (a concatenated script would). EF's <c>__EFMigrationsHistory</c> row is written too, which
+/// keeps EF tooling truthful; the plan's history stays the authority. A migration whose raw SQL operations
+/// suppress the transaction makes the step non-transactional; any other command that asks for it fails the step. On a database that EF migrated before the plan existed, the step is
 /// satisfied — recorded without running — when <c>__EFMigrationsHistory</c> already lists its id.
 /// </summary>
 internal sealed class EntityFrameworkMigrationStep<TContext>(string migrationId, string version, string name,
-    string? previousMigrationId) : MigrationStep where TContext : DbContext {
+    bool useTransaction) : MigrationStep where TContext : DbContext {
     public override string Kind => EntityFrameworkMigrationStepKinds.EntityFramework;
 
     public override string Name => migrationId;
@@ -81,6 +93,8 @@ internal sealed class EntityFrameworkMigrationStep<TContext>(string migrationId,
     public override string? Version => version;
 
     public override string Description => name;
+
+    public override bool UseTransaction => useTransaction;
 
     public override async ValueTask<bool> IsAlreadySatisfiedAsync(MigrationStepContext context,
         CancellationToken cancellationToken) {
@@ -92,14 +106,35 @@ internal sealed class EntityFrameworkMigrationStep<TContext>(string migrationId,
 
     public override async Task ExecuteAsync(MigrationStepContext context, CancellationToken cancellationToken) {
         var db = context.Services.GetRequiredService<TContext>();
+        var history = db.GetService<IHistoryRepository>();
+        var assembly = db.GetService<IMigrationsAssembly>();
+        var migration = assembly.CreateMigration(assembly.Migrations[migrationId], db.Database.ProviderName!);
+        var model = db.GetService<IModelRuntimeInitializer>()
+            .Initialize(FinalizeModel(migration.TargetModel), designTime: true, validationLogger: null);
 
-        // NoTransactions: the plan owns the transaction, so the script must not open or close its own. The
-        // history table is created first because a plan baselined past the first migration (or an EF history
-        // dropped by hand) would otherwise fail on the history insert at the end of the script.
-        var script = db.GetService<IMigrator>()
-            .GenerateScript(previousMigrationId, migrationId, MigrationsSqlGenerationOptions.NoTransactions);
-        var createHistory = db.GetService<IHistoryRepository>().GetCreateIfNotExistsScript();
+        // The history table is created first because a plan baselined past the first migration (or an EF history
+        // dropped by hand) would otherwise fail on the history insert at the end of the migration.
+        await context.ExecuteSqlAsync(history.GetCreateIfNotExistsScript(), cancellationToken);
 
-        await context.ExecuteSqlAsync(createHistory + Environment.NewLine + script, cancellationToken);
+        var commands = db.GetService<IMigrationsSqlGenerator>()
+            .Generate(migration.UpOperations, model, MigrationsSqlGenerationOptions.Default);
+        foreach (var command in commands) {
+            if (command.TransactionSuppressed && context.Transaction is not null) {
+                throw new InvalidOperationException(
+                    $"EF migration '{migrationId}' contains a command that must run outside a transaction, but the plan runs this step in one. Express it as a raw migrationBuilder.Sql(..., suppressTransaction: true) operation so the step opts out of the transaction, or move it to a SQL script with a '-- elarion: no-transaction' directive.");
+            }
+
+            await context.ExecuteSqlAsync(command.CommandText, cancellationToken);
+        }
+
+        var row = new HistoryRow(migrationId, EfProductVersion);
+        await context.ExecuteSqlAsync(history.GetInsertScript(row), cancellationToken);
     }
+
+    private static IModel FinalizeModel(IModel model) {
+        return model is IMutableModel mutable ? mutable.FinalizeModel() : model;
+    }
+
+    private static string EfProductVersion { get; } = typeof(DbContext).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "unknown";
 }

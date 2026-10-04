@@ -44,6 +44,13 @@ minor releases may include breaking changes.
   decorator because they need the request. It is deliberately not an early exit, so when the payload binds the full
   pipeline still runs and denials stay audited and traced.
 
+- **EF migration steps run each migration command on its own, like `Database.MigrateAsync()` (ADR-0081).** The step
+  executed `IMigrator.GenerateScript(...)` as one batch, and that script does not terminate statements, so raw
+  `migrationBuilder.Sql("...")` operations without a trailing `;` ran into the next one (syntax error) although the
+  same migrations apply under `MigrateAsync()`. The step now generates the migration's commands with
+  `IMigrationsSqlGenerator` and executes them one by one on the plan's connection and transaction, then writes EF's
+  history row. A migration with a `suppressTransaction: true` raw SQL operation makes its step non-transactional.
+
 ### Changed
 - **BREAKING: `IAuthorizer` gains `AuthorizeGateAsync(requirements, ct)`**, the payload-independent half of
   `AuthorizeAsync` (anonymous opt-out, authentication, permissions, roles, claims). A custom or decorating
