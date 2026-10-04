@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Reflection;
-using System.Runtime.CompilerServices;
 using Elarion.Abstractions.Pipeline;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Authorization;
@@ -30,10 +28,6 @@ public sealed class AuthorizationDecorator<TRequest, TResponse>(
     IReadOnlyList<ResourceRequirementBinding<TRequest>>? resourceBindings = null
 ) : IHandler<TRequest, TResponse>
     where TResponse : IResultFailureFactory<TResponse> {
-    // Parsed-from-attributes requirements are cached per concrete handler type; the cheap default-policy
-    // flag is merged in per call so attribute reflection runs once per handler type.
-    private static readonly ConditionalWeakTable<Type, RequirementsBox> Cache = new();
-
     /// <inheritdoc />
     public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
         var requirements = ResolveRequirements();
@@ -67,34 +61,6 @@ public sealed class AuthorizationDecorator<TRequest, TResponse>(
     }
 
     private AuthorizationRequirements ResolveRequirements() {
-        var parsed = Cache.GetValue(metadata.HandlerType, static type => new RequirementsBox(Parse(type))).Value;
-        return requireAuthenticatedByDefault && !parsed.AllowAnonymous && !parsed.RequireAuthenticated
-            ? parsed with { RequireAuthenticated = true }
-            : parsed;
-    }
-
-    private static AuthorizationRequirements Parse(Type handlerType) {
-        var allowAnonymous = handlerType.GetCustomAttribute<AllowAnonymousAttribute>(true) is not null;
-        var permissions = handlerType.GetCustomAttributes<RequirePermissionAttribute>(true)
-            .Select(static attribute => attribute.Permission).ToArray();
-        var roles = handlerType.GetCustomAttributes<RequireRoleAttribute>(true)
-            .Select(static attribute => attribute.Role).ToArray();
-        var claims = handlerType.GetCustomAttributes<RequireClaimAttribute>(true).ToArray();
-        var policies = handlerType.GetCustomAttributes<RequirePolicyAttribute>(true)
-            .Select(static attribute => attribute.Policy).ToArray();
-
-        return new AuthorizationRequirements(
-            allowAnonymous,
-            false,
-            permissions,
-            roles,
-            claims,
-            policies,
-            []);
-    }
-
-    // ConditionalWeakTable requires a reference-type value, so the requirements struct is boxed once per type.
-    private sealed class RequirementsBox(AuthorizationRequirements value) {
-        public AuthorizationRequirements Value { get; } = value;
+        return HandlerAuthorizationRequirements.Resolve(metadata, requireAuthenticatedByDefault);
     }
 }

@@ -185,7 +185,7 @@ internal static partial class HttpEndpointEmission {
         if (entry.UseAsParameters)
             AppendMemberBinding(sb, entry, indent, index);
         else
-            AppendBodyBinding(sb, indent, index);
+            AppendBodyBinding(sb, entry, indent, index);
 
         sb.AppendLine(
             $"{indent}var __handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions");
@@ -195,17 +195,25 @@ internal static partial class HttpEndpointEmission {
         sb.AppendLine($"{indent}await __result.ExecuteAsync(__context);");
     }
 
-    private static void AppendBodyRead(StringBuilder sb, string indent, int index) {
+    // Every binding failure first asks the handler's admission gate: a caller who is not authenticated or
+    // authorized gets the 401/403 problem before any payload problem (the pipeline itself never runs here).
+    private static void AppendAdmit(StringBuilder sb, Model entry, string indent) {
+        sb.AppendLine(
+            $"{indent}if (!await {BinderFqn}.TryAdmitAsync<{entry.RequestTypeFqn}>(__context)) return;");
+    }
+
+    private static void AppendBodyRead(StringBuilder sb, Model entry, string indent, int index) {
         sb.AppendLine(
             $"{indent}var __bodyResult = await {BinderFqn}.ReadJsonBodyAsync(__context, __bodyTypeInfo{index});");
         sb.AppendLine($"{indent}if (__bodyResult.Failure != {BinderFqn}.BodyFailure.None) {{");
+        AppendAdmit(sb, entry, indent + "    ");
         sb.AppendLine($"{indent}    await {BinderFqn}.WriteBodyProblemAsync(__context, __bodyResult.Failure);");
         sb.AppendLine($"{indent}    return;");
         sb.AppendLine($"{indent}}}");
     }
 
-    private static void AppendBodyBinding(StringBuilder sb, string indent, int index) {
-        AppendBodyRead(sb, indent, index);
+    private static void AppendBodyBinding(StringBuilder sb, Model entry, string indent, int index) {
+        AppendBodyRead(sb, entry, indent, index);
         sb.AppendLine($"{indent}var __request = __bodyResult.Value!;");
     }
 
@@ -228,19 +236,21 @@ internal static partial class HttpEndpointEmission {
         if (needsForm) {
             sb.AppendLine($"{indent}var __form = await {BinderFqn}.ReadFormAsync(__context);");
             sb.AppendLine($"{indent}if (__form is null) {{");
+            AppendAdmit(sb, entry, indent + "    ");
             sb.AppendLine($"{indent}    await {BinderFqn}.WriteFormProblemAsync(__context);");
             sb.AppendLine($"{indent}    return;");
             sb.AppendLine($"{indent}}}");
         }
 
         if (hasBodyMember)
-            AppendBodyRead(sb, indent, index);
+            AppendBodyRead(sb, entry, indent, index);
 
         sb.AppendLine($"{indent}var __errors = default(global::Elarion.AspNetCore.ElarionHttpBindingErrors);");
         foreach (var member in members)
             sb.AppendLine($"{indent}var {LocalName(member)} = {BindExpression(member)};");
 
         sb.AppendLine($"{indent}if (__errors.HasErrors) {{");
+        AppendAdmit(sb, entry, indent + "    ");
         sb.AppendLine($"{indent}    await __errors.WriteAsync(__context);");
         sb.AppendLine($"{indent}    return;");
         sb.AppendLine($"{indent}}}");

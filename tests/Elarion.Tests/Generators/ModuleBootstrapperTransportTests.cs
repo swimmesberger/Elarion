@@ -138,6 +138,12 @@ public sealed class ModuleBootstrapperTransportTests {
             "[global::Microsoft.AspNetCore.Mvc.FromRoute(Name = \"Id\")] global::System.Guid @id");
         generated.Should().Contain(
             "new global::Microsoft.AspNetCore.Http.Metadata.AcceptsMetadata(new[] { \"application/json\" }, typeof(global::Sample.Shipping.CreateShipment.Command), false)");
+        // Every binding-failure branch first asks the handler's admission gate, so a caller who may not call the
+        // endpoint gets 401/403 rather than a 400 that discloses the parameter requirements.
+        generated.Should().Contain(
+            "if (!await global::Elarion.AspNetCore.ElarionHttpEndpointBinder.TryAdmitAsync<global::Sample.Shipping.CreateShipment.Command>(__context)) return;");
+        generated.Should().Contain(
+            "if (!await global::Elarion.AspNetCore.ElarionHttpEndpointBinder.TryAdmitAsync<global::Sample.Billing.GetInvoice.Query>(__context)) return;");
         // The per-module handler method maps that module's [Handler] operation onto the registry with its flags.
         generated.Should().Contain(
             "dispatcher.Map<global::Sample.Billing.GetInvoiceRpc.Query, global::Sample.Billing.GetInvoiceRpc.Response>(\"invoices.get\", global::Elarion.Abstractions.HandlerTransports.All, errors: global::System.Array.Empty<global::Elarion.Abstractions.ErrorContract>());");

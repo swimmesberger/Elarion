@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using Elarion.Abstractions.Dispatch;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -58,6 +59,22 @@ public static class ElarionHttpEndpointBinder {
 
         /// <summary>The failure kind, <see cref="BodyFailure.None"/> on success.</summary>
         public BodyFailure Failure { get; } = failure;
+    }
+
+    /// <summary>
+    /// Asks the handler's admission gate (<see cref="IHandlerGate"/>) whether the caller may call the endpoint at
+    /// all, after request binding failed. Returns <see langword="true"/> when admitted — the caller then reports the
+    /// binding problem — and <see langword="false"/> after writing the 401/403 problem, so an unauthenticated or
+    /// forbidden caller never learns the parameter requirements (401/403 before 400). Binding success never
+    /// reaches this: the decorator pipeline enforces authorization on the bound request.
+    /// </summary>
+    public static async ValueTask<bool> TryAdmitAsync<TRequest>(HttpContext httpContext) {
+        var denial = await HandlerGates.EvaluateAsync<TRequest>(httpContext.RequestServices, httpContext.RequestAborted)
+            .ConfigureAwait(false);
+        if (denial is null) return true;
+
+        await ElarionHttpResults.ToProblem(denial).ExecuteAsync(httpContext).ConfigureAwait(false);
+        return false;
     }
 
     /// <summary>

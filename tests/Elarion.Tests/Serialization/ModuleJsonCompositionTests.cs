@@ -49,9 +49,12 @@ public sealed class ModuleJsonCompositionTests {
 
         var options = services.BuildServiceProvider().GetRequiredService<IElarionJsonSerialization>().Options;
 
-        options.TypeInfoResolverChain
-            .Count(resolver => ReferenceEquals(resolver, ModuleCompositionJsonContext.Default))
-            .Should().Be(1);
+        // The module's own contribution alone defines the chain; the host contributing the same context again must
+        // not grow it (resolvers are wrapped after composition, so compare sizes rather than identities).
+        var moduleOnly = new ServiceCollection();
+        InvokeConfigureDefaultServices(assembly, moduleOnly);
+        var moduleOnlyOptions = moduleOnly.BuildServiceProvider().GetRequiredService<IElarionJsonSerialization>().Options;
+        options.TypeInfoResolverChain.Should().HaveCount(moduleOnlyOptions.TypeInfoResolverChain.Count);
     }
 
     private static void InvokeConfigureDefaultServices(Assembly assembly, IServiceCollection services) {

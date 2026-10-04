@@ -33,7 +33,21 @@ minor releases may include breaking changes.
   everywhere; non-nullable members without a default stay required. A nullable `required`/`[JsonRequired]` member is
   likewise optional on the wire.
 
+- **A caller who may not call an operation now gets 401/403, not an invalid-params error, for a malformed payload.**
+  JSON-RPC, MCP tool calls and the generated HTTP endpoints deserialized and rejected the payload (`-32602`/400)
+  before authorization ran, which leaked parameter requirements to unauthenticated callers and inverted the usual
+  401-before-400 order. When binding fails, the transport now asks the handler's new `IHandlerGate` (registered by
+  the generator for every handler with an authorization decorator; reached through `HandlerRoute.EvaluateGateAsync`,
+  `HandlerGates.EvaluateAsync` and `ElarionHttpEndpointBinder.TryAdmitAsync`) and answers with the authentication or
+  authorization error (`-32005`/401, `-32003`/403). The gate covers the payload-independent requirements
+  (authentication, permissions, roles, claims); policies, global rules and resource requirements stay in the
+  decorator because they need the request. It is deliberately not an early exit, so when the payload binds the full
+  pipeline still runs and denials stay audited and traced.
+
 ### Changed
+- **BREAKING: `IAuthorizer` gains `AuthorizeGateAsync(requirements, ct)`**, the payload-independent half of
+  `AuthorizeAsync` (anonymous opt-out, authentication, permissions, roles, claims). A custom or decorating
+  authorizer must implement it; a decorator forwards to its inner `ClaimsAuthorizer`.
 - **BREAKING: settings API tidy-up.** `SettingsConfigurationProjection.Project` returns `SettingsProjection`
   (`.Data` is the old dictionary, `.Problems` the skipped rows); `ISettingResolver.IsPinned` and
   `GetConfigurationChangeToken` moved to `ISettingPins`; the `SettingResolver` constructor takes

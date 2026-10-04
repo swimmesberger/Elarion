@@ -165,6 +165,11 @@ public sealed partial class HandlerRegistrationGenerator {
             // through the typed connection path.
             sb.AppendLine(
                 $"        services.Add(ServiceDescriptor.KeyedSingleton<global::Elarion.Abstractions.Pipeline.HandlerMetadata>(typeof({handler.RequestFqn}), __handlerMetadata));");
+            // The request-independent admission gate (IHandlerGate): a transport that cannot bind the payload asks it
+            // first, so an unauthenticated or forbidden caller gets 401/403 instead of an invalid-params error.
+            if (handler.HasAuthorization)
+                sb.AppendLine(
+                    $"        services.Add(ServiceDescriptor.KeyedSingleton<global::Elarion.Abstractions.Dispatch.IHandlerGate>(typeof({handler.RequestFqn}), new global::Elarion.Pipeline.AuthorizationGate(__handlerMetadata{(handler.RequireAuthenticatedByDefault ? ", requireAuthenticatedByDefault: true" : string.Empty)})));");
         }
     }
 

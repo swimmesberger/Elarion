@@ -70,6 +70,22 @@ the feature-gate 404 applies). The default authorizer logs the unmet requirement
 operators; a host that wants the detail on the wire sets `AuthorizationOptions.ForbiddenMessageFormat`
 to a format containing `{0}` (e.g. `"Missing required permission: {0}"`).
 
+### 401/403 before 400
+
+A caller who may not call an operation never learns its parameter requirements. When a transport that binds a wire
+payload itself (JSON-RPC, MCP tool calls, the generated HTTP endpoints) **fails to bind** the request, it first asks
+the handler's *admission gate* (`IHandlerGate`, registered by the generator for every handler with an authorization
+decorator) and answers with the authentication/authorization error — `-32005`/`401` for an unauthenticated caller,
+`-32003`/`403` for one missing a declared permission, role or claim — instead of `-32602`/`400`. An admitted caller
+still gets the payload error.
+
+The gate covers only what does not depend on the payload: the authentication gate and the declared
+`[RequirePermission]`, `[RequireRole]` and `[RequireClaim]`. Named policies, global rules and `[RequireResource]`
+receive the request and are evaluated by the decorator after binding, exactly as before. The gate is not an early
+exit in front of the pipeline: when the payload binds, the full pipeline runs, so denials stay audited and traced.
+gRPC and the stream endpoints take an application-mapped, already typed request, so there is no framework binding
+step to order.
+
 ## Opt-in by default
 
 By default the authorization decorator is attached **only to handlers that carry a `Require*` or
@@ -111,6 +127,9 @@ policies — no `HttpContext`, no ASP.NET dependency:
 public interface IAuthorizer {
     // null => authorized; AppError.Unauthorized/Forbidden otherwise.
     ValueTask<AppError?> AuthorizeAsync(AuthorizationRequirements requirements, object? resource, CancellationToken ct);
+
+    // The payload-independent part (authentication, permissions, roles, claims), used by the admission gate.
+    ValueTask<AppError?> AuthorizeGateAsync(AuthorizationRequirements requirements, CancellationToken ct);
 }
 ```
 
@@ -214,6 +233,10 @@ public sealed class AuditingAuthorizer(ClaimsAuthorizer inner, IAuditSink sink) 
         var error = await inner.AuthorizeAsync(requirements, resource, ct);
         if (error is not null) await sink.RecordDenialAsync(error, ct);
         return error;
+    }
+
+    public ValueTask<AppError?> AuthorizeGateAsync(AuthorizationRequirements requirements, CancellationToken ct) {
+        return inner.AuthorizeGateAsync(requirements, ct);
     }
 }
 

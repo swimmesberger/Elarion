@@ -120,6 +120,10 @@ public sealed class AuthorizationPolicyRegistrationTests {
             Calls++;
             return inner.AuthorizeAsync(requirements, resource, ct);
         }
+
+        public ValueTask<AppError?> AuthorizeGateAsync(AuthorizationRequirements requirements, CancellationToken ct) {
+            return inner.AuthorizeGateAsync(requirements, ct);
+        }
     }
 
     [Fact]

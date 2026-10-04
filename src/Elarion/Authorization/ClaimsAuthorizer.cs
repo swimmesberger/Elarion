@@ -65,17 +65,7 @@ public sealed class ClaimsAuthorizer(
             }
         }
 
-        foreach (var permission in requirements.Permissions)
-            if (!user.HasClaim(options.PermissionClaimType, permission))
-                return Forbidden("permission", permission);
-
-        foreach (var role in requirements.Roles)
-            if (!user.IsInRole(role))
-                return Forbidden("role", role);
-
-        foreach (var claim in requirements.Claims)
-            if (!SatisfiesClaim(claim))
-                return Forbidden("claim", claim.ClaimType);
+        if (CheckDeclared(requirements) is { } declared) return declared;
 
         foreach (var policyName in requirements.Policies) {
             var policy = FindPolicy(policyName);
@@ -100,6 +90,34 @@ public sealed class ClaimsAuthorizer(
             if (!await resourceAuthorizer.AuthorizeResourceAsync(context, ct).ConfigureAwait(false))
                 return Forbidden("resource", resourceRequirement.ResourceTypeName);
         }
+
+        return null;
+    }
+
+    /// <inheritdoc />
+    public ValueTask<AppError?> AuthorizeGateAsync(AuthorizationRequirements requirements, CancellationToken ct) {
+        if (requirements.AllowAnonymous) return ValueTask.FromResult<AppError?>(null);
+
+        if (requirements.HasAny && !user.IsAuthenticated)
+            return ValueTask.FromResult<AppError?>(AppError.Unauthorized(options.UnauthorizedMessage));
+
+        return ValueTask.FromResult(CheckDeclared(requirements));
+    }
+
+    // The payload-independent declared requirements, shared by the full evaluation and the gate so the two cannot
+    // drift apart.
+    private AppError? CheckDeclared(AuthorizationRequirements requirements) {
+        foreach (var permission in requirements.Permissions)
+            if (!user.HasClaim(options.PermissionClaimType, permission))
+                return Forbidden("permission", permission);
+
+        foreach (var role in requirements.Roles)
+            if (!user.IsInRole(role))
+                return Forbidden("role", role);
+
+        foreach (var claim in requirements.Claims)
+            if (!SatisfiesClaim(claim))
+                return Forbidden("claim", claim.ClaimType);
 
         return null;
     }
