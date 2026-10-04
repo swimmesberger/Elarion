@@ -31,7 +31,11 @@ namespace Elarion.Abstractions.Features;
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class FeatureVariantAttribute(string feature) : Attribute {
-    /// <summary>The feature flag whose allocated variant selects the implementation.</summary>
+    /// <summary>
+    /// The declared feature flag whose allocated variant selects the implementation. It must be declared
+    /// (<see cref="FeatureFlagAttribute"/>/<see cref="BackendFeatureFlagAttribute"/>) or the build fails with
+    /// <c>ELFLAG001</c>.
+    /// </summary>
     public string Feature { get; } = feature;
 
     /// <summary>

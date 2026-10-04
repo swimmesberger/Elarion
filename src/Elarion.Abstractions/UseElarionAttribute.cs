@@ -10,7 +10,8 @@ namespace Elarion.Abstractions;
 /// <see cref="GenerateResiliencePoliciesAttribute"/>, <see cref="GenerateActorsAttribute"/>,
 /// <see cref="GenerateModuleAuthorizationPoliciesAttribute"/>,
 /// <see cref="GenerateClientEventTopicsAttribute"/>, <see cref="GeneratePermissionCatalogAttribute"/>,
-/// and <see cref="GenerateVariantCatalogAttribute"/>.
+/// <see cref="GenerateVariantCatalogAttribute"/>, <see cref="GenerateFeatureFlagsAttribute"/>, and
+/// <see cref="Settings.GenerateSettingDefinitionCatalogAttribute"/>.
 /// Application-owned attributes, such as pipeline defaults, remain explicit because the framework cannot
 /// know which policy an application wants.
 /// </remarks>

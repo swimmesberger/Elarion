@@ -39,6 +39,43 @@
           "id",
           "number"
         ]
+      },
+      "errors": {
+        "forbidden": {
+          "kind": "forbidden"
+        },
+        "unauthorized": {
+          "kind": "unauthorized"
+        },
+        "validation": {
+          "kind": "validation",
+          "data": {
+            "type": "object",
+            "properties": {
+              "errors": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fieldErrors": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "required": [
+              "errors"
+            ]
+          }
+        }
       }
     },
     "clients.get": {
@@ -77,6 +114,14 @@
           "name",
           "email"
         ]
+      },
+      "errors": {
+        "forbidden": {
+          "kind": "forbidden"
+        },
+        "unauthorized": {
+          "kind": "unauthorized"
+        }
       }
     },
     "clients.list": {
@@ -117,6 +162,14 @@
         "required": [
           "clients"
         ]
+      },
+      "errors": {
+        "forbidden": {
+          "kind": "forbidden"
+        },
+        "unauthorized": {
+          "kind": "unauthorized"
+        }
       }
     },
     "elarion.session": {
@@ -225,6 +278,14 @@
           "escalated",
           "needsAttention"
         ]
+      },
+      "errors": {
+        "forbidden": {
+          "kind": "forbidden"
+        },
+        "unauthorized": {
+          "kind": "unauthorized"
+        }
       }
     },
     "invoices.create": {
@@ -277,6 +338,43 @@
           "number",
           "sendJobId"
         ]
+      },
+      "errors": {
+        "forbidden": {
+          "kind": "forbidden"
+        },
+        "unauthorized": {
+          "kind": "unauthorized"
+        },
+        "validation": {
+          "kind": "validation",
+          "data": {
+            "type": "object",
+            "properties": {
+              "errors": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fieldErrors": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "required": [
+              "errors"
+            ]
+          }
+        }
       }
     },
     "invoices.list": {
@@ -326,6 +424,14 @@
         "required": [
           "invoices"
         ]
+      },
+      "errors": {
+        "forbidden": {
+          "kind": "forbidden"
+        },
+        "unauthorized": {
+          "kind": "unauthorized"
+        }
       }
     },
     "invoices.sendStatus": {
@@ -370,10 +476,16 @@
         "required": [
           "status",
           "attempt",
-          "maxAttempts",
-          "nextAttemptAt",
-          "lastError"
+          "maxAttempts"
         ]
+      },
+      "errors": {
+        "forbidden": {
+          "kind": "forbidden"
+        },
+        "unauthorized": {
+          "kind": "unauthorized"
+        }
       }
     }
   },

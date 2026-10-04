@@ -82,13 +82,14 @@ internal sealed class ElarionMcpServerTool : McpServerTool {
         };
 
         if (_includeErrorDetails) {
-            // Build the node manually so no resolver is needed for a wrapper type; the error data is serialized
-            // by its runtime type with the dispatcher's options — consistent with the JSON-RPC response path.
+            // The structured content is the same { code, data? } shape every transport carries: the stable error
+            // code plus the typed payload, serialized by its runtime type with the dispatcher's options.
             var details = new JsonObject();
-            if (result.ErrorCode is { } code) details["code"] = code;
-
-            if (result.ErrorData is { } data)
-                details["data"] = JsonSerializer.SerializeToNode(data, data.GetType(), jsonOptions);
+            if (result.ErrorData is { } errorData) {
+                details["code"] = errorData.Code;
+                if (errorData.Data is { } data)
+                    details["data"] = JsonSerializer.SerializeToNode(data, data.GetType(), jsonOptions);
+            }
 
             // CallToolResult.StructuredContent is a JsonElement; clone so it owns its memory after the document is disposed.
             using var detailsDocument = JsonSerializer.SerializeToDocument(details, jsonOptions);

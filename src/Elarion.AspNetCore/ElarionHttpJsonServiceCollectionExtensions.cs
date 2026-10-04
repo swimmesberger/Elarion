@@ -75,6 +75,8 @@ internal sealed class ElarionHttpJsonConfigureOptions(IElarionJsonSerialization 
         target.PropertyNamingPolicy = canonical.PropertyNamingPolicy;
         target.PropertyNameCaseInsensitive = canonical.PropertyNameCaseInsensitive;
         target.DefaultIgnoreCondition = canonical.DefaultIgnoreCondition;
+        target.RespectNullableAnnotations = canonical.RespectNullableAnnotations;
+        target.RespectRequiredConstructorParameters = canonical.RespectRequiredConstructorParameters;
 
         // Prepend the canonical resolvers so they win first-match over any ASP.NET default resolver, preserving
         // their internal order. The frozen canonical options are only read here.

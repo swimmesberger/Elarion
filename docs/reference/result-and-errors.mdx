@@ -1,6 +1,6 @@
 ---
 title: Result & error model
-description: Lookup reference for Result<T>, Result, Unit, AppError, and ErrorKind, with each kind's mapping to JSON-RPC error codes and HTTP status.
+description: Lookup reference for Result<T>, Result, Unit, AppError, ErrorKind, error codes, and [ProducesError], with the wire shape of an error on every transport.
 ---
 
 A lookup reference for the result and error types. For the conceptual model and how these flow
@@ -111,32 +111,37 @@ failure, not how a protocol should report it:
 public sealed record AppError {
     public required ErrorKind Kind { get; init; }
     public required string Message { get; init; }
-    public object? Data { get; init; }
+    public string Code { get; init; }  // always present; the kind's default code when none was set
+    public object? Data { get; init; } // typed payload for this Code
 
     // Shared singleton for the generic internal-failure case.
     public static readonly AppError InternalError; // Kind = Internal, Message = "Internal error"
 }
 ```
 
+`Code` is the contract clients branch on; `Message` is prose. An error built without a specific code carries its
+kind's default code (see [Error codes](#error-codes)).
+
 ### Factory methods
+
+Every factory takes the same optional `code` and `data`, so any kind can carry a specific code and a typed payload.
 
 | Factory | `Kind` | Notes |
 | --- | --- | --- |
-| `AppError.Validation(string message, object? data = null)` | `Validation` | Optional structured `Data` payload. |
-| `AppError.Validation(string message, IReadOnlyList<string> errors)` | `Validation` | Wraps `errors` in `ValidationErrorData` as `Data`. |
-| `AppError.Validation(string message, IReadOnlyDictionary<string, string[]> fieldErrors)` | `Validation` | Wraps messages keyed by wire-named field path (e.g. `"address.street"`; empty key = not field-specific) in `ValidationErrorData`, deriving the flat `Errors` list by flattening in ordinal key order. |
-| `AppError.NotFound(string message)` | `NotFound` | |
-| `AppError.Conflict(string message)` | `Conflict` | |
-| `AppError.Unauthorized(string message)` | `Unauthorized` | |
-| `AppError.Forbidden(string message)` | `Forbidden` | |
-| `AppError.BusinessRule(string message, object? data = null)` | `BusinessRule` | Optional structured `Data` payload. |
-| `AppError.Internal(string message, object? data = null)` | `Internal` | Optional structured `Data` payload. |
+| `AppError.Validation(string message, string? code = null, object? data = null)` | `Validation` | |
+| `AppError.Validation(string message, IReadOnlyList<string> errors, string? code = null)` | `Validation` | Wraps `errors` in `ValidationErrorData` as `Data`. |
+| `AppError.Validation(string message, IReadOnlyDictionary<string, string[]> fieldErrors, string? code = null)` | `Validation` | Wraps messages keyed by wire-named field path (e.g. `"address.street"`; empty key = not field-specific) in `ValidationErrorData`, deriving the flat `Errors` list by flattening in ordinal key order. |
+| `AppError.NotFound` / `Conflict` / `Unauthorized` / `Forbidden` / `BusinessRule` / `Internal` `(string message, string? code = null, object? data = null)` | the matching kind | |
+| `AppError.Create(ErrorKind kind, string message, string? code = null, object? data = null)` | any | The general factory the others call. |
 
 ```csharp
 AppError.Validation("Invalid command.", new[] { "Name is required.", "Email is invalid." });
 AppError.NotFound($"Client {id} was not found.");
-AppError.BusinessRule("Credit limit exceeded.", data: limitInfo);
+AppError.Conflict("The seat is taken.", code: "seat.taken", data: new SeatTaken(seatId));
 ```
+
+An invalid code throws `ArgumentException` at the call site. Two errors are equal when kind, message, effective code and
+payload are equal, so an explicit default code equals an omitted one.
 
 `ValidationErrorData` is the payload shape for both structured overloads:
 
@@ -152,7 +157,81 @@ public sealed record ValidationErrorData {
 
 The framework [`ValidationDecorator`](/docs/concepts/validation) produces the field-keyed shape; the
 HTTP mapper surfaces `FieldErrors` as the RFC 7807 `errors` extension, and the JSON-RPC error carries
-the whole payload in `error.data`.
+the whole payload in `error.data.data` under the code `validation`.
+
+## Error codes
+
+`Elarion.Abstractions.ErrorCodes` holds the default code of every `ErrorKind` and the codes the pipeline itself produces.
+A code is lower-case ASCII letters, digits and underscores in dot-separated segments, never renamed or reused once
+shipped.
+
+| `ErrorKind` | Default code |
+| --- | --- |
+| `Validation` | `validation` |
+| `NotFound` | `not_found` |
+| `Conflict` | `conflict` |
+| `Unauthorized` | `unauthorized` |
+| `Forbidden` | `forbidden` |
+| `BusinessRule` | `business_rule` |
+| `Internal` | `internal` |
+
+Pipeline codes: `idempotency.key_required` (`Validation`), `idempotency.in_progress` (`Conflict`),
+`idempotency.key_reused` (`BusinessRule`). `ErrorCodes.IsValid(code)` checks the format.
+
+## `[ProducesError]` — the declared error contract
+
+A handler declares the failures it can produce, so the schema export and the generated clients describe them
+([ADR-0080](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md)).
+
+```csharp
+[Handler]
+[ProducesError("token.malformed", ErrorKind.Validation, typeof(TokenProblem))] // specific code + typed payload
+[ProducesError(ErrorKind.NotFound)]                                            // kind-default code, no payload
+public sealed class RedeemToken(...) : IHandler<RedeemToken.Command, Result<RedeemToken.Response>> { ... }
+```
+
+| Constructor | Declares |
+| --- | --- |
+| `ProducesError(ErrorKind kind)` | the kind's default code, no payload |
+| `ProducesError(ErrorKind kind, Type dataType)` | the kind's default code with a payload |
+| `ProducesError(string code, ErrorKind kind)` | a specific code, no payload |
+| `ProducesError(string code, ErrorKind kind, Type dataType)` | a specific code with a payload |
+
+The generator adds the failures the framework attaches where they are statically knowable and publishes the merged
+list (sorted by code) with the operation, in the assembly manifest and the `HandlerDispatcher` registration:
+
+| Handler has | Implied errors |
+| --- | --- |
+| validatable request (with `Elarion.Validation`) | `validation` with `ValidationErrorData` |
+| `[Require*]` attribute | `unauthorized`, `forbidden` |
+| `[FeatureGate]` | `not_found` |
+| `[Idempotent]` | `idempotency.key_required`, `idempotency.in_progress`, `idempotency.key_reused` |
+
+Diagnostics: `ELERR001` (invalid code), `ELERR002` (one code declared with different kinds or payloads). Whether a
+handler *body* returns an undeclared code is not statically knowable, so it is checked at runtime in the Development
+environment: `IErrorContractMonitor` logs each distinct undeclared code (or kind mismatch) once as a warning.
+`internal` failures and the default `unauthorized`/`forbidden` codes (which authorization defaults can attach without
+a per-handler attribute) are always admitted. Production does no checking.
+
+## Wire shape
+
+Every transport carries the code, and the typed payload where the transport has a place for it.
+
+| Transport | Code | Typed payload |
+| --- | --- | --- |
+| JSON-RPC | `error.data.code` | `error.data.data` (omitted when none) |
+| HTTP | ProblemDetails member `code` | ProblemDetails member `data` (a validation payload is the standard `errors` map instead) |
+| gRPC | `elarion-error-code` trailer | not carried (the kind goes in `elarion-error-kind`) |
+| MCP | structured content `code` | structured content `data` |
+
+```json title="JSON-RPC error"
+{ "code": -32002, "message": "The seat is taken.", "data": { "code": "seat.taken", "data": { "seat": 4 } } }
+```
+
+The numeric JSON-RPC `error.code` stays the coarse kind mapping below. Protocol-level failures carry `parse_error`,
+`invalid_request`, `method_not_found`, `invalid_params` and `internal`. An `[Idempotent]` replay returns the stored
+`AppError`, so the code and payload are identical to the original response. The payload is serialized by its runtime
+type, so it must be registered in a source-generated `JsonSerializerContext`.
 
 ## `ErrorKind`
 
@@ -179,7 +258,7 @@ the `Internal` row.
 
 From `Elarion.JsonRpc.AppErrorMapper.MapToCode(ErrorKind)`. Protocol-level kinds reuse the JSON-RPC 2.0 spec
 codes; the remaining application kinds use the reserved server range (`-32000` to `-32099`).
-`AppErrorMapper.ToRpcError(AppError)` wraps the code with the error's `Message` and `Data`.
+`AppErrorMapper.ToRpcError(AppError)` wraps the code with the error's `Message` and `{ code, data }`.
 
 | `ErrorKind` | JSON-RPC code | Note |
 | --- | --- | --- |

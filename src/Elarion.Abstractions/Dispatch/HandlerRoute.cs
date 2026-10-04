@@ -22,4 +22,8 @@ public sealed record HandlerRoute(
     Func<object, IServiceProvider, CancellationToken, ValueTask<Result<object>>> InvokeAsync,
     // Whether the handler is [Idempotent] — carried as route metadata (like Transports) so the exported schema
     // can advertise it and a generated client can attach an idempotency key by default. Not used for routing.
-    bool Idempotent = false);
+    bool Idempotent = false,
+    // The failures the operation declares (ProducesError attributes plus the framework behaviours attached to the
+    // handler), exported to the schema and verified at runtime by IErrorContractMonitor. Null on a hand-wired
+    // route that declares no contract: its failures are neither exported nor checked.
+    IReadOnlyList<ErrorContract>? Errors = null);

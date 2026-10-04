@@ -196,10 +196,44 @@ own — so you can compose it into a plain `createRpcApi({ headers: forwardReque
 
 ## Error handling
 
-A JSON-RPC error returned by the server is thrown as a typed `RpcError` carrying `code`, `message`, and
-optional `data`. Beyond the standard JSON-RPC codes, Elarion maps its transport-agnostic `AppError` kinds
-onto the server-reserved range, and the generated `RpcError` exposes a getter per kind — so a frontend
-branches on the kind directly instead of re-wrapping the error:
+A JSON-RPC error returned by the server is thrown as a typed `RpcError`. Every error carries a stable string
+`code` (the contract to branch on, for example `not_found` or `token.malformed`), a typed `data` payload, the
+human-readable `message`, and `rpcCode` — the numeric JSON-RPC code, which only encodes the coarse `AppError` kind
+and is why it is not called `code`. The wire shape is always `error.data = { code, data? }`
+([ADR-0080](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md)).
+
+Handlers declare the errors they produce with `[ProducesError]`, and the generator emits them per method: each
+method's `errors` entry in `RpcMethods` maps a code to its kind and payload type, and the client exports
+`RpcMethodError<M>`, a union of `RpcError` variants discriminated by `code`, with `data` typed per variant:
+
+```ts
+import { isRpcMethodError, type RpcMethodError } from './generated/rpc-client'
+
+function describe(error: RpcMethodError<'tokens.redeem'>) {
+  switch (error.code) {
+    case 'token.malformed':
+      return `Malformed: ${error.data.reason}` // data is typed from the declared payload
+    case 'not_found':
+      return 'Unknown token'
+  }
+}
+
+try {
+  await rpc.tokens.redeem({ token })
+} catch (error) {
+  if (isRpcMethodError('tokens.redeem', error)) return describe(error) // narrows by the declared codes
+  throw error
+}
+```
+
+A declared payload is validated against its generated Zod schema (`rpcErrorDataSchemas`) unless
+`validateResults: false`; a mismatch throws `RpcProtocolError` instead of surfacing a mistyped error. Batch items
+report `error: RpcError`; narrow them with `isRpcMethodError`. Without a `{ code, data }` envelope (a foreign
+server) `code` falls back to the default code of the numeric kind.
+
+Beyond the standard JSON-RPC codes, Elarion maps its transport-agnostic `AppError` kinds
+onto the server-reserved range, and the generated `RpcError` exposes a getter per kind (reading `rpcCode`) — a
+quick way to branch on the kind alone:
 
 ```ts
 import { RpcError, ElarionErrorCodes } from './generated/rpc-client'

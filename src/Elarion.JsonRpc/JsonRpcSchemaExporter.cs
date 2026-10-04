@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using Elarion.Abstractions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Schema;
@@ -9,6 +10,15 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
 namespace Elarion.JsonRpc;
+
+/// <summary>Whether a schema describes data the server reads (a request) or writes (a response, event or error payload).</summary>
+internal enum SchemaDirection {
+    /// <summary>Data the server reads; members with a default value are optional to send.</summary>
+    Request,
+
+    /// <summary>Data the server writes; every non-nullable member is always written.</summary>
+    Response
+}
 
 /// <summary>
 /// Generates a JSON Schema document describing all registered JSON-RPC methods,
@@ -40,7 +50,8 @@ public static class JsonRpcSchemaExporter {
         JsonSerializerOptions? jsonOptions = null,
         JsonRpcSchemaExportOptions? exportOptions = null) {
         var options = CreateSchemaOptions(jsonOptions);
-        IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent)> methods;
+        IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent,
+            IReadOnlyList<ErrorContract> Errors)> methods;
         try {
             methods = dispatcher.GetRegisteredMethods();
         }
@@ -55,9 +66,11 @@ public static class JsonRpcSchemaExporter {
                 "Cannot export the JSON-RPC schema because the dispatcher has no registered methods.");
 
         var methodsObj = new JsonObject();
-        foreach (var (methodName, requestType, responseType, idempotent) in methods) {
-            var requestSchema = BuildSchemaNode(requestType, options, InjectReflectedAnnotations);
-            var responseSchema = BuildSchemaNode(responseType, options, InjectReflectedAnnotations);
+        foreach (var (methodName, requestType, responseType, idempotent, errors) in methods) {
+            var requestSchema = BuildSchemaNode(
+                requestType, options, SchemaDirection.Request, InjectReflectedAnnotations);
+            var responseSchema = BuildSchemaNode(
+                responseType, options, SchemaDirection.Response, InjectReflectedAnnotations);
 
             var method = new JsonObject {
                 ["params"] = requestSchema,
@@ -65,6 +78,10 @@ public static class JsonRpcSchemaExporter {
             };
             // Only emit the flag when set, so the schema stays byte-identical for non-idempotent methods.
             if (idempotent) method["idempotent"] = true;
+
+            // The declared error contract (ADR-0080): code -> kind + optional payload schema, in ordinal code
+            // order. Omitted when the operation declares none, so contract-free schemas stay byte-identical.
+            if (BuildErrorsNode(errors, options) is { } errorsNode) method["errors"] = errorsNode;
 
             methodsObj[methodName] = method;
         }
@@ -85,6 +102,28 @@ public static class JsonRpcSchemaExporter {
     }
 
     /// <summary>
+    /// Builds a method's <c>errors</c> object — each declared error code with its <c>kind</c> (the kind's default
+    /// code, e.g. <c>not_found</c>) and, when the error carries a typed payload, its <c>data</c> schema — or
+    /// <see langword="null"/> when the method declares none.
+    /// </summary>
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
+    private static JsonObject? BuildErrorsNode(IReadOnlyList<ErrorContract> errors, JsonSerializerOptions options) {
+        if (errors.Count == 0) return null;
+
+        var node = new JsonObject();
+        foreach (var error in errors.OrderBy(static e => e.Code, StringComparer.Ordinal)) {
+            var entry = new JsonObject { ["kind"] = ErrorCodes.ForKind(error.Kind) };
+            if (error.DataType is { } dataType)
+                entry["data"] = BuildSchemaNode(dataType, options, SchemaDirection.Response, InjectReflectedAnnotations);
+
+            node[error.Code] = entry;
+        }
+
+        return node;
+    }
+
+    /// <summary>
     /// Builds the <c>events</c> block — each declared client-event topic with its payload schema (ADR-0043),
     /// in deterministic ordinal topic order — or <see langword="null"/> when no topics were supplied, keeping
     /// event-free schemas byte-identical.
@@ -98,14 +137,15 @@ public static class JsonRpcSchemaExporter {
         var events = new JsonObject();
         foreach (var topic in manifest.Topics.OrderBy(static t => t.Name, StringComparer.Ordinal))
             events[topic.Name] = new JsonObject {
-                ["payload"] = BuildSchemaNode(topic.EventType, options, InjectReflectedAnnotations)
+                ["payload"] = BuildSchemaNode(
+                    topic.EventType, options, SchemaDirection.Response, InjectReflectedAnnotations)
             };
 
         return events;
     }
 
     /// <summary>
-    /// Builds the <c>capabilities</c> vocabulary block — module names with their exposed <c>[ClientFeatures]</c>
+    /// Builds the <c>capabilities</c> vocabulary block — module names with their client-exposed feature flags
     /// (enabled modules only, matching the method gating), the structured permission catalog, and the role names —
     /// or <see langword="null"/> when nothing was supplied, keeping vocabulary-free schemas byte-identical. All
     /// collections are emitted in a deterministic ordinal order.
@@ -121,7 +161,11 @@ public static class JsonRpcSchemaExporter {
                          .Where(static m => m.Enabled)
                          .OrderBy(static m => m.Name, StringComparer.Ordinal)) {
                 var features = new JsonArray();
-                foreach (var feature in module.Features.OrderBy(static f => f, StringComparer.Ordinal))
+                var exposed = (exportOptions.FeatureFlags?.All ?? [])
+                    .Where(f => f.ExposeToClient && string.Equals(f.Module, module.Name, StringComparison.Ordinal))
+                    .Select(static f => f.Name)
+                    .OrderBy(static name => name, StringComparer.Ordinal);
+                foreach (var feature in exposed)
                     features.Add((JsonNode?)JsonValue.Create(feature));
 
                 modules[module.Name] = new JsonObject { ["features"] = features };
@@ -177,15 +221,148 @@ public static class JsonRpcSchemaExporter {
     internal static JsonNode BuildSchemaNode(
         Type type,
         JsonSerializerOptions options,
+        SchemaDirection direction,
         Func<JsonSchemaExporterContext, JsonNode, JsonNode>? extraTransform = null) {
         var exporterOptions = new JsonSchemaExporterOptions {
             TreatNullObliviousAsNonNullable = true,
-            TransformSchemaNode = extraTransform is null
-                ? static (ctx, schema) => NormalizeNumericType(ctx, MapFilePayload(ctx, schema))
-                : (ctx, schema) => extraTransform(ctx, NormalizeNumericType(ctx, MapFilePayload(ctx, schema)))
+            TransformSchemaNode = (ctx, schema) => {
+                var node = ApplyRequiredness(ctx, NormalizeNumericType(ctx, MapFilePayload(ctx, schema)), direction);
+                return extraTransform is null ? node : extraTransform(ctx, node);
+            }
         };
 
+        if (direction == SchemaDirection.Response && options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingDefault)
+            throw new InvalidOperationException(
+                "Cannot export a response schema: the serializer options use DefaultIgnoreCondition = " +
+                "WhenWritingDefault, which omits non-nullable members holding their default value while the " +
+                "schema marks them required. Use WhenWritingNull (the Elarion default) or Never.");
+
         return options.GetJsonSchemaAsNode(type, exporterOptions);
+    }
+
+    /// <summary>
+    /// The single requiredness rule of the wire contract (ADR-0082), applied to every object node: a non-nullable
+    /// property is <c>required</c>; a nullable property is optional. For <see cref="SchemaDirection.Request"/>
+    /// types a non-nullable property that has a default value — a constructor parameter default, or an initializer
+    /// that yields a non-default value — is also optional to send. This replaces the serializer's own
+    /// <c>required</c> list (C# <c>required</c> / <c>[JsonRequired]</c>), so nullability is the one source of truth
+    /// in both directions.
+    /// </summary>
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
+    private static JsonNode ApplyRequiredness(JsonSchemaExporterContext ctx, JsonNode schema, SchemaDirection direction) {
+        if (ctx.TypeInfo.Kind != JsonTypeInfoKind.Object
+            || schema is not JsonObject obj
+            || obj["properties"] is not JsonObject properties)
+            return schema;
+
+        obj.Remove("required");
+
+        object? probe = null;
+        var probed = false;
+        var required = new JsonArray();
+        foreach (var property in ctx.TypeInfo.Properties) {
+            if (!properties.TryGetPropertyValue(property.Name, out var propertySchema)) continue;
+
+            if (direction == SchemaDirection.Response)
+                RejectConditionalWrite(ctx.TypeInfo.Type, property, propertySchema, options: ctx.TypeInfo.Options);
+
+            if (AllowsNull(propertySchema, property, direction)) continue;
+
+            if (direction == SchemaDirection.Request && HasDefaultValue(ctx.TypeInfo, property, ref probe, ref probed))
+                continue;
+
+            required.Add((JsonNode?)JsonValue.Create(property.Name));
+        }
+
+        if (required.Count > 0) obj["required"] = required;
+
+        return schema;
+    }
+
+    private static bool AllowsNull(JsonNode? propertySchema, JsonPropertyInfo property, SchemaDirection direction) {
+        switch (propertySchema) {
+            case JsonObject node when node.Count == 0:
+            case JsonValue:
+                // An unconstrained schema ({} / true) says nothing about null; fall back to the CLR annotation.
+                return direction == SchemaDirection.Request ? property.IsSetNullable : property.IsGetNullable;
+            case JsonObject node:
+                return TypeUnionContainsNull(node["type"])
+                       || AnyOfContainsNull(node["anyOf"])
+                       || AnyOfContainsNull(node["oneOf"]);
+            default:
+                return false;
+        }
+    }
+
+    private static bool TypeUnionContainsNull(JsonNode? type) {
+        return type switch {
+            JsonValue single => single.TryGetValue<string>(out var name) && name == "null",
+            JsonArray union => union.Any(static item =>
+                item is JsonValue value && value.TryGetValue<string>(out var name) && name == "null"),
+            _ => false
+        };
+    }
+
+    private static bool AnyOfContainsNull(JsonNode? alternatives) {
+        return alternatives is JsonArray array
+               && array.Any(static item => item is JsonObject node && TypeUnionContainsNull(node["type"]));
+    }
+
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
+    private static bool HasDefaultValue(
+        JsonTypeInfo typeInfo, JsonPropertyInfo property, ref object? probe, ref bool probed) {
+        if (property.AssociatedParameter is { HasDefaultValue: true }) return true;
+
+        // An initializer is only observable on an instance: construct one once per type and compare the member
+        // with the CLR default. An initializer that equals the CLR default (= 0, = false) is indistinguishable
+        // from none — declare the member nullable or give it a non-default value.
+        if (property.Get is null || property.AssociatedParameter is not null || typeInfo.CreateObject is not { } create)
+            return false;
+
+        if (!probed) {
+            probed = true;
+            try {
+                probe = create();
+            }
+            catch (Exception) {
+                probe = null;
+            }
+        }
+
+        if (probe is null) return false;
+
+        try {
+            var value = property.Get(probe);
+            return value is not null
+                   && !(property.PropertyType.IsValueType && value.Equals(System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(property.PropertyType)));
+        }
+        catch (Exception) {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// A response member that the serializer may omit is an optional member, but the wire contract marks every
+    /// non-nullable member required (ADR-0082) — so a conditional write on a non-nullable member is a contract
+    /// violation, reported here for types the compile-time check cannot see (client events, custom contexts).
+    /// </summary>
+    private static void RejectConditionalWrite(
+        Type declaringType, JsonPropertyInfo property, JsonNode? propertySchema, JsonSerializerOptions options) {
+        if (AllowsNull(propertySchema, property, SchemaDirection.Response)) return;
+
+        if (property.AttributeProvider?.GetCustomAttributes(typeof(JsonIgnoreAttribute), true)
+                is not [JsonIgnoreAttribute { Condition: var condition }, ..])
+            return;
+
+        if (condition == JsonIgnoreCondition.WhenWritingDefault
+            || (condition == JsonIgnoreCondition.WhenWritingNull && !property.PropertyType.IsValueType))
+            throw new InvalidOperationException(
+                $"Cannot export the schema of '{declaringType}': member '{property.Name}' is non-nullable but is " +
+                $"annotated [JsonIgnore(Condition = {condition})]. Non-nullable members are required on the wire, " +
+                "so the serializer must always write them. Make the member nullable to declare it optional, or " +
+                "remove the ignore condition.");
     }
 
     /// <summary>

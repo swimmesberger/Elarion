@@ -11,6 +11,7 @@ using Elarion.Pipeline;
 using Elarion.Tests.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Elarion.Tests.Features;
 using Xunit;
 
 namespace Elarion.Tests.Pipeline;
@@ -358,7 +359,7 @@ public sealed class StreamPipelineTests {
     public async Task FeatureGate_MixedBlankNameStillEvaluatesEffectiveName_AndRecordsGateTelemetry() {
         using var meters = new MeterCollector(HandlerTelemetry.MeterName);
         using var activity = new Activity("stream").Start();
-        var flags = new RecordingFeatureFlags(("paid-export", false));
+        var flags = new StubFeatureFlagService(("paid-export", false));
         var decorator = new StreamFeatureGateDecorator<Request, int>(
             new ProbeHandler([]),
             new StreamHandlerMetadata(typeof(MixedFeatureGateHandler), typeof(Request), typeof(int)), flags);
@@ -374,7 +375,7 @@ public sealed class StreamPipelineTests {
 
     [Fact]
     public async Task FeatureGate_AllBlankAndNegatedBlankAreInert_WhileNegatedEffectiveGateCloses() {
-        var flags = new RecordingFeatureFlags(("paid-export", true));
+        var flags = new StubFeatureFlagService(("paid-export", true));
         var allBlank = new StreamFeatureGateDecorator<Request, int>(new ProbeHandler([]),
             new StreamHandlerMetadata(typeof(AllBlankFeatureGateHandler), typeof(Request), typeof(int)), flags);
         var negatedBlank = new StreamFeatureGateDecorator<Request, int>(new ProbeHandler([]),
@@ -606,15 +607,6 @@ public sealed class StreamPipelineTests {
         }
     }
 
-    private sealed class RecordingFeatureFlags(params (string Name, bool Enabled)[] flags) : IFeatureFlagService {
-        private readonly Dictionary<string, bool> _flags = flags.ToDictionary(x => x.Name, x => x.Enabled);
-        public List<string> Queried { get; } = [];
-
-        public ValueTask<bool> IsEnabledAsync(string feature, CancellationToken ct = default) {
-            Queried.Add(feature);
-            return ValueTask.FromResult(_flags.TryGetValue(feature, out var enabled) && enabled);
-        }
-    }
 
     [FeatureGate("paid-export", "")]
     private sealed class MixedFeatureGateHandler;

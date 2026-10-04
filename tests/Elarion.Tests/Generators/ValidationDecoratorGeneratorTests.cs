@@ -312,7 +312,7 @@ public sealed class ValidationDecoratorGeneratorTests {
             .Where(path => !excludeElarionValidation ||
                            !string.Equals(Path.GetFileName(path), "Elarion.Validation.dll",
                                StringComparison.OrdinalIgnoreCase))
-            .Select(path => MetadataReference.CreateFromFile(path))
+            .Select(path => SharedMetadataReferences.FromFile(path))
             .ToArray();
     }
 }

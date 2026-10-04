@@ -13,7 +13,7 @@ namespace Elarion.Tests.Features;
 
 public sealed class FeatureGateDecoratorTests {
     private static FeatureGateDecorator<GatedCommand, Result<string>> Decorate(
-        Type handlerType, IFeatureFlagService features, RecordingHandler? inner = null) {
+        Type handlerType, StubFeatureFlagService features, RecordingHandler? inner = null) {
         return new FeatureGateDecorator<GatedCommand, Result<string>>(
             inner ?? new RecordingHandler(Result<string>.Success("ok")),
             new HandlerMetadata(handlerType, typeof(GatedCommand), typeof(Result<string>)),
@@ -23,7 +23,7 @@ public sealed class FeatureGateDecoratorTests {
     [Fact]
     public async Task EnabledFlag_RunsHandler() {
         var inner = new RecordingHandler(Result<string>.Success("ok"));
-        var decorator = Decorate(typeof(SingleGateHandler), new FakeFeatureFlags(("new-billing", true)), inner);
+        var decorator = Decorate(typeof(SingleGateHandler), new StubFeatureFlagService(("new-billing", true)), inner);
 
         var result = await decorator.HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
 
@@ -35,7 +35,7 @@ public sealed class FeatureGateDecoratorTests {
     [Fact]
     public async Task DisabledFlag_ReturnsNotFound_WithoutRunningHandler() {
         var inner = new RecordingHandler(Result<string>.Success("ok"));
-        var decorator = Decorate(typeof(SingleGateHandler), new FakeFeatureFlags(("new-billing", false)), inner);
+        var decorator = Decorate(typeof(SingleGateHandler), new StubFeatureFlagService(("new-billing", false)), inner);
 
         var result = await decorator.HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
 
@@ -46,7 +46,7 @@ public sealed class FeatureGateDecoratorTests {
 
     [Fact]
     public async Task NotFoundMessage_DoesNotLeakTheGatedFeatureName() {
-        var decorator = Decorate(typeof(SingleGateHandler), new FakeFeatureFlags(("new-billing", false)));
+        var decorator = Decorate(typeof(SingleGateHandler), new StubFeatureFlagService(("new-billing", false)));
 
         var result = await decorator.HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
 
@@ -55,51 +55,51 @@ public sealed class FeatureGateDecoratorTests {
 
     [Fact]
     public async Task All_RequiresEveryListedFeature() {
-        var partial = await Decorate(typeof(AllGateHandler), new FakeFeatureFlags(("a", true), ("b", false)))
+        var partial = await Decorate(typeof(AllGateHandler), new StubFeatureFlagService(("a", true), ("b", false)))
             .HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
         partial.Error.Kind.Should().Be(ErrorKind.NotFound);
 
-        var both = await Decorate(typeof(AllGateHandler), new FakeFeatureFlags(("a", true), ("b", true)))
+        var both = await Decorate(typeof(AllGateHandler), new StubFeatureFlagService(("a", true), ("b", true)))
             .HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
         both.IsSuccess.Should().BeTrue();
     }
 
     [Fact]
     public async Task Any_RequiresAtLeastOneListedFeature() {
-        var one = await Decorate(typeof(AnyGateHandler), new FakeFeatureFlags(("a", false), ("b", true)))
+        var one = await Decorate(typeof(AnyGateHandler), new StubFeatureFlagService(("a", false), ("b", true)))
             .HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
         one.IsSuccess.Should().BeTrue();
 
-        var none = await Decorate(typeof(AnyGateHandler), new FakeFeatureFlags(("a", false), ("b", false)))
+        var none = await Decorate(typeof(AnyGateHandler), new StubFeatureFlagService(("a", false), ("b", false)))
             .HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
         none.Error.Kind.Should().Be(ErrorKind.NotFound);
     }
 
     [Fact]
     public async Task Negate_SatisfiedWhenFeatureIsDisabled() {
-        var off = await Decorate(typeof(NegatedGateHandler), new FakeFeatureFlags(("legacy", false)))
+        var off = await Decorate(typeof(NegatedGateHandler), new StubFeatureFlagService(("legacy", false)))
             .HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
         off.IsSuccess.Should().BeTrue();
 
-        var on = await Decorate(typeof(NegatedGateHandler), new FakeFeatureFlags(("legacy", true)))
+        var on = await Decorate(typeof(NegatedGateHandler), new StubFeatureFlagService(("legacy", true)))
             .HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
         on.Error.Kind.Should().Be(ErrorKind.NotFound);
     }
 
     [Fact]
     public async Task StackedGates_AreAnded() {
-        var partial = await Decorate(typeof(StackedGatesHandler), new FakeFeatureFlags(("a", true), ("b", false)))
+        var partial = await Decorate(typeof(StackedGatesHandler), new StubFeatureFlagService(("a", true), ("b", false)))
             .HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
         partial.Error.Kind.Should().Be(ErrorKind.NotFound);
 
-        var both = await Decorate(typeof(StackedGatesHandler), new FakeFeatureFlags(("a", true), ("b", true)))
+        var both = await Decorate(typeof(StackedGatesHandler), new StubFeatureFlagService(("a", true), ("b", true)))
             .HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
         both.IsSuccess.Should().BeTrue();
     }
 
     [Fact]
     public async Task NoGate_AlwaysRuns_AndNeverQueriesFlags() {
-        var flags = new FakeFeatureFlags();
+        var flags = new StubFeatureFlagService();
         var result = await Decorate(typeof(NoGateHandler), flags)
             .HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
 
@@ -111,7 +111,7 @@ public sealed class FeatureGateDecoratorTests {
     public async Task ClosedGate_TagsHandlerSpanAndRecordsClosedMetric() {
         using var meters = new MeterCollector(HandlerTelemetry.MeterName);
         using var handlerActivity = new Activity("handle").Start();
-        var decorator = Decorate(typeof(SingleGateHandler), new FakeFeatureFlags(("new-billing", false)));
+        var decorator = Decorate(typeof(SingleGateHandler), new StubFeatureFlagService(("new-billing", false)));
 
         var result = await decorator.HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
 
@@ -126,26 +126,11 @@ public sealed class FeatureGateDecoratorTests {
     public async Task GateFires_EvenWhenDecoratorIsOutermost() {
         // The decorator reads gates from HandlerMetadata (the true handler type), not inner.GetType(); here `inner`
         // is an unrelated stub, simulating the decorator sitting outermost. The gate must still fire.
-        var decorator = Decorate(typeof(SingleGateHandler), new FakeFeatureFlags(("new-billing", false)));
+        var decorator = Decorate(typeof(SingleGateHandler), new StubFeatureFlagService(("new-billing", false)));
 
         var result = await decorator.HandleAsync(new GatedCommand(1), TestContext.Current.CancellationToken);
 
         result.Error.Kind.Should().Be(ErrorKind.NotFound);
-    }
-
-    private sealed class FakeFeatureFlags : IFeatureFlagService {
-        private readonly Dictionary<string, bool> _flags;
-
-        public FakeFeatureFlags(params (string Name, bool Enabled)[] flags) {
-            _flags = flags.ToDictionary(flag => flag.Name, flag => flag.Enabled, StringComparer.Ordinal);
-        }
-
-        public List<string> Queried { get; } = [];
-
-        public ValueTask<bool> IsEnabledAsync(string feature, CancellationToken ct = default) {
-            Queried.Add(feature);
-            return ValueTask.FromResult(_flags.TryGetValue(feature, out var enabled) && enabled);
-        }
     }
 
     private sealed class RecordingHandler(Result<string> response) : IHandler<GatedCommand, Result<string>> {

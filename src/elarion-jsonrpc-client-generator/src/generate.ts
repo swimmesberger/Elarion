@@ -53,6 +53,24 @@ export function generateRpcClientFiles(
     typesLines.push(`  ${JSON.stringify(method)}: {`)
     typesLines.push(`    params: ${paramsType}`)
     typesLines.push(`    result: ${resultType}`)
+    const errorCodes = Object.keys(definition.errors ?? {}).sort()
+    if (errorCodes.length === 0) {
+      typesLines.push('    errors: {}')
+    } else {
+      typesLines.push('    errors: {')
+      for (const code of errorCodes) {
+        const error = (definition.errors as NonNullable<typeof definition.errors>)[code]
+        const dataType = error.data === undefined
+          ? 'undefined'
+          : jsonSchemaToTypeScript(
+            stripNullable(error.data),
+            createContext(error.data, `methods.${method}.errors.${code}.data`),
+            3
+          )
+        typesLines.push(`      ${JSON.stringify(code)}: { kind: ${JSON.stringify(error.kind)}; data: ${dataType} }`)
+      }
+      typesLines.push('    }')
+    }
     typesLines.push('  }')
   }
 
@@ -99,6 +117,33 @@ export function generateRpcClientFiles(
   schemasLines.push('export type RpcResultSchemas = typeof rpcResultSchemas')
   schemasLines.push('')
 
+  // Typed error payload schemas (ADR-0080): per method, per declared code that carries a payload.
+  schemasLines.push('export const rpcErrorDataSchemas = {')
+  for (const method of methods) {
+    const errors = schema.methods[method].errors ?? {}
+    const entries = Object.keys(errors)
+      .sort()
+      .filter((code) => errors[code].data !== undefined)
+      .map((code) => {
+        const data = errors[code].data as JsonSchema
+        const zodSchema = jsonSchemaToZod(
+          stripNullable(data),
+          createContext(data, `methods.${method}.errors.${code}.data`),
+          2
+        )
+        return `    ${JSON.stringify(code)}: ${zodSchema},`
+      })
+    if (entries.length > 0) {
+      schemasLines.push(`  ${JSON.stringify(method)}: {`)
+      schemasLines.push(...entries)
+      schemasLines.push('  },')
+    }
+  }
+  schemasLines.push('} as const')
+  schemasLines.push('')
+  schemasLines.push('export type RpcErrorDataSchemas = typeof rpcErrorDataSchemas')
+  schemasLines.push('')
+
   // Client-event payload schemas (ADR-0043), emitted only when the schema declares events so event-free
   // schemas keep producing byte-identical output.
   const eventTopics = Object.keys(schema.events ?? {}).sort()
@@ -117,6 +162,14 @@ export function generateRpcClientFiles(
     schemasLines.push('')
     schemasLines.push('export type RpcEventPayloadSchemas = typeof rpcEventPayloadSchemas')
     schemasLines.push('')
+  }
+
+  const errorCodesByMethod: Record<string, string[]> = {}
+  for (const method of methods) {
+    const codes = Object.keys(schema.methods[method].errors ?? {}).sort()
+    if (codes.length > 0) {
+      errorCodesByMethod[method] = codes
+    }
   }
 
   const idempotentMethods = methods.filter((method) => schema.methods[method].idempotent === true)
@@ -151,6 +204,7 @@ export function generateRpcClientFiles(
     schemasFileName,
     methods,
     idempotentMethods,
+    errorCodesByMethod,
     paramsFilePaths,
     resultFilePaths,
   })

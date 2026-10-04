@@ -61,6 +61,9 @@
  ELRPC001   | Elarion.JsonRpc                    | Warning  | RPC method handler is not in any module
  ELRPC002   | Elarion.JsonRpc                    | Warning  | RPC handler has no resolvable request/response shape
  ELRPC003   | Elarion.JsonRpc                    | Warning  | Duplicate operation name across the handler bus
+ ELRPC004   | Elarion.JsonRpc                    | Error    | Response member is omitted from the wire contract
+ ELERR001   | Elarion.Errors                     | Error    | Invalid error code
+ ELERR002   | Elarion.Errors                     | Error    | Conflicting error declaration
  ELRES001   | Elarion.Abstractions.Resilience    | Error    | Invalid resilience policy
  ELRES002   | Elarion.Abstractions.Resilience    | Error    | Duplicate resilience policy name
  ELCACHE001 | Elarion.Abstractions.Caching       | Error    | Handler cannot be both cacheable and cache-invalidating
@@ -78,6 +81,12 @@
  ELPERM002  | Elarion.Abstractions.Authorization | Warning  | Permission produces a duplicate typed accessor
  ELFEAT001  | Elarion.Abstractions.Features      | Error    | Feature-gated handler response cannot represent failure
  ELFEAT002  | Elarion.Abstractions.Features      | Warning  | FeatureGate declares no feature name
+ ELFLAG001  | Elarion.Abstractions.Features      | Error    | Feature flag is used but not declared
+ ELFLAG002  | Elarion.Abstractions.Features      | Error    | Feature flag is declared more than once
+ ELFLAG003  | Elarion.Abstractions.Features      | Error    | Feature flag has no owner
+ ELFLAG004  | Elarion.Abstractions.Features      | Error    | Feature flag is not declared under a module
+ ELFLAG005  | Elarion.Abstractions.Features      | Error    | Feature flag declares a blank name
+ ELFLAG006  | Elarion.Abstractions.Features      | Warning  | Feature flag registry accessor collision
  ELVAR001   | Elarion.Abstractions.Features      | Error    | Duplicate variant key
  ELVAR003   | Elarion.Abstractions.Features      | Warning  | Variant contract has no default implementation
  ELVAR004   | Elarion.Abstractions.Features      | Error    | Conflicting variant selector
@@ -101,3 +110,10 @@
  ELREQ002   | Elarion.Abstractions.Requests      | Warning  | Handler response does not match the request's self-typed marker
  ELREQ003   | Elarion.Abstractions.Requests      | Warning  | Stream handler item does not match the request's self-typed marker
  ELID001    | Elarion.Identifiers                | Warning  | Prefer Guid.CreateVersion7() over Guid.NewGuid()
+ ELSDEF001  | Elarion.Abstractions.Settings      | Error    | Invalid setting definitions container
+ ELSDEF002  | Elarion.Abstractions.Settings      | Error    | Invalid setting declaration
+ ELSDEF003  | Elarion.Abstractions.Settings      | Error    | Invalid setting key
+ ELSDEF004  | Elarion.Abstractions.Settings      | Error    | Duplicate setting key
+ ELSDEF005  | Elarion.Abstractions.Settings      | Error    | Secret setting declares a default
+ ELSDEF006  | Elarion.Abstractions.Settings      | Error    | Pinnable setting must allow the global scope
+ ELSDEF007  | Elarion.Abstractions.Settings      | Error    | Invalid setting default

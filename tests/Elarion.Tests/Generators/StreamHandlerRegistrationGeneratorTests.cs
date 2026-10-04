@@ -355,11 +355,11 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
 
     private static IReadOnlyList<MetadataReference> References() {
         var tpa = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
-            .Select(static path => MetadataReference.CreateFromFile(path));
+            .Select(static path => SharedMetadataReferences.FromFile(path));
         return tpa.Concat([
-            MetadataReference.CreateFromFile(typeof(IStreamHandler<,>).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(StreamHandlerInvoker).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Elarion.Validation.ElarionValidationServiceCollectionExtensions)
+            SharedMetadataReferences.FromFile(typeof(IStreamHandler<,>).Assembly.Location),
+            SharedMetadataReferences.FromFile(typeof(StreamHandlerInvoker).Assembly.Location),
+            SharedMetadataReferences.FromFile(typeof(Elarion.Validation.ElarionValidationServiceCollectionExtensions)
                 .Assembly.Location)
         ]).ToArray();
     }

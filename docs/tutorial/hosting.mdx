@@ -214,6 +214,13 @@ app.MapElarionMcp().RequireAuthorization();     // /mcp — independent of /rpc
 app.Run();
 ```
 
+<Callout type="info">
+  `Database.MigrateAsync()` keeps this tutorial short. Once a release needs a C# backfill or a SQL script
+  between two EF migrations, run them all through the one [migration plan](/docs/capabilities/migrations)
+  instead: `AddElarionMigrations(o => o.AddEntityFrameworkMigrations<BillingDbContext>())` replaces the
+  `MigrateAsync()` call.
+</Callout>
+
 `MapElarionEndpoints` publishes every handler that carries `[HttpEndpoint]` as a minimal-API REST
 route — the same handler, pipeline, and `Result` mapping as JSON-RPC, just a different projection.
 None of the Billing handlers opt in so far; making one RESTful is a single attribute:

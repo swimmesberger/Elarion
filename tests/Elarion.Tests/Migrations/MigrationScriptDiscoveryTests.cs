@@ -13,11 +13,11 @@ public sealed class MigrationScriptDiscoveryTests {
         var set = Discover("Basic.");
 
         set.Errors.Should().BeEmpty();
-        set.Versioned.Select(s => s.Version!.Text).Should().Equal("1", "2");
+        set.Versioned.Select(s => s.Version!).Should().Equal("1", "2");
         set.Versioned.Select(s => s.ScriptName).Should().Equal("V1__create_customers.sql", "V2__add_email.sql");
         set.Versioned[0].Description.Should().Be("create customers");
         set.Repeatable.Should().ContainSingle().Which.ScriptName.Should().Be("R__customer_view.sql");
-        set.Versioned.Should().OnlyContain(s => !s.NoTransaction);
+        set.Versioned.Should().OnlyContain(s => !s.NoTransaction && s.UseTransaction);
     }
 
     [Fact]
@@ -37,8 +37,8 @@ public sealed class MigrationScriptDiscoveryTests {
         var set = Discover("NoTx.");
 
         set.Errors.Should().BeEmpty();
-        set.Versioned.Single(s => s.Version!.Text == "2").NoTransaction.Should().BeTrue();
-        set.Versioned.Single(s => s.Version!.Text == "1").NoTransaction.Should().BeFalse();
+        set.Versioned.Single(s => s.Version! == "2").NoTransaction.Should().BeTrue();
+        set.Versioned.Single(s => s.Version! == "1").NoTransaction.Should().BeFalse();
     }
 
     [Fact]
@@ -66,9 +66,11 @@ public sealed class MigrationScriptDiscoveryTests {
 
     [Fact]
     public void DuplicateVersionsFail_IncludingTrailingZeroEquivalence() {
-        var set = Discover("Duplicate.");
+        var catalog = MigrationStepCatalog.Build(
+            [new ScriptStepSource([new MigrationScriptSource(typeof(MigrationScriptDiscoveryTests).Assembly, ScriptPrefix + "Duplicate.")])],
+            EmptyServiceProvider.Instance);
 
-        set.Errors.Should().ContainSingle().Which.Message.Should().Contain("Duplicate migration version 1");
+        catalog.Errors.Should().ContainSingle().Which.Message.Should().Contain("Duplicate migration version 1");
     }
 
     [Theory]
@@ -96,9 +98,20 @@ public sealed class MigrationScriptDiscoveryTests {
         error.Should().Contain(scriptName);
     }
 
-    internal static MigrationScriptSet Discover(string scenario) {
-        return MigrationScriptDiscovery.Discover([
+    /// <summary>The scripts of one scenario, split the way the plan orders them.</summary>
+    internal sealed record ScriptSet(
+        IReadOnlyList<ScriptMigrationStep> Versioned,
+        IReadOnlyList<ScriptMigrationStep> Repeatable,
+        IReadOnlyList<MigrationValidationError> Errors);
+
+    internal static ScriptSet Discover(string scenario) {
+        var set = MigrationScriptDiscovery.Discover([
             new MigrationScriptSource(typeof(MigrationScriptDiscoveryTests).Assembly, ScriptPrefix + scenario)
         ]);
+        var scripts = set.Steps.Cast<ScriptMigrationStep>().ToList();
+        return new ScriptSet(
+            scripts.Where(s => s.ParsedVersion is not null).OrderBy(s => s.ParsedVersion).ToList(),
+            scripts.Where(s => s.ParsedVersion is null).OrderBy(s => s.ScriptName, StringComparer.Ordinal).ToList(),
+            set.Errors);
     }
 }

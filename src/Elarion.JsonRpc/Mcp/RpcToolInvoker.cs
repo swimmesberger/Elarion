@@ -21,8 +21,11 @@ public readonly record struct RpcToolResult {
     /// <summary>The JSON-RPC error code, when <see cref="IsError"/> is <see langword="true"/>.</summary>
     public int? ErrorCode { get; init; }
 
-    /// <summary>Optional structured error data, when present. Adapters serialize it with the dispatcher's options.</summary>
-    public object? ErrorData { get; init; }
+    /// <summary>
+    /// The stable error code and the optional typed payload, when <see cref="IsError"/> is <see langword="true"/>
+    /// and the failure came from a handler. Adapters serialize it with the dispatcher's options.
+    /// </summary>
+    public RpcErrorData? ErrorData { get; init; }
 }
 
 /// <summary>
@@ -64,7 +67,8 @@ public static class RpcToolInvoker {
             // Unregistered names are unbounded caller input, so metrics use the same sentinel as JSON-RPC.
             using var unregisteredActivity = StartToolActivity("_unregistered");
             RecordError(unregisteredActivity, "_unregistered", "-32601", "Method not found", startTimestamp);
-            return new RpcToolResult { IsError = true, Text = $"Method not found: {methodName}", ErrorCode = -32601 };
+            return new RpcToolResult { IsError = true, Text = $"Method not found: {methodName}", ErrorCode = -32601,
+                ErrorData = new RpcErrorData { Code = RpcErrorCodes.MethodNotFound } };
         }
 
         using var activity = StartToolActivity(route.Name);
@@ -79,13 +83,15 @@ public static class RpcToolInvoker {
         }
         catch (JsonException ex) {
             RecordError(activity, route.Name, "-32602", "Invalid params", startTimestamp);
-            return new RpcToolResult { IsError = true, Text = $"Invalid params: {ex.Message}", ErrorCode = -32602 };
+            return new RpcToolResult { IsError = true, Text = $"Invalid params: {ex.Message}", ErrorCode = -32602,
+                ErrorData = new RpcErrorData { Code = RpcErrorCodes.InvalidParams } };
         }
 
         if (requestObject is null) {
             RecordError(activity, route.Name, "-32602", "Invalid params", startTimestamp);
             return new RpcToolResult
-                { IsError = true, Text = "Could not construct request params", ErrorCode = -32602 };
+                { IsError = true, Text = "Could not construct request params", ErrorCode = -32602,
+                    ErrorData = new RpcErrorData { Code = RpcErrorCodes.InvalidParams } };
         }
 
         // Per-call idempotency key from the tool arguments' _meta (the batch-correct, transport-neutral location).
@@ -113,7 +119,8 @@ public static class RpcToolInvoker {
                 { "exception.message", ex.Message }
             }));
             RecordError(activity, route.Name, "-32603", ex.Message, startTimestamp);
-            return new RpcToolResult { IsError = true, Text = "Internal error", ErrorCode = -32603 };
+            return new RpcToolResult { IsError = true, Text = "Internal error", ErrorCode = -32603,
+                ErrorData = new RpcErrorData { Code = ErrorCodes.Internal } };
         }
 
         if (!result.IsSuccess) {

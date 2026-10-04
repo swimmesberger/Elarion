@@ -8,8 +8,8 @@ namespace Elarion.Abstractions.Authorization;
 public interface IAuthorizer {
     /// <summary>
     /// Returns <see langword="null"/> when authorized; otherwise an <see cref="AppError"/> describing the
-    /// first failed requirement — <see cref="AppError.Unauthorized(string)"/> when the principal is
-    /// unauthenticated, <see cref="AppError.Forbidden(string)"/> when authenticated but lacking a requirement.
+    /// first failed requirement — <see cref="AppError.Unauthorized(string, string, object)"/> when the principal is
+    /// unauthenticated, <see cref="AppError.Forbidden(string, string, object)"/> when authenticated but lacking a requirement.
     /// </summary>
     /// <param name="requirements">The requirements to satisfy.</param>
     /// <param name="resource">The handler request, supplied to named policies as the resource.</param>

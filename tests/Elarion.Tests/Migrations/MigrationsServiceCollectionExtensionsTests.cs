@@ -65,12 +65,63 @@ public sealed class MigrationsServiceCollectionExtensionsTests {
     }
 
     [Fact]
-    public void WithoutScriptSources_FailsAtRegistration() {
+    public void WithoutAnyStepSource_FailsWhenTheRunnerIsResolved() {
         var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddElarionPostgreSql(ConnectionString);
+        services.AddElarionMigrations(_ => { });
 
-        var act = () => services.AddElarionMigrations(_ => { });
+        using var provider = services.BuildServiceProvider();
+        var act = () => provider.GetRequiredService<IMigrationRunner>();
 
-        act.Should().Throw<InvalidOperationException>().WithMessage("*AddScripts*");
+        act.Should().Throw<InvalidOperationException>().WithMessage("*at least one step source*");
+    }
+
+    [Fact]
+    public void RegisteredCodeMigrations_BecomeStepsWithoutAnyScriptSource() {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddElarionPostgreSql(ConnectionString);
+        services.AddCodeMigration<BackfillMigration>();
+        services.AddCodeMigration<BackfillMigration>();
+        services.AddElarionMigrations();
+
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IMigrationRunner>().Should().BeOfType<MigrationRunner>();
+        provider.GetServices<ICodeMigration>().Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task CodeMigrationWithInvalidVersion_FailsValidationNamingTheType() {
+        var options = new MigrationOptions();
+        options.AddCodeMigrations(new InvalidVersionMigration());
+        var runner = new PostgreSqlMigrationRunner(ConnectionString, options);
+
+        var act = () => runner.GetPendingAsync(TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<MigrationException>()).Which.Message
+            .Should().Contain(nameof(InvalidVersionMigration)).And.Contain("invalid Version");
+    }
+
+    private sealed class BackfillMigration : ICodeMigration {
+        public string Version => "20260901120000";
+
+        public string Description => "backfill";
+
+        public Task ExecuteAsync(MigrationStepContext context, CancellationToken cancellationToken) {
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class InvalidVersionMigration : ICodeMigration {
+        public string Version => "not-a-version";
+
+        public string Description => "invalid";
+
+        public Task ExecuteAsync(MigrationStepContext context, CancellationToken cancellationToken) {
+            return Task.CompletedTask;
+        }
     }
 
     [Fact]

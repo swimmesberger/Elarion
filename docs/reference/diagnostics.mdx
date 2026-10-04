@@ -24,6 +24,9 @@ JSON-RPC method emission for `[Handler]` handlers. See
 | ELRPC001 | Warning | A `[Handler]` handler's namespace is not under any `[AppModule]`; it is registered unconditionally (not gated by a module feature flag). MCP reuses this id since it is built on `[Handler]`. | Move the handler under a module's namespace so its RPC/MCP registration is module-scoped and feature-gated. |
 | ELRPC002 | Warning | A `[Handler]` handler does not implement `IHandler<TRequest, TResponse>` with a `Result<T>` response, so no RPC method can be generated. | Make the handler implement `IHandler<TRequest, Result<TResponse>>` (or the `IHandler<T>` sugar) so the request/response shape is resolvable. |
 | ELRPC003 | Warning | Two handlers resolve to the same operation name on the shared bus (e.g. an inferred name colliding with another inferred or explicit one); one would silently win at runtime. | Give one handler an explicit `[Handler("...")]` name so every operation name is unique across the bus. |
+| ELRPC004 | Error | A non-nullable member of a handler's response graph is annotated `[JsonIgnore(Condition = WhenWritingDefault)]` (or `WhenWritingNull` on a non-nullable reference). Non-nullable members are required on the wire, so the serializer must always write them. | Make the member nullable to declare it optional, or remove the ignore condition. |
+| ELERR001 | Error | A `[ProducesError]` code is not lower-case ASCII letters, digits and underscores in dot-separated segments. | Use a code such as `token.malformed`. |
+| ELERR002 | Error | One error code is declared more than once on a handler with a different kind or payload type. | Declare each code once; a code has exactly one kind and one payload. |
 
 ## ELHTTP — HTTP endpoint generation
 
@@ -245,6 +248,19 @@ Feature-gate decorator attachment for `[FeatureGate]`. See [Feature flags](/docs
 | --- | --- | --- | --- |
 | ELFEAT001 | Error | A handler declares a `[FeatureGate]` but its response type does not implement `IResultFailureFactory<T>`, so the gate cannot short-circuit and would be silently skipped. | Return `Result<T>` or `Result` from the gated handler so the gate can short-circuit to `AppError.NotFound`. |
 | ELFEAT002 | Warning | A handler declares a `[FeatureGate]` with no feature name (or a blank one); the gate has no effect. | Pass at least one non-blank feature name to `[FeatureGate]`, or remove it. |
+
+## ELFLAG — Feature-flag declarations
+
+Declaration, ownership and wiring of feature flags (ADR-0079). See [Feature flags](/docs/concepts/feature-flags).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELFLAG001 | Error | A name used by `[FeatureGate]` or `[FeatureVariant]` is declared by no `[FeatureFlag]`/`[BackendFeatureFlag]` in this assembly or a referenced one. | Declare the flag once under its module, or fix the misspelled name. |
+| ELFLAG002 | Error | The same flag name is declared more than once — within one assembly or across referenced assemblies (read from the manifest). Neither declaration is registered. | Keep a single declaration; a flag has exactly one owner. |
+| ELFLAG003 | Error | `[FeatureFlag]` sits on a class that cannot own the flag: it does not implement `IFeatureFlagResolver`, or is abstract, static or generic. | Implement `IFeatureFlagResolver` on a concrete class, or use `[BackendFeatureFlag]` to leave evaluation to the backend. |
+| ELFLAG004 | Error | A flag is declared outside every `[AppModule]` namespace of its assembly, so no module registers it. | Move the declaration under its module's namespace. |
+| ELFLAG005 | Error | A flag declaration has a blank name. | Give the flag a non-blank name. |
+| ELFLAG006 | Warning | Two flag names map to the same `ElarionFeatureFlags` accessor (PascalCase collision); the second is omitted from the typed accessors but stays in `All`. | Rename one flag so the PascalCased accessors differ. |
 
 ## ELVAL — Request validation
 

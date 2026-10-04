@@ -47,9 +47,12 @@ public sealed class JsonRpcDispatcher {
 
     /// <summary>Registers a DI-resolved handler on the underlying registry (convenience forwarder).</summary>
     public JsonRpcDispatcher Map<TRequest, TResponse>(
-        string methodName, HandlerTransports transports = HandlerTransports.All, bool idempotent = false)
+        string methodName,
+        HandlerTransports transports = HandlerTransports.All,
+        bool idempotent = false,
+        IReadOnlyList<ErrorContract>? errors = null)
         where TRequest : class {
-        _registry.Map<TRequest, TResponse>(methodName, transports, idempotent);
+        _registry.Map<TRequest, TResponse>(methodName, transports, idempotent, errors);
         return this;
     }
 
@@ -58,9 +61,10 @@ public sealed class JsonRpcDispatcher {
         string methodName,
         Func<TRequest, IServiceProvider, CancellationToken, ValueTask<Result<TResponse>>> handler,
         HandlerTransports transports = HandlerTransports.All,
-        bool idempotent = false)
+        bool idempotent = false,
+        IReadOnlyList<ErrorContract>? errors = null)
         where TRequest : class {
-        _registry.MapDelegate(methodName, handler, transports, idempotent);
+        _registry.MapDelegate(methodName, handler, transports, idempotent, errors);
         return this;
     }
 
@@ -210,14 +214,16 @@ public sealed class JsonRpcDispatcher {
     }
 
     /// <summary>
-    /// Returns all JSON-RPC-exposed methods with their request and response types.
+    /// Returns all JSON-RPC-exposed methods with their request and response types and declared error contract.
     /// Used by schema export to ensure the same methods as the runtime dispatcher.
     /// </summary>
-    public IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent)>
+    public IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent,
+            IReadOnlyList<ErrorContract> Errors)>
         GetRegisteredMethods() {
         return _registry.RoutesFor(HandlerTransports.JsonRpc)
             .OrderBy(static route => route.Name, StringComparer.Ordinal)
-            .Select(static route => (route.Name, route.RequestType, route.ResponseType, route.Idempotent))
+            .Select(static route => (route.Name, route.RequestType, route.ResponseType, route.Idempotent,
+                route.Errors ?? (IReadOnlyList<ErrorContract>)[]))
             .ToList();
     }
 

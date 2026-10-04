@@ -38,12 +38,12 @@ public abstract class EfCoreSettingsStoreTransactionTestBase(ISettingsStoreFixtu
         await using (var context = fixture.CreateContext()) {
             var store = CreateStore(context);
             await using var transaction = await context.Database.BeginTransactionAsync(Ct);
-            await store.SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
+            await store.SetAsync(SettingsScope.Global, key, "v1", null, cancellationToken: Ct);
             await transaction.RollbackAsync(Ct);
         }
 
         await using var verifyContext = fixture.CreateContext();
-        (await CreateStore(verifyContext).GetAsync(SettingsScope.Global, key, Ct)).Should().BeNull();
+        (await CreateStore(verifyContext).GetValueAsync(SettingsScope.Global, key, Ct)).Should().BeNull();
     }
 
     [Fact]
@@ -54,12 +54,12 @@ public abstract class EfCoreSettingsStoreTransactionTestBase(ISettingsStoreFixtu
         await using (var context = fixture.CreateContext()) {
             var store = CreateStore(context);
             await using var transaction = await context.Database.BeginTransactionAsync(Ct);
-            await store.SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
+            await store.SetAsync(SettingsScope.Global, key, "v1", null, cancellationToken: Ct);
             await transaction.CommitAsync(Ct);
         }
 
         await using var verifyContext = fixture.CreateContext();
-        (await CreateStore(verifyContext).GetAsync(SettingsScope.Global, key, Ct)).Should().Be("v1");
+        (await CreateStore(verifyContext).GetValueAsync(SettingsScope.Global, key, Ct)).Should().Be("v1");
     }
 
     [Fact]
@@ -67,18 +67,18 @@ public abstract class EfCoreSettingsStoreTransactionTestBase(ISettingsStoreFixtu
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var key = UniqueKey();
         await using (var seedContext = fixture.CreateContext()) {
-            await CreateStore(seedContext).SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
+            await CreateStore(seedContext).SetAsync(SettingsScope.Global, key, "v1", null, cancellationToken: Ct);
         }
 
         await using (var context = fixture.CreateContext()) {
             var store = CreateStore(context);
             await using var transaction = await context.Database.BeginTransactionAsync(Ct);
-            await store.SetAsync(SettingsScope.Global, key, "v2", cancellationToken: Ct);
+            await store.SetAsync(SettingsScope.Global, key, "v2", null, cancellationToken: Ct);
             await transaction.RollbackAsync(Ct);
         }
 
         await using var verifyContext = fixture.CreateContext();
-        (await CreateStore(verifyContext).GetAsync(SettingsScope.Global, key, Ct)).Should().Be("v1");
+        (await CreateStore(verifyContext).GetValueAsync(SettingsScope.Global, key, Ct)).Should().Be("v1");
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public abstract class EfCoreSettingsStoreTransactionTestBase(ISettingsStoreFixtu
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var key = UniqueKey();
         await using (var seedContext = fixture.CreateContext()) {
-            await CreateStore(seedContext).SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
+            await CreateStore(seedContext).SetAsync(SettingsScope.Global, key, "v1", null, cancellationToken: Ct);
         }
 
         await using (var context = fixture.CreateContext()) {
@@ -97,6 +97,6 @@ public abstract class EfCoreSettingsStoreTransactionTestBase(ISettingsStoreFixtu
         }
 
         await using var verifyContext = fixture.CreateContext();
-        (await CreateStore(verifyContext).GetAsync(SettingsScope.Global, key, Ct)).Should().Be("v1");
+        (await CreateStore(verifyContext).GetValueAsync(SettingsScope.Global, key, Ct)).Should().Be("v1");
     }
 }

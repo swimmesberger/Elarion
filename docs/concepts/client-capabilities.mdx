@@ -27,30 +27,32 @@ The bootstrap returns one object for the current user and deployment:
 ```
 
 It composes existing seams only — the generated `IsModuleEnabled`, [`IFeatureFlagService`](/docs/concepts/feature-flags),
-the `IFeatureVariantService` variant accessor, and [`ICurrentUser`](/docs/concepts/handlers) — so module enablement is
+the declared feature-flag catalog, and [`ICurrentUser`](/docs/concepts/handlers) — so module enablement is
 deployment-scoped while flags, variants, and grants are per-user. See
 [ADR-0030](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0030-client-capability-bootstrap.md).
 
-## Exposing flags per module — `[ClientFeatures]`
+## Exposing flags — `ExposeToClient`
 
-A module declares the flag/variant names it exposes to the client on its `[AppModule]` type. Nothing reaches the wire
-unless a module names it, so exposure is leak-safe by construction:
+A flag is exposed to the client by declaring it so: `ExposeToClient = true` on its `[FeatureFlag]` or
+`[BackendFeatureFlag]` declaration (see [feature flags](/docs/concepts/feature-flags)). Nothing reaches the wire
+unless its declaration says so, so exposure is leak-safe by construction:
 
 ```csharp
 [AppModule("Billing")]
-[ClientFeatures("new-checkout", "dashboard-v2")]   // exposed to the frontend
+[BackendFeatureFlag("new-checkout", ExposeToClient = true)]
+[BackendFeatureFlag("dashboard-v2", ExposeToClient = true)]
 public static class BillingModule { }
 ```
 
-The bootstrap evaluates **only those names, only for enabled modules**. A listed name needs **no** server-side
-`[FeatureGate]`/`[FeatureVariant]` behind it — a pure UI flag is first-class, evaluated by the same provider and the
-user's context. The names are collected into a per-deployment manifest by the bootstrapper generator
-(`configuration.GetClientCapabilityManifest()`).
+The bootstrap evaluates **only the exposed flags of enabled modules** (a disabled module registers no flags), through
+the same `IFeatureFlagService` and one `FeatureEvaluationContext` the handler gates use, so the snapshot cannot
+disagree with a gate. A flag needs **no** server-side `[FeatureGate]`/`[FeatureVariant]` behind it — a pure UI flag
+is first-class. A flag whose owner allocates a variant also appears under `variants`.
 
-`GetClientCapabilityManifest()` is emitted for **every** host, so the one-liner below compiles even when no module
-declares `[ClientFeatures]` — you then get module enablement plus the user's grants, with empty `flags`/`variants`.
-Using the session bootstrap purely for grants + module enablement is a fully supported case; you don't need a single
-client flag to adopt it.
+`GetClientCapabilityManifest()` is emitted for **every** host and carries only the module map (name and enabled
+state); the flags come from the runtime catalog. A host with no exposed flags gets module enablement plus the user's
+grants, with empty `flags`/`variants`. Using the session bootstrap purely for grants + module enablement is a
+fully supported case.
 
 ## Wiring the host
 
@@ -91,7 +93,7 @@ alongside the RPC client: a typed `ClientSnapshot`, synchronous `SessionCapabili
 | `module.Billing` | `modules["Billing"]` (deployment-scoped) |
 | `permission.billing.write` | `user.permissions.includes(...)` |
 | `role.admin` | `user.roles.includes(...)` |
-| `new-checkout` | `flags[...]` (the `[ClientFeatures]` set) |
+| `new-checkout` | `flags[...]` (the `ExposeToClient` flags) |
 | `ForecastAlgorithm` | `variants[...]` (string / `.variant`) |
 
 ```ts
@@ -233,7 +235,7 @@ it keeps the snapshot reflection-free under Native AOT.
 ## Typed vocabulary — no stringly-typed capability checks
 
 The exported schema carries the application's **capability vocabulary** (module names, each module's
-`[ClientFeatures]`, and the `[RequirePermission]`/`[RequireRole]` catalog) in an optional `capabilities` block —
+client-exposed flags, and the `[RequirePermission]`/`[RequireRole]` catalog) in an optional `capabilities` block —
 resolved automatically by the schema tool from the app's own registrations. The generator turns it into typed
 constants and literal unions in `session-client.ts`, so a typo is a compile error instead of a silent `false`:
 

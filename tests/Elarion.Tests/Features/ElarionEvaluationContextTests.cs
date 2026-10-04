@@ -1,14 +1,17 @@
 using AwesomeAssertions;
+using Elarion.Abstractions.Features;
 using Elarion.FeatureFlags.OpenFeature;
-using Elarion.Tests.Authorization;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Elarion.Tests.Features;
 
 public sealed class ElarionEvaluationContextTests {
+    private static readonly IServiceProvider Services = new ServiceCollection().BuildServiceProvider();
+
     [Fact]
     public void AuthenticatedUser_SetsTargetingKeyUserIdAndGroups() {
-        var user = new FakeCurrentUser { IsAuthenticated = true, UserId = "u-42", Roles = ["Admin", "Billing"] };
+        var user = new FeatureEvaluationContext { Services = Services, UserId = "u-42", Roles = ["Admin", "Billing"] };
 
         var context = ElarionEvaluationContext.Create(user);
 
@@ -22,11 +25,26 @@ public sealed class ElarionEvaluationContextTests {
 
     [Fact]
     public void AnonymousUser_HasNoTargetingKeyOrUserId() {
-        var user = new FakeCurrentUser { IsAuthenticated = false };
+        var user = new FeatureEvaluationContext { Services = Services };
 
         var context = ElarionEvaluationContext.Create(user);
 
         context.TargetingKey.Should().BeNull();
         context.ContainsKey(ElarionEvaluationContext.UserIdKey).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TenantAndCustomAttributes_AreForwardedAsTargetingAttributes() {
+        var user = new FeatureEvaluationContext {
+            Services = Services,
+            UserId = "u-1",
+            TenantId = "tenant-7",
+            Attributes = new Dictionary<string, string> { ["plan"] = "pro" }
+        };
+
+        var context = ElarionEvaluationContext.Create(user);
+
+        context.GetValue(ElarionEvaluationContext.TenantIdKey).AsString.Should().Be("tenant-7");
+        context.GetValue("plan").AsString.Should().Be("pro");
     }
 }

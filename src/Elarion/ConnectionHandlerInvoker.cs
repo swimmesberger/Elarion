@@ -297,7 +297,7 @@ public sealed class ConnectionHandlerInvoker : IAsyncDisposable {
     /// <param name="ct">A cancellation token flowed unchanged into the route.</param>
     /// <returns>
     /// The route's boxed success or failure result. Unknown names and routes exposed only to another transport
-    /// return the same generic <see cref="AppError.NotFound(string)"/> value so transport exposure is not leaked.
+    /// return the same generic <see cref="AppError.NotFound"/> value so transport exposure is not leaked.
     /// No exception translation is performed.
     /// </returns>
     /// <exception cref="ArgumentException">

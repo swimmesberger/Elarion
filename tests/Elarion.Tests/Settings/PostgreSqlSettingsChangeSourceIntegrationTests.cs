@@ -39,7 +39,7 @@ public sealed class PostgreSqlSettingsChangeSourceIntegrationTests(PostgreSqlSet
 
         await using var context = fixture.CreateContext();
         var store = CreateStore(context, nodeA.Options);
-        await store.SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, key, "v1", null, cancellationToken: Ct);
 
         await fired.WaitAsync(FireTimeout, Ct);
     }
@@ -76,7 +76,7 @@ public sealed class PostgreSqlSettingsChangeSourceIntegrationTests(PostgreSqlSet
         await using var context = fixture.CreateContext();
         var store = CreateStore(context, node.Options);
         await using (var transaction = await context.Database.BeginTransactionAsync(Ct)) {
-            await store.SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
+            await store.SetAsync(SettingsScope.Global, key, "v1", null, cancellationToken: Ct);
 
             // NOTIFY rides the caller's transaction: nothing is delivered before commit.
             await Task.Delay(QuietWindow, Ct);
@@ -98,7 +98,7 @@ public sealed class PostgreSqlSettingsChangeSourceIntegrationTests(PostgreSqlSet
         await using (var context = fixture.CreateContext()) {
             var store = CreateStore(context, node.Options);
             await using var transaction = await context.Database.BeginTransactionAsync(Ct);
-            await store.SetAsync(SettingsScope.Global, key, "v1", cancellationToken: Ct);
+            await store.SetAsync(SettingsScope.Global, key, "v1", null, cancellationToken: Ct);
             await transaction.RollbackAsync(Ct);
         }
 

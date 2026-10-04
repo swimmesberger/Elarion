@@ -1,10 +1,13 @@
+using System.Data.Common;
+
 namespace Elarion.Migrations;
 
 /// <summary>
 /// The database-specific half of the migration engine (ADR-0060): opens locked, single-threaded sessions
 /// for the neutral <see cref="MigrationRunner"/> to orchestrate. One provider per database engine
-/// (<c>Elarion.Sql.PostgreSql</c>, <c>Elarion.Sql.Sqlite</c>); the runner supplies the
-/// roll-forward policy, the provider supplies the SQL and the lock.
+/// (<c>Elarion.Sql.PostgreSql</c>, <c>Elarion.Sql.Sqlite</c>); the runner supplies the plan, the ordering and
+/// the roll-forward policy — transactions included — and the provider supplies the lock, the history-table SQL
+/// and SQL execution.
 /// </summary>
 public interface IMigrationDatabase {
     /// <summary>
@@ -18,40 +21,39 @@ public interface IMigrationDatabase {
 }
 
 /// <summary>
-/// A single migration session over one dedicated connection: the history-table operations and script
-/// execution the <see cref="MigrationRunner"/> drives. All calls run sequentially on the one connection —
-/// never concurrently. Disposal releases any exclusive lock the session holds and closes the connection.
+/// A single migration session over one dedicated connection: the history-table operations the
+/// <see cref="MigrationRunner"/> drives plus SQL execution. The runner owns transaction scope — it begins a
+/// transaction on <see cref="Connection"/> and passes it to <see cref="InsertHistoryRowAsync"/> and
+/// <see cref="ExecuteSqlAsync"/> — so a step's writes and its history row commit or roll back together. All
+/// calls run sequentially on the one connection, never concurrently. Disposal releases any exclusive lock
+/// the session holds and closes the connection.
 /// </summary>
 public interface IMigrationSession : IAsyncDisposable {
-    /// <summary>Creates the history table and its version uniqueness constraint if they do not exist.</summary>
+    /// <summary>The session's open connection, which holds the exclusive lock for an exclusive session.</summary>
+    DbConnection Connection { get; }
+
+    /// <summary>
+    /// Creates the history table and its version uniqueness constraint if they do not exist, and upgrades a
+    /// table written by the script-only runner (ADR-0057/0060) in place to the step-shaped layout.
+    /// </summary>
     Task EnsureHistoryTableAsync(CancellationToken cancellationToken);
 
     /// <summary>Whether the history table already exists (read-only sessions use this before loading).</summary>
     Task<bool> HistoryTableExistsAsync(CancellationToken cancellationToken);
 
-    /// <summary>Loads every history row in ascending <c>installed_rank</c> order.</summary>
+    /// <summary>
+    /// Loads every history row in ascending <c>installed_rank</c> order. A table of the pre-step layout is read
+    /// as step-shaped rows (kind <c>sql</c>) without being modified, so read-only sessions work before the
+    /// first exclusive run upgrades it.
+    /// </summary>
     Task<IReadOnlyList<AppliedMigrationRow>> LoadHistoryAsync(CancellationToken cancellationToken);
 
     /// <summary>
-    /// Runs <paramref name="sql"/> in one transaction, then inserts the row from
-    /// <paramref name="historyRowFactory"/> in that <em>same</em> transaction and commits — so a failure
-    /// rolls back the script and its history row together (the roll-forward, no-repair invariant). The
-    /// factory is invoked just before the insert (after the script ran) so the runner can stamp the
-    /// measured execution duration onto the row. Provider exceptions propagate; the runner wraps them in
-    /// <see cref="MigrationExecutionException"/>.
+    /// Inserts a history row, in <paramref name="transaction"/> when one is given — that is how a transactional
+    /// step's row commits atomically with its writes (the roll-forward, no-repair invariant).
     /// </summary>
-    Task ExecuteInTransactionAsync(string sql, Func<MigrationHistoryRecord> historyRowFactory,
+    Task InsertHistoryRowAsync(MigrationHistoryRecord historyRow, DbTransaction? transaction,
         CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Runs <paramref name="sql"/> outside any transaction (for <c>-- elarion: no-transaction</c>
-    /// scripts) and writes no history row — the runner records the applied or failed row separately
-    /// afterwards. Provider exceptions propagate.
-    /// </summary>
-    Task ExecuteWithoutTransactionAsync(string sql, CancellationToken cancellationToken);
-
-    /// <summary>Inserts a standalone history row (a no-transaction applied/failed row, or a baseline row).</summary>
-    Task InsertHistoryRowAsync(MigrationHistoryRecord historyRow, CancellationToken cancellationToken);
 
     /// <summary>Deletes the history row with the given rank (resolving a failed migration as retry).</summary>
     Task DeleteHistoryRowAsync(int installedRank, CancellationToken cancellationToken);
@@ -61,4 +63,12 @@ public interface IMigrationSession : IAsyncDisposable {
     /// <paramref name="checksum"/> is non-null (resolving a failed migration as mark-applied).
     /// </summary>
     Task MarkHistoryRowAppliedAsync(int installedRank, string? checksum, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Executes <paramref name="sql"/>: as one command in <paramref name="transaction"/> when given, otherwise
+    /// outside any transaction with the engine's autocommit rules (PostgreSQL runs the script statement by
+    /// statement so <c>CREATE INDEX CONCURRENTLY</c> works). Provider exceptions propagate; the runner wraps
+    /// them in <see cref="MigrationExecutionException"/>.
+    /// </summary>
+    Task ExecuteSqlAsync(string sql, DbTransaction? transaction, CancellationToken cancellationToken);
 }

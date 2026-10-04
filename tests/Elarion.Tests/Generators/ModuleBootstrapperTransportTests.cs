@@ -140,7 +140,7 @@ public sealed class ModuleBootstrapperTransportTests {
             "new global::Microsoft.AspNetCore.Http.Metadata.AcceptsMetadata(new[] { \"application/json\" }, typeof(global::Sample.Shipping.CreateShipment.Command), false)");
         // The per-module handler method maps that module's [Handler] operation onto the registry with its flags.
         generated.Should().Contain(
-            "dispatcher.Map<global::Sample.Billing.GetInvoiceRpc.Query, global::Sample.Billing.GetInvoiceRpc.Response>(\"invoices.get\", global::Elarion.Abstractions.HandlerTransports.All);");
+            "dispatcher.Map<global::Sample.Billing.GetInvoiceRpc.Query, global::Sample.Billing.GetInvoiceRpc.Response>(\"invoices.get\", global::Elarion.Abstractions.HandlerTransports.All, errors: global::System.Array.Empty<global::Elarion.Abstractions.ErrorContract>());");
 
         // Each generated endpoint is tagged with its owning module so OpenAPI groups operations by module.
         generated.Should().Contain(".WithTags(\"Billing\")");
@@ -563,11 +563,11 @@ public sealed class ModuleBootstrapperTransportTests {
         // A web companion assembly publishes its [ModuleEndpoints] contributor through the manifest; the host
         // bootstrapper calls it without the companion being part of the host compilation.
         var module = EncodeFields(
-            "Manifest", "ManifestOnly", "global::ManifestOnly.ManifestModule", null, "0", "0", "0", "0", "0", "");
+            "Manifest", "ManifestOnly", "global::ManifestOnly.ManifestModule", null, "0", "0", "0", "0", "0");
         var hooks = EncodeFields("Manifest", "global::ManifestOnly.ManifestWebEndpoints", "1", "0");
 
         var librarySource = $$"""
-                              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+                              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "2")]
                               [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
                               [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ModuleEndpoints.v1", "{{hooks}}")]
 
@@ -708,10 +708,10 @@ public sealed class ModuleBootstrapperTransportTests {
         generated.Should().Contain("AddManifestHandlers(dispatcher);");
         generated.Should().Contain("app.MapGet(\"manifest\",");
         generated.Should().Contain(
-            "dispatcher.Map<global::ManifestOnly.GetManifest.Query, global::ManifestOnly.GetManifest.Response>(\"manifest.get\", global::Elarion.Abstractions.HandlerTransports.All);");
-        // A pre-Connection (11-field) manifest entry still maps — without the connection surface.
+            "dispatcher.Map<global::ManifestOnly.GetManifest.Query, global::ManifestOnly.GetManifest.Response>(\"manifest.get\", global::Elarion.Abstractions.HandlerTransports.All, errors: global::System.Array.Empty<global::Elarion.Abstractions.ErrorContract>());");
+        // A manifest entry carries its declared error contract into the registration (ADR-0080).
         generated.Should().Contain(
-            "dispatcher.Map<global::ManifestOnly.GetLegacy.Query, global::ManifestOnly.GetLegacy.Response>(\"manifest.legacy\", global::Elarion.Abstractions.HandlerTransports.JsonRpc | global::Elarion.Abstractions.HandlerTransports.Mcp);");
+            "dispatcher.Map<global::ManifestOnly.GetLegacy.Query, global::ManifestOnly.GetLegacy.Response>(\"manifest.legacy\", global::Elarion.Abstractions.HandlerTransports.JsonRpc | global::Elarion.Abstractions.HandlerTransports.Mcp, errors: new global::Elarion.Abstractions.ErrorContract[] { new global::Elarion.Abstractions.ErrorContract { Code = \"not_found\", Kind = global::Elarion.Abstractions.ErrorKind.NotFound }, new global::Elarion.Abstractions.ErrorContract { Code = \"token.malformed\", Kind = global::Elarion.Abstractions.ErrorKind.Validation, DataType = typeof(global::ManifestOnly.GetLegacy.Response) } });");
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
@@ -798,9 +798,9 @@ public sealed class ModuleBootstrapperTransportTests {
         generated.Should().Contain("MapAppHttp(endpoints);");
         generated.Should().Contain("app.MapGet(\"things/{id}\",");
         generated.Should().Contain(
-            "dispatcher.Map<global::Host.App.GetThing.Query, global::Host.App.GetThing.Response>(\"app.getThing\", global::Elarion.Abstractions.HandlerTransports.All);");
+            "dispatcher.Map<global::Host.App.GetThing.Query, global::Host.App.GetThing.Response>(\"app.getThing\", global::Elarion.Abstractions.HandlerTransports.All, errors: global::System.Array.Empty<global::Elarion.Abstractions.ErrorContract>());");
         generated.Should().Contain(
-            "dispatcher.Map<global::Host.App.ArchiveThing.Command, global::Host.App.ArchiveThing.Response>(\"things.archive\", global::Elarion.Abstractions.HandlerTransports.Mcp);");
+            "dispatcher.Map<global::Host.App.ArchiveThing.Command, global::Host.App.ArchiveThing.Response>(\"things.archive\", global::Elarion.Abstractions.HandlerTransports.Mcp, errors: global::System.Array.Empty<global::Elarion.Abstractions.ErrorContract>());");
         generated.Should().Contain("GetAppMcpMetadata()");
 
         // Feature-module gating applies to host-compilation handlers exactly like referenced ones.
@@ -900,10 +900,12 @@ public sealed class ModuleBootstrapperTransportTests {
             null,
             string.Empty,
             "0",
-            "0");
+            "0",
+            "0",
+            string.Empty);
         var librarySource = $$"""
-                              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
-                              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{rpc}}")]
+                              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "2")]
+                              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v2", "{{rpc}}")]
 
                               namespace ManifestOnly { public static class Placeholder { } }
                               """;
@@ -1002,31 +1004,30 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
-    public void Bootstrapper_EmitsClientCapabilityManifest_FromReferencedClientFeatures() {
-        // A module declaring [ClientFeatures] in a referenced assembly — the names must survive the manifest
-        // round-trip (encode → image → decode), and every module appears with its IsModuleEnabled state.
+    public void Bootstrapper_EmitsClientCapabilityManifest_FromReferencedModules() {
+        // Modules of a referenced assembly must survive the manifest round-trip (encode → image → decode), and
+        // every module appears with its IsModuleEnabled state; flags are not part of this manifest (ADR-0079).
         var modulesReference = CompileToImage(
             """
             using Elarion.Abstractions.Modules;
 
-            namespace Sample.ClientFeatures {
+            namespace Sample.ClientModules {
                 [AppModule("Billing")]
-                [ClientFeatures("new-checkout", "dashboard-v2")]
                 public static class BillingModule { }
 
                 [AppModule("Core", Kind = AppModuleKind.Core)]
                 public static class CoreModule { }
             }
             """,
-            "Sample.ClientFeatures");
+            "Sample.ClientModules");
 
         var generated = RunGenerator([modulesReference], out var compilationWithGenerated);
 
         var method = Slice(generated, "GetClientCapabilityManifest(");
         method.Should().Contain(
-                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\"), Features = new string[] { \"new-checkout\", \"dashboard-v2\" } }")
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\") }")
             .And.Contain(
-                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Core\", Enabled = IsModuleEnabled(configuration, \"Core\"), Features = global::System.Array.Empty<string>() }");
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Core\", Enabled = IsModuleEnabled(configuration, \"Core\") }");
 
         // The generated code references the real Elarion.Session manifest types, so it compiles.
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
@@ -1035,17 +1036,17 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
-    public void Bootstrapper_EmitsModulesOnlyClientCapabilityManifest_WhenNoModuleExposesClientFeatures() {
-        // No module declares [ClientFeatures], but the method is still emitted with a modules-only manifest so
+    public void Bootstrapper_EmitsModulesOnlyClientCapabilityManifest_ForTheHostsModules() {
+        // The method is emitted with a modules-only manifest so
         // AddElarionSession(configuration.GetClientCapabilityManifest()) compiles for every host — the session
         // bootstrap still projects per-user module enablement from it (an empty manifest would drop that).
         var generated = RunGenerator(out var compilationWithGenerated);
 
         var method = Slice(generated, "GetClientCapabilityManifest(");
         method.Should().Contain(
-                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\"), Features = global::System.Array.Empty<string>() }")
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Billing\", Enabled = IsModuleEnabled(configuration, \"Billing\") }")
             .And.Contain(
-                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Shipping\", Enabled = IsModuleEnabled(configuration, \"Shipping\"), Features = global::System.Array.Empty<string>() }");
+                "new global::Elarion.Abstractions.Modules.ClientModuleManifest { Name = \"Shipping\", Enabled = IsModuleEnabled(configuration, \"Shipping\") }");
 
         // The generated code references the real Elarion.Session manifest types, so it compiles.
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
@@ -1286,9 +1287,7 @@ public sealed class ModuleBootstrapperTransportTests {
             "0",
             "0",
             "0",
-            "0",
-            // The client-features blob (10th field) — empty for a module with no [ClientFeatures].
-            "");
+            "0");
         // The nested binding-members blob (ADR-0071): GetManifest.Query's one member, `required Guid Id`,
         // bound from the query string as an IParsable value type — eleven fields per member, the last the
         // (here empty) nested validation-attribute blob.
@@ -1319,11 +1318,12 @@ public sealed class ModuleBootstrapperTransportTests {
             string.Empty,
             "0",
             "0",
-            // OnConnection (12th field, appended by ADR-0053) — "1" so the entry decodes as All.
-            "1");
-        // The pre-Connection wire format: 11 fields. Must decode (with the connection surface off), never
-        // silently drop the handler.
-        var legacyRpc = EncodeFields(
+            // OnConnection — "1" so the entry decodes as All.
+            "1",
+            // Declared errors (ADR-0080): none.
+            string.Empty);
+        // A JSON-RPC + MCP entry (no connection surface) carrying a declared error contract.
+        var errorsRpc = EncodeFields(
             "manifest.legacy",
             "ManifestOnly",
             "global::ManifestOnly.GetLegacy.Query",
@@ -1334,18 +1334,22 @@ public sealed class ModuleBootstrapperTransportTests {
             null,
             string.Empty,
             "0",
-            "0");
+            "0",
+            "0",
+            EncodeFields(
+                "not_found", "NotFound", null,
+                "token.malformed", "Validation", "global::ManifestOnly.GetLegacy.Response"));
 
         return $$"""
                  using System.Threading;
                  using System.Threading.Tasks;
                  using Elarion.Abstractions;
 
-                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "2")]
                  [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
                  [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.HttpEndpoint.v2", "{{http}}")]
-                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{rpc}}")]
-                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v1", "{{legacyRpc}}")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v2", "{{rpc}}")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.RpcMethod.v2", "{{errorsRpc}}")]
 
                  namespace ManifestOnly;
 
@@ -1370,7 +1374,7 @@ public sealed class ModuleBootstrapperTransportTests {
     private static string ResourceFilterLibSource() {
         // A feature module (IsCore = 0) so its filter registration is gated by the module flag.
         var module = EncodeFields(
-            "FilterLib", "FilterLib", "global::FilterLib.FilterModule", null, "0", "0", "0", "0", "0", "");
+            "FilterLib", "FilterLib", "global::FilterLib.FilterModule", null, "0", "0", "0", "0", "0");
         var owner = EncodeFields(
             "global::FilterLib.ContactAccess", "global::FilterLib.Contact", "FilterLib", "0");
         var shared = EncodeFields(
@@ -1383,7 +1387,7 @@ public sealed class ModuleBootstrapperTransportTests {
                  using Elarion.Abstractions.Identity;
                  using Elarion.Authorization.EntityFrameworkCore;
 
-                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+                 [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "2")]
                  [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
                  [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ResourceFilter.v1", "{{owner}}")]
                  [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ResourceFilter.v1", "{{shared}}")]
@@ -1487,7 +1491,7 @@ public sealed class ModuleBootstrapperTransportTests {
 
         return trustedPlatformAssemblies!
             .Split(Path.PathSeparator)
-            .Select(path => MetadataReference.CreateFromFile(path))
+            .Select(path => SharedMetadataReferences.FromFile(path))
             .ToArray();
     }
 }

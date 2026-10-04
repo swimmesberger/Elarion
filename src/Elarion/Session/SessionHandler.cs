@@ -9,14 +9,16 @@ namespace Elarion.Session;
 /// <summary>
 /// The framework-shipped client-capability bootstrap handler. It composes existing seams only — the deployment
 /// <see cref="ClientCapabilityManifest"/>, the current <see cref="ICurrentUser"/>, and (when present) the
-/// <see cref="IFeatureFlagService"/>/<see cref="IFeatureVariantService"/> — into a single <see cref="SessionResponse"/>
-/// the frontend reflects. See <c>ADR-0030</c>.
+/// <see cref="IFeatureFlagCatalog"/>/<see cref="IFeatureFlagService"/> — into a single <see cref="SessionResponse"/>
+/// the frontend reflects. See <c>ADR-0030</c> and <c>ADR-0079</c>.
 /// </summary>
 /// <remarks>
-/// The flag and variant services are optional: a host that does not use feature flags still gets the module map and
-/// the user's grants. Only the names a module declared via <c>[ClientFeatures]</c> (and only for <b>enabled</b>
-/// modules) are evaluated, so nothing internal leaks. A name is reported as a variant only when the variant accessor
-/// resolves one; otherwise it appears as a boolean flag, so a pure UI flag is first-class.
+/// The flag services are optional: a host that does not use feature flags still gets the module map and
+/// the user's grants. Only the catalog flags declared with <c>ExposeToClient</c> are evaluated — and the catalog
+/// holds only <b>enabled</b> modules' flags — so nothing internal leaks. Every flag is evaluated through the same
+/// <see cref="IFeatureFlagService"/> and one <see cref="FeatureEvaluationContext"/> as the handler gates, so the
+/// snapshot cannot disagree with the gate. A flag is reported as a variant only when its owner allocates one;
+/// otherwise it appears as a boolean flag, so a pure UI flag is first-class.
 /// Registered <see cref="IClientSnapshotContributor"/> instances add named application sections on top of that fixed
 /// shape.
 /// </remarks>
@@ -24,8 +26,8 @@ public sealed class SessionHandler(
     ICurrentUser currentUser,
     ClientCapabilityManifest manifest,
     AuthorizationOptions? authorizationOptions = null,
+    IFeatureFlagCatalog? catalog = null,
     IFeatureFlagService? featureFlags = null,
-    IFeatureVariantService? featureVariants = null,
     IEnumerable<IClientSnapshotContributor>? contributors = null)
     : IHandler<SessionRequest, Result<SessionResponse>> {
     /// <inheritdoc/>
@@ -34,18 +36,18 @@ public sealed class SessionHandler(
         var flags = new Dictionary<string, bool>(StringComparer.Ordinal);
         var variants = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        foreach (var module in manifest.Modules) {
+        foreach (var module in manifest.Modules)
             modules[module.Name] = module.Enabled;
-            if (!module.Enabled) continue;
 
-            foreach (var feature in module.Features) {
-                if (featureFlags is not null && !flags.ContainsKey(feature))
-                    flags[feature] = await featureFlags.IsEnabledAsync(feature, ct).ConfigureAwait(false);
+        if (catalog is not null && featureFlags is not null) {
+            var context = featureFlags.CreateContext();
+            foreach (var flag in catalog.All) {
+                if (!flag.ExposeToClient) continue;
 
-                if (featureVariants is not null && !variants.ContainsKey(feature)) {
-                    var variant = await featureVariants.GetVariantAsync(feature, ct).ConfigureAwait(false);
-                    if (variant is not null) variants[feature] = variant;
-                }
+                flags[flag.Name] = await featureFlags.IsEnabledAsync(flag.Name, context, ct).ConfigureAwait(false);
+
+                var variant = await featureFlags.GetVariantAsync(flag.Name, context, ct).ConfigureAwait(false);
+                if (variant is not null) variants[flag.Name] = variant;
             }
         }
 

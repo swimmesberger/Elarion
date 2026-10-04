@@ -92,11 +92,12 @@ public static class ElarionHttpResults {
             var errors = validation.FieldErrors is { } fieldErrors
                 ? new Dictionary<string, string[]>(fieldErrors)
                 : new Dictionary<string, string[]> { [string.Empty] = [.. validation.Errors] };
-            return Results.ValidationProblem(errors, error.Message, statusCode: statusCode);
+            return Results.ValidationProblem(
+                errors, error.Message, statusCode: statusCode, extensions: HttpAppErrorMapper.Extensions(error));
         }
 
         // Leave the title null so ASP.NET fills the canonical reason phrase for the status code.
-        return Results.Problem(error.Message, statusCode: statusCode);
+        return Results.Problem(error.Message, statusCode: statusCode, extensions: HttpAppErrorMapper.Extensions(error));
     }
 
     /// <summary>

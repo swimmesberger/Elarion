@@ -444,13 +444,13 @@ public sealed class SqlRecordMapperGeneratorTests {
         return [
             .. trustedPlatformAssemblies!
                 .Split(Path.PathSeparator)
-                .Select(path => MetadataReference.CreateFromFile(path)),
-            MetadataReference.CreateFromFile(typeof(Sql.SqlRecordAttribute).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Elarion.Abstractions.Serialization.IElarionJsonSerialization)
+                .Select(path => SharedMetadataReferences.FromFile(path)),
+            SharedMetadataReferences.FromFile(typeof(Sql.SqlRecordAttribute).Assembly.Location),
+            SharedMetadataReferences.FromFile(typeof(Elarion.Abstractions.Serialization.IElarionJsonSerialization)
                 .Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection)
+            SharedMetadataReferences.FromFile(typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection)
                 .Assembly.Location),
-            MetadataReference.CreateFromFile(
+            SharedMetadataReferences.FromFile(
                 typeof(Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions)
                     .Assembly.Location)
         ];

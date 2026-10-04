@@ -96,7 +96,7 @@ events.$client.onConnected(() => refetchAll())
 
 ## Error handling
 
-A JSON-RPC error from the server is thrown as a typed `RpcError` (`code`, `message`, optional `data`). Elarion maps its
+A JSON-RPC error from the server is thrown as a typed `RpcError`: `code` (the stable string error code), `data` (its typed payload), `message`, and `rpcCode` (the numeric JSON-RPC code). Methods list their declared errors in the schema, so `RpcMethodError<'method'>` is a union discriminated by `code` with typed `data`, and `isRpcMethodError('method', error)` narrows a caught error. Elarion maps its
 `AppError` kinds onto the JSON-RPC server-reserved range, so the generated `RpcError` exposes a getter per kind — branch
 on the kind directly instead of re-wrapping:
 

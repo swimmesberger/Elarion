@@ -15,6 +15,10 @@
 > (`IObservableVariableSource`) drives **live reschedule** of affected recurring jobs on change. Remaining:
 > cross-instance change sources.
 
+> **Update (ADR-0078):** the string-key accessor and the stand-alone `IConfiguration` provider described below were
+> replaced by declared setting definitions resolved through one effective-value resolver; the store/change-source
+> split in this ADR is unchanged. See [ADR-0078](0078-settings-definitions-and-effective-value-resolver.md).
+
 ## Context
 
 Downstream apps repeatedly ask for a **runtime-changeable settings/configuration API**: key/value,

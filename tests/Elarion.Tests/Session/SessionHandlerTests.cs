@@ -11,6 +11,7 @@ using Elarion.Abstractions.Serialization;
 using Elarion.Identity;
 using Elarion.Session;
 using Microsoft.Extensions.DependencyInjection;
+using Elarion.Tests.Features;
 using Xunit;
 
 namespace Elarion.Tests.Session;
@@ -20,8 +21,8 @@ public sealed class SessionHandlerTests {
     public async Task HandleAsync_ProjectsModulesFlagsVariantsAndGrants() {
         var manifest = new ClientCapabilityManifest {
             Modules = [
-                new ClientModuleManifest { Name = "Billing", Enabled = true, Features = ["new-checkout", "forecast"] },
-                new ClientModuleManifest { Name = "Experiments", Enabled = false, Features = ["beta-x"] }
+                new ClientModuleManifest { Name = "Billing", Enabled = true },
+                new ClientModuleManifest { Name = "Experiments", Enabled = false }
             ]
         };
         var user = new FakeCurrentUser {
@@ -30,10 +31,17 @@ public sealed class SessionHandlerTests {
             Roles = ["admin"],
             Claims = { ["permission"] = ["billing.write"] }
         };
-        var flags = new FakeFeatureFlags { ["new-checkout"] = true, ["forecast"] = true, ["beta-x"] = true };
-        var variants = new FakeFeatureVariants { ["forecast"] = "neural" };
+        // The catalog holds only enabled modules' flags (a disabled module registers none), and only the
+        // ExposeToClient ones reach the wire.
+        var catalog = new StubFeatureFlagCatalog(
+            StubFeatureFlagCatalog.Flag("new-checkout", "Billing"),
+            StubFeatureFlagCatalog.Flag("forecast", "Billing"),
+            StubFeatureFlagCatalog.Flag("internal-only", "Billing", expose: false));
+        var flags = new StubFeatureFlagService(("new-checkout", true), ("forecast", true), ("internal-only", true)) {
+            Variants = { ["forecast"] = "neural" }
+        };
 
-        var handler = new SessionHandler(user, manifest, new AuthorizationOptions(), flags, variants);
+        var handler = new SessionHandler(user, manifest, new AuthorizationOptions(), catalog, flags);
         var result = await handler.HandleAsync(new SessionRequest(), TestContext.Current.CancellationToken);
 
         result.IsSuccess.Should().BeTrue();
@@ -46,10 +54,11 @@ public sealed class SessionHandlerTests {
         response.Modules.Should().Contain("Billing", true);
         response.Modules.Should().Contain("Experiments", false);
 
-        // Only the enabled module's features are evaluated.
+        // Only client-exposed catalog flags are evaluated; an internal flag never reaches the wire.
         response.Flags.Should().Contain("new-checkout", true);
         response.Flags.Should().Contain("forecast", true);
-        response.Flags.Should().NotContainKey("beta-x");
+        response.Flags.Should().NotContainKey("internal-only");
+        flags.Queried.Should().NotContain("internal-only");
 
         // A feature resolves a variant only when the variant accessor returns one; a boolean flag does not.
         response.Variants.Should().Contain("forecast", "neural");
@@ -59,7 +68,7 @@ public sealed class SessionHandlerTests {
     [Fact]
     public async Task HandleAsync_WithNoFeatureServices_StillReturnsModulesAndGrants() {
         var manifest = new ClientCapabilityManifest {
-            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true, Features = ["new-checkout"] }]
+            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true }]
         };
         var user = new FakeCurrentUser { UserId = string.Empty, IsAuthenticated = false, Roles = [] };
 
@@ -77,7 +86,7 @@ public sealed class SessionHandlerTests {
     [Fact]
     public async Task HandleAsync_WithAnonymousShippedCurrentUser_ProjectsEmptyIdWithoutThrowing() {
         var manifest = new ClientCapabilityManifest {
-            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true, Features = [] }]
+            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true }]
         };
         // The shipped ICurrentUser: unseeded, it is an anonymous caller whose UserId *throws* (the contract is
         // non-nullable and there is no id). Session bootstrap must consult IsAuthenticated first — reading UserId
@@ -113,7 +122,7 @@ public sealed class SessionHandlerTests {
         var services = new ServiceCollection();
         services.AddSingleton<ICurrentUser>(new FakeCurrentUser { UserId = "u-1", IsAuthenticated = true });
         services.AddElarionSession(new ClientCapabilityManifest {
-            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true, Features = [] }]
+            Modules = [new ClientModuleManifest { Name = "Billing", Enabled = true }]
         });
         using var provider = services.BuildServiceProvider();
 
@@ -290,18 +299,6 @@ public sealed class SessionHandlerTests {
 
         public IEnumerable<string> GetClaimValues(string type) {
             return Claims.TryGetValue(type, out var values) ? values : [];
-        }
-    }
-
-    private sealed class FakeFeatureFlags : Dictionary<string, bool>, IFeatureFlagService {
-        public ValueTask<bool> IsEnabledAsync(string feature, CancellationToken ct = default) {
-            return ValueTask.FromResult(TryGetValue(feature, out var value) && value);
-        }
-    }
-
-    private sealed class FakeFeatureVariants : Dictionary<string, string>, IFeatureVariantService {
-        public ValueTask<string?> GetVariantAsync(string feature, CancellationToken ct = default) {
-            return ValueTask.FromResult(TryGetValue(feature, out var value) ? value : null);
         }
     }
 }

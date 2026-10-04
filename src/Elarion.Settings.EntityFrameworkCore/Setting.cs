@@ -19,6 +19,12 @@ public sealed class Setting {
     /// <summary>The stored value, or <see langword="null"/> for a present-but-null setting.</summary>
     public string? Value { get; set; }
 
+    /// <summary>
+    /// The protection scheme the <see cref="Value"/> is protected with (<see cref="SettingEntry.Protection"/>), or
+    /// <see langword="null"/> for a plain JSON value. Add it to an existing table as a nullable column.
+    /// </summary>
+    public string? Protection { get; set; }
+
     /// <summary>When the row was last written.</summary>
     public DateTimeOffset UpdatedOnUtc { get; set; }
 

@@ -37,7 +37,7 @@ export const Modules = {
 } as const
 export type ModuleName = (typeof Modules)[keyof typeof Modules]
 
-/** Flag/variant names the backend exposes to the client (the union of every [ClientFeatures] list). */
+/** Flag/variant names the backend exposes to the client (the union of every client-exposed flag declaration). */
 export const Flags = {
   "bulk-import": "bulk-import",
   "client-portal-v2": "client-portal-v2",

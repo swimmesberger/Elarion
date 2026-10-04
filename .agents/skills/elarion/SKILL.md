@@ -323,7 +323,9 @@ updates for users who have the app open stay client events.
   validator.
 - **Authorization sits on the handler.** `[RequirePermission("resource", "verb")]`,
   `[RequireRole]`, `[RequirePolicy]`, `[FeatureGate]` — class-level, enforced identically on every
-  transport. ASP.NET `[Authorize]`/policies are host-level extras (middleware or
+  transport. A `[FeatureGate]` name must be a declared flag: `[FeatureFlag]` on an `IFeatureFlagResolver`
+  class (code-defined) or `[BackendFeatureFlag]` (owned by the host's backend), with `ExposeToClient` for the
+  session snapshot — there is no `[ClientFeatures]`. ASP.NET `[Authorize]`/policies are host-level extras (middleware or
   `ConfigureEndpointGroup`), never the business gate.
 - **Inject the concrete `DbContext`.** No repository layer, no `IAppDbContext`. Entities pair an
   `IEntityTypeConfiguration<T>` marked `[EntityConfiguration]` with `[GenerateDbSets]` on the

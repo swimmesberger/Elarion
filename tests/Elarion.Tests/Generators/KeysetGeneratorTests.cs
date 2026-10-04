@@ -541,15 +541,15 @@ public sealed class KeysetGeneratorTests {
 
         return trustedPlatformAssemblies!
             .Split(Path.PathSeparator)
-            .Select(path => MetadataReference.CreateFromFile(path))
+            .Select(path => SharedMetadataReferences.FromFile(path))
             .ToArray();
     }
 
     private static IReadOnlyList<MetadataReference> RuntimeReferences() {
         var references = PlatformReferences().ToList();
-        references.Add(MetadataReference.CreateFromFile(
+        references.Add(SharedMetadataReferences.FromFile(
             typeof(Elarion.Paging.CursorWriter).Assembly.Location));
-        references.Add(MetadataReference.CreateFromFile(
+        references.Add(SharedMetadataReferences.FromFile(
             typeof(Elarion.Abstractions.Paging.Page<>).Assembly.Location));
         return references;
     }

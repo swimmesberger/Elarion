@@ -31,17 +31,6 @@ The class may optionally implement convention-based statics: `ConfigureServices(
 
 See [Modules](/docs/concepts/modules).
 
-### `[ClientFeatures]`
-
-- **Package:** `Elarion.Abstractions` (Modules) · **Applies to:** class (alongside `[AppModule]`)
-- **Triggers:** opts named feature flags and variants into the generated client-capability manifest. The list is the complete client-visible vocabulary for that module: internal flags are not exposed by discovery, and a disabled module contributes none. A listed name may be a pure UI flag; it does not need a server-side `[FeatureGate]`.
-
-| Parameter | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `features` | `params string[]` (ctor) → `Features` (`IReadOnlyList<string>`) | empty | Feature flag or variant names the session endpoint may evaluate and return for this module. |
-
-See [Client capabilities](/docs/concepts/client-capabilities).
-
 ### `[Service]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class
@@ -118,6 +107,11 @@ See [JSON-RPC](/docs/capabilities/transports/json-rpc) and [MCP](/docs/capabilit
 | `mode` | `HandlerTelemetryMode` (ctor) → `Mode` | required | `Full` (= 0, the default when the attribute is absent) or `None` (= 1). |
 
 See [Telemetry](/docs/capabilities/telemetry) and [Connections — the low-allocation dispatch profile](/docs/capabilities/connections/low-allocation).
+
+### `[ProducesError]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** class (repeatable)
+- **Triggers:** declares a failure the handler can produce — a stable error code, its `ErrorKind`, and an optional typed payload. The generator publishes the declarations (plus the validation, authorization, feature-gate and idempotency failures the framework adds) with the operation; the schema export lists them under the method's `errors`, and the TypeScript client types `error.code`/`error.data` per method. Constructors: `(ErrorKind)`, `(ErrorKind, Type)`, `(string code, ErrorKind)`, `(string code, ErrorKind, Type)`. See [Result & error model](/docs/reference/result-and-errors#produceserror--the-declared-error-contract).
 
 ### `[McpHandler]`
 
@@ -328,10 +322,31 @@ See [Resilience](/docs/capabilities/resilience).
 
 ## Feature flags
 
+### `[FeatureFlag]`
+
+- **Package:** `Elarion.Abstractions` (Features) · **Applies to:** class (not inherited)
+- **Triggers:** declares a **code-defined** flag and makes the class its owner. The class must be a concrete, non-generic `IFeatureFlagResolver` (`ELFLAG003` otherwise) under an `[AppModule]` namespace of its assembly (`ELFLAG004`). The generator registers it into the module's default services, so the flag exists exactly when the module is enabled, and publishes it in the manifest so duplicates across assemblies are rejected (`ELFLAG002`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `name` | `string` (ctor) → `Name` | required | The flag name; blank is `ELFLAG005`. |
+| `Description` | `string?` (init) | `null` | What the flag controls. |
+| `ExposeToClient` | `bool` (init) | `false` | Whether the session snapshot evaluates and returns the flag to the frontend. |
+
+### `[BackendFeatureFlag]`
+
+- **Package:** `Elarion.Abstractions` (Features) · **Applies to:** class (`AllowMultiple`, not inherited)
+- **Triggers:** declares a **backend-evaluated** flag owned by the host's `IBackendFeatureFlagEvaluator` (`Elarion.FeatureFlags.FeatureManagement`/`.OpenFeature`). Same parameters and declaration rules as `[FeatureFlag]`; place it on the module type or any class under the module's namespace. A host that declares backend flags without registering a backend fails at startup.
+
+### `[assembly: GenerateFeatureFlags]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** assembly (included in `[assembly: UseElarion]`)
+- **Triggers:** emits the `ElarionFeatureFlags` registry: typed `FeatureFlagKey` members, a `Names` class of constants and `All` descriptors, aggregated across referenced assemblies.
+
 ### `[FeatureGate]`
 
 - **Package:** `Elarion.Abstractions` (Features) · **Applies to:** class (`AllowMultiple`, inherited)
-- **Triggers:** gates a handler behind one or more feature flags. The handler-registration generator auto-attaches the `FeatureGateDecorator<TRequest, TResponse>` **just inside the authorization gate** so the flag is evaluated *before* the handler runs (before caching and the rest of the pipeline). When the gate is not satisfied the call short-circuits to `AppError.NotFound` (404) — a disabled feature is indistinguishable from a missing one, so the feature name is **never leaked** (MS-MVC-style "hide the roadmap"). Transport-neutral: identical under JSON-RPC, MCP, and HTTP. Stacking multiple `[FeatureGate]` attributes ANDs them. The flag is evaluated through the `IFeatureFlagService` seam; the default provider ships in `Elarion.FeatureFlags.OpenFeature`.
+- **Triggers:** gates a handler behind one or more feature flags. The handler-registration generator auto-attaches the `FeatureGateDecorator<TRequest, TResponse>` **just inside the authorization gate** so the flag is evaluated *before* the handler runs (before caching and the rest of the pipeline). When the gate is not satisfied the call short-circuits to `AppError.NotFound` (404) — a disabled feature is indistinguishable from a missing one, so the feature name is **never leaked** (MS-MVC-style "hide the roadmap"). Transport-neutral: identical under JSON-RPC, MCP, and HTTP. Stacking multiple `[FeatureGate]` attributes ANDs them. Every name must be a declared flag (`ELFLAG001`); it is evaluated through `IFeatureFlagService` by the flag's single owner.
 
 The attribute has two constructors:
 
@@ -477,7 +492,7 @@ See [Audit trail](/docs/concepts/auditing).
 There is **no Elarion validation attribute**. Request validation is declared with the standard
 `System.ComponentModel.DataAnnotations` attributes on the handler's request DTO — `[Range]`,
 `[MinLength]`/`[MaxLength]`/`[Length]`/`[StringLength]`, `[RegularExpression]`, `[EmailAddress]`,
-`[Url]`, `[Base64String]` — with requiredness from nullability + the `required` modifier (no
+`[Url]`, `[Base64String]` — with requiredness from nullability (ADR-0082; no
 `[Required]` needed). The handler-registration generator auto-attaches the framework
 `ValidationDecorator` (just inside the feature gate) for any handler whose request type graph carries
 validation attributes, and the same attributes are exported to the JSON-RPC schema, MCP tool schemas,
@@ -887,7 +902,7 @@ See [Cross-module communication](/docs/concepts/cross-module-communication).
 ### `[UseElarion]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** assembly
-- **Triggers:** enables the framework-owned assembly generators at once — handlers, services, scheduled jobs, event consumers, resilience policies, actor facades/registration, authorization-policy registration, client-event topics, the permission catalog, and the variant catalog. Application-owned policy attributes such as pipeline defaults remain explicit, as do host/provider triggers such as `[GenerateModuleBootstrapper]`, `[GenerateDbSets]`, and `[UseElarionSql]`. Marker only — no parameters.
+- **Triggers:** enables the framework-owned assembly generators at once — handlers, services, scheduled jobs, event consumers, resilience policies, actor facades/registration, authorization-policy registration, client-event topics, the permission catalog, the variant catalog, the feature-flag registry, and the setting-definition catalog. Application-owned policy attributes such as pipeline defaults remain explicit, as do host/provider triggers such as `[GenerateModuleBootstrapper]`, `[GenerateDbSets]`, and `[UseElarionSql]`. Marker only — no parameters.
 
 ### Individual generation triggers
 
@@ -905,6 +920,8 @@ All are `Elarion.Abstractions`, applied to the assembly, marker-only (no paramet
 | `[GenerateClientEventTopics]` | Per-module client-event topic registration and subscribe-time policy metadata. |
 | `[GeneratePermissionCatalog]` | The typed permission/role catalog harvested from handler requirements. |
 | `[GenerateVariantCatalog]` | The typed feature/configuration variant catalog. |
+| `[GenerateFeatureFlags]` | The typed `ElarionFeatureFlags` registry and per-module flag registration (ADR-0079). |
+| `[GenerateSettingDefinitionCatalog]` | The aggregated catalog of declared settings (`ElarionSettingDefinitions.All`). |
 
 ### `[GeneratePermissionCatalog]`
 
@@ -975,6 +992,28 @@ See [Client events](/docs/capabilities/events/client-events).
 ```
 
 See [Feature flags](/docs/concepts/feature-flags).
+
+### `[SettingDefinitions]` and `[Setting]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** `[SettingDefinitions]` on a top-level `static partial` class; `[Setting("key")]` on a `static partial` get-only property of type `SettingDefinition<T>` inside it
+- **Triggers:** the settings-definition generator implements each property as a `SettingDefinition<T>` built from the attribute and adds a per-class `All` list; the container is published in the Elarion manifest. Diagnostics `ELSDEF001`–`ELSDEF007` (invalid container or member, invalid key, duplicate key, secret with a default, pinnable without the global scope, invalid default).
+
+| `[Setting]` parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `key` | `string` (ctor) | — | The hierarchical key; unique case-insensitively (it doubles as the `IConfiguration` key). |
+| `Scopes` | `string[]` (init) | `["global"]` | Scope kinds the setting may be accessed in. |
+| `Secret` | `bool` (init) | `false` | Protected at rest, never described, never projected into `IConfiguration`. Cannot declare a default. |
+| `Pinnable` | `bool` (init) | `false` | Deployment configuration may pin the value. Requires the global scope. |
+| `Description` | `string?` (init) | `null` | Text for admin tooling. |
+| `Default` | `object?` (init) | none | A constant default for scalar settings. |
+| `DefaultFactory` | `string?` (init) | none | `nameof` a static parameterless method returning the value type (lazy, once). Exclusive with `Default`. |
+
+See [Settings](/docs/concepts/settings).
+
+### `[GenerateSettingDefinitionCatalog]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** assembly
+- **Triggers:** emits `ElarionSettingDefinitions.All`, the declared settings of this assembly plus the public `[SettingDefinitions]` containers of referenced assemblies (from the manifest). The host seeds the runtime catalog with `services.AddElarionSettings(o => o.AddDefinitions(ElarionSettingDefinitions.All))`. Marker only. Subsumed by `[UseElarion]`.
 
 ### `[UseElarionEntityFrameworkCore]`
 

@@ -1,4 +1,5 @@
 using System.Text;
+using Elarion.Abstractions.Features;
 using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.ClientEvents;
 using Elarion.Abstractions.Modules;
@@ -52,10 +53,11 @@ internal static class Program {
                              "The application did not register a JsonRpcDispatcher service. Register the dispatcher before building the host.");
 
         // Capability vocabulary (ADR-0032): both optional, resolved from the app's own registrations — the
-        // manifest when a module opts in via [ClientFeatures] + AddElarionSession, the catalog when the host
-        // calls AddElarionAuthorization. Absent, the schema is byte-identical to a vocabulary-free export.
+        // module map when the host calls AddElarionSession, the feature-flag catalog when an enabled module
+        // declares a flag, the permission catalog when the host calls AddElarionAuthorization. Absent, the schema is byte-identical to a vocabulary-free export.
         var exportOptions = new JsonRpcSchemaExportOptions {
             ClientCapabilities = host.Services.GetService(typeof(ClientCapabilityManifest)) as ClientCapabilityManifest,
+            FeatureFlags = host.Services.GetService(typeof(IFeatureFlagCatalog)) as IFeatureFlagCatalog,
             PermissionCatalog = host.Services.GetService(typeof(IPermissionCatalog)) as IPermissionCatalog,
             // Present when the host calls AddElarionClientEvents; absent, the schema carries no events block.
             ClientEventTopics = host.Services.GetService(typeof(ClientEventTopicManifest)) as ClientEventTopicManifest

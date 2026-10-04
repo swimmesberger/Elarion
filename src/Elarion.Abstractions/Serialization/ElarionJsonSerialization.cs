@@ -49,7 +49,12 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
         var options = new JsonSerializerOptions {
             PropertyNamingPolicy = config.PropertyNamingPolicy,
             PropertyNameCaseInsensitive = config.PropertyNameCaseInsensitive,
-            DefaultIgnoreCondition = config.DefaultIgnoreCondition
+            DefaultIgnoreCondition = config.DefaultIgnoreCondition,
+            // The serializer enforces the wire contract the schema exports (ADR-0082): a non-nullable member is
+            // required, so a null for it is rejected on read and write, and a constructor parameter without a
+            // default must be supplied. Not configurable — the exported schema would stop describing the wire.
+            RespectNullableAnnotations = true,
+            RespectRequiredConstructorParameters = true
         };
 
         // Ordered, first-match-wins. Host overrides win over everything the framework and transports

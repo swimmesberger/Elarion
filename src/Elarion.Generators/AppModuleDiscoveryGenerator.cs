@@ -91,8 +91,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         bool HasMapEndpoints,
         bool HasGetJsonTypeInfoResolver,
         bool HasConfigureEndpointGroup,
-        bool EmitDefaultServices,
-        EquatableArray<string> ClientFeatures
+        bool EmitDefaultServices
     );
 
     /// <summary>Grouped transport handlers, keyed by owning module name, plus the unmatched buckets.</summary>
@@ -563,8 +562,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
             module.HasMapEndpoints,
             module.HasGetJsonTypeInfoResolver,
             module.HasConfigureEndpointGroup,
-            emitDefaultServices,
-            module.ClientFeatures);
+            emitDefaultServices);
     }
 
     /// <summary>
@@ -806,6 +804,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         // The typed in-process mediator send, available wherever handlers are. Idempotent (TryAddScoped).
         sb.AppendLine(
             "        global::Elarion.HandlerSenderServiceCollectionExtensions.AddElarionHandlerSender(services);");
+        // The development-time check that handlers stay inside their declared error contract (ADR-0080).
+        sb.AppendLine(
+            "        global::Elarion.ErrorContractMonitorServiceCollectionExtensions.AddElarionErrorContractMonitor(services);");
         // Contribute every enabled module's source-generated JSON context to the canonical serializer options, so
         // every subsystem (JSON-RPC, MCP, idempotency, caching, outbox, settings) reads one shared configuration.
         sb.AppendLine(
@@ -1006,10 +1007,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
 
     /// <summary>
     /// Emits the deployment-resolved client-capability manifest the session bootstrap handler consumes: every module
-    /// with its <c>IsModuleEnabled</c> state plus the names from its <c>[ClientFeatures]</c> list (empty for modules
-    /// that expose none). Always emitted so <c>AddElarionSession(configuration.GetClientCapabilityManifest())</c>
-    /// compiles for every host — a host with no <c>[ClientFeatures]</c> still gets a modules-only manifest, which the
-    /// session bootstrap projects into per-user module enablement (an empty manifest would drop that entirely).
+    /// with its <c>IsModuleEnabled</c> state. The client-visible flags are not part of it: they come from the runtime
+    /// feature-flag catalog (ADR-0079). Always emitted so <c>AddElarionSession(configuration.GetClientCapabilityManifest())</c>
+    /// compiles for every host.
     /// </summary>
     private static void AppendClientCapabilityManifest(StringBuilder sb, List<ModuleEntry> entries) {
         const string ManifestFqn = "global::Elarion.Abstractions.Modules.ClientCapabilityManifest";
@@ -1017,7 +1017,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
 
         sb.AppendLine();
         sb.AppendLine(
-            "    /// <summary>Builds the deployment-resolved client-capability manifest (modules + exposed feature names) the session bootstrap evaluates per user.</summary>");
+            "    /// <summary>Builds the deployment-resolved client-capability manifest (the module map) the session bootstrap projects.</summary>");
         sb.AppendLine($"    public static {ManifestFqn} GetClientCapabilityManifest(");
         sb.AppendLine("        this global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
@@ -1026,12 +1026,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         sb.AppendLine($"            Modules = new {ModuleManifestFqn}[]");
         sb.AppendLine("            {");
         foreach (var entry in entries) {
-            var features = entry.ClientFeatures.IsEmpty
-                ? "global::System.Array.Empty<string>()"
-                : $"new string[] {{ {string.Join(", ", entry.ClientFeatures.Select(SourceString))} }}";
             sb.AppendLine(
                 $"                new {ModuleManifestFqn} {{ Name = {SourceString(entry.ModuleName)}, "
-                + $"Enabled = IsModuleEnabled(configuration, {SourceString(entry.ModuleName)}), Features = {features} }},");
+                + $"Enabled = IsModuleEnabled(configuration, {SourceString(entry.ModuleName)}) }},");
         }
 
         sb.AppendLine("            },");

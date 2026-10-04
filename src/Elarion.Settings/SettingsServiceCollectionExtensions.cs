@@ -2,19 +2,37 @@ using Elarion.Abstractions.Serialization;
 using Elarion.Settings.InProcess;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace Elarion.Settings;
 
 /// <summary>Registers the Elarion settings subsystem.</summary>
 public static class SettingsServiceCollectionExtensions {
     /// <summary>
-    /// Registers the settings foundation: the in-process store and change source (the shipped default sink)
-    /// and the scoped <see cref="ISettingsManager"/> accessor. Swap the sink later by registering a different
-    /// <see cref="ISettingsStore"/> (for example the EF Core provider) before or after this call —
-    /// the store registration here uses <c>TryAdd</c> so an earlier registration wins.
+    /// Registers the settings foundation: the definition catalog, the effective-value resolver, the in-process
+    /// store and change source (the shipped default sink), the scoped <see cref="ISettingsManager"/>, the
+    /// re-protector, and a startup check that fails the host when a secret definition has no
+    /// <see cref="ISettingValueProtector"/>. Swap the sink by registering a different <see cref="ISettingsStore"/>
+    /// (for example the EF Core provider) before or after this call — the store registration here uses
+    /// <c>TryAdd</c> so an earlier registration wins. Safe to call repeatedly; the options accumulate.
     /// </summary>
-    public static IServiceCollection AddElarionSettings(this IServiceCollection services) {
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">
+    /// Configures <see cref="SettingsOptions"/>, typically
+    /// <c>o =&gt; o.AddDefinitions(ElarionSettingDefinitions.All)</c>.
+    /// </param>
+    public static IServiceCollection AddElarionSettings(
+        this IServiceCollection services, Action<SettingsOptions>? configure = null) {
         ArgumentNullException.ThrowIfNull(services);
+
+        var options = services.FirstOrDefault(static d => d.ServiceType == typeof(SettingsOptions))
+            ?.ImplementationInstance as SettingsOptions;
+        if (options is null) {
+            options = new SettingsOptions();
+            services.AddSingleton(options);
+        }
+
+        configure?.Invoke(options);
 
         services.AddElarionJson();
         services.TryAddSingleton(TimeProvider.System);
@@ -26,10 +44,14 @@ public static class SettingsServiceCollectionExtensions {
             sp.GetRequiredService<InProcessSettingsChangeSource>());
 
         services.TryAddSingleton<ISettingsStore, InProcessSettingsStore>();
+        services.TryAddSingleton<ISettingDefinitionCatalog, SettingDefinitionCatalog>();
 
-        // Scoped so it resolves the current request's ICurrentUser for user-scoped reads.
+        // Scoped: the store may be scoped (EF Core), and the manager resolves the current request's ICurrentUser.
+        services.TryAddScoped<ISettingResolver, SettingResolver>();
         services.TryAddScoped<ISettingsManager, SettingsManager>();
+        services.TryAddScoped<ISettingReprotector, SettingReprotector>();
 
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, SettingsStartupValidator>());
         return services;
     }
 }

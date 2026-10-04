@@ -11,8 +11,8 @@ namespace Elarion.Abstractions.Authorization;
 /// Registered rules run <b>in registration order</b>, after the authenticated gate and <b>before</b> the declared
 /// permission, role, claim, policy, and resource checks. The first rule returning a non-null
 /// <see cref="AppError"/> denies, and that error is returned to the caller <b>unchanged</b> — a rule that must not
-/// disclose the existence of a resource returns <see cref="AppError.NotFound(string)"/>, one that states the
-/// denial plainly returns <see cref="AppError.Forbidden(string)"/>. Returning <see langword="null"/> passes.
+/// disclose the existence of a resource returns <see cref="AppError.NotFound"/>, one that states the
+/// denial plainly returns <see cref="AppError.Forbidden(string, string, object)"/>. Returning <see langword="null"/> passes.
 /// </para>
 /// <para>
 /// A handler marked <c>[AllowAnonymous]</c> short-circuits the whole authorizer, so rules are <b>not</b> evaluated
@@ -22,7 +22,7 @@ namespace Elarion.Abstractions.Authorization;
 /// </para>
 /// <para>
 /// Rules always run behind the authentication gate: a handler declaring any requirement rejects an unauthenticated
-/// caller with <see cref="AppError.Unauthorized(string)"/> before rules are reached, so
+/// caller with <see cref="AppError.Unauthorized(string, string, object)"/> before rules are reached, so
 /// <see cref="AuthorizationContext.User"/> is an authenticated principal. <see cref="AuthorizationContext.Resource"/>
 /// is the handler request, or <see langword="null"/> on the client-event subscription path, which has no request —
 /// a rule that branches on the request shape falls through to its denial there (fail-closed), so handle

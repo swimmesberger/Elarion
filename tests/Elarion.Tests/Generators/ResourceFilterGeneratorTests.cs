@@ -428,13 +428,13 @@ public sealed class ResourceFilterGeneratorTests {
 
         return trustedPlatformAssemblies!
             .Split(Path.PathSeparator)
-            .Select(path => MetadataReference.CreateFromFile(path))
+            .Select(path => SharedMetadataReferences.FromFile(path))
             .ToArray();
     }
 
     private static IReadOnlyList<MetadataReference> RuntimeReferences() {
         var references = PlatformReferences().ToList();
-        references.Add(MetadataReference.CreateFromFile(
+        references.Add(SharedMetadataReferences.FromFile(
             typeof(Elarion.Abstractions.Authorization.IQueryAuthorizer<>).Assembly.Location));
         return references;
     }

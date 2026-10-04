@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Elarion.Migrations;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -36,6 +37,8 @@ internal sealed class PostgreSqlMigrationSession : IMigrationSession {
         _history = new SchemaHistory(connection, schema, historyTableName, commandTimeoutSeconds);
     }
 
+    public DbConnection Connection => _connection;
+
     public Task EnsureHistoryTableAsync(CancellationToken cancellationToken) {
         return _history.EnsureTableAsync(cancellationToken);
     }
@@ -48,20 +51,14 @@ internal sealed class PostgreSqlMigrationSession : IMigrationSession {
         return _history.LoadAsync(cancellationToken);
     }
 
-    public async Task ExecuteInTransactionAsync(string sql, Func<MigrationHistoryRecord> historyRowFactory,
-        CancellationToken cancellationToken) {
-        await using var transaction = await _connection.BeginTransactionAsync(cancellationToken);
-        await using (var command = new NpgsqlCommand(sql, _connection, transaction)
-                         { CommandTimeout = _commandTimeoutSeconds }) {
+    public async Task ExecuteSqlAsync(string sql, DbTransaction? transaction, CancellationToken cancellationToken) {
+        if (transaction is not null) {
+            await using var command = new NpgsqlCommand(sql, _connection, (NpgsqlTransaction)transaction)
+                { CommandTimeout = _commandTimeoutSeconds };
             await command.ExecuteNonQueryAsync(cancellationToken);
+            return;
         }
 
-        // The history row commits atomically with the script — the no-repair invariant.
-        await _history.InsertAsync(historyRowFactory(), transaction, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-    }
-
-    public async Task ExecuteWithoutTransactionAsync(string sql, CancellationToken cancellationToken) {
         // Statement by statement: a multi-statement command travels as one simple-query message, which
         // PostgreSQL wraps in a single implicit transaction and which therefore breaks
         // CREATE INDEX CONCURRENTLY, the very statement the no-transaction directive exists for.
@@ -72,8 +69,9 @@ internal sealed class PostgreSqlMigrationSession : IMigrationSession {
         }
     }
 
-    public Task InsertHistoryRowAsync(MigrationHistoryRecord historyRow, CancellationToken cancellationToken) {
-        return _history.InsertAsync(historyRow, null, cancellationToken);
+    public Task InsertHistoryRowAsync(MigrationHistoryRecord historyRow, DbTransaction? transaction,
+        CancellationToken cancellationToken) {
+        return _history.InsertAsync(historyRow, transaction, cancellationToken);
     }
 
     public Task DeleteHistoryRowAsync(int installedRank, CancellationToken cancellationToken) {

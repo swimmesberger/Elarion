@@ -11,6 +11,14 @@ export interface RpcMethods {
     id: string
     number: string
   }
+    errors: {
+      "forbidden": { kind: "forbidden"; data: undefined }
+      "unauthorized": { kind: "unauthorized"; data: undefined }
+      "validation": { kind: "validation"; data: {
+        errors: string[]
+        fieldErrors?: unknown
+      } }
+    }
   }
   "clients.get": {
     params: {
@@ -22,6 +30,10 @@ export interface RpcMethods {
     name: string
     email: string
   }
+    errors: {
+      "forbidden": { kind: "forbidden"; data: undefined }
+      "unauthorized": { kind: "unauthorized"; data: undefined }
+    }
   }
   "clients.list": {
     params: unknown
@@ -33,6 +45,10 @@ export interface RpcMethods {
       email: string
     }[]
   }
+    errors: {
+      "forbidden": { kind: "forbidden"; data: undefined }
+      "unauthorized": { kind: "unauthorized"; data: undefined }
+    }
   }
   "elarion.session": {
     params: unknown
@@ -49,6 +65,7 @@ export interface RpcMethods {
     variants: unknown
     sections?: unknown
   }
+    errors: {}
   }
   "invoices.clientDunning": {
     params: {
@@ -59,6 +76,10 @@ export interface RpcMethods {
     escalated: boolean
     needsAttention: boolean
   }
+    errors: {
+      "forbidden": { kind: "forbidden"; data: undefined }
+      "unauthorized": { kind: "unauthorized"; data: undefined }
+    }
   }
   "invoices.create": {
     params: {
@@ -72,6 +93,14 @@ export interface RpcMethods {
     number: string
     sendJobId: string
   }
+    errors: {
+      "forbidden": { kind: "forbidden"; data: undefined }
+      "unauthorized": { kind: "unauthorized"; data: undefined }
+      "validation": { kind: "validation"; data: {
+        errors: string[]
+        fieldErrors?: unknown
+      } }
+    }
   }
   "invoices.list": {
     params: unknown
@@ -85,6 +114,10 @@ export interface RpcMethods {
       dueDate: string
     }[]
   }
+    errors: {
+      "forbidden": { kind: "forbidden"; data: undefined }
+      "unauthorized": { kind: "unauthorized"; data: undefined }
+    }
   }
   "invoices.sendStatus": {
     params: {
@@ -94,8 +127,12 @@ export interface RpcMethods {
     status: string
     attempt: number
     maxAttempts: number
-    nextAttemptAt: string | null | undefined
-    lastError: string | null | undefined
+    nextAttemptAt?: string | null | undefined
+    lastError?: string | null | undefined
   }
+    errors: {
+      "forbidden": { kind: "forbidden"; data: undefined }
+      "unauthorized": { kind: "unauthorized"; data: undefined }
+    }
   }
 }

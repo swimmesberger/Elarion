@@ -2,7 +2,7 @@ namespace Elarion.Abstractions.Features;
 
 /// <summary>
 /// Gates a handler behind one or more feature flags. When any declared gate is not satisfied, the handler is
-/// short-circuited before it runs and the call fails with <see cref="AppError.NotFound(string)"/> — a disabled
+/// short-circuited before it runs and the call fails with <see cref="AppError.NotFound"/> — a disabled
 /// feature is indistinguishable from a missing one, hiding the roadmap rather than advertising it (the same
 /// hide-it behavior as Microsoft's MVC <c>[FeatureGate]</c>, but as a transport-neutral handler gate that works
 /// identically under JSON-RPC, MCP, and HTTP).
@@ -23,7 +23,9 @@ namespace Elarion.Abstractions.Features;
 /// </code>
 /// </example>
 /// <para>
-/// The enforcing <c>FeatureGateDecorator&lt;TRequest, TResponse&gt;</c> is attached automatically by the handler
+/// Every name must be a <b>declared</b> flag (<see cref="FeatureFlagAttribute"/> or
+/// <see cref="BackendFeatureFlagAttribute"/>, in this assembly or a referenced one); an undeclared name is a build
+/// error (<c>ELFLAG001</c>). The enforcing <c>FeatureGateDecorator&lt;TRequest, TResponse&gt;</c> is attached automatically by the handler
 /// source generator just inside the authorization gate, so a denied feature never reaches the handler, caching, or
 /// the rest of the pipeline. A handler whose response cannot represent failure (no
 /// <see cref="IResultFailureFactory{TSelf}"/>) is reported at build time.
@@ -32,14 +34,14 @@ namespace Elarion.Abstractions.Features;
 [AttributeUsage(AttributeTargets.Class, Inherited = true, AllowMultiple = true)]
 public sealed class FeatureGateAttribute : Attribute {
     /// <summary>Gates on the given features, requiring all of them (<see cref="FeatureRequirement.All"/>).</summary>
-    /// <param name="features">One or more feature flag names.</param>
+    /// <param name="features">One or more declared feature flag names.</param>
     public FeatureGateAttribute(params string[] features)
         : this(FeatureRequirement.All, features) {
     }
 
     /// <summary>Gates on the given features, combined according to <paramref name="requirement"/>.</summary>
     /// <param name="requirement">Whether all or any of the features must be enabled.</param>
-    /// <param name="features">One or more feature flag names.</param>
+    /// <param name="features">One or more declared feature flag names.</param>
     public FeatureGateAttribute(FeatureRequirement requirement, params string[] features) {
         Requirement = requirement;
         Features = features ?? [];

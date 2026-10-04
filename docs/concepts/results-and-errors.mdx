@@ -28,6 +28,7 @@ ceremony:
 return new Response(project.Id);                       // implicit Success
 return AppError.Validation("Name is required.");       // implicit Failure
 return AppError.Conflict("Invoice number is already reserved.");
+AppError.Conflict("The seat is taken.", code: "seat.taken", data: new SeatTaken(4)); // specific code + payload
 ```
 
 Because it is a struct with `ValueTask`-friendly ergonomics, the success path stays allocation-light.
@@ -41,9 +42,16 @@ particular protocol should report it:
 public sealed record AppError {
     public required ErrorKind Kind { get; init; }
     public required string Message { get; init; }
-    public object? Data { get; init; }
+    public string Code { get; init; }   // always present: a stable, machine-readable identifier
+    public object? Data { get; init; }  // typed payload for that code
 }
 ```
+
+`Message` is prose; clients branch on `Code`. Each kind has a default code (`not_found`, `conflict`, `validation`, ...)
+and any factory takes a specific one: `AppError.Conflict("Seat taken.", code: "seat.taken", data: new SeatTaken(4))`.
+A handler **declares** the failures it can produce with `[ProducesError("seat.taken", ErrorKind.Conflict, typeof(SeatTaken))]`;
+the declaration flows into the JSON-RPC schema and the generated TypeScript client, which types `error.code` and
+`error.data` per method. See the [reference](/docs/reference/result-and-errors#produceserror--the-declared-error-contract).
 
 ### Error kinds
 

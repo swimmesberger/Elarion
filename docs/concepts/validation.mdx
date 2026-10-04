@@ -24,7 +24,10 @@ so what the client pre-validates is by construction what the server enforces.
 ## Tier 1 — declare shape constraints on the request
 
 Annotate the request's properties. Requiredness needs no attribute at all — it comes from nullability
-plus the `required` modifier, which the schemas already export:
+([ADR-0082](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0082-requiredness-comes-from-nullability-in-both-directions.md)):
+a non-nullable property is required, a nullable one is optional, and a request property with a default value is
+optional to send. The `required` modifier is still useful — the compiler enforces it at construction sites — but it
+no longer changes the exported schema:
 
 ```csharp title="src/Billing.Application/Modules/Clients/Handlers/CreateClient.cs"
 using System.ComponentModel.DataAnnotations;
@@ -51,7 +54,8 @@ are enforced (and reported) too. The supported vocabulary is the set every schem
 
 | Attribute | Enforced as | Exported as (JSON Schema) |
 | --- | --- | --- |
-| `required` + non-nullable | member must be present | `required` |
+| non-nullable (no default) | member must be present (the canonical serializer rejects `null` and a missing constructor parameter) | `required` |
+| nullable, or a request member with a default | member may be omitted | optional |
 | `[Range(min, max)]` | numeric bounds | `minimum` / `maximum` (`exclusiveMinimum`/`exclusiveMaximum` for exclusive bounds) |
 | `[MinLength]` / `[MaxLength]` / `[Length]` / `[StringLength]` | string/collection length | `minLength` / `maxLength` (`minItems`/`maxItems` on arrays) |
 | `[RegularExpression]` | pattern match | `pattern` |
@@ -143,7 +147,7 @@ Over HTTP the mapper surfaces them as the standard RFC 7807 `errors` extension (
 }
 ```
 
-Over JSON-RPC the same structure rides in `error.data` (code `-32602`, the spec's "Invalid params"):
+Over JSON-RPC the same structure rides in `error.data.data` under the stable code `validation` (numeric code `-32602`, the spec's "Invalid params"):
 
 ```json
 {
@@ -151,10 +155,13 @@ Over JSON-RPC the same structure rides in `error.data` (code `-32602`, the spec'
     "code": -32602,
     "message": "The Name field is required.",
     "data": {
-      "errors": ["The Name field is required.", "The Street field is required."],
-      "fieldErrors": {
-        "name": ["The Name field is required."],
-        "deliveries[1].street": ["The Street field is required."]
+      "code": "validation",
+      "data": {
+        "errors": ["The Name field is required.", "The Street field is required."],
+        "fieldErrors": {
+          "name": ["The Name field is required."],
+          "deliveries[1].street": ["The Street field is required."]
+        }
       }
     }
   }

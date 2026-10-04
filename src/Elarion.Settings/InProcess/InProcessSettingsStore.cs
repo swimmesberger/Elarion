@@ -15,9 +15,10 @@ public sealed class InProcessSettingsStore(ISettingsChangePublisher publisher, T
     private readonly object _writeLock = new();
 
     /// <inheritdoc />
-    public ValueTask<string?> GetAsync(SettingsScope scope, string key, CancellationToken cancellationToken = default) {
+    public ValueTask<SettingEntry?> GetAsync(SettingsScope scope, string key,
+        CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(key);
-        return ValueTask.FromResult(_entries.TryGetValue((scope, key), out var entry) ? entry.Value : null);
+        return ValueTask.FromResult<SettingEntry?>(_entries.TryGetValue((scope, key), out var entry) ? entry : null);
     }
 
     /// <inheritdoc />
@@ -36,6 +37,7 @@ public sealed class InProcessSettingsStore(ISettingsChangePublisher publisher, T
         SettingsScope scope,
         string key,
         string? value,
+        string? protection,
         int? expectedVersion = null,
         CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(key);
@@ -51,6 +53,7 @@ public sealed class InProcessSettingsStore(ISettingsChangePublisher publisher, T
                 else {
                     var updated = existing with {
                         Value = value,
+                        Protection = protection,
                         Version = existing.Version + 1,
                         UpdatedOnUtc = timeProvider.GetUtcNow()
                     };
@@ -63,7 +66,7 @@ public sealed class InProcessSettingsStore(ISettingsChangePublisher publisher, T
                 result = SettingWriteResult.ConcurrencyConflict;
             }
             else {
-                var created = new SettingEntry(key, value, timeProvider.GetUtcNow(), 1);
+                var created = new SettingEntry(key, value, protection, timeProvider.GetUtcNow(), 1);
                 _entries[entryKey] = created;
                 result = SettingWriteResult.Success(created.Version);
                 changed = true;

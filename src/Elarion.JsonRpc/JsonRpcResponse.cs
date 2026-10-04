@@ -50,7 +50,7 @@ public sealed class JsonRpcResponse {
     /// <summary>Creates an error response from an <see cref="RpcError"/>.</summary>
     public static JsonRpcResponse FromError(string? id, RpcError error) {
         return new JsonRpcResponse
-            { Id = id, Error = new RpcErrorResponse { Code = error.Code, Message = error.Message, Data = error.Data } };
+            { Id = id, Error = RpcErrorResponse.From(error) };
     }
 
     internal static JsonRpcResponse FromError(JsonRpcRequest request, RpcError error) {
@@ -58,14 +58,14 @@ public sealed class JsonRpcResponse {
             Id = request.Id,
             IdKind = request.IdKind,
             IdRaw = request.IdRaw,
-            Error = new RpcErrorResponse { Code = error.Code, Message = error.Message, Data = error.Data }
+            Error = RpcErrorResponse.From(error)
         };
     }
 
     /// <summary>Creates a "method not found" error response (JSON-RPC -32601).</summary>
     public static JsonRpcResponse MethodNotFound(string? id) {
         return new JsonRpcResponse
-            { Id = id, Error = new RpcErrorResponse { Code = -32601, Message = "Method not found" } };
+            { Id = id, Error = RpcErrorResponse.From(RpcError.MethodNotFound()) };
     }
 
     internal static JsonRpcResponse MethodNotFound(JsonRpcRequest request) {
@@ -73,19 +73,19 @@ public sealed class JsonRpcResponse {
             Id = request.Id,
             IdKind = request.IdKind,
             IdRaw = request.IdRaw,
-            Error = new RpcErrorResponse { Code = -32601, Message = "Method not found" }
+            Error = RpcErrorResponse.From(RpcError.MethodNotFound())
         };
     }
 
     /// <summary>Creates a "parse error" response (JSON-RPC -32700, no id available).</summary>
     public static JsonRpcResponse ParseError() {
-        return new JsonRpcResponse { Error = new RpcErrorResponse { Code = -32700, Message = "Parse error" } };
+        return new JsonRpcResponse { Error = RpcErrorResponse.From(RpcError.ParseError()) };
     }
 
     /// <summary>Creates an "invalid request" error response (JSON-RPC -32600).</summary>
     public static JsonRpcResponse InvalidRequest(string? id) {
         return new JsonRpcResponse
-            { Id = id, Error = new RpcErrorResponse { Code = -32600, Message = "Invalid request" } };
+            { Id = id, Error = RpcErrorResponse.From(RpcError.InvalidRequest()) };
     }
 
     internal static JsonRpcResponse InvalidRequest(JsonRpcRequest request) {
@@ -93,7 +93,7 @@ public sealed class JsonRpcResponse {
             Id = request.Id,
             IdKind = request.IdKind,
             IdRaw = request.IdRaw,
-            Error = new RpcErrorResponse { Code = -32600, Message = "Invalid request" }
+            Error = RpcErrorResponse.From(RpcError.InvalidRequest())
         };
     }
 
@@ -118,8 +118,12 @@ public sealed record RpcErrorResponse {
     /// <summary>A short human-readable description of the error.</summary>
     public required string Message { get; init; }
 
-    /// <summary>Optional structured data providing additional context.</summary>
-    public object? Data { get; init; }
+    /// <summary>The stable error code and the optional typed payload.</summary>
+    public required RpcErrorData Data { get; init; }
+
+    internal static RpcErrorResponse From(RpcError error) {
+        return new RpcErrorResponse { Code = error.Code, Message = error.Message, Data = error.Data };
+    }
 }
 
 internal sealed class JsonRpcResponseConverter : JsonConverter<JsonRpcResponse> {

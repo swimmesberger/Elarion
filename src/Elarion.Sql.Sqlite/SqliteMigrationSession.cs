@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Elarion.Migrations;
 using Microsoft.Data.Sqlite;
 
@@ -13,6 +14,8 @@ internal sealed class SqliteMigrationSession(
     SqliteSchemaHistory history,
     int commandTimeoutSeconds,
     SemaphoreSlim? gate) : IMigrationSession {
+    public DbConnection Connection => connection;
+
     public Task EnsureHistoryTableAsync(CancellationToken cancellationToken) {
         return history.EnsureTableAsync(cancellationToken);
     }
@@ -25,33 +28,20 @@ internal sealed class SqliteMigrationSession(
         return history.LoadAsync(cancellationToken);
     }
 
-    public async Task ExecuteInTransactionAsync(string sql, Func<MigrationHistoryRecord> historyRowFactory,
-        CancellationToken cancellationToken) {
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-        await using (var command = connection.CreateCommand()) {
-            command.CommandText = sql;
-            command.CommandTimeout = commandTimeoutSeconds;
-            command.Transaction = transaction;
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        // The history row commits atomically with the script — the no-repair invariant.
-        await history.InsertAsync(historyRowFactory(), transaction, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-    }
-
-    public async Task ExecuteWithoutTransactionAsync(string sql, CancellationToken cancellationToken) {
-        // SQLite has full transactional DDL and no CREATE INDEX CONCURRENTLY, so the no-transaction path
-        // is rarely needed; when a script asks for it, run it in autocommit mode (each statement commits
-        // on its own), matching the "may be half-applied on failure" semantics the directive documents.
+    public async Task ExecuteSqlAsync(string sql, DbTransaction? transaction, CancellationToken cancellationToken) {
+        // Without a transaction (a no-transaction script): SQLite has full transactional DDL and no CREATE INDEX
+        // CONCURRENTLY, so this is rarely needed; run it in autocommit mode (each statement commits on its
+        // own), matching the "may be half-applied on failure" semantics the directive documents.
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         command.CommandTimeout = commandTimeoutSeconds;
+        command.Transaction = (SqliteTransaction?)transaction;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public Task InsertHistoryRowAsync(MigrationHistoryRecord historyRow, CancellationToken cancellationToken) {
-        return history.InsertAsync(historyRow, null, cancellationToken);
+    public Task InsertHistoryRowAsync(MigrationHistoryRecord historyRow, DbTransaction? transaction,
+        CancellationToken cancellationToken) {
+        return history.InsertAsync(historyRow, transaction, cancellationToken);
     }
 
     public Task DeleteHistoryRowAsync(int installedRank, CancellationToken cancellationToken) {

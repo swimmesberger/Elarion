@@ -20,13 +20,13 @@ public sealed class PostgreSqlMigrationRunner : MigrationRunner {
 
     /// <summary>Creates a runner that opens its dedicated connection from a connection string.</summary>
     public PostgreSqlMigrationRunner(string connectionString, MigrationOptions options,
-        long advisoryLockKey = DefaultAdvisoryLockKey, ILogger<PostgreSqlMigrationRunner>? logger = null)
-        : base(new PostgreSqlMigrationDatabase(connectionString, options, advisoryLockKey, logger), options, logger) {
+        long advisoryLockKey = DefaultAdvisoryLockKey, ILogger<PostgreSqlMigrationRunner>? logger = null, IServiceProvider? services = null)
+        : base(new PostgreSqlMigrationDatabase(connectionString, options, advisoryLockKey, logger), options, logger, services) {
     }
 
     /// <summary>Creates a runner that borrows connections from an existing data source (never disposes it).</summary>
     public PostgreSqlMigrationRunner(NpgsqlDataSource dataSource, MigrationOptions options,
-        long advisoryLockKey = DefaultAdvisoryLockKey, ILogger<PostgreSqlMigrationRunner>? logger = null)
-        : base(new PostgreSqlMigrationDatabase(dataSource, options, advisoryLockKey, logger), options, logger) {
+        long advisoryLockKey = DefaultAdvisoryLockKey, ILogger<PostgreSqlMigrationRunner>? logger = null, IServiceProvider? services = null)
+        : base(new PostgreSqlMigrationDatabase(dataSource, options, advisoryLockKey, logger), options, logger, services) {
     }
 }

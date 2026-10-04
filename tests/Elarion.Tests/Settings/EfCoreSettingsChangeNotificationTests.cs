@@ -36,7 +36,7 @@ public sealed class EfCoreSettingsChangeNotificationTests(PostgreSqlSettingsStor
             var context = scope.ServiceProvider.GetRequiredService<SettingsIntegrationDbContext>();
             var store = scope.ServiceProvider.GetRequiredService<ISettingsStore>();
             await using var transaction = await context.Database.BeginTransactionAsync(Ct);
-            await store.SetAsync(SettingsScope.Global, key, "v", cancellationToken: Ct);
+            await store.SetAsync(SettingsScope.Global, key, "v", null, cancellationToken: Ct);
 
             // Still open: the notification is buffered, not yet announced.
             token.HasChanged.Should().BeFalse();
@@ -58,7 +58,7 @@ public sealed class EfCoreSettingsChangeNotificationTests(PostgreSqlSettingsStor
             var context = scope.ServiceProvider.GetRequiredService<SettingsIntegrationDbContext>();
             var store = scope.ServiceProvider.GetRequiredService<ISettingsStore>();
             await using var transaction = await context.Database.BeginTransactionAsync(Ct);
-            await store.SetAsync(SettingsScope.Global, key, "v", cancellationToken: Ct);
+            await store.SetAsync(SettingsScope.Global, key, "v", null, cancellationToken: Ct);
             await transaction.RollbackAsync(Ct);
         }
 
@@ -75,7 +75,7 @@ public sealed class EfCoreSettingsChangeNotificationTests(PostgreSqlSettingsStor
 
         await using (var scope = provider.CreateAsyncScope()) {
             var store = scope.ServiceProvider.GetRequiredService<ISettingsStore>();
-            await store.SetAsync(SettingsScope.Global, key, "v", cancellationToken: Ct);
+            await store.SetAsync(SettingsScope.Global, key, "v", null, cancellationToken: Ct);
         }
 
         token.HasChanged.Should().BeTrue();
@@ -97,12 +97,12 @@ public sealed class EfCoreSettingsChangeNotificationTests(PostgreSqlSettingsStor
             await using var transaction = await context.Database.BeginTransactionAsync(Ct);
 
             // Written before the savepoint: this change must survive the partial rollback and be announced.
-            await store.SetAsync(SettingsScope.Global, beforeKey, "v", cancellationToken: Ct);
+            await store.SetAsync(SettingsScope.Global, beforeKey, "v", null, cancellationToken: Ct);
             await transaction.CreateSavepointAsync("sp1", Ct);
 
             // Written after the savepoint: undone by the rollback-to-savepoint and must not be announced even though
             // the outer transaction still commits (the idempotency-decorator shape).
-            await store.SetAsync(SettingsScope.Global, afterKey, "v", cancellationToken: Ct);
+            await store.SetAsync(SettingsScope.Global, afterKey, "v", null, cancellationToken: Ct);
             await transaction.RollbackToSavepointAsync("sp1", Ct);
             await transaction.CommitAsync(Ct);
         }

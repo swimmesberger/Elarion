@@ -188,7 +188,7 @@ public sealed class ValidationEndToEndTests {
 
         return trustedPlatformAssemblies!
             .Split(Path.PathSeparator)
-            .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
+            .Select(path => (MetadataReference)SharedMetadataReferences.FromFile(path))
             .ToArray();
     }
 }

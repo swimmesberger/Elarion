@@ -19,7 +19,7 @@ namespace Elarion.Abstractions.Serialization;
 /// The framework's own such types live here (<see cref="ValidationErrorData"/>, plus the idempotency
 /// <see cref="Elarion.Abstractions.Idempotency.StoredResult"/> replay envelope and the <see cref="AppError"/> it
 /// carries — none of which any app/module context registers, but which the idempotency store must serialize on an
-/// AOT-strict host); app-provided payloads (via <see cref="AppError.Validation(string, object?)"/> and friends)
+/// AOT-strict host); app-provided payloads (via <see cref="AppError.Validation(string, string, object)"/> and friends)
 /// stay in the app's own context. <see cref="ElarionFile"/> is here for the same reason on the response side: a
 /// transport serializes a handler's success value by its runtime type, and a handler whose response <b>is</b>
 /// <see cref="ElarionFile"/> gives the STJ generator no app DTO to reach it from (its metadata delegates to

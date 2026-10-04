@@ -41,7 +41,7 @@ function vocabularySection(capabilities: RpcSchemaCapabilities | undefined): str
   lines.push('')
 
   if (flagNames.length > 0) {
-    lines.push('/** Flag/variant names the backend exposes to the client (the union of every [ClientFeatures] list). */')
+    lines.push('/** Flag/variant names the backend exposes to the client (the union of every client-exposed flag declaration). */')
     lines.push('export const Flags = {')
     for (const name of flagNames) lines.push(`  ${q(name)}: ${q(name)},`)
     lines.push('} as const')

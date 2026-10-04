@@ -8,7 +8,98 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **`Elarion.Settings.DataProtection`: secret settings protected at rest.** Definitions marked `Secret = true` are
+  encrypted through `ISettingValueProtector` (the scheme is stored as entry metadata, the payload is bound to
+  scope, owner and key), never returned by `DescribeAsync` and never projected into `IConfiguration`. A secret
+  definition without a registered protector fails startup (no unprotected fallback).
+  `AddElarionSettingsDataProtection` registers the Data Protection implementation and an optional startup
+  re-protection; `ISettingReprotector` converges legacy plaintext and rotated keys idempotently.
+
 ### Changed
+- **One migration plan: SQL scripts, C# code steps and EF Core migrations share a version sequence, history and
+  lock (ADR-0081, breaking).** `Elarion.Migrations` now merges the steps of every *source* — embedded
+  `V…__`/`R__` scripts, `ICodeMigration` classes, and EF Core migrations (new
+  `Elarion.Migrations.EntityFrameworkCore`) — into one version-ordered sequence under one exclusive lock, so an
+  expand migration, a C# backfill and a contract migration run in that order, once per database. Code steps
+  run in the plan's transaction on the plan's connection by default (failure rolls back, records nothing, stops
+  the plan, retries next start; `UseTransaction => false` is the explicit opt-out for long idempotent batches;
+  `IsAlreadySatisfiedAsync` and `BaselineAsync` cover fresh and adopted databases). The history table is now
+  step-shaped — `installed_rank, kind, version, description, step_name, checksum, outcome, …` — and a table
+  written by the script-only runner is upgraded in place by the first run (rows keep their meaning, nothing
+  re-runs). Migration: rename `MigrationScriptInfo` to `MigrationStepInfo` (`ScriptName` → `Name`;
+  `MigrateAsync` returns `MigrationStepResult` with `.Step`/`.Outcome`/`.Duration`);
+  `MigrationValidationError`/`MigrationExecutionException`/`MigrationFailedStateException` `.ScriptName` →
+  `.StepName`; SQL that read `script_name`/`state` now reads `step_name`/`outcome`; a custom provider
+  implements the narrowed `IMigrationSession` (`Connection`, history operations, `ExecuteSqlAsync(sql,
+  transaction?)` — the runner owns the transaction). "At least one script source" is now "at least one step
+  source", checked when the runner is built, and the `AddElarionMigrations` callback is optional. The migrations
+  page moved from `capabilities/sql-migrations` to `capabilities/migrations`. **EF hosts:** replace
+  `Database.MigrateAsync()` with `AddElarionPostgreSql(cs)` + `AddElarionMigrations(o =>
+  o.AddEntityFrameworkMigrations<AppDbContext>())`; a database EF already migrated needs no baseline (its EF
+  steps are recorded as `satisfied`). Operations EF marks `suppressTransaction` move to a
+  `-- elarion: no-transaction` SQL script.
+- **BREAKING: settings are declared definitions resolved through one layered resolver (ADR-0078).** Settings are
+  declared once with `[Setting("key")]` on a `static partial` `SettingDefinition<T>` property of a
+  `[SettingDefinitions]` class (key, type, default, scopes, `Secret`, `Pinnable`, description); a generator
+  implements them and `ElarionSettingDefinitions.All` aggregates them across assemblies, seeded with
+  `AddElarionSettings(o => o.AddDefinitions(ElarionSettingDefinitions.All))`. `ISettingsManager` is now
+  definition-based: `GetAsync(definition)`, `SetAsync(definition, value)` returning `Result<SettingWrite>`,
+  `ResetAsync`, `DescribeAsync`, `Watch(definition)`; the string-key `GetAsync(key, fallback)`, `GetStringAsync`,
+  `SetStringAsync`, `RemoveAsync` and `SettingWriteResult` on the manager are gone. Reads layer default < store <
+  configuration (configuration only for `Pinnable` global definitions; an empty value does not pin unless
+  `EmptyConfigurationValuesPin`), and a write to a pinned definition is refused with an `AppError` coded
+  `settings.pinned` / `settings.concurrency_conflict` (`SettingErrorCodes`) carrying a `SettingWriteFailure`. Undeclared or unregistered definitions and disallowed scopes throw.
+  Migration: declare each key you used, replace string calls with the definition, handle the `Result`.
+- **BREAKING: `ISettingsStore` carries protection metadata.** `GetAsync` returns `SettingEntry?`, `SetAsync` takes
+  a `protection` argument, and `SettingEntry` gains `Protection`. The EF `Setting` row gains a nullable
+  `protection` column (max 64): add it with an EF migration (`ALTER TABLE elarion_settings ADD COLUMN protection
+  varchar(64) NULL`).
+- **BREAKING: the settings `IConfiguration` provider is a projection of the resolver.**
+  `AddElarionSettingsConfiguration` projects the effective global values (object values flattened to
+  `key:property`), never secrets, and is skipped by the resolver so it cannot pin. `SettingsConfigurationProvider.Apply`
+  takes a key/value dictionary and reloads only on change; `SettingsConfigurationRefresher` also takes
+  `IConfiguration`. Register it after your other configuration sources.
+- **Every feature flag is declared once and has exactly one owner (ADR-0079).** A flag is declared with
+  `[FeatureFlag]` on an `IFeatureFlagResolver` class (code-defined) or `[BackendFeatureFlag]` (evaluated by the
+  host's backend), with a description and `ExposeToClient`. Source generators build a catalog into the manifest,
+  register each module's flags with the module, emit an `ElarionFeatureFlags` registry (`[assembly:
+  GenerateFeatureFlags]`, in `[UseElarion]`) of typed `FeatureFlagKey`s, and report a flag used by
+  `[FeatureGate]`/`[FeatureVariant]` but undeclared (`ELFLAG001`), declared twice incl. across assemblies
+  (`ELFLAG002`), without an owner (`ELFLAG003`), outside a module (`ELFLAG004`), or blank (`ELFLAG005`).
+  Evaluation takes an explicit `FeatureEvaluationContext` (user, roles, tenant, attributes, services); gates, the
+  session snapshot and application code share one `IFeatureFlagService`/`IFeatureFlagCatalog`. An unknown name is
+  disabled and logged once. **Breaking:** `[ClientFeatures]` and `ClientModuleManifest.Features` are removed
+  (use `ExposeToClient = true` on the declaration); `IFeatureVariantService` is removed (`IFeatureFlagService`
+  now has `GetVariantAsync`, context overloads and `CreateContext`); `OpenFeatureFeatureFlagService` and
+  `OpenFeatureFeatureVariantService` are replaced by `OpenFeatureFlagEvaluator` (`IBackendFeatureFlagEvaluator`),
+  and `ElarionEvaluationContext.Create` takes a `FeatureEvaluationContext`. Migration: declare every flag you
+  gate on, expose, or select variants by; a host with backend flags still registers
+  `AddElarionFeatureManagement`/`AddElarionOpenFeature` and now fails at startup without one.
+- **BREAKING: errors are a declared contract with a stable code (ADR-0080).** `AppError.Code` is always present — each
+  `ErrorKind` has a default code (`not_found`, `conflict`, `validation`, `business_rule`, `forbidden`,
+  `unauthorized`, `internal`) and any factory takes a specific one; every factory (all kinds) now takes
+  `(message, string? code = null, object? data = null)` and `AppError.Create(kind, ...)` is the general factory.
+  Handlers declare their failures with `[ProducesError]`; the generator publishes them (plus the implied
+  validation/authorization/feature-gate/idempotency errors) in the manifest and `HandlerDispatcher.Map(..., errors:)`,
+  the schema export lists them per method under `errors`, and development logs an undeclared code once
+  (`IErrorContractMonitor`, registered by `AddElarion`). One wire shape everywhere: JSON-RPC
+  `error.data = { code, data? }` on every error (protocol errors included; `RpcError.Data` and `RpcErrorResponse.Data`
+  are now the required `RpcErrorData`), HTTP ProblemDetails `code` + `data`, gRPC `elarion-error-code` trailer, MCP
+  structured content `{ code, data? }`. The generated TypeScript `RpcError` is `RpcError<TCode, TData>`: `code` is now
+  the stable string, the numeric JSON-RPC code moved to `rpcCode`, `data` is the typed payload; new `RpcMethodError<M>`
+  unions, `isRpcMethodError`, and generated `rpcErrorDataSchemas`. The manifest schema version is now `2`: rebuild
+  referenced module assemblies. *Migration:* change `AppError.X("m", data)` calls to `AppError.X("m", data: data)`,
+  read `error.code`/`error.rpcCode` in TypeScript, regenerate the client, and add `[ProducesError]` to handlers that
+  return specific codes.
+- **BREAKING: requiredness comes from nullability, in both directions (ADR-0082).** A non-nullable property is
+  `required` in `rpc-schema.json` (and the MCP input schemas); a nullable one is optional; a request property with a
+  constructor default or a non-default initializer is optional to send. C# `required`/`[JsonRequired]` no longer change
+  the schema, so `required string? X` is now optional. The canonical serializer enforces the contract
+  (`RespectNullableAnnotations`, `RespectRequiredConstructorParameters`), and result/event types must not use
+  `[JsonIgnore(Condition = WhenWritingDefault/WhenWritingNull)]` on non-nullable members: new error `ELRPC004`, and the
+  exporter fails for event payloads. *Migration:* make optional response members nullable, give optional request members
+  a constructor default, and regenerate `rpc-schema.json` and the TypeScript client.
 - **The EF Web Push subscription store joins the caller's unit of work.** `EfCorePushSubscriptionStore` is now
   scoped over the caller's `TDbContext` instead of a singleton that opened its own scope and connection per
   operation. A subscribe, unsubscribe, or dead-subscription cleanup inside a command now commits or rolls back
@@ -35,6 +126,13 @@ minor releases may include breaking changes.
   the latest, each replacing the last as it is shown.
 
 ### Added
+- **`ICodeMigration` and `Elarion.Migrations.EntityFrameworkCore` (ADR-0081).** `ICodeMigration` is a C# step
+  with a `Version` in the same space as SQL scripts, registered at compile time through
+  `[GenerateContractSetRegistration(typeof(ICodeMigration))]` or `AddCodeMigration<T>()`, resolving its services
+  from a fresh scope per step (`MigrationStepContext`). `IMigrationStepSource` is the extension point for further
+  step kinds; `AddEntityFrameworkMigrations<TContext>()` contributes every EF migration of a context as one step
+  each, executing the migration's own generated SQL in the plan's transaction. See the new
+  [migrations](docs/capabilities/migrations.mdx) page.
 - **SQL array parameters (ADR-0077).** `SqlArray.Of(collection)` binds a collection as **one** array-valued
   parameter instead of the `IN`-list expansion a collection hole gets: `WHERE id = ANY({SqlArray.Of(ids)})`
   renders `= ANY(@p0)` with a typed `T[]` value — one parameter and one cached plan whatever the length, and an
@@ -612,7 +710,7 @@ minor releases may include breaking changes.
   dialects are rejected by design. `AddElarionPostgreSqlMigrations(connectionString | dataSource,
   o => o.AddScripts(assembly, prefix))` registers the runner plus a hosted service that migrates before
   the host reports ready and fails startup on error (`ApplyOnStartup = false` opts out). Documented in
-  the new [SQL migrations](docs/capabilities/sql-migrations.mdx) capability page.
+  the new [SQL migrations](docs/capabilities/migrations.mdx) capability page.
 - **Data-rate shaping helpers (ADR-0055).** `Elarion` core gains the `Elarion.Buffering` namespace with
   the two primitives every telemetry gateway hand-rolls between "device produces samples" and
   "database/UI consume them" — BCL-only, no DI registration, `TimeProvider`-driven for deterministic

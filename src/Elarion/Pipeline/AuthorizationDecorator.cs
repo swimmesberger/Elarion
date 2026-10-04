@@ -15,7 +15,7 @@ namespace Elarion.Pipeline;
 /// <see cref="HandlerMetadata"/> — never <c>inner.GetType()</c> — so the guard is correct at any position
 /// in the decorator chain (the generator places it as the outermost functional gate, so denied requests
 /// never touch caching, the pipeline, or the handler). A failed requirement short-circuits with
-/// <see cref="AppError.Unauthorized(string)"/> (unauthenticated) or <see cref="AppError.Forbidden(string)"/>.
+/// <see cref="AppError.Unauthorized(string, string, object)"/> (unauthenticated) or <see cref="AppError.Forbidden(string, string, object)"/>.
 /// </summary>
 /// <remarks>
 /// <paramref name="requireAuthenticatedByDefault"/> is supplied by the source generator when a
