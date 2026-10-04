@@ -146,7 +146,7 @@ public sealed class ElarionOutboxGeneratorTests {
         trustedPlatformAssemblies.Should().NotBeNull();
         return trustedPlatformAssemblies!
             .Split(Path.PathSeparator)
-            .Select(path => MetadataReference.CreateFromFile(path))
+            .Select(path => SharedMetadataReferences.FromFile(path))
             .ToArray();
     }
 }

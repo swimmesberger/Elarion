@@ -146,7 +146,7 @@ public sealed class ErrorContractGeneratorTests {
             "ErrorContracts",
             [CSharpSyntaxTree.ParseText(source, parseOptions)],
             ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-                .Split(Path.PathSeparator).Select(p => (MetadataReference)MetadataReference.CreateFromFile(p)),
+                .Split(Path.PathSeparator).Select(p => (MetadataReference)SharedMetadataReferences.FromFile(p)),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(

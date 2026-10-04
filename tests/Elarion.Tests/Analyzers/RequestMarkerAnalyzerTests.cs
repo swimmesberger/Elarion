@@ -279,7 +279,7 @@ public sealed class RequestMarkerAnalyzerTests {
 
         return trustedPlatformAssemblies!
             .Split(Path.PathSeparator)
-            .Select(path => MetadataReference.CreateFromFile(path))
+            .Select(path => SharedMetadataReferences.FromFile(path))
             .ToArray();
     }
 }

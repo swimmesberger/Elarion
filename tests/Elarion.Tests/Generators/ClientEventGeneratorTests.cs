@@ -289,7 +289,7 @@ public sealed class ClientEventGeneratorTests {
             .Split(Path.PathSeparator)
             .Where(path => !excludeClientEventsPackage ||
                            !Path.GetFileName(path).StartsWith("Elarion.ClientEvents", StringComparison.Ordinal))
-            .Select(path => MetadataReference.CreateFromFile(path))
+            .Select(path => SharedMetadataReferences.FromFile(path))
             .ToArray();
     }
 }

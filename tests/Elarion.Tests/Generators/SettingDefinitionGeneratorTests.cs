@@ -197,7 +197,7 @@ public sealed class SettingDefinitionGeneratorTests {
     private static IReadOnlyList<MetadataReference> References() {
         var tpa = (string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES");
         tpa.Should().NotBeNull();
-        return tpa!.Split(Path.PathSeparator).Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))
+        return tpa!.Split(Path.PathSeparator).Select(p => (MetadataReference)SharedMetadataReferences.FromFile(p))
             .ToArray();
     }
 }
