@@ -73,6 +73,42 @@ public sealed class MigrationPlanEntityFrameworkTests(PostgreSqlMigrationsFixtur
             "20260901000100:Satisfied", "20260901000200:Applied", "20260901000300:Applied");
     }
 
+    [Fact]
+    public async Task Migrate_ExecutesUnterminatedRawSqlOperationsExactlyAsMigrateAsyncDoes() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var planned = await fixture.CreateDatabaseAsync(TestToken);
+        var viaEf = await fixture.CreateDatabaseAsync(TestToken);
+
+        await using (var provider = BuildRawSqlProvider(planned)) {
+            var applied = await provider.GetRequiredService<IMigrationRunner>().MigrateAsync(TestToken);
+            applied.Select(a => a.Outcome).Should().OnlyContain(o => o == MigrationOutcome.Applied);
+        }
+
+        await using (var provider = BuildRawSqlProvider(viaEf)) {
+            await using var scope = provider.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<RawSqlDbContext>().Database.MigrateAsync(TestToken);
+        }
+
+        foreach (var connectionString in new[] { planned, viaEf }) {
+            (await StringsAsync(connectionString, "SELECT id::text || name FROM raw_items ORDER BY id"))
+                .Should().Equal("1one", "2two");
+            (await ScalarAsync(connectionString, "SELECT count(*) FROM pg_indexes WHERE indexname = 'ix_raw_items_name'"))
+                .Should().Be(1L);
+        }
+    }
+
+    private static ServiceProvider BuildRawSqlProvider(string connectionString) {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<RawSqlDbContext>(o => o.UseNpgsql(connectionString));
+        services.AddElarionPostgreSql(connectionString);
+        services.AddElarionMigrations(o => {
+            o.ApplyOnStartup = false;
+            o.AddEntityFrameworkMigrations<RawSqlDbContext>();
+        });
+        return services.BuildServiceProvider();
+    }
+
     private static ServiceProvider BuildProvider(string connectionString) {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -142,6 +178,28 @@ public sealed class MigrationPlanEntityFrameworkTests(PostgreSqlMigrationsFixtur
 
         public Task ExecuteAsync(MigrationStepContext context, CancellationToken cancellationToken) {
             return context.ExecuteSqlAsync("UPDATE widgets SET slug = lower(name)", cancellationToken);
+        }
+    }
+
+    public sealed class RawSqlDbContext(DbContextOptions<RawSqlDbContext> options) : DbContext(options);
+
+    /// <summary>Raw SQL operations without a trailing semicolon: a concatenated script would run them together.</summary>
+    [DbContext(typeof(RawSqlDbContext))]
+    [Migration("20260902000100_RawStatements")]
+    public sealed class RawStatements : Migration {
+        protected override void Up(MigrationBuilder migrationBuilder) {
+            migrationBuilder.Sql("CREATE TABLE raw_items (id integer PRIMARY KEY, name text NOT NULL)");
+            migrationBuilder.Sql("INSERT INTO raw_items (id, name) VALUES (1, 'one'), (2, 'two')");
+        }
+    }
+
+    /// <summary>Suppressed transaction: the step must opt out of the plan's transaction.</summary>
+    [DbContext(typeof(RawSqlDbContext))]
+    [Migration("20260902000200_ConcurrentIndex")]
+    public sealed class ConcurrentIndex : Migration {
+        protected override void Up(MigrationBuilder migrationBuilder) {
+            migrationBuilder.Sql("CREATE INDEX CONCURRENTLY ix_raw_items_name ON raw_items (name)",
+                suppressTransaction: true);
         }
     }
 }

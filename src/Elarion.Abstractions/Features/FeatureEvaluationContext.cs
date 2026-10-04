@@ -19,11 +19,21 @@ namespace Elarion.Abstractions.Features;
 /// <c>context with { UserId = "u-42", Roles = ["admin"] }</c>.
 /// </remarks>
 public sealed record FeatureEvaluationContext {
+    private IServiceProvider _services = NoServices.Instance;
+
     /// <summary>
     /// The services a resolver may use (a <c>DbContext</c>, a clock, a configuration reader). For the ambient
-    /// context this is the current request's scope.
+    /// context (<see cref="FromScope"/>) this is the current request's scope. Optional: a context built for a
+    /// resolver or backend that needs no services (a test, a pure targeting rule) may leave it unset, and then
+    /// carries an empty provider — <c>GetService</c> returns <see langword="null"/> and <c>GetRequiredService</c>
+    /// throws an <see cref="InvalidOperationException"/> that says the context carries no services. It can never be
+    /// <see langword="null"/>.
     /// </summary>
-    public required IServiceProvider Services { get; init; }
+    /// <exception cref="ArgumentNullException">The value is <see langword="null"/>.</exception>
+    public IServiceProvider Services {
+        get => _services;
+        init => _services = value ?? throw new ArgumentNullException(nameof(value));
+    }
 
     /// <summary>The subject's user id, or <see langword="null"/> for an anonymous caller.</summary>
     public string? UserId { get; init; }
@@ -67,5 +77,19 @@ public sealed record FeatureEvaluationContext {
             Roles = authenticated ? user!.Roles : [],
             TenantId = tenant is { IsSystemScope: false } ? tenant.TenantId : null
         };
+    }
+
+    private sealed class NoServices : IServiceProvider, ISupportRequiredService {
+        public static readonly NoServices Instance = new();
+
+        public object? GetService(Type serviceType) {
+            return serviceType == typeof(IServiceProvider) ? this : null;
+        }
+
+        public object GetRequiredService(Type serviceType) {
+            return GetService(serviceType) ?? throw new InvalidOperationException(
+                $"This {nameof(FeatureEvaluationContext)} carries no services, so '{serviceType}' cannot be resolved. "
+                + $"Set {nameof(Services)} (or build the context with {nameof(FromScope)}) when the resolver needs services.");
+        }
     }
 }

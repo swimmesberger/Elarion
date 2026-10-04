@@ -1,4 +1,5 @@
 using System.Buffers.Text;
+using System.Text.Json.Serialization;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Identity;
 
@@ -17,7 +18,33 @@ public sealed record PushSubscriptionRequest {
 
     /// <summary>When the browser will expire the subscription (Unix milliseconds), if it says. Informational.</summary>
     public long? ExpirationTime { get; init; }
+
+    /// <summary>
+    /// The subscribing browser's <c>User-Agent</c>, set by a transport that has one (<c>MapElarionWebPush</c> copies
+    /// the request header). Not part of the wire contract: it is never read from or written to the JSON body.
+    /// </summary>
+    [JsonIgnore]
+    public string? UserAgent { get; init; }
 }
+
+/// <summary>
+/// The unsubscribe request: <c>{"endpoint":"…"}</c> on the wire. The operation behind
+/// <c>POST {prefix}/unsubscribe</c> — an application handler taking this type serves it.
+/// </summary>
+public sealed record WebPushUnsubscribeRequest {
+    /// <summary>The subscription endpoint to delete.</summary>
+    public required string Endpoint { get; init; }
+}
+
+/// <summary>
+/// The request of the public-key operation behind <c>GET {prefix}/public-key</c>; it carries nothing, and exists
+/// so the operation has a handler request type like the other two.
+/// </summary>
+public sealed record WebPushPublicKeyRequest;
+
+/// <summary>The response of the public-key operation: <c>{"publicKey":"…"}</c> on the wire.</summary>
+/// <param name="PublicKey">The VAPID public key (base64url), the browser's <c>applicationServerKey</c>.</param>
+public sealed record WebPushPublicKeyResponse(string PublicKey);
 
 /// <summary>The <c>keys</c> member of a serialized browser subscription.</summary>
 public sealed record PushSubscriptionKeys {
@@ -29,11 +56,12 @@ public sealed record PushSubscriptionKeys {
 }
 
 /// <summary>
-/// The server half of subscribe/unsubscribe for the current user, shared by <c>MapElarionWebPush</c> and
-/// application <c>[Handler]</c>s: it validates what the browser sent, binds the subscription to
-/// <see cref="ICurrentUser"/>, and returns a normal <see cref="Result"/>. Authorization of the calling
-/// endpoint or handler stays the host's (its usual policy or <c>[Require*]</c> attributes); this service only
-/// insists the caller is authenticated, so a subscription always has an owner.
+/// The server half of subscribe/unsubscribe for the current user, called by the application's
+/// <c>[Handler]</c>s — the operations <c>MapElarionWebPush</c> dispatches to, so the handler pipeline (global
+/// authorization rules, tenant and realm rules, audit, rate limiting) applies to every call. It validates what the
+/// browser sent, binds the subscription to <see cref="ICurrentUser"/>, and returns a normal <see cref="Result"/>.
+/// Who may subscribe is the handler's decision (its <c>[Require*]</c> attributes and the pipeline); this service
+/// only insists the caller is authenticated, so a subscription always has an owner.
 /// </summary>
 /// <example>
 /// <code>
@@ -72,7 +100,7 @@ public sealed class WebPushSubscriptionService(
     /// subscription and refresh its last-seen time.
     /// </summary>
     /// <param name="request">The serialized browser subscription.</param>
-    /// <param name="userAgent">The caller's <c>User-Agent</c>, if the transport has one.</param>
+    /// <param name="userAgent">The caller's <c>User-Agent</c>; defaults to <see cref="PushSubscriptionRequest.UserAgent"/>.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <returns>Success, <see cref="ErrorKind.Unauthorized"/> without a user, or <see cref="ErrorKind.Validation"/>.</returns>
     public async ValueTask<Result> SubscribeAsync(PushSubscriptionRequest request, string? userAgent = null,
@@ -81,6 +109,7 @@ public sealed class WebPushSubscriptionService(
         if (!TryGetUserId(out var userId)) return AppError.Unauthorized("Subscribing to push notifications requires a signed-in user.");
         if (Validate(request) is { } error) return error;
 
+        userAgent ??= request.UserAgent;
         var now = timeProvider.GetUtcNow();
         await store.UpsertAsync(new PushSubscription {
             Endpoint = request.Endpoint,

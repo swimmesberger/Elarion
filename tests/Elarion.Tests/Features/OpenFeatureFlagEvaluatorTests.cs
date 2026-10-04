@@ -19,10 +19,9 @@ namespace Elarion.Tests.Features;
 // One class, because OpenFeature's provider registry (Api.Instance) is process-global: tests that swap the
 // provider must not run in parallel with each other.
 public sealed class OpenFeatureFlagEvaluatorTests {
-    private static readonly IServiceProvider EmptyServices = new ServiceCollection().BuildServiceProvider();
 
     private static FeatureEvaluationContext ContextFor(string userId) {
-        return new FeatureEvaluationContext { Services = EmptyServices, UserId = userId };
+        return new FeatureEvaluationContext { UserId = userId };
     }
 
     private static Dictionary<string, Flag> Flags() {

@@ -38,6 +38,11 @@ event payloads and error payloads.
   attributes the generator cannot see, and for serializer options using `DefaultIgnoreCondition = WhenWritingDefault`.
   Making the member nullable is the way to declare it optional.
 
+The canonical resolver chain also wraps every resolver with a type-info modifier (`WireRequiredness`) that clears
+System.Text.Json's `IsRequired` for every nullable member — a constructor parameter without a default, a C#
+`required` member, a `[JsonRequired]` member — so an omitted nullable member binds `null`, exactly as the schema
+exports it. Without it the serializer rejected a request the schema marks optional (`-32602`).
+
 There is no exporter flag or CLI switch to restore the old behaviour.
 
 ## Consequences

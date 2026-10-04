@@ -26,4 +26,13 @@ public sealed record HandlerRoute(
     // The failures the operation declares (ProducesError attributes plus the framework behaviours attached to the
     // handler), exported to the schema and verified at runtime by IErrorContractMonitor. Null on a hand-wired
     // route that declares no contract: its failures are neither exported nor checked.
-    IReadOnlyList<ErrorContract>? Errors = null);
+    IReadOnlyList<ErrorContract>? Errors = null) {
+    /// <summary>
+    /// Evaluates the handler's request-independent admission check (see <see cref="IHandlerGate"/>). A transport
+    /// calls it when it could not bind the wire payload into <see cref="RequestType"/>, so the caller gets the
+    /// authentication or authorization error rather than a payload error. <see langword="null"/> means admitted.
+    /// </summary>
+    public ValueTask<AppError?> EvaluateGateAsync(IServiceProvider scope, CancellationToken ct) {
+        return HandlerGates.EvaluateAsync(scope, RequestType, ct);
+    }
+}

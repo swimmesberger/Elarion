@@ -102,17 +102,20 @@ of every kind at or below V as applied.
 ### EF Core migrations as steps
 
 `Elarion.Migrations.EntityFrameworkCore` is a new sibling package (below). Its source enumerates
-`IMigrationsAssembly.Migrations` for the context and emits one step per migration. A step executes
-`IMigrator.GenerateScript(previousId, id, NoTransactions)` — exactly what `dotnet ef migrations script` prints for
-that one migration — through `MigrationStepContext.ExecuteSqlAsync`, so the migration and the plan's history row
-commit atomically; the plan owns the transaction, hence `NoTransactions`. EF's `__EFMigrationsHistory` row is
-part of that script, so `dotnet ef` tooling and EF bundles stay truthful; the plan's history is the authority
-for ordering and exactly-once. **Adoption needs no baseline:** an EF step whose id is already in
-`__EFMigrationsHistory` reports `IsAlreadySatisfiedAsync` and is recorded as `satisfied`. An EF host drops
-`Database.MigrateAsync()` and runs the one runner. Limit, stated in the docs: operations EF flags
-`suppressTransaction` (`CREATE INDEX CONCURRENTLY`) cannot run in the plan's transaction and belong in a
-`-- elarion: no-transaction` SQL script; the generated script must be a plain statement batch (PostgreSQL,
-SQLite).
+`IMigrationsAssembly.Migrations` for the context and emits one step per migration. A step builds the migration's
+up operations, generates them with `IMigrationsSqlGenerator` and executes **each generated command as its own
+statement** through `MigrationStepContext.ExecuteSqlAsync` — what `Database.MigrateAsync()` executes — followed by
+EF's `__EFMigrationsHistory` insert, so the migration and the plan's history row commit atomically and `dotnet ef`
+tooling and EF bundles stay truthful; the plan's history is the authority for ordering and exactly-once. (An earlier
+revision executed `IMigrator.GenerateScript(..., NoTransactions)` as one batch; that script does not terminate
+statements, so a raw `migrationBuilder.Sql("...")` without a trailing `;` ran into the next operation and failed
+although the same migration succeeds under `MigrateAsync()`.) **Adoption needs no baseline:** an EF step whose id is
+already in `__EFMigrationsHistory` reports `IsAlreadySatisfiedAsync` and is recorded as `satisfied`. An EF host drops
+`Database.MigrateAsync()` and runs the one runner. A migration with a raw SQL operation flagged
+`suppressTransaction` (`CREATE INDEX CONCURRENTLY`) makes its step non-transactional (the plan's rule for such work;
+the history row is then recorded after the commands); any other command that must run outside a transaction fails the
+step with a message pointing at that option or a `-- elarion: no-transaction` SQL script. Targets relational
+providers whose commands are plain statements (PostgreSQL, SQLite).
 
 ### History
 

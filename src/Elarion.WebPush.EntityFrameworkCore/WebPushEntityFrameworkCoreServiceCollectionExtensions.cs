@@ -15,10 +15,19 @@ public static class WebPushEntityFrameworkCoreServiceCollectionExtensions {
     /// <c>modelBuilder.UseElarionWebPush()</c>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The subscription store is scoped and works on the caller's <typeparamref name="TDbContext"/>, so it joins
     /// an active unit of work. The VAPID key pair is resolved once when the host starts, outside any caller's
     /// transaction (it has to be stored for good before it is used); a start-up failure — the tables not
     /// created yet — is logged and the pair is resolved on first use instead.
+    /// </para>
+    /// <para>
+    /// The VAPID private key is protected at rest through the registered <c>ISettingValueProtector</c> (for
+    /// example <c>AddElarionSettingsDataProtection()</c>); resolving the key store without one fails closed. Keys
+    /// configured through <see cref="WebPushOptions.PublicKey"/>/<see cref="WebPushOptions.PrivateKey"/> never touch the
+    /// store. An application with its own <see cref="IVapidKeyStore"/> (a vault, a KMS) registers it after this
+    /// call and needs no protector.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Configures the options; <see cref="WebPushOptions.Subject"/> is required.</param>

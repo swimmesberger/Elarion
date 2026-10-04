@@ -128,6 +128,15 @@ native `TypedResults.ServerSentEvents` framing and does not start the handler un
 JSON-RPC and MCP are deliberately single-response;
 client and duplex streams belong to a transport-specific protocol or `Elarion.Connections`, not this contract.
 
+## Answer denials before payload errors
+
+If your transport binds a wire payload into the request type itself, call
+`route.EvaluateGateAsync(scope.ServiceProvider, ct)` (or `HandlerGates.EvaluateAsync<TRequest>(scope, ct)`) when binding
+fails and, for a non-`null` `AppError`, translate that instead of reporting the payload error — so an unauthenticated
+or forbidden caller gets the 401/403 equivalent and never learns the parameter requirements. When binding succeeds,
+dispatch as usual; the decorator pipeline enforces authorization on the bound request. See
+[Authorization](/docs/concepts/authorization#401403-before-400).
+
 ## Map application errors
 
 Implement `IAppErrorTranslator<TWireError>` or map `ErrorKind` directly. Keep protocol status codes stable:

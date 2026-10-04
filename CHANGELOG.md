@@ -8,6 +8,97 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Settings: pre-host snapshot, `GetResolvedAsync`, singleton pin check, legacy-row normalizer.**
+  `SettingsConfigurationSnapshot.LoadAsync` runs the resolver and projection against a store before the host exists
+  (and `AddElarionSettingsConfiguration(snapshot)` / `AddElarionSettingsSnapshot` seed configuration with it), with
+  `SettingsConfigurationProjection.Flatten` public, so apps no longer copy the decode and flatten logic.
+  `ISettingsManager.GetResolvedAsync<T>` returns `SettingValue<T>` (value, `SettingSource`, `Version`, `IsPinned`) to
+  tell unset from defaulted. `ISettingPins` (singleton) answers `IsPinned`/`GetPinnedText` without a scope.
+  `ISettingNormalizer.NormalizeAsync` converts legacy raw-string rows of `string` definitions to canonical JSON once,
+  idempotently; reads deliberately do not guess (`42` is a valid string and a valid number), other types are reported.
+
+- **Web Push: `IPushSubscriptionStore.ListSubscribedUserIdsAsync(among?)`** answers "which users own subscriptions"
+  (distinct, ordinal-sorted; optionally narrowed to a candidate list) for the in-memory and EF stores, so an
+  application can fan out to an audience without querying the store's table. **BREAKING for a custom
+  `IPushSubscriptionStore`:** implement the new member.
+
+- **Web Push: the VAPID private key is protected at rest.** `EfCoreVapidKeyStore` writes the private key through
+  the registered `ISettingValueProtector` (ADR-0078's seam; `AddElarionSettingsDataProtection()` is the shipped
+  implementation), bound to the public key, with the scheme in a new nullable `protection` column on
+  `elarion_vapid_keys`. It fails closed: no protector means the store cannot be resolved, and an undecryptable
+  payload throws instead of generating a replacement pair. Legacy plaintext rows (and payloads under a retired key)
+  are re-protected in place on read. **BREAKING:** `Elarion.WebPush.EntityFrameworkCore` now references
+  `Elarion.Settings`; a host must register an `ISettingValueProtector` (or its own `IVapidKeyStore`, or configure
+  `WebPushOptions.PublicKey`/`PrivateKey`); add an EF migration for the `protection` column and the widened
+  `private_key` (1024).
+
+### Fixed
+- **`@swimmesberger/elarion-webpush`: the registration lookup no longer hangs.** The helpers waited on
+  `navigator.serviceWorker.ready`, which never settles when no worker controls the page (a Vite dev server, a page
+  outside the worker's scope). They now use the page's active registration or the `registration` option, and
+  otherwise wait at most `registrationTimeoutMs` (default 10 s) before throwing a `WebPushRegistrationError` that
+  says how to fix it. `enablePush` keeps requesting permission before its first `await` (now pinned by a test that
+  also covers the failing lookup) so Safari honours the prompt.
+- **Settings projection no longer loses every stored setting because of one bad row.** Bulk resolution now flags a
+  stored value that is not valid for its definition's type as unreadable (`ResolvedSetting.IsUnreadable`,
+  `UnreadableReason`, also on `SettingDescription`) exactly like an undecryptable secret, and the configuration
+  projection skips only that row; the refresher logs its key and reason once. Previously a single malformed row made
+  the refresh throw and nothing reached `IConfiguration`.
+
+- **Schema and runtime now agree on requiredness for nullable constructor parameters (ADR-0082).** A request type
+  such as `record Search(string Query, string? Note)` was exported with `note` optional, but the canonical
+  serializer (`RespectRequiredConstructorParameters`) rejected a request that omitted it with `-32602`. A type-info
+  modifier on the canonical resolver chain (source-generated and reflection resolvers alike, also copied to the HTTP
+  JSON options) now makes every nullable member optional to send and bound as `null`, so apps need no `= null`
+  everywhere; non-nullable members without a default stay required. A nullable `required`/`[JsonRequired]` member is
+  likewise optional on the wire.
+
+- **A caller who may not call an operation now gets 401/403, not an invalid-params error, for a malformed payload.**
+  JSON-RPC, MCP tool calls and the generated HTTP endpoints deserialized and rejected the payload (`-32602`/400)
+  before authorization ran, which leaked parameter requirements to unauthenticated callers and inverted the usual
+  401-before-400 order. When binding fails, the transport now asks the handler's new `IHandlerGate` (registered by
+  the generator for every handler with an authorization decorator; reached through `HandlerRoute.EvaluateGateAsync`,
+  `HandlerGates.EvaluateAsync` and `ElarionHttpEndpointBinder.TryAdmitAsync`) and answers with the authentication or
+  authorization error (`-32005`/401, `-32003`/403). The gate covers the payload-independent requirements
+  (authentication, permissions, roles, claims); policies, global rules and resource requirements stay in the
+  decorator because they need the request. It is deliberately not an early exit, so when the payload binds the full
+  pipeline still runs and denials stay audited and traced.
+
+- **EF migration steps run each migration command on its own, like `Database.MigrateAsync()` (ADR-0081).** The step
+  executed `IMigrator.GenerateScript(...)` as one batch, and that script does not terminate statements, so raw
+  `migrationBuilder.Sql("...")` operations without a trailing `;` ran into the next one (syntax error) although the
+  same migrations apply under `MigrateAsync()`. The step now generates the migration's commands with
+  `IMigrationsSqlGenerator` and executes them one by one on the plan's connection and transaction, then writes EF's
+  history row. A migration with a `suppressTransaction: true` raw SQL operation makes its step non-transactional.
+
+### Changed
+- **`FeatureEvaluationContext.Services` is optional.** It was `required`, forcing `Services = null!` in tests and in
+  resolvers that need no services. A hand-built context now carries an empty provider (`GetService` yields `null`,
+  `GetRequiredService` throws a message that names the cause); setting it to `null` throws, so it is never `null`.
+  The ambient path (`FromScope`, `IFeatureFlagService.CreateContext()`) is unchanged and always carries the scope.
+  Source-compatible: existing initializers keep compiling.
+- **BREAKING: `MapElarionWebPush()` dispatches to application handlers instead of bypassing the handler pipeline.**
+  The endpoints called `WebPushSubscriptionService` directly, so global authorization rules, realm/tenant rules,
+  audit and rate-limiting decorators did not apply to subscribe/unsubscribe. They are now HTTP bindings for three
+  handlers the application declares — `IHandler<PushSubscriptionRequest>`, `IHandler<WebPushUnsubscribeRequest>`,
+  `IHandler<WebPushPublicKeyRequest, Result<WebPushPublicKeyResponse>>` (thin handlers delegating to
+  `WebPushSubscriptionService`, shown on the capability page); a malformed body is answered by the handler's
+  admission gate (401/403) before 400, and `MapElarionWebPush` throws at startup naming a missing handler. The
+  wire shapes are unchanged; `WebPushUnsubscribeRequest` and `WebPushPublicKeyResponse` are now public types in
+  `Elarion.WebPush`, and `PushSubscriptionRequest` gains a non-wire `UserAgent` that the endpoint fills from the
+  header. Migration: declare the three handlers before calling `MapElarionWebPush()`.
+- **BREAKING: `IAuthorizer` gains `AuthorizeGateAsync(requirements, ct)`**, the payload-independent half of
+  `AuthorizeAsync` (anonymous opt-out, authentication, permissions, roles, claims). A custom or decorating
+  authorizer must implement it; a decorator forwards to its inner `ClaimsAuthorizer`.
+- **BREAKING: settings API tidy-up.** `SettingsConfigurationProjection.Project` returns `SettingsProjection`
+  (`.Data` is the old dictionary, `.Problems` the skipped rows); `ISettingResolver.IsPinned` and
+  `GetConfigurationChangeToken` moved to `ISettingPins`; the `SettingResolver` constructor takes
+  `ISettingPins` and `IElarionJsonSerialization` instead of options and configuration; `SettingDefinition` gains the
+  abstract `TryValidateJson` (generated definitions are unaffected). Structured (record/collection) **defaults** are
+  no longer projected into `IConfiguration` — they were noise keys such as `self.runtime:applyStage`; stored values
+  and scalar defaults still are. Migration: use `.Data` and `ISettingPins`; bind options with their own defaults.
+
 ## [0.2.8] - 2026-10-04
 
 ### Added

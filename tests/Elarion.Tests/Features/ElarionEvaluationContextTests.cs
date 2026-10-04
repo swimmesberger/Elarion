@@ -7,11 +7,10 @@ using Xunit;
 namespace Elarion.Tests.Features;
 
 public sealed class ElarionEvaluationContextTests {
-    private static readonly IServiceProvider Services = new ServiceCollection().BuildServiceProvider();
 
     [Fact]
     public void AuthenticatedUser_SetsTargetingKeyUserIdAndGroups() {
-        var user = new FeatureEvaluationContext { Services = Services, UserId = "u-42", Roles = ["Admin", "Billing"] };
+        var user = new FeatureEvaluationContext { UserId = "u-42", Roles = ["Admin", "Billing"] };
 
         var context = ElarionEvaluationContext.Create(user);
 
@@ -25,7 +24,7 @@ public sealed class ElarionEvaluationContextTests {
 
     [Fact]
     public void AnonymousUser_HasNoTargetingKeyOrUserId() {
-        var user = new FeatureEvaluationContext { Services = Services };
+        var user = new FeatureEvaluationContext { };
 
         var context = ElarionEvaluationContext.Create(user);
 
@@ -36,7 +35,6 @@ public sealed class ElarionEvaluationContextTests {
     [Fact]
     public void TenantAndCustomAttributes_AreForwardedAsTargetingAttributes() {
         var user = new FeatureEvaluationContext {
-            Services = Services,
             UserId = "u-1",
             TenantId = "tenant-7",
             Attributes = new Dictionary<string, string> { ["plan"] = "pro" }

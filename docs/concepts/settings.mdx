@@ -101,7 +101,9 @@ if (!write.IsSuccess && write.Error.Code == SettingErrorCodes.Pinned)
     // deployment configuration pins the title; the UI should show it read-only
 ```
 
-`GetAsync` returns the **effective** value. `SetAsync` returns `Result<SettingWrite>` (the new version);
+`GetAsync` returns the **effective** value. `GetResolvedAsync` returns it together with its `SettingSource` and store
+`Version` (`SettingValue<T>`; `IsSet` is `false` while the default applies), so "unset" is distinguishable from
+"explicitly stored the default" without a nullable value type or a `DescribeAsync` call. `SetAsync` returns `Result<SettingWrite>` (the new version);
 `ResetAsync` removes the stored value so the setting reverts to its default. Failures are `AppError`s with a stable
 code ([ADR-0080](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md))
 and a `SettingWriteFailure(Key)` payload: `settings.pinned` (`SettingErrorCodes.Pinned`, a `BusinessRule` — the
@@ -127,6 +129,24 @@ The configuration text of a string setting is the string itself; any other type 
 `true`, a JSON document such as `{"host":"mail"}` for a record), and bare words work for enums and string-like
 types. A malformed pinned value fails loudly on read. Only non-projection configuration providers are consulted
 (see below), so the projection cannot pin.
+
+The pin check itself is `ISettingPins` — `IsPinned(definition, scope)`, `GetPinnedText(definition)` — a
+**singleton** that needs only the catalog and `IConfiguration`, never the store. Inject it where the scoped
+resolver is not available (a singleton, middleware, options setup).
+
+### Unreadable and legacy rows
+
+A stored row that cannot be read — a secret that cannot be decrypted, or a value that is not valid for the
+definition's type — never takes the other settings down. Bulk resolution (`ResolveAllAsync`, `DescribeAsync`, the
+configuration projection) flags it (`IsUnreadable` plus an `UnreadableReason` that never contains the value) and
+carries on; a single `GetAsync` of that setting still throws. The configuration projection skips the row and the
+refresher logs its key and reason once.
+
+Rows written before a definition existed typically hold the raw string (`smtp.example.com`) instead of its JSON
+form (`"smtp.example.com"`). Reads do not guess — `42` is a legal string and a legal number — so convert them once
+with `ISettingNormalizer.NormalizeAsync(scope, prefix?)`: for a `string` definition, any stored value that is not a
+JSON string is rewritten as that literal string (protected again when the definition is secret). It is idempotent
+and version-guarded; other types are never guessed and are reported in `UnreadableKeys`.
 
 ## Secrets
 
@@ -158,7 +178,8 @@ IReadOnlyList<SettingDescription> all = await settings.DescribeAsync(cancellatio
 
 Each entry has `Key`, `ValueType`, `Scope`, `AllowedScopes`, `IsSecret`, `IsPinnable`, `IsPinned`, `HasValue`,
 `Source` (`Default`, `Store` or `Configuration`), `ValueJson` (never for secrets), `Version` (usable as
-`expectedVersion`), `IsUnreadable` (a stored secret that cannot be decrypted) and `Description`. Elarion ships
+`expectedVersion`), `IsUnreadable` / `UnreadableReason` (a stored entry that cannot be decrypted or is not a valid
+value of its type) and `Description`. Elarion ships
 no handlers for it; map it to whatever your host exposes.
 
 ## Watching for changes
@@ -273,13 +294,26 @@ It is a **projection, not a second source of truth**: it is derived from the res
 it back, so it cannot pin a definition and there is no store-versus-configuration precedence switch. Scalar
 definitions become one key; object values are flattened to `key:property` (and `key:0`, `key:1` for arrays) so a
 section binds to your options type. Secrets are never projected, values pinned by configuration are skipped (they
-are already there), and only the global scope is surfaced. Register it after your other sources so a later
+are already there), and only the global scope is surfaced. A **stored** value is always projected; a declared
+**default** only when it is a scalar — a structured (record or collection) default would add a key per property that
+nobody set, and the options type already carries its own defaults. An unreadable row is skipped and reported, never
+fatal (see above). Register it after your other sources so a later
 provider does not mask the projected effective value.
 
 Because `IConfiguration` is built before the DI container, the background refresher performs the initial load in
 its `StartAsync`, before later-registered hosted services (notably the scheduler) start. The load is time-bounded
 so a slow store cannot hang startup. The refresher reprojects on store changes and when the rest of the
 configuration reloads (a pin may have appeared); the provider reloads only when its data actually changed.
+
+### Before the host is built
+
+Configuration consumed while the builder is still being assembled (server endpoints, authentication options) cannot
+wait for the refresher. `SettingsConfigurationSnapshot.LoadAsync(definitions, store, serialization,
+deploymentConfiguration)` runs the same resolver and projection against a store you construct yourself and returns a
+`SettingsProjection` (`Data`, `Problems`); `SettingsConfigurationProjection.Flatten` is the public decode helper.
+Pass the snapshot to `builder.AddElarionSettingsConfiguration(snapshot)` so the live provider starts with it
+(one provider, so a value that is later reset cannot linger), or add it to a plain `IConfigurationBuilder` with
+`AddElarionSettingsSnapshot(snapshot)`. Secret definitions are skipped.
 
 ## Scheduler integration
 

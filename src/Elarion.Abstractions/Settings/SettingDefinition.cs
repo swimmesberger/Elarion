@@ -71,6 +71,12 @@ public abstract class SettingDefinition {
 
     /// <summary>Serializes the default value to canonical JSON text, or <see langword="null"/> when there is none.</summary>
     public abstract string? SerializeDefault(IElarionJsonSerialization serialization);
+
+    /// <summary>
+    /// Checks whether <paramref name="json"/> is a valid value of <see cref="ValueType"/> under the canonical
+    /// serializer options. <paramref name="reason"/> describes the problem (never the value) when it is not.
+    /// </summary>
+    public abstract bool TryValidateJson(string json, IElarionJsonSerialization serialization, out string? reason);
 }
 
 /// <summary>The typed definition of a setting whose value is <typeparamref name="T"/>.</summary>
@@ -127,5 +133,20 @@ public sealed class SettingDefinition<T> : SettingDefinition {
         return _hasDefault
             ? System.Text.Json.JsonSerializer.Serialize(Default, serialization.GetTypeInfo<T>())
             : null;
+    }
+
+    /// <inheritdoc />
+    public override bool TryValidateJson(string json, IElarionJsonSerialization serialization, out string? reason) {
+        ArgumentNullException.ThrowIfNull(json);
+        ArgumentNullException.ThrowIfNull(serialization);
+        try {
+            _ = System.Text.Json.JsonSerializer.Deserialize(json, serialization.GetTypeInfo<T>());
+            reason = null;
+            return true;
+        }
+        catch (System.Text.Json.JsonException ex) {
+            reason = $"not a valid {typeof(T).Name}: {ex.GetType().Name} at {ex.Path ?? "$"}";
+            return false;
+        }
     }
 }

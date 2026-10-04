@@ -34,11 +34,26 @@ export type EnablePushOutcome = 'subscribed' | 'denied' | 'dismissed' | 'install
 /** Options shared by the subscription helpers. */
 export interface PushHelperOptions {
   /**
-   * The service-worker registration to subscribe through. Defaults to `navigator.serviceWorker.ready` — which
-   * never settles when no service worker is registered, so register one before calling the helpers.
+   * The service-worker registration to subscribe through — pass the one `navigator.serviceWorker.register(...)`
+   * returned when you have it. Without it the helpers use the page's active registration, and otherwise wait for
+   * `navigator.serviceWorker.ready` for at most {@link registrationTimeoutMs}, failing with a
+   * {@link WebPushRegistrationError} instead of hanging when no service worker ever takes over (a dev server
+   * that does not serve one, a page outside the worker's scope).
    */
   registration?: ServiceWorkerRegistration
+  /** How long to wait for a service worker to become active when none is yet. Defaults to 10 000 ms. */
+  registrationTimeoutMs?: number
 }
+
+/** Thrown when no active service-worker registration is available to subscribe through. */
+export class WebPushRegistrationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'WebPushRegistrationError'
+  }
+}
+
+const DEFAULT_REGISTRATION_TIMEOUT_MS = 10_000
 
 /** Detects push support; see {@link PushAvailability}. Safe to call during rendering. */
 export function pushAvailability(): PushAvailability {
@@ -121,7 +136,34 @@ export async function refreshOnStart(api: WebPushServerApi, options: PushHelperO
 }
 
 async function resolveRegistration(options: PushHelperOptions): Promise<ServiceWorkerRegistration> {
-  return options.registration ?? navigator.serviceWorker.ready
+  if (options.registration) return options.registration
+
+  const container = navigator.serviceWorker
+  // `ready` waits for a worker to become active and never settles when none is ever registered, so look for an
+  // active registration first and bound the wait for the rest.
+  const existing = await container.getRegistration?.()
+  if (existing?.active) return existing
+
+  const timeoutMs = options.registrationTimeoutMs ?? DEFAULT_REGISTRATION_TIMEOUT_MS
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new WebPushRegistrationError(
+            `No active service worker registration after ${timeoutMs} ms. Web Push needs a registered service worker: ` +
+              `call navigator.serviceWorker.register('/sw.js', { type: 'module' }) first (a dev server that does not ` +
+              `serve the worker never activates one), or pass the registration as the 'registration' option.`,
+          ),
+        ),
+      timeoutMs,
+    )
+  })
+  try {
+    return await Promise.race([container.ready, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 function iosVersion(): [number, number] | undefined {

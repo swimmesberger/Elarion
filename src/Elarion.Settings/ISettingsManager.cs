@@ -29,6 +29,17 @@ public interface ISettingsManager {
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Reads the effective value together with its <see cref="SettingSource"/> and store version — the cheap way to
+    /// tell "unset, defaulted" (<see cref="SettingSource.Default"/>) from "explicitly stored or pinned" without a
+    /// nullable value type or a <see cref="DescribeAsync"/> call.
+    /// </summary>
+    /// <exception cref="SettingProtectionException">A stored secret cannot be unprotected.</exception>
+    ValueTask<SettingValue<T>> GetResolvedAsync<T>(
+        SettingDefinition<T> definition,
+        SettingsScope? scope = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Writes the value to the store (protected at rest for a secret definition). Refused with a
     /// <see cref="SettingErrorCodes.Pinned"/> failure while deployment configuration pins the definition.
     /// </summary>

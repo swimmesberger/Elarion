@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Elarion.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +16,16 @@ namespace Elarion.WebPush.EntityFrameworkCore;
 /// <c>ON CONFLICT DO NOTHING</c> and then reads the row back, so all of them adopt the single winner.
 /// </para>
 /// <para>
+/// The private key is protected at rest through the framework's protection seam, the registered
+/// <see cref="ISettingValueProtector"/> (ADR-0078; <c>AddElarionSettingsDataProtection()</c> is the shipped
+/// implementation), bound to the key pair's public half so a payload copied onto another row does not decrypt.
+/// The store fails closed: without a protector it cannot be constructed, and a payload that does not decrypt
+/// throws <see cref="SettingProtectionException"/> instead of generating a replacement pair (which would
+/// invalidate every subscription). A legacy row written before protection existed (no
+/// <see cref="VapidKeyEntity.Protection"/>) is accepted once and re-protected in place, as is a payload under a
+/// retired key.
+/// </para>
+/// <para>
 /// Unlike the subscription store, a singleton on its own DI scope, deliberately outside any caller's unit of
 /// work: the provider caches the pair for the life of the process, so it must be stored for good before it is
 /// used — a caller's rollback must never un-store a key that browsers already subscribed against. To keep that
@@ -22,15 +33,39 @@ namespace Elarion.WebPush.EntityFrameworkCore;
 /// resolved when the host starts; see <c>AddElarionWebPushEntityFrameworkCore</c>.
 /// </para>
 /// </remarks>
-public sealed class EfCoreVapidKeyStore<TDbContext>(
-    IServiceScopeFactory scopeFactory,
-    TimeProvider timeProvider) : IVapidKeyStore
+public sealed class EfCoreVapidKeyStore<TDbContext> : IVapidKeyStore
     where TDbContext : DbContext {
+    /// <summary>The root of the purpose string the private key is protected under.</summary>
+    public const string PurposePrefix = "Elarion.WebPush.VapidKey";
+
     private static readonly ConcurrentDictionary<IModel, string> InsertSqlCache = new();
+
+    private readonly ISettingValueProtector _protector;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly TimeProvider _timeProvider;
+
+    /// <summary>Creates the store.</summary>
+    /// <param name="scopeFactory">Opens the store's own scope per operation.</param>
+    /// <param name="timeProvider">The clock stamping a newly stored pair.</param>
+    /// <param name="protector">
+    /// The at-rest protector for the private key; required (there is no unprotected fallback).
+    /// </param>
+    /// <exception cref="SettingProtectionException">No <see cref="ISettingValueProtector"/> is registered.</exception>
+    public EfCoreVapidKeyStore(
+        IServiceScopeFactory scopeFactory,
+        TimeProvider timeProvider,
+        ISettingValueProtector? protector = null) {
+        _scopeFactory = scopeFactory;
+        _timeProvider = timeProvider;
+        _protector = protector ?? throw new SettingProtectionException(
+            "The Web Push VAPID private key is protected at rest, but no ISettingValueProtector is registered. "
+            + "Call AddElarionSettingsDataProtection() (Elarion.Settings.DataProtection) or register your own "
+            + "protector, or configure WebPushOptions.PublicKey/PrivateKey from a secret store.");
+    }
 
     /// <inheritdoc />
     public async ValueTask<VapidKeys?> GetAsync(CancellationToken cancellationToken = default) {
-        await using var scope = scopeFactory.CreateAsyncScope();
+        await using var scope = _scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
         return await ReadAsync(dbContext, cancellationToken).ConfigureAwait(false);
     }
@@ -38,7 +73,7 @@ public sealed class EfCoreVapidKeyStore<TDbContext>(
     /// <inheritdoc />
     public async ValueTask<VapidKeys> GetOrAddAsync(VapidKeys candidate, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(candidate);
-        await using var scope = scopeFactory.CreateAsyncScope();
+        await using var scope = _scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
         var sql = InsertSqlCache.GetOrAdd(
             dbContext.Model,
@@ -47,18 +82,58 @@ public sealed class EfCoreVapidKeyStore<TDbContext>(
         var parameters = WebPushEntitySql.Parameters(dbContext, typeof(VapidKeyEntity),
             (nameof(VapidKeyEntity.Name), VapidKeyEntity.DefaultName),
             (nameof(VapidKeyEntity.PublicKey), candidate.PublicKey),
-            (nameof(VapidKeyEntity.PrivateKey), candidate.PrivateKey),
-            (nameof(VapidKeyEntity.CreatedOnUtc), timeProvider.GetUtcNow()));
+            (nameof(VapidKeyEntity.PrivateKey), _protector.Protect(Purpose(candidate.PublicKey), candidate.PrivateKey)),
+            (nameof(VapidKeyEntity.Protection), _protector.Scheme),
+            (nameof(VapidKeyEntity.CreatedOnUtc), _timeProvider.GetUtcNow()));
         await dbContext.Database.ExecuteSqlRawAsync(sql, parameters, cancellationToken).ConfigureAwait(false);
         return await ReadAsync(dbContext, cancellationToken).ConfigureAwait(false)
                ?? throw new InvalidOperationException("The VAPID key row vanished right after it was inserted.");
     }
 
-    private static Task<VapidKeys?> ReadAsync(TDbContext dbContext, CancellationToken cancellationToken) {
-        return dbContext.Set<VapidKeyEntity>()
+    private static string Purpose(string publicKey) {
+        return $"{PurposePrefix}/{VapidKeyEntity.DefaultName}/{publicKey}";
+    }
+
+    private async Task<VapidKeys?> ReadAsync(TDbContext dbContext, CancellationToken cancellationToken) {
+        var row = await dbContext.Set<VapidKeyEntity>()
             .AsNoTracking()
             .Where(entity => entity.Name == VapidKeyEntity.DefaultName)
-            .Select(entity => (VapidKeys?)new VapidKeys { PublicKey = entity.PublicKey, PrivateKey = entity.PrivateKey })
-            .FirstOrDefaultAsync(cancellationToken);
+            .Select(entity => new { entity.PublicKey, entity.PrivateKey, entity.Protection })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (row is null) return null;
+
+        if (row.Protection is null) {
+            // A row from before protection existed: plaintext, accepted once and protected in place.
+            await RewriteAsync(dbContext, row.PublicKey, row.PrivateKey, row.Protection, row.PrivateKey,
+                cancellationToken).ConfigureAwait(false);
+            return new VapidKeys { PublicKey = row.PublicKey, PrivateKey = row.PrivateKey };
+        }
+
+        if (!string.Equals(row.Protection, _protector.Scheme, StringComparison.Ordinal))
+            throw new SettingProtectionException(
+                $"The stored VAPID private key was protected with scheme '{row.Protection}', but the registered "
+                + $"protector's scheme is '{_protector.Scheme}'.");
+
+        var unprotected = _protector.Unprotect(Purpose(row.PublicKey), row.PrivateKey);
+        if (unprotected.RequiresReprotection)
+            await RewriteAsync(dbContext, row.PublicKey, row.PrivateKey, row.Protection, unprotected.Plaintext,
+                cancellationToken).ConfigureAwait(false);
+        return new VapidKeys { PublicKey = row.PublicKey, PrivateKey = unprotected.Plaintext };
+    }
+
+    // Guarded by the exact stored value, so a concurrent writer (another node re-protecting the same row) wins.
+    private Task RewriteAsync(TDbContext dbContext, string publicKey, string storedPrivateKey, string? storedProtection,
+        string plaintext, CancellationToken cancellationToken) {
+        var payload = _protector.Protect(Purpose(publicKey), plaintext);
+        var scheme = _protector.Scheme;
+        return dbContext.Set<VapidKeyEntity>()
+            .Where(entity => entity.Name == VapidKeyEntity.DefaultName
+                             && entity.PrivateKey == storedPrivateKey
+                             && entity.Protection == storedProtection)
+            .ExecuteUpdateAsync(
+                set => set.SetProperty(entity => entity.PrivateKey, payload)
+                    .SetProperty(entity => entity.Protection, scheme),
+                cancellationToken);
     }
 }

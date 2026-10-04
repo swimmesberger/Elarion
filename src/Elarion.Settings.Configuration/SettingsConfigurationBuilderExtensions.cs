@@ -25,14 +25,21 @@ public static class SettingsConfigurationBuilderExtensions {
     /// observe the stored values rather than empty defaults.
     /// </para>
     /// </summary>
-    public static TBuilder AddElarionSettingsConfiguration<TBuilder>(this TBuilder builder)
+    /// <param name="builder">The host builder.</param>
+    /// <param name="bootSnapshot">
+    /// A snapshot loaded before the host was built (<see cref="SettingsConfigurationSnapshot.LoadAsync"/>). The
+    /// projection provider starts with it, so the pre-host values and the live values are one provider and a value
+    /// that is later reset cannot linger.
+    /// </param>
+    public static TBuilder AddElarionSettingsConfiguration<TBuilder>(
+        this TBuilder builder, SettingsProjection? bootSnapshot = null)
         where TBuilder : IHostApplicationBuilder {
         ArgumentNullException.ThrowIfNull(builder);
 
         // Ensure ISettingsStore + ISettingsChangeSource exist (TryAdd: a previously registered backend wins).
         builder.Services.AddElarionSettings();
 
-        var source = new SettingsConfigurationSource();
+        var source = new SettingsConfigurationSource(bootSnapshot?.Data);
         builder.Configuration.Add(source);
 
         // Share the provider instance the configuration system uses so the refresher pushes data into it.

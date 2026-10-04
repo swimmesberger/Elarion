@@ -85,6 +85,17 @@ one after another. The key store keeps its own scope on purpose: the provider ca
 so it must be committed independently of any caller. The EF registration resolves it at host start, so its
 first-use insert never runs inside a request either.
 
+*Amended — the private key is protected at rest.* The EF key store first persisted the private key as plain
+text. It now writes it through `ISettingValueProtector` (the seam [ADR-0078](0078-settings-definitions-and-effective-value-resolver.md)
+introduced for secret settings; `Elarion.WebPush.EntityFrameworkCore` references only the `Elarion.Settings`
+contract, the host picks the implementation, normally `AddElarionSettingsDataProtection()`). The purpose binds
+the pair's public key, the scheme is stored beside the payload in a nullable `protection` column, and the store
+fails closed exactly like a secret setting: no protector means the store cannot be built, an undecryptable payload
+throws instead of regenerating the pair. Legacy plaintext rows (null `protection`) and payloads under a retired
+key are re-protected in place on read, guarded by the stored value so a concurrent node wins. Rejected: a
+WebPush-specific protection interface (a second seam for the same job), and encrypting inside the provider (the
+configured-keys path deliberately bypasses storage, and custom `IVapidKeyStore`s own their own at-rest story).
+
 ### Subscriptions belong to the current user; authorization stays the host's
 
 `WebPushSubscriptionService` binds subscriptions to `ICurrentUser`, returns ordinary `Result`/`AppError`
@@ -93,6 +104,21 @@ its normal policy to `MapElarionWebPush()` or its `[Require*]` attributes to its
 convenience; handlers delegating to the service are the first-class path for applications whose API is
 `[Handler]`s, so the operations appear in the JSON-RPC schema and generated client. The framework does not ship
 `[Handler]`s itself: module ownership, naming, and authorization of handlers are application decisions.
+
+*Amended — the endpoints dispatch to the application's handlers.* `MapElarionWebPush()` first called the service
+directly from three hand-built request delegates. Those bypassed the handler pipeline, so an application's global
+authorization rules, realm/tenant rules, audit and rate-limiting decorators did not apply to subscribe and
+unsubscribe — the only operations of the application that skipped them. The framework still cannot ship
+decorated `[Handler]`s (the pipeline is composed by the generator inside the application's own assembly, and
+module ownership, naming and authorization are application decisions), so the endpoints became **HTTP bindings
+for handlers the application declares**: each call resolves the registered
+`IHandler<PushSubscriptionRequest, Result<Unit>>`, `IHandler<WebPushUnsubscribeRequest, Result<Unit>>` and
+`IHandler<WebPushPublicKeyRequest, Result<WebPushPublicKeyResponse>>` and invokes it, a binding failure is
+answered by the handler's `IHandlerGate` (401/403 before 400, ADR-0071's rule), and mapping fails at startup
+naming the handlers that are missing. The request/response types moved into `Elarion.WebPush` so the handlers
+and the endpoints share them. Rejected: a per-endpoint authorization hook (a second, weaker rule engine that
+audit and rate limiting would still miss), and an undecorated default handler registered by
+`AddElarionWebPush` (the silent bypass this amendment removes).
 
 ### The browser transport is pluggable
 
@@ -108,7 +134,8 @@ and is checked against the real `ServiceWorkerGlobalScope` in the package tests.
   what remains is recipients, triggers, and text.
 - iOS "add to Home Screen first" detection is now uniform (`pushAvailability() === 'install-first'`).
 - A self-hosted or unusual push service needs one line of configuration.
-- The VAPID private key sits in the application database unless configured; the capability page says so.
+- The VAPID private key sits in the application database unless configured — protected at rest, since the
+  amendment below; the capability page says how.
 - Not done here: a combined "notify this user" entry point that uses client events while the user has a live
   subscriber and Web Push otherwise. It composes from the two existing seams and can be added when a second
   application asks for the same routing rule.

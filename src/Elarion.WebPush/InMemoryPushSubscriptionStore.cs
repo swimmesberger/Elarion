@@ -45,4 +45,17 @@ public sealed class InMemoryPushSubscriptionStore : IPushSubscriptionStore {
             .ToArray();
         return ValueTask.FromResult(matches);
     }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<string>> ListSubscribedUserIdsAsync(IReadOnlyCollection<string>? among = null,
+        CancellationToken cancellationToken = default) {
+        var owners = among is null ? null : among as IReadOnlySet<string> ?? new HashSet<string>(among, StringComparer.Ordinal);
+        IReadOnlyList<string> ids = _subscriptions.Values
+            .Select(subscription => subscription.UserId)
+            .Where(userId => owners is null || owners.Contains(userId))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        return ValueTask.FromResult(ids);
+    }
 }

@@ -115,9 +115,28 @@ public sealed class JsonRpcDispatcher {
             // Omitted params are treated identically to `params: {}` and deserialized through the configured
             // (source-gen) resolver — reflection-free / Native-AOT-safe, and applies the request record's
             // constructor defaults (an all-optional positional record has no parameterless constructor).
-            var requestObject = RpcRequestParams.Deserialize(request.Params, route.RequestType, _jsonOptions);
+            object? requestObject;
+            try {
+                requestObject = RpcRequestParams.Deserialize(request.Params, route.RequestType, _jsonOptions);
+            }
+            catch (JsonException ex) {
+                // A caller the operation would reject anyway must not learn its parameter requirements: answer
+                // with the authentication/authorization error (-32001/-32005) before reporting the payload.
+                if (await DenyUnadmittedAsync(request, route, scopeProvider, activity, method, startTimestamp, ct)
+                        .ConfigureAwait(false) is { } denied)
+                    return denied;
+
+                _logger?.LogWarning(ex, "JSON-RPC {Method} — invalid params (deserialization failed)", request.Method);
+                RecordError(activity, method, "-32602", "Invalid params", "invalid-params", startTimestamp);
+                return JsonRpcResponse.FromError(request,
+                    RpcError.InvalidParams("Invalid params: could not deserialize"));
+            }
 
             if (requestObject is null) {
+                if (await DenyUnadmittedAsync(request, route, scopeProvider, activity, method, startTimestamp, ct)
+                        .ConfigureAwait(false) is { } denied)
+                    return denied;
+
                 RecordError(activity, method, "-32602", "Invalid params", "invalid-params", startTimestamp);
                 return JsonRpcResponse.FromError(request, RpcError.InvalidParams("Could not construct request params"));
             }
@@ -178,6 +197,26 @@ public sealed class JsonRpcDispatcher {
             return JsonRpcResponse.FromError(request, RpcError.InternalError("Internal error"));
 #endif
         }
+    }
+
+    /// <summary>
+    /// Runs the handler's request-independent admission gate after the payload failed to bind. Returns the
+    /// translated authentication/authorization error response when the caller is not admitted, otherwise
+    /// <see langword="null"/> so the caller reports the payload error.
+    /// </summary>
+    private async Task<JsonRpcResponse?> DenyUnadmittedAsync(
+        JsonRpcRequest request, HandlerRoute route, IServiceProvider scopeProvider, Activity? activity, string method,
+        long startTimestamp, CancellationToken ct) {
+        var denial = await route.EvaluateGateAsync(scopeProvider, ct).ConfigureAwait(false);
+        if (denial is null) return null;
+
+        var translator = scopeProvider.GetService<IAppErrorTranslator<RpcError>>() ?? JsonRpcAppErrorTranslator.Default;
+        var rpcError = translator.Translate(denial);
+        _logger?.LogWarning(
+            "JSON-RPC {Method} denied before params were validated: {Code}: {Message}",
+            request.Method, rpcError.Code, rpcError.Message);
+        RecordError(activity, method, rpcError.Code.ToString(), rpcError.Message, "application-error", startTimestamp);
+        return JsonRpcResponse.FromError(request, rpcError);
     }
 
     /// <summary>

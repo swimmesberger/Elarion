@@ -76,22 +76,49 @@ public static class RpcToolInvoker {
         await using var scope = rootServices.CreateDispatchScope(context);
 
         object? requestObject;
+        string invalidParamsText;
         try {
             // Omitted arguments are treated identically to `{}` and deserialized through the configured (source-gen)
             // resolver — reflection-free / Native-AOT-safe, and applies the request record's constructor defaults.
             requestObject = RpcRequestParams.Deserialize(arguments, route.RequestType, serializerOptions);
+            invalidParamsText = "Could not construct request params";
         }
         catch (JsonException ex) {
-            RecordError(activity, route.Name, "-32602", "Invalid params", startTimestamp);
-            return new RpcToolResult { IsError = true, Text = $"Invalid params: {ex.Message}", ErrorCode = -32602,
-                ErrorData = new RpcErrorData { Code = RpcErrorCodes.InvalidParams } };
+            requestObject = null;
+            invalidParamsText = $"Invalid params: {ex.Message}";
         }
 
         if (requestObject is null) {
+            // A caller the operation would reject anyway must not learn its parameter requirements: answer with the
+            // authentication/authorization error before reporting the payload.
+            AppError? denial;
+            try {
+                denial = await route.EvaluateGateAsync(scope.ServiceProvider, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+                throw;
+            }
+            catch (Exception ex) {
+                rootServices.GetService<ILoggerFactory>()?.CreateLogger(typeof(RpcToolInvoker))
+                    .LogError(ex, "Unhandled exception evaluating the admission gate of tool {Method}", methodName);
+                RecordError(activity, route.Name, "-32603", ex.Message, startTimestamp);
+                return new RpcToolResult { IsError = true, Text = "Internal error", ErrorCode = -32603,
+                    ErrorData = new RpcErrorData { Code = ErrorCodes.Internal } };
+            }
+
+            if (denial is not null) {
+                var denialError = (scope.ServiceProvider.GetService<IAppErrorTranslator<RpcError>>()
+                                   ?? JsonRpcAppErrorTranslator.Default).Translate(denial);
+                RecordError(activity, route.Name, denialError.Code.ToString(), denialError.Message, startTimestamp);
+                return new RpcToolResult {
+                    IsError = true, Text = denialError.Message, ErrorCode = denialError.Code,
+                    ErrorData = denialError.Data
+                };
+            }
+
             RecordError(activity, route.Name, "-32602", "Invalid params", startTimestamp);
-            return new RpcToolResult
-                { IsError = true, Text = "Could not construct request params", ErrorCode = -32602,
-                    ErrorData = new RpcErrorData { Code = RpcErrorCodes.InvalidParams } };
+            return new RpcToolResult { IsError = true, Text = invalidParamsText, ErrorCode = -32602,
+                ErrorData = new RpcErrorData { Code = RpcErrorCodes.InvalidParams } };
         }
 
         // Per-call idempotency key from the tool arguments' _meta (the batch-correct, transport-neutral location).

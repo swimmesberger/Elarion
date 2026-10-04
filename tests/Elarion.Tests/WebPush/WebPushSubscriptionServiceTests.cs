@@ -161,4 +161,19 @@ public sealed class WebPushSubscriptionServiceTests {
     private static WebPushSubscriptionService ServiceFor(AsyncServiceScope scope, ICurrentUser currentUser) {
         return ServiceFor(scope.ServiceProvider, currentUser);
     }
+
+    [Fact]
+    public async Task InMemoryStore_ListSubscribedUserIds_ReturnsDistinctOwnersSorted() {
+        var store = new InMemoryPushSubscriptionStore();
+        using var phone = new TestPushSubscriber(Endpoint);
+        using var laptop = new TestPushSubscriber("https://fcm.googleapis.com/fcm/send/device-2");
+        using var tablet = new TestPushSubscriber("https://fcm.googleapis.com/fcm/send/device-3");
+        await store.UpsertAsync(phone.ToSubscription("bob"), TestToken);
+        await store.UpsertAsync(laptop.ToSubscription("bob"), TestToken);
+        await store.UpsertAsync(tablet.ToSubscription("alice"), TestToken);
+
+        (await store.ListSubscribedUserIdsAsync(cancellationToken: TestToken)).Should().Equal("alice", "bob");
+        (await store.ListSubscribedUserIdsAsync(["carol", "bob"], TestToken)).Should().Equal("bob");
+        (await store.ListSubscribedUserIdsAsync([], TestToken)).Should().BeEmpty();
+    }
 }

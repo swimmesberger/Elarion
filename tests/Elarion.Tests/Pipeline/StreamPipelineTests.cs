@@ -605,6 +605,10 @@ public sealed class StreamPipelineTests {
             Requirements = requirements;
             return ValueTask.FromResult(result);
         }
+
+        public ValueTask<AppError?> AuthorizeGateAsync(AuthorizationRequirements requirements, CancellationToken ct) {
+            return ValueTask.FromResult(result);
+        }
     }
 
 

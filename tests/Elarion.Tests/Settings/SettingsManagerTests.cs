@@ -161,4 +161,38 @@ public sealed class SettingsManagerTests {
         plain.HasValue.Should().BeFalse();
         plain.ValueJson.Should().BeNull();
     }
+
+    [Fact]
+    public async Task GetResolved_DistinguishesUnsetFromStoredAndPinned() {
+        using var provider = SettingsTestHost.Build(new Dictionary<string, string?> { ["app:title"] = "pinned" });
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
+        await manager.SetAsync(TestSettings.Port, 25, cancellationToken: Ct);
+
+        var unset = await manager.GetResolvedAsync(TestSettings.Enabled, cancellationToken: Ct);
+        var stored = await manager.GetResolvedAsync(TestSettings.Port, cancellationToken: Ct);
+        var pinned = await manager.GetResolvedAsync(TestSettings.Title, cancellationToken: Ct);
+
+        unset.Should().Be(new SettingValue<bool>(true, SettingSource.Default, null, false));
+        unset.IsSet.Should().BeFalse();
+        stored.Value.Should().Be(25);
+        stored.Source.Should().Be(SettingSource.Store);
+        stored.Version.Should().Be(1);
+        stored.IsSet.Should().BeTrue();
+        pinned.Should().Be(new SettingValue<string>("pinned", SettingSource.Configuration, null, true));
+    }
+
+    [Fact]
+    public void Pins_AreSingletonSafe_AndNeverTouchTheStore() {
+        using var provider = SettingsTestHost.Build(new Dictionary<string, string?> { ["app:title"] = "pinned" });
+        var pins = provider.GetRequiredService<ISettingPins>();
+
+        pins.IsPinned(TestSettings.Title, SettingsScope.Global).Should().BeTrue();
+        pins.IsPinned(TestSettings.Port, SettingsScope.Global).Should().BeFalse();
+        pins.IsPinned(TestSettings.Title, SettingsScope.User("u1")).Should().BeFalse();
+        pins.IsPinned(TestSettings.Plain, SettingsScope.Global).Should().BeFalse();
+        pins.GetPinnedText(TestSettings.Title).Should().Be("pinned");
+        provider.GetRequiredService<ISettingPins>().Should().BeSameAs(pins);
+        FluentActions.Invoking(() => pins.IsPinned(TestSettings.Unregistered, SettingsScope.Global))
+            .Should().Throw<InvalidOperationException>();
+    }
 }

@@ -57,4 +57,17 @@ public interface IPushSubscriptionStore {
     /// <param name="cancellationToken">Cancels the read.</param>
     ValueTask<IReadOnlyList<PushSubscription>> ListByUsersAsync(IReadOnlyCollection<string> userIds,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The distinct ids of the users that own at least one subscription — the audience of a fan-out ("every user
+    /// with a device"), without reading the subscriptions themselves.
+    /// </summary>
+    /// <param name="among">
+    /// When set, narrows the answer to those of these users that own a subscription (an empty collection yields
+    /// nothing); <see langword="null"/> considers every owner.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The owner ids, ordinal-sorted.</returns>
+    ValueTask<IReadOnlyList<string>> ListSubscribedUserIdsAsync(IReadOnlyCollection<string>? among = null,
+        CancellationToken cancellationToken = default);
 }

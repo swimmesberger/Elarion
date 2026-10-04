@@ -111,9 +111,9 @@ public sealed class ElarionJsonSerializationTests {
 
         var options = Resolve(services).Options;
 
-        options.TypeInfoResolverChain.Count(resolver => ReferenceEquals(resolver, SampleJsonContext.Default))
-            .Should().Be(1);
-        options.TypeInfoResolverChain.Should().HaveCount(2); // the context plus the always-seeded framework context
+        // Every resolver is wrapped by the requiredness modifier after composition, so the chain is checked by size:
+        // the context once plus the always-seeded framework context.
+        options.TypeInfoResolverChain.Should().HaveCount(2);
     }
 
     [Fact]
@@ -124,8 +124,7 @@ public sealed class ElarionJsonSerializationTests {
 
         var options = Resolve(services).Options;
 
-        options.TypeInfoResolverChain.Count(resolver => ReferenceEquals(resolver, SampleJsonContext.Default))
-            .Should().Be(1);
+        options.TypeInfoResolverChain.Should().HaveCount(2); // the context once plus the framework context
     }
 
     [Fact]
@@ -259,8 +258,9 @@ public sealed class ElarionJsonSerializationTests {
 
         var options = Resolve(services).Options;
 
-        options.TypeInfoResolverChain[0].Should().BeSameAs(overrideResolver);
-        options.TypeInfoResolverChain[1].Should().BeSameAs(SampleJsonContext.Default);
+        options.TypeInfoResolverChain.Should().HaveCount(3); // override, context, framework context
+        JsonSerializer.Serialize(new OverrideProbeDto(), options.GetTypeInfo(typeof(OverrideProbeDto)))
+            .Should().Be("\"override\"");
     }
 
     [Fact]

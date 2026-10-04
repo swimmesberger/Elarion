@@ -345,6 +345,10 @@ public sealed partial class ClientEventEndpointsTests {
             AuthorizationRequirements requirements, object? resource, CancellationToken ct) {
             return ValueTask.FromResult(allow ? null : AppError.Forbidden("Denied."));
         }
+
+        public ValueTask<AppError?> AuthorizeGateAsync(AuthorizationRequirements requirements, CancellationToken ct) {
+            return ValueTask.FromResult(allow ? null : AppError.Forbidden("Denied."));
+        }
     }
 
     /// <summary>Records what a rule observed, resolved from the host's container rather than a static.</summary>

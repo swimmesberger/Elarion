@@ -45,6 +45,10 @@ public sealed class AuthorizationGeneratorTests {
         generated.Should().Contain("global::Elarion.Pipeline.AuthorizationDecorator<");
         generated.Should().Contain("GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>()");
         generated.Should().Contain("__handlerMetadata");
+        // The request-independent admission gate is registered under the request type, so a transport that cannot
+        // bind the payload still answers an unauthorized caller with 401/403 instead of invalid params.
+        generated.Should().Contain("KeyedSingleton<global::Elarion.Abstractions.Dispatch.IHandlerGate>(typeof(");
+        generated.Should().Contain("new global::Elarion.Pipeline.AuthorizationGate(__handlerMetadata)");
         // Authorization is the outermost functional gate, just inside the observability decorator.
         generated.IndexOf("AuthorizationDecorator", StringComparison.Ordinal)
             .Should().BeLessThan(generated.IndexOf("ObservabilityDecorator", StringComparison.Ordinal));
@@ -75,6 +79,7 @@ public sealed class AuthorizationGeneratorTests {
         var generated = GetGenerated(result, "Sample_App_OpenHandler.g.cs");
 
         generated.Should().NotContain("AuthorizationDecorator");
+        generated.Should().NotContain("IHandlerGate");
     }
 
     [Fact]

@@ -16,7 +16,7 @@ store, the send loop with cleanup, the subscribe endpoints, and the browser and 
 | --- | --- |
 | `Elarion.WebPush` | `IWebPushSender`, `WebPushSubscriptionService`, VAPID keys, the store seams, in-memory defaults. |
 | `Elarion.WebPush.EntityFrameworkCore` | Durable `elarion_push_subscriptions` and `elarion_vapid_keys` tables (PostgreSQL or SQLite). |
-| `Elarion.WebPush.AspNetCore` | `MapElarionWebPush()` — the public-key/subscribe/unsubscribe endpoints. |
+| `Elarion.WebPush.AspNetCore` | `MapElarionWebPush()` — HTTP bindings for the three subscription handlers your application declares. |
 | `@swimmesberger/elarion-webpush` | Availability detection, permission and subscription helpers, and the service-worker module. |
 
 ## Wiring
@@ -29,11 +29,14 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbCo
     protected override void OnModelCreating(ModelBuilder modelBuilder) => ConfigureEntities(modelBuilder);
 }
 
+builder.Services.AddElarionSettingsDataProtection();   // protects the VAPID private key at rest (any ISettingValueProtector)
 builder.Services.AddElarionWebPushEntityFrameworkCore<AppDbContext>(options =>
     options.Subject = "mailto:ops@example.com");   // required: the VAPID contact
 
 app.MapElarionWebPush().RequireAuthorization();    // GET public-key, POST subscribe/unsubscribe under /webpush
 ```
+
+plus the three handlers below, which `MapElarionWebPush()` dispatches to.
 
 The EF stores write with `INSERT … ON CONFLICT` statements, which run on **PostgreSQL** and **SQLite** (3.24+).
 Their parameters are created from the model's own type mappings, so a context-wide value converter applies to
@@ -65,8 +68,17 @@ resolved it is cached for the life of the process, so it must be stored for good
 inside a request's transaction, whose rollback could un-store a key browsers already subscribed against. If the
 tables do not exist yet at start, that is logged and the pair is resolved on first use instead.
 
-The private key is stored in plain text in that table; restrict who can read it, or configure the keys
-instead. `VapidKeys.Generate()` mints a pair if you want to pin one from the start.
+The private key is **protected at rest** (ADR-0078's seam): the EF store writes it through the registered
+`ISettingValueProtector` — `AddElarionSettingsDataProtection()` is the shipped implementation over ASP.NET Core
+Data Protection, whose key ring you must persist and share between nodes — bound to the pair's public key, with
+the protector's scheme in the row's `protection` column. The store **fails closed**: without a protector it cannot
+be resolved, and a payload that does not decrypt (a lost key ring) throws instead of minting a replacement pair,
+which would invalidate every subscription. A row written before protection existed (no `protection` value) is
+accepted once and re-protected in place, as is a payload under a retired Data Protection key. Upgrading adds
+the nullable `protection` column and widens `private_key` to 1024 characters — add an EF migration.
+Keys configured through `options.PublicKey`/`PrivateKey` never touch the store, and an application with its own
+`IVapidKeyStore` (a vault, a KMS) registers it after `AddElarionWebPushEntityFrameworkCore` and needs no protector.
+`VapidKeys.Generate()` mints a pair if you want to pin one from the start.
 
 ## Sending
 
@@ -124,24 +136,18 @@ Message fields map onto the protocol:
 
 `SendToCurrentUserAsync(message)` sends to the caller's own devices — the "send a test notification" button.
 
+To address an **audience**, ask the store rather than its table: `IPushSubscriptionStore.ListSubscribedUserIdsAsync()`
+returns the distinct ids of every user that owns a subscription, `ListSubscribedUserIdsAsync(candidates)` narrows
+a candidate list to those with at least one device, and `ListByUsersAsync(userIds)` returns the subscriptions
+themselves. A custom store implements all three.
+
 ## Subscribing
 
-Subscriptions belong to the current user (`ICurrentUser`); subscribing requires an authenticated caller.
-`MapElarionWebPush()` maps:
-
-| Endpoint | Body | Result |
-| --- | --- | --- |
-| `GET /webpush/public-key` | — | `200 {"publicKey":"…"}` |
-| `POST /webpush/subscribe` | `subscription.toJSON()` | `204`; `400` invalid; `401` anonymous |
-| `POST /webpush/unsubscribe` | `{"endpoint":"…"}` | `204`; `401` anonymous |
-
-Subscribing is an upsert **by endpoint**: the same device re-subscribing refreshes its keys and last-seen
-time, and re-subscribing under a *different* account reassigns the row instead of colliding on the unique
-endpoint. Unsubscribing only ever deletes the caller's own subscription.
-
-An application whose API is `[Handler]`s can skip the ASP.NET package and expose the same three operations as
-handlers, delegating to `WebPushSubscriptionService` — they then appear in the JSON-RPC schema and the
-generated TypeScript client like every other handler:
+Subscribing is an **operation of your application**, so it runs through your handler pipeline like every
+other one: global authorization rules, tenant and realm rules, audit, rate limiting and validation apply to it.
+The framework therefore ships the request types and the shared logic, not the handlers. Declare three
+`[Handler]`s that delegate to `WebPushSubscriptionService` — they appear in the JSON-RPC schema and the
+generated TypeScript client like any other:
 
 ```csharp
 [Handler("webPush.subscribe")]
@@ -149,7 +155,47 @@ public sealed class SubscribeToPush(WebPushSubscriptionService subscriptions) : 
     public ValueTask<Result> HandleAsync(PushSubscriptionRequest request, CancellationToken ct) =>
         subscriptions.SubscribeAsync(request, cancellationToken: ct);
 }
+
+[Handler("webPush.unsubscribe")]
+public sealed class UnsubscribeFromPush(WebPushSubscriptionService subscriptions) : IHandler<WebPushUnsubscribeRequest> {
+    public ValueTask<Result> HandleAsync(WebPushUnsubscribeRequest request, CancellationToken ct) =>
+        subscriptions.UnsubscribeAsync(request.Endpoint, ct);
+}
+
+[Handler("webPush.publicKey")]
+public sealed class GetPushPublicKey(WebPushSubscriptionService subscriptions)
+    : IHandler<WebPushPublicKeyRequest, Result<WebPushPublicKeyResponse>> {
+    public async ValueTask<Result<WebPushPublicKeyResponse>> HandleAsync(WebPushPublicKeyRequest request, CancellationToken ct) =>
+        new WebPushPublicKeyResponse(await subscriptions.GetPublicKeyAsync(ct));
+}
 ```
+
+Subscriptions belong to the current user (`ICurrentUser`); the service insists the caller is authenticated, so
+a subscription always has an owner, and add `[RequirePermission]` or any other attribute to the handlers to
+restrict who may subscribe.
+
+`MapElarionWebPush()` is the **HTTP binding** for exactly those handlers — it resolves the registered
+`IHandler`s for `PushSubscriptionRequest`, `WebPushUnsubscribeRequest` and `WebPushPublicKeyRequest` and calls
+them, so the decorators the generator wrapped around them decide every call. It fails at startup, naming the
+missing handlers, if one is not registered; there is deliberately no undecorated fallback that could bypass the
+pipeline by accident. The wire shapes are the browser package's fixed contract:
+
+| Endpoint | Body | Result |
+| --- | --- | --- |
+| `GET /webpush/public-key` | — | `200 {"publicKey":"…"}` |
+| `POST /webpush/subscribe` | `subscription.toJSON()` | `204`; `400` invalid; `401` anonymous; `403` forbidden |
+| `POST /webpush/unsubscribe` | `{"endpoint":"…"}` | `204`; `401` anonymous; `403` forbidden |
+
+A handler failure maps to a bodyless status by its error kind (`Validation` 400, `Unauthorized` 401, `Forbidden`
+403, …). A malformed body is answered `401`/`403` by the handler's admission gate when the caller may not call it
+at all, and `400` otherwise — an anonymous caller never learns the request shape. The endpoint copies the
+request's `User-Agent` header into `PushSubscriptionRequest.UserAgent` (a property that is not part of the JSON
+contract). Apply endpoint-level conventions (`.RequireAuthorization()`, a rate-limiter policy) to the returned
+group as for any minimal API.
+
+Subscribing is an upsert **by endpoint**: the same device re-subscribing refreshes its keys and last-seen
+time, and re-subscribing under a *different* account reassigns the row instead of colliding on the unique
+endpoint. Unsubscribing only ever deletes the caller's own subscription.
 
 ### Endpoint allow-list
 
@@ -187,7 +233,12 @@ switch (pushAvailability()) {
 - `enablePush` requests permission **before its first `await`**, because Safari only honours a permission
   request made synchronously inside the user gesture. Call it straight from the click handler.
 - `subscribe`, `unsubscribe`, and `isSubscribed` are the building blocks; `refreshOnStart` never prompts.
-- With your own handlers, adapt the generated client instead of `fetchWebPushApi()`:
+- They subscribe through the page's **active service-worker registration** — or the `registration` option, where
+  you pass what `navigator.serviceWorker.register(...)` returned. Otherwise they wait for a worker to activate for
+  at most `registrationTimeoutMs` (10 s) and throw a `WebPushRegistrationError`; `navigator.serviceWorker.ready`
+  alone never settles when no worker is registered, as on a dev server that does not serve one.
+- `fetchWebPushApi()` targets the `MapElarionWebPush()` endpoints. To use the handlers over JSON-RPC instead,
+  adapt the generated client:
 
 ```ts
 const api: WebPushServerApi = {

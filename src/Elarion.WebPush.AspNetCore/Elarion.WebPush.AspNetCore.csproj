@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>ASP.NET Core endpoints for Elarion Web Push (ADR-0076): MapElarionWebPush maps public-key, subscribe, and unsubscribe for the current user, matching the default transport of the @swimmesberger/elarion-webpush browser package.</Description>
+    <Description>ASP.NET Core endpoints for Elarion Web Push (ADR-0076): MapElarionWebPush maps public-key, subscribe, and unsubscribe as HTTP bindings for the three handlers the application declares, so its handler pipeline (authorization rules, audit, rate limiting) applies; the wire shapes match the default transport of the @swimmesberger/elarion-webpush browser package.</Description>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
