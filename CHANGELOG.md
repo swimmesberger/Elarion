@@ -8,6 +8,14 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **`Elarion.Settings.DataProtection`: secret settings protected at rest.** Definitions marked `Secret = true` are
+  encrypted through `ISettingValueProtector` (the scheme is stored as entry metadata, the payload is bound to
+  scope, owner and key), never returned by `DescribeAsync` and never projected into `IConfiguration`. A secret
+  definition without a registered protector fails startup (no unprotected fallback).
+  `AddElarionSettingsDataProtection` registers the Data Protection implementation and an optional startup
+  re-protection; `ISettingReprotector` converges legacy plaintext and rotated keys idempotently.
+
 ### Changed
 - **One migration plan: SQL scripts, C# code steps and EF Core migrations share a version sequence, history and
   lock (ADR-0081, breaking).** `Elarion.Migrations` now merges the steps of every *source* — embedded
@@ -31,6 +39,27 @@ minor releases may include breaking changes.
   o.AddEntityFrameworkMigrations<AppDbContext>())`; a database EF already migrated needs no baseline (its EF
   steps are recorded as `satisfied`). Operations EF marks `suppressTransaction` move to a
   `-- elarion: no-transaction` SQL script.
+- **BREAKING: settings are declared definitions resolved through one layered resolver (ADR-0078).** Settings are
+  declared once with `[Setting("key")]` on a `static partial` `SettingDefinition<T>` property of a
+  `[SettingDefinitions]` class (key, type, default, scopes, `Secret`, `Pinnable`, description); a generator
+  implements them and `ElarionSettingDefinitions.All` aggregates them across assemblies, seeded with
+  `AddElarionSettings(o => o.AddDefinitions(ElarionSettingDefinitions.All))`. `ISettingsManager` is now
+  definition-based: `GetAsync(definition)`, `SetAsync(definition, value)` returning `Result<SettingWrite>`,
+  `ResetAsync`, `DescribeAsync`, `Watch(definition)`; the string-key `GetAsync(key, fallback)`, `GetStringAsync`,
+  `SetStringAsync`, `RemoveAsync` and `SettingWriteResult` on the manager are gone. Reads layer default < store <
+  configuration (configuration only for `Pinnable` global definitions; an empty value does not pin unless
+  `EmptyConfigurationValuesPin`), and a write to a pinned definition is refused with a `SettingWriteFailure`
+  (`Pinned`/`ConcurrencyConflict`). Undeclared or unregistered definitions and disallowed scopes throw.
+  Migration: declare each key you used, replace string calls with the definition, handle the `Result`.
+- **BREAKING: `ISettingsStore` carries protection metadata.** `GetAsync` returns `SettingEntry?`, `SetAsync` takes
+  a `protection` argument, and `SettingEntry` gains `Protection`. The EF `Setting` row gains a nullable
+  `protection` column (max 64): add it with an EF migration (`ALTER TABLE elarion_settings ADD COLUMN protection
+  varchar(64) NULL`).
+- **BREAKING: the settings `IConfiguration` provider is a projection of the resolver.**
+  `AddElarionSettingsConfiguration` projects the effective global values (object values flattened to
+  `key:property`), never secrets, and is skipped by the resolver so it cannot pin. `SettingsConfigurationProvider.Apply`
+  takes a key/value dictionary and reloads only on change; `SettingsConfigurationRefresher` also takes
+  `IConfiguration`. Register it after your other configuration sources.
 - **The EF Web Push subscription store joins the caller's unit of work.** `EfCorePushSubscriptionStore` is now
   scoped over the caller's `TDbContext` instead of a singleton that opened its own scope and connection per
   operation. A subscribe, unsubscribe, or dead-subscription cleanup inside a command now commits or rolls back

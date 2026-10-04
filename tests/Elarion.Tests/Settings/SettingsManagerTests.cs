@@ -1,7 +1,5 @@
-using System.Text.Json.Serialization;
 using AwesomeAssertions;
-using Elarion.Abstractions.Identity;
-using Elarion.Abstractions.Serialization;
+using Elarion.Abstractions;
 using Elarion.Settings;
 using Elarion.Tests.Authorization;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,104 +10,154 @@ namespace Elarion.Tests.Settings;
 public sealed class SettingsManagerTests {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static ServiceProvider BuildProvider(ICurrentUser? currentUser = null) {
-        var services = new ServiceCollection();
-        if (currentUser is not null) services.AddSingleton(currentUser);
-
-        services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SettingsTestJsonContext.Default));
-        services.AddElarionSettings();
-        return services.BuildServiceProvider();
-    }
-
-    private static ISettingsManager Resolve(ServiceProvider provider) {
-        return provider.CreateScope().ServiceProvider.GetRequiredService<ISettingsManager>();
-    }
-
     [Fact]
     public async Task TypedSet_ThenGet_RoundTripsViaSourceGenJson() {
-        using var provider = BuildProvider();
-        var manager = Resolve(provider);
-        var settings = new WidgetSettings { MaxItems = 7, Title = "Inbox" };
+        using var provider = SettingsTestHost.Build();
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
+        var widgets = new WidgetSettings { MaxItems = 7, Title = "Inbox" };
 
-        await manager.SetAsync("widgets", settings, cancellationToken: Ct);
-        var loaded = await manager.GetAsync("widgets", new WidgetSettings(), cancellationToken: Ct);
+        var write = await manager.SetAsync(TestSettings.Widgets, widgets, cancellationToken: Ct);
+        var loaded = await manager.GetAsync(TestSettings.Widgets, cancellationToken: Ct);
 
-        loaded.Should().Be(settings);
+        write.IsSuccess.Should().BeTrue();
+        write.Value.Version.Should().Be(1);
+        loaded.Should().Be(widgets);
     }
 
     [Fact]
-    public async Task TypedGet_ReturnsFallback_WhenAbsent() {
-        using var provider = BuildProvider();
-        var manager = Resolve(provider);
-        var fallback = new WidgetSettings { MaxItems = 1, Title = "default" };
+    public async Task Get_ReturnsTheDeclaredDefault_WhenNothingIsStored() {
+        using var provider = SettingsTestHost.Build();
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
 
-        var loaded = await manager.GetAsync("missing", fallback, cancellationToken: Ct);
-
-        loaded.Should().Be(fallback);
+        (await manager.GetAsync(TestSettings.Title, cancellationToken: Ct)).Should().Be("Untitled");
+        (await manager.GetAsync(TestSettings.Port, cancellationToken: Ct)).Should().Be(25);
+        (await manager.GetAsync(TestSettings.Widgets, cancellationToken: Ct)).Should()
+            .Be(new WidgetSettings { MaxItems = 3, Title = "default" });
+        (await manager.GetAsync(TestSettings.Plain, cancellationToken: Ct)).Should().BeNull();
     }
 
     [Fact]
-    public async Task GlobalScope_WorksWithoutCurrentUserRegistered() {
-        using var provider = BuildProvider(null);
-        var manager = Resolve(provider);
+    public async Task Reset_RemovesTheStoredValue_AndRevertsToTheDefault() {
+        using var provider = SettingsTestHost.Build();
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
+        await manager.SetAsync(TestSettings.Title, "Elarion", cancellationToken: Ct);
 
-        await manager.SetStringAsync("app:title", "Elarion", cancellationToken: Ct);
+        var reset = await manager.ResetAsync(TestSettings.Title, cancellationToken: Ct);
 
-        (await manager.GetStringAsync("app:title", cancellationToken: Ct)).Should().Be("Elarion");
+        reset.IsSuccess.Should().BeTrue();
+        reset.Value.Should().BeTrue();
+        (await manager.GetAsync(TestSettings.Title, cancellationToken: Ct)).Should().Be("Untitled");
+    }
+
+    [Fact]
+    public async Task OptimisticWrite_WithStaleVersion_ReturnsTypedConflict() {
+        using var provider = SettingsTestHost.Build();
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
+        await manager.SetAsync(TestSettings.Title, "a", cancellationToken: Ct);
+
+        var result = await manager.SetAsync(TestSettings.Title, "b", expectedVersion: 5, cancellationToken: Ct);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Kind.Should().Be(ErrorKind.Conflict);
+        result.Error.Data.Should().Be(new SettingWriteFailure("app:title", SettingWriteFailureReason.ConcurrencyConflict));
+        (await manager.GetAsync(TestSettings.Title, cancellationToken: Ct)).Should().Be("a");
+    }
+
+    [Fact]
+    public async Task UnregisteredDefinition_IsRefused() {
+        using var provider = SettingsTestHost.Build();
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
+
+        var read = async () => await manager.GetAsync(TestSettings.Unregistered, cancellationToken: Ct);
+        var write = async () => await manager.SetAsync(TestSettings.Unregistered, "x", cancellationToken: Ct);
+
+        await read.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not registered*");
+        await write.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not registered*");
+    }
+
+    [Fact]
+    public async Task ScopeTheDefinitionDoesNotAllow_IsRefused() {
+        using var provider = SettingsTestHost.Build();
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
+
+        var read = async () => await manager.GetAsync(TestSettings.Title, SettingsScope.User("u1"), Ct);
+        var write = async () => await manager.SetAsync(TestSettings.Title, "x", SettingsScope.User("u1"),
+            cancellationToken: Ct);
+
+        await read.Should().ThrowAsync<InvalidOperationException>().WithMessage("*does not allow the 'user' scope*");
+        await write.Should().ThrowAsync<InvalidOperationException>().WithMessage("*does not allow the 'user' scope*");
     }
 
     [Fact]
     public async Task CurrentUserScope_ResolvesOwnerFromCurrentUser() {
-        using var provider = BuildProvider(new FakeCurrentUser { IsAuthenticated = true, UserId = "u1" });
-        var manager = Resolve(provider);
+        using var provider = SettingsTestHost.Build(
+            currentUser: new FakeCurrentUser { IsAuthenticated = true, UserId = "u1" });
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
 
-        await manager.SetStringAsync("theme", "dark", SettingsScope.CurrentUser, cancellationToken: Ct);
+        await manager.SetAsync(TestSettings.Theme, "dark", SettingsScope.CurrentUser, cancellationToken: Ct);
 
-        // Written under the resolved per-user scope, not global.
-        (await manager.GetStringAsync("theme", SettingsScope.User("u1"), Ct)).Should().Be("dark");
-        (await manager.GetStringAsync("theme", SettingsScope.Global, Ct)).Should().BeNull();
+        (await manager.GetAsync(TestSettings.Theme, SettingsScope.User("u1"), Ct)).Should().Be("dark");
+        (await manager.GetAsync(TestSettings.Theme, SettingsScope.Global, Ct)).Should().Be("light");
     }
 
     [Fact]
     public async Task CurrentUserScope_FailsClosed_WhenUnauthenticated() {
-        using var provider = BuildProvider(new FakeCurrentUser { IsAuthenticated = false });
-        var manager = Resolve(provider);
+        using var provider = SettingsTestHost.Build(currentUser: new FakeCurrentUser { IsAuthenticated = false });
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
 
-        Func<Task> act = async () =>
-            await manager.GetStringAsync("theme", SettingsScope.CurrentUser, Ct);
+        var act = async () => await manager.GetAsync(TestSettings.Theme, SettingsScope.CurrentUser, Ct);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]
-    public async Task Watch_FiresAfterWrite() {
-        using var provider = BuildProvider();
-        var manager = Resolve(provider);
-        var token = manager.Watch("app");
+    public async Task GlobalScope_WorksWithoutCurrentUserRegistered() {
+        using var provider = SettingsTestHost.Build();
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
 
-        await manager.SetStringAsync("app:title", "Elarion", cancellationToken: Ct);
+        await manager.SetAsync(TestSettings.Title, "Elarion", cancellationToken: Ct);
 
-        token.HasChanged.Should().BeTrue();
+        (await manager.GetAsync(TestSettings.Title, cancellationToken: Ct)).Should().Be("Elarion");
     }
 
     [Fact]
-    public async Task Remove_DeletesValue() {
-        using var provider = BuildProvider();
-        var manager = Resolve(provider);
-        await manager.SetStringAsync("k", "v", cancellationToken: Ct);
+    public async Task Watch_FiresAfterWrite() {
+        using var provider = SettingsTestHost.Build();
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
+        var byPrefix = manager.Watch("app");
+        var byDefinition = manager.Watch(TestSettings.Title);
 
-        var removed = await manager.RemoveAsync("k", cancellationToken: Ct);
+        await manager.SetAsync(TestSettings.Title, "Elarion", cancellationToken: Ct);
 
-        removed.Should().BeTrue();
-        (await manager.GetStringAsync("k", cancellationToken: Ct)).Should().BeNull();
+        byPrefix.HasChanged.Should().BeTrue();
+        byDefinition.HasChanged.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Describe_ReportsEffectiveStateForEveryDefinitionAllowingTheScope() {
+        using var provider = SettingsTestHost.Build();
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
+        await manager.SetAsync(TestSettings.Port, 587, cancellationToken: Ct);
+
+        var descriptions = await manager.DescribeAsync(cancellationToken: Ct);
+
+        descriptions.Select(d => d.Key).Should().NotContain("user:token");
+        var port = descriptions.Single(d => d.Key == "app:smtp:port");
+        port.Source.Should().Be(SettingSource.Store);
+        port.ValueJson.Should().Be("587");
+        port.Version.Should().Be(1);
+        port.IsPinnable.Should().BeTrue();
+        port.IsPinned.Should().BeFalse();
+        port.ValueType.Should().Be(typeof(int));
+
+        var title = descriptions.Single(d => d.Key == "app:title");
+        title.Source.Should().Be(SettingSource.Default);
+        title.HasValue.Should().BeTrue();
+        title.ValueJson.Should().Be("\"Untitled\"");
+        title.Description.Should().Be("The title.");
+
+        var plain = descriptions.Single(d => d.Key == "app:plain");
+        plain.HasValue.Should().BeFalse();
+        plain.ValueJson.Should().BeNull();
     }
 }
-
-internal sealed record WidgetSettings {
-    public int MaxItems { get; init; }
-
-    public string Title { get; init; } = "";
-}
-
-[JsonSerializable(typeof(WidgetSettings))]
-internal sealed partial class SettingsTestJsonContext : JsonSerializerContext;

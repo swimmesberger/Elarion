@@ -101,3 +101,10 @@
  ELREQ002   | Elarion.Abstractions.Requests      | Warning  | Handler response does not match the request's self-typed marker
  ELREQ003   | Elarion.Abstractions.Requests      | Warning  | Stream handler item does not match the request's self-typed marker
  ELID001    | Elarion.Identifiers                | Warning  | Prefer Guid.CreateVersion7() over Guid.NewGuid()
+ ELSDEF001  | Elarion.Abstractions.Settings      | Error    | Invalid setting definitions container
+ ELSDEF002  | Elarion.Abstractions.Settings      | Error    | Invalid setting declaration
+ ELSDEF003  | Elarion.Abstractions.Settings      | Error    | Invalid setting key
+ ELSDEF004  | Elarion.Abstractions.Settings      | Error    | Duplicate setting key
+ ELSDEF005  | Elarion.Abstractions.Settings      | Error    | Secret setting declares a default
+ ELSDEF006  | Elarion.Abstractions.Settings      | Error    | Pinnable setting must allow the global scope
+ ELSDEF007  | Elarion.Abstractions.Settings      | Error    | Invalid setting default

@@ -46,7 +46,7 @@ public sealed class EfCoreSettingsStore<TDbContext>(
     private static readonly ConcurrentDictionary<IModel, string> UpdateSqlCache = new();
 
     /// <inheritdoc />
-    public async ValueTask<string?> GetAsync(SettingsScope scope, string key,
+    public async ValueTask<SettingEntry?> GetAsync(SettingsScope scope, string key,
         CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(key);
         var kind = scope.Kind;
@@ -55,7 +55,8 @@ public sealed class EfCoreSettingsStore<TDbContext>(
         return await dbContext.Set<Setting>()
             .AsNoTracking()
             .Where(setting => setting.Kind == kind && setting.Owner == owner && setting.Key == key)
-            .Select(setting => setting.Value)
+            .Select(setting => (SettingEntry?)new SettingEntry(
+                setting.Key, setting.Value, setting.Protection, setting.UpdatedOnUtc, setting.Version))
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
     }
@@ -69,7 +70,7 @@ public sealed class EfCoreSettingsStore<TDbContext>(
         return await dbContext.Set<Setting>()
             .AsNoTracking()
             .Where(setting => setting.Kind == kind && setting.Owner == owner)
-            .Select(setting => new SettingEntry(setting.Key, setting.Value, setting.UpdatedOnUtc, setting.Version))
+            .Select(setting => new SettingEntry(setting.Key, setting.Value, setting.Protection, setting.UpdatedOnUtc, setting.Version))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
     }
@@ -79,6 +80,7 @@ public sealed class EfCoreSettingsStore<TDbContext>(
         SettingsScope scope,
         string key,
         string? value,
+        string? protection,
         int? expectedVersion = null,
         CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(key);
@@ -99,7 +101,7 @@ public sealed class EfCoreSettingsStore<TDbContext>(
 
             var raced = false;
             try {
-                await InsertAsync(kind, owner, key, value, now, cancellationToken).ConfigureAwait(false);
+                await InsertAsync(kind, owner, key, value, protection, now, cancellationToken).ConfigureAwait(false);
             }
             catch (DbException) {
                 // A concurrent writer may have created the same key first; rethrow if it was some other failure.
@@ -130,6 +132,7 @@ public sealed class EfCoreSettingsStore<TDbContext>(
                                   && setting.Version == observedVersion)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(setting => setting.Value, value)
+                    .SetProperty(setting => setting.Protection, protection)
                     .SetProperty(setting => setting.UpdatedOnUtc, now)
                     .SetProperty(setting => setting.Version, guardedNewVersion), cancellationToken)
                 .ConfigureAwait(false);
@@ -144,20 +147,20 @@ public sealed class EfCoreSettingsStore<TDbContext>(
 
         // Unconditional (last-write-wins) path: update keyed only on identity, incrementing Version in place so two
         // nodes writing concurrently both succeed instead of one spuriously conflicting.
-        var newVersion = await UnconditionalUpdateAsync(kind, owner, key, value, now, cancellationToken)
+        var newVersion = await UnconditionalUpdateAsync(kind, owner, key, value, protection, now, cancellationToken)
             .ConfigureAwait(false);
 
         if (newVersion is null) {
             // The row was removed by a concurrent delete between the read and this update; recreate it.
             try {
-                await InsertAsync(kind, owner, key, value, now, cancellationToken).ConfigureAwait(false);
+                await InsertAsync(kind, owner, key, value, protection, now, cancellationToken).ConfigureAwait(false);
             }
             catch (DbException) {
                 // A concurrent create raced us; if the row now exists, retry the unconditional update once,
                 // otherwise the failure is genuine.
                 if (!await ExistsAsync(kind, owner, key, cancellationToken).ConfigureAwait(false)) throw;
 
-                newVersion = await UnconditionalUpdateAsync(kind, owner, key, value, now, cancellationToken)
+                newVersion = await UnconditionalUpdateAsync(kind, owner, key, value, protection, now, cancellationToken)
                                  .ConfigureAwait(false)
                              ?? 1;
                 await changeNotifier.NotifyAsync(dbContext, scope, key, cancellationToken).ConfigureAwait(false);
@@ -183,7 +186,8 @@ public sealed class EfCoreSettingsStore<TDbContext>(
     /// statement produced it.
     /// </remarks>
     private async Task<int?> UnconditionalUpdateAsync(
-        string kind, string owner, string key, string? value, DateTimeOffset now, CancellationToken cancellationToken) {
+        string kind, string owner, string key, string? value, string? protection, DateTimeOffset now,
+        CancellationToken cancellationToken) {
         var sql = UpdateSqlCache.GetOrAdd(dbContext.Model, static (_, context) => BuildUpdateSql(context), dbContext);
 
         // Same nullable-value handling as the raw INSERT path: a raw null cannot have its store type inferred
@@ -194,7 +198,12 @@ public sealed class EfCoreSettingsStore<TDbContext>(
         valueParameter.DbType = DbType.String;
         valueParameter.Value = (object?)value ?? DBNull.Value;
 
-        object[] parameters = [valueParameter, now, kind, owner, key];
+        var protectionParameter = parameterFactory.CreateParameter();
+        protectionParameter.ParameterName = "@p_protection";
+        protectionParameter.DbType = DbType.String;
+        protectionParameter.Value = (object?)protection ?? DBNull.Value;
+
+        object[] parameters = [valueParameter, protectionParameter, now, kind, owner, key];
         var versions = await dbContext.Database
             .SqlQueryRaw<int>(sql, parameters)
             .ToListAsync(cancellationToken)
@@ -232,8 +241,8 @@ public sealed class EfCoreSettingsStore<TDbContext>(
                 cancellationToken);
     }
 
-    private async Task InsertAsync(string kind, string owner, string key, string? value, DateTimeOffset now,
-        CancellationToken cancellationToken) {
+    private async Task InsertAsync(string kind, string owner, string key, string? value, string? protection,
+        DateTimeOffset now, CancellationToken cancellationToken) {
         var sql = InsertSqlCache.GetOrAdd(dbContext.Model, static (_, context) => BuildInsertSql(context), dbContext);
 
         // A raw null cannot have its store type inferred from a CLR DBNull, so the (nullable) value is passed
@@ -244,7 +253,12 @@ public sealed class EfCoreSettingsStore<TDbContext>(
         valueParameter.DbType = DbType.String;
         valueParameter.Value = (object?)value ?? DBNull.Value;
 
-        object[] parameters = [kind, owner, key, valueParameter, now, 1];
+        var protectionParameter = parameterFactory.CreateParameter();
+        protectionParameter.ParameterName = "@p_protection";
+        protectionParameter.DbType = DbType.String;
+        protectionParameter.Value = (object?)protection ?? DBNull.Value;
+
+        object[] parameters = [kind, owner, key, valueParameter, protectionParameter, now, 1];
         await dbContext.Database.ExecuteSqlRawAsync(sql, parameters, cancellationToken).ConfigureAwait(false);
     }
 
@@ -252,8 +266,9 @@ public sealed class EfCoreSettingsStore<TDbContext>(
         var (sqlHelper, table, column) = ResolveSettingTable(context);
         return $"INSERT INTO {table} (" +
                $"{column(nameof(Setting.Kind))}, {column(nameof(Setting.Owner))}, {column(nameof(Setting.Key))}, " +
-               $"{column(nameof(Setting.Value))}, {column(nameof(Setting.UpdatedOnUtc))}, {column(nameof(Setting.Version))}) " +
-               "VALUES ({0}, {1}, {2}, {3}, {4}, {5})";
+               $"{column(nameof(Setting.Value))}, {column(nameof(Setting.Protection))}, " +
+               $"{column(nameof(Setting.UpdatedOnUtc))}, {column(nameof(Setting.Version))}) " +
+               "VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6})";
     }
 
     private static string BuildUpdateSql(DbContext context) {
@@ -263,10 +278,10 @@ public sealed class EfCoreSettingsStore<TDbContext>(
         // RETURNING (PostgreSQL, SQLite) atomically reads back the version this statement wrote; the alias
         // "Value" is the column name EF's scalar SqlQueryRaw<T> materializes from.
         return $"UPDATE {table} SET " +
-               $"{column(nameof(Setting.Value))} = {{0}}, {column(nameof(Setting.UpdatedOnUtc))} = {{1}}, " +
-               $"{version} = {version} + 1 " +
-               $"WHERE {column(nameof(Setting.Kind))} = {{2}} AND {column(nameof(Setting.Owner))} = {{3}} " +
-               $"AND {column(nameof(Setting.Key))} = {{4}} " +
+               $"{column(nameof(Setting.Value))} = {{0}}, {column(nameof(Setting.Protection))} = {{1}}, " +
+               $"{column(nameof(Setting.UpdatedOnUtc))} = {{2}}, {version} = {version} + 1 " +
+               $"WHERE {column(nameof(Setting.Kind))} = {{3}} AND {column(nameof(Setting.Owner))} = {{4}} " +
+               $"AND {column(nameof(Setting.Key))} = {{5}} " +
                $"RETURNING {version} AS {sqlHelper.DelimitIdentifier("Value")}";
     }
 

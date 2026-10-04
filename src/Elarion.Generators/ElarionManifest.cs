@@ -33,6 +33,12 @@ internal static class ElarionManifest {
     public const string PermissionKey = "Elarion.Manifest.Permission.v1";
     public const string RoleKey = "Elarion.Manifest.Role.v1";
     public const string VariantKey = "Elarion.Manifest.Variant.v1";
+    public const string SettingContainerKey = "Elarion.Manifest.SettingContainer.v1";
+
+    // A [SettingDefinitions] container, carried so the host-side ElarionSettingDefinitions static aggregates
+    // setting definitions across referenced assemblies (a container that is not public cannot be referenced from
+    // another assembly, so it contributes nothing there). ADR-0078.
+    public sealed record SettingContainer(string ContainerFqn, bool IsPublic);
 
     // A [RequirePermission(resource, verb)]/[RequireRole] declared by a handler, carried so the host-side
     // ElarionPermissions static can aggregate the permission catalog across referenced module assemblies.
@@ -98,13 +104,15 @@ internal static class ElarionManifest {
         IReadOnlyList<ResourceFilter> ResourceFilters,
         IReadOnlyList<Permission> Permissions,
         IReadOnlyList<Role> Roles,
-        IReadOnlyList<Variant> Variants
+        IReadOnlyList<Variant> Variants,
+        IReadOnlyList<SettingContainer> SettingContainers
     ) {
-        public static readonly Data Empty = new([], [], [], [], [], [], [], []);
+        public static readonly Data Empty = new([], [], [], [], [], [], [], [], []);
 
         public bool HasEntries =>
             Modules.Count > 0 || ModuleEndpointHooks.Count > 0 || HttpEndpoints.Count > 0 || RpcMethods.Count > 0
-            || ResourceFilters.Count > 0 || Permissions.Count > 0 || Roles.Count > 0 || Variants.Count > 0;
+            || ResourceFilters.Count > 0 || Permissions.Count > 0 || Roles.Count > 0 || Variants.Count > 0
+            || SettingContainers.Count > 0;
 
         public static Data Combine(IEnumerable<Data> manifests) {
             var modules = new List<Module>();
@@ -115,6 +123,7 @@ internal static class ElarionManifest {
             var permissions = new List<Permission>();
             var roles = new List<Role>();
             var variants = new List<Variant>();
+            var settingContainers = new List<SettingContainer>();
 
             foreach (var manifest in manifests) {
                 modules.AddRange(manifest.Modules);
@@ -125,6 +134,7 @@ internal static class ElarionManifest {
                 permissions.AddRange(manifest.Permissions);
                 roles.AddRange(manifest.Roles);
                 variants.AddRange(manifest.Variants);
+                settingContainers.AddRange(manifest.SettingContainers);
             }
 
             modules.Sort(static (a, b) => {
@@ -185,9 +195,12 @@ internal static class ElarionManifest {
                 return string.Compare(a.Value, b.Value, StringComparison.Ordinal);
             });
 
+            settingContainers.Sort(static (a, b) =>
+                string.Compare(a.ContainerFqn, b.ContainerFqn, StringComparison.Ordinal));
+
             return new Data(
                 modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions, roles,
-                variants);
+                variants, settingContainers);
         }
     }
 
@@ -330,6 +343,21 @@ internal static class ElarionManifest {
             fields[4],
             isDefault,
             contractIsPublic);
+        return true;
+    }
+
+    public static string EncodeSettingContainer(SettingContainer container) {
+        return ElarionManifestCodec.EncodeFields(container.ContainerFqn, EncodeBool(container.IsPublic));
+    }
+
+    public static bool TryDecodeSettingContainer(string value, out SettingContainer? container) {
+        container = null;
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 2)
+            return false;
+        if (fields[0] is null || !TryDecodeBool(fields[1], out var isPublic))
+            return false;
+
+        container = new SettingContainer(fields[0]!, isPublic);
         return true;
     }
 
@@ -663,6 +691,7 @@ internal static class ElarionManifestReader {
         var permissions = new List<ElarionManifest.Permission>();
         var roles = new List<ElarionManifest.Role>();
         var variants = new List<ElarionManifest.Variant>();
+        var settingContainers = new List<ElarionManifest.SettingContainer>();
 
         var entries = AssemblyMetadataReader.ReadRawEntries(reference, ct);
 
@@ -695,12 +724,12 @@ internal static class ElarionManifestReader {
         foreach (var (key, value) in entries)
             AddEntry(
                 key, value, modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions,
-                roles, variants);
+                roles, variants, settingContainers);
 
         return new ManifestReadResult(
             CreateData(
                 modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions, roles,
-                variants),
+                variants, settingContainers),
             null);
     }
 
@@ -712,7 +741,8 @@ internal static class ElarionManifestReader {
             or ElarionManifest.ResourceFilterKey
             or ElarionManifest.PermissionKey
             or ElarionManifest.RoleKey
-            or ElarionManifest.VariantKey;
+            or ElarionManifest.VariantKey
+            or ElarionManifest.SettingContainerKey;
     }
 
     private static string DescribeReference(MetadataReference reference) {
@@ -730,12 +760,13 @@ internal static class ElarionManifestReader {
         List<ElarionManifest.ResourceFilter> resourceFilters,
         List<ElarionManifest.Permission> permissions,
         List<ElarionManifest.Role> roles,
-        List<ElarionManifest.Variant> variants) {
+        List<ElarionManifest.Variant> variants,
+        List<ElarionManifest.SettingContainer> settingContainers) {
         return ElarionManifest.Data.Combine(
         [
             new ElarionManifest.Data(
                 modules, moduleEndpointHooks, httpEndpoints, rpcMethods, resourceFilters, permissions, roles,
-                variants)
+                variants, settingContainers)
         ]);
     }
 
@@ -749,7 +780,8 @@ internal static class ElarionManifestReader {
         List<ElarionManifest.ResourceFilter> resourceFilters,
         List<ElarionManifest.Permission> permissions,
         List<ElarionManifest.Role> roles,
-        List<ElarionManifest.Variant> variants) {
+        List<ElarionManifest.Variant> variants,
+        List<ElarionManifest.SettingContainer> settingContainers) {
         switch (key) {
             case ElarionManifest.SchemaKey:
                 break;
@@ -787,6 +819,11 @@ internal static class ElarionManifestReader {
             case ElarionManifest.VariantKey:
                 if (ElarionManifest.TryDecodeVariant(value, out var variant) && variant is not null)
                     variants.Add(variant);
+                break;
+            case ElarionManifest.SettingContainerKey:
+                if (ElarionManifest.TryDecodeSettingContainer(value, out var settingContainer)
+                    && settingContainer is not null)
+                    settingContainers.Add(settingContainer);
                 break;
         }
     }

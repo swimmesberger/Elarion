@@ -1,115 +1,172 @@
 ---
 title: Settings
-description: Runtime-changeable, key/value settings with a swappable store, in-process change watching, and an AOT-clean typed accessor — global and per-user.
+description: Declared, typed runtime settings resolved through one layered resolver (default, store, configuration pin), with secrets protected at rest and an IConfiguration projection.
 ---
 
-Elarion's settings subsystem gives applications **runtime-changeable configuration**: key/value data,
-hierarchical like `IConfiguration` (but the hierarchy is *virtual*, like environment variables), that can
-change while the app runs and be **watched** for changes in-process. It is split into two swappable sides
-so each can evolve independently — see [ADR-0011](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0011-runtime-settings-subsystem.md).
+Elarion's settings subsystem gives applications **runtime-changeable configuration**. Settings are **declared
+once** as typed definitions; one **effective-value resolver** layers a default, a value stored at runtime and an
+optional deployment-configuration pin; everything that reads settings — your code, the admin describe call, the
+`IConfiguration` projection — goes through it. See
+[ADR-0078](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0078-settings-definitions-and-effective-value-resolver.md)
+(and [ADR-0011](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0011-runtime-settings-subsystem.md) for the store/change-source split).
 
 <Callout type="info">
   Two backends ship: an **in-process** store (the zero-dependency default) and an **EF Core database**
   store (`Elarion.Settings.EntityFrameworkCore`). Change notification is in-process by default; add
   `Elarion.Settings.PostgreSql` (PostgreSQL `LISTEN/NOTIFY`) to propagate changes across all nodes.
-  Consume settings natively (below), or as `IConfiguration`/`IOptionsMonitor<T>` via the
-  `Elarion.Settings.Configuration` adapter. The EF Core store writes on your injected `DbContext`, so a
-  `SetAsync`/`RemoveAsync` made inside a transaction commits or rolls back with it — see
-  [persistence & transactions](/docs/concepts/persistence-and-transactions).
+  The EF Core store writes on your injected `DbContext`, so a `SetAsync`/`ResetAsync` made inside a transaction
+  commits or rolls back with it — see [persistence & transactions](/docs/concepts/persistence-and-transactions).
 </Callout>
 
-## Two sides
+## Declaring settings
 
-- **The sink side** — where settings live and how changes are announced. `ISettingsStore` reads and
-  writes values; `ISettingsChangeSource` hands out change tokens you can watch. Both are interfaces, so
-  the backing store is swappable: the in-process default ships today; database and other backends
-  implement the same contracts.
-- **The consuming side** — how your code reads settings. The native `ISettingsManager` is an AOT-clean
-  typed accessor. Adapters to `IConfiguration` and `IOptionsMonitor<T>` ship in
-  `Elarion.Settings.Configuration`, so existing code that already speaks those abstractions consumes
-  settings without change — see
-  [Consuming as IConfiguration / IOptionsMonitor](#consuming-as-iconfiguration--ioptionsmonitor).
+A `static partial` class marked `[SettingDefinitions]` holds one `static partial SettingDefinition<T>` property
+per setting. The attribute carries the key and metadata; a generator implements the property and verifies the
+declarations at build time.
+
+```csharp
+[SettingDefinitions]
+public static partial class AppSettings {
+    [Setting("app:title", Default = "Untitled", Pinnable = true, Description = "The application title.")]
+    public static partial SettingDefinition<string> Title { get; }
+
+    [Setting("app:smtp", DefaultFactory = nameof(DefaultSmtp), Pinnable = true)]
+    public static partial SettingDefinition<SmtpSettings> Smtp { get; }
+
+    [Setting("app:smtp:password", Secret = true)]
+    public static partial SettingDefinition<string> SmtpPassword { get; }
+
+    [Setting("ui:theme", Scopes = ["global", "user"], Default = "light")]
+    public static partial SettingDefinition<string> Theme { get; }
+
+    private static SmtpSettings DefaultSmtp() => new() { Host = "localhost" };
+}
+```
+
+| `[Setting]` option | Meaning |
+| --- | --- |
+| `key` | Hierarchical key with `:` separators; unique case-insensitively (it doubles as the `IConfiguration` key). |
+| `Scopes` | Scope kinds the setting may be used in. Default: global only. |
+| `Secret` | Protected at rest, never described, never projected into `IConfiguration`. No default allowed. |
+| `Pinnable` | Deployment configuration may pin the value (global scope only). |
+| `Default` / `DefaultFactory` | A constant for scalars, or a static factory (lazy, once) for records. |
+| `Description` | Text for admin tooling. |
+
+Build-time diagnostics: `ELSDEF001` invalid container (must be a top-level `static partial` class), `ELSDEF002`
+invalid member, `ELSDEF003` invalid key, `ELSDEF004` duplicate key, `ELSDEF005` secret with a default,
+`ELSDEF006` pinnable without the global scope, `ELSDEF007` invalid default.
+
+Register the definitions on the host. `[assembly: UseElarion]` (or `[assembly: GenerateSettingDefinitionCatalog]`)
+emits `ElarionSettingDefinitions.All`, aggregating this assembly and the public containers of referenced module
+assemblies:
+
+```csharp
+builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(AppSettingsJsonContext.Default));
+builder.Services.AddElarionSettings(o => o.AddDefinitions(ElarionSettingDefinitions.All));
+
+[JsonSerializable(typeof(SmtpSettings))]
+[JsonSerializable(typeof(string))]
+internal sealed partial class AppSettingsJsonContext : JsonSerializerContext;
+```
+
+Values serialize through the canonical [`IElarionJsonSerialization`](/docs/capabilities/serialization) options —
+source-generated `JsonTypeInfo<T>`, no reflection — so the value types must be in a JSON context.
+
+An undeclared setting cannot be named: the manager takes definitions, not strings. A definition that is not
+registered, or used in a scope it does not allow, throws `InvalidOperationException` (a programming error).
 
 ## Scopes
 
-A setting belongs to a `SettingsScope`. Two scopes ship:
+A setting belongs to a `SettingsScope`: `Global` (system-wide), `User(userId)`, or the `CurrentUser`
+placeholder resolved against the ambient `ICurrentUser`. A scope is an open `(Kind, Owner)` value, so more kinds
+can be added without changing the contracts or the store schema; a definition lists the kinds it allows.
+User-scoped access **fails closed**: outside an authenticated context, `CurrentUser` throws rather than reading
+global data.
 
-- `SettingsScope.Global` — system-wide, shared by everyone.
-- `SettingsScope.User(userId)` — bound to a specific user. `SettingsScope.CurrentUser` is a placeholder
-  the accessor resolves against the ambient `ICurrentUser` at call time.
-
-A scope is an open `(Kind, Owner)` value rather than a closed enum, so additional scopes (for example
-`tenant` or `environment`) can be added later without changing the contracts or the store schema.
-
-User-scoped reads **fail closed**: outside an authenticated context (a background job, say, where there is
-no current user) requesting `CurrentUser` throws rather than silently reading global data — the same
-posture as current-user handler caching.
-
-## Keys
-
-Keys are flat strings with a `:` separator, exactly like `IConfiguration` (`"app:smtp:host"`). The
-hierarchy is virtual — the store treats keys as opaque; only prefix watching and the `IConfiguration`
-adapter interpret the tree. Watch a prefix to observe a whole subtree.
-
-## Using the typed accessor
-
-`ISettingsManager` is registered scoped by `AddElarionSettings()`. Typed access serializes through the
-canonical [`IElarionJsonSerialization`](/docs/capabilities/serialization) options — a source-generated
-`JsonTypeInfo<T>`, no reflection — so it works under trimming/AOT (the repo disables reflection-based JSON
-by default). Register your settings types in a JSON context and contribute it to the canonical serializer
-(module contexts are contributed automatically by `AddElarion`; a standalone type uses `ConfigureElarionJson`):
-
-```csharp
-// Program.cs
-builder.Services.AddElarionSettings();
-builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(AppSettingsJsonContext.Default));
-
-// A source-generated context for your settings types.
-[JsonSerializable(typeof(SmtpSettings))]
-internal sealed partial class AppSettingsJsonContext : JsonSerializerContext;
-
-public sealed record SmtpSettings {
-    public required string Host { get; init; }
-    public int Port { get; init; } = 25;
-}
-```
+## Reading and writing
 
 ```csharp
 public sealed class SendEmailHandler(ISettingsManager settings) : IHandler<SendEmail, Result<Unit>> {
     public async ValueTask<Result<Unit>> HandleAsync(SendEmail request, CancellationToken ct) {
-        // Global, typed, with a fallback when unset. Type info comes from the canonical serializer.
-        var smtp = await settings.GetAsync(
-            "app:smtp",
-            fallback: new SmtpSettings { Host = "localhost" },
-            cancellationToken: ct);
-
-        // Per-user, raw string.
-        var signature = await settings.GetStringAsync(
-            "email:signature", SettingsScope.CurrentUser, ct);
-
-        // ... send ...
+        var smtp = await settings.GetAsync(AppSettings.Smtp, cancellationToken: ct);
+        var password = await settings.GetAsync(AppSettings.SmtpPassword, cancellationToken: ct);
+        var theme = await settings.GetAsync(AppSettings.Theme, SettingsScope.CurrentUser, ct);
+        // ...
         return Result.Success();
     }
 }
+
+var write = await settings.SetAsync(AppSettings.Title, "Inbox", cancellationToken: ct);
+if (!write.IsSuccess && write.Error.Data is SettingWriteFailure { Reason: SettingWriteFailureReason.Pinned })
+    // deployment configuration pins the title; the UI should show it read-only
 ```
 
-Write with `SetAsync`/`SetStringAsync`. Concurrency is opt-in per write:
+`GetAsync` returns the **effective** value. `SetAsync` returns `Result<SettingWrite>` (the new version);
+`ResetAsync` removes the stored value so the setting reverts to its default. Failures are typed
+`AppError`s whose `Data` is a `SettingWriteFailure`: `Pinned` (a `BusinessRule` — the stored value would be
+ignored) and `ConcurrencyConflict` (a `Conflict`). Concurrency is opt-in: an unconditional write is
+last-write-wins; pass `expectedVersion` for optimistic concurrency.
 
-- **Unconditional (`expectedVersion` omitted / `null`) is last-write-wins.** The update is keyed only on the
-  setting's identity and increments the version in place, so two nodes writing the same key concurrently both
-  succeed instead of one spuriously reporting a conflict.
-- **Pass an `expectedVersion` to opt into optimistic concurrency.** A mismatch (a lost race, or a create where
-  the key already exists) returns `SettingWriteResult.ConcurrencyConflict` rather than throwing.
+## The effective-value resolver
+
+`ISettingResolver` layers, lowest to highest:
+
+1. the definition's **default** (`default(T)` when it declares none),
+2. the **store** value,
+3. a **configuration** value — only for `Pinnable` definitions in the global scope. A configuration value *pins*
+   the definition: it wins, and writes are refused.
+
+A configuration value pins only when it is present and neither empty nor whitespace, so a blank environment
+variable or an unfilled template placeholder does not freeze a setting. Set
+`o.EmptyConfigurationValuesPin = true` when an empty string is a legitimate pinned value.
+
+The configuration text of a string setting is the string itself; any other type uses its JSON form (`2525`,
+`true`, a JSON document such as `{"host":"mail"}` for a record), and bare words work for enums and string-like
+types. A malformed pinned value fails loudly on read. Only non-projection configuration providers are consulted
+(see below), so the projection cannot pin.
+
+## Secrets
+
+Definitions with `Secret = true` are protected at rest through an `ISettingValueProtector`. Add the Data
+Protection implementation:
+
+```csharp
+builder.Services.AddElarionSettingsDataProtection();   // Elarion.Settings.DataProtection
+```
+
+- The payload is bound to scope kind, owner and key (renaming a secret key requires writing it again).
+- The protection **scheme** is store metadata — `SettingEntry.Protection`, the nullable `protection` column on
+  the EF row — not a prefix inside the value. Add the column to an existing table with a migration.
+- **Fail closed:** a secret definition with no `ISettingValueProtector` registered fails host startup. There is
+  no unprotected fallback; development hosts use Data Protection's default key ring.
+- `DescribeAsync` never returns a secret's value, and secrets are never projected into `IConfiguration` (it is
+  routinely bound, logged and dumped). Read secrets through `ISettingsManager`.
+- `ISettingReprotector.ReprotectAsync(scope, prefix?)` converges legacy plaintext, rotated keys and older
+  schemes; it is idempotent and version-guarded. `AddElarionSettingsDataProtection` also runs it once at start
+  for the global scope (`ReprotectOnStartup`).
+- Persist and share the Data Protection key ring in production; a lost key ring makes protected settings
+  unrecoverable.
+
+## Describing settings for an admin UI
+
+```csharp
+IReadOnlyList<SettingDescription> all = await settings.DescribeAsync(cancellationToken: ct);
+```
+
+Each entry has `Key`, `ValueType`, `Scope`, `AllowedScopes`, `IsSecret`, `IsPinnable`, `IsPinned`, `HasValue`,
+`Source` (`Default`, `Store` or `Configuration`), `ValueJson` (never for secrets), `Version` (usable as
+`expectedVersion`), `IsUnreadable` (a stored secret that cannot be decrypted) and `Description`. Elarion ships
+no handlers for it; map it to whatever your host exposes.
 
 ## Watching for changes
 
-`ISettingsManager.Watch` (and `ISettingsChangeSource.Watch`) return an `IChangeToken` that fires when a
-matching setting changes. Tokens are one-shot — re-watch, or use `ChangeToken.OnChange`, to keep
-observing.
+`ISettingsManager.Watch(definition)` and `Watch(prefix)` return an `IChangeToken` that fires when the effective
+value may have changed: a store change, or — for pinnable global definitions — a deployment-configuration
+reload. Tokens are one-shot; re-watch or use `ChangeToken.OnChange`.
 
 ```csharp
 ChangeToken.OnChange(
-    () => settings.Watch("app:smtp"),
+    () => settings.Watch(AppSettings.Smtp),
     () => _logger.LogInformation("SMTP settings changed; reloading."));
 ```
 
@@ -171,7 +228,7 @@ builder.Services.AddElarionPostgreSqlSettingsChanges(dataSource);
 ```
 
 A write on any node now fires `IChangeToken` watchers on **every** node — `ISettingsManager.Watch`, the
-settings `IConfiguration` provider, `IOptionsMonitor<T>`, and the scheduler's `${...}` live rescheduling all
+settings `IConfiguration` projection, `IOptionsMonitor<T>`, and the scheduler's `${...}` live rescheduling all
 follow. How it works:
 
 - A hosted listener holds one dedicated `LISTEN` connection per node and fires the matching watch tokens for
@@ -191,7 +248,7 @@ The store's `DbContext` must target the same PostgreSQL database as the connecti
 to `AddElarionPostgreSqlSettingsChanges`. See
 [ADR-0024](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0024-postgres-listen-notify-settings-changes.md) for the design and alternatives.
 
-`UseElarionSettings` takes optional `tableName` and `schema` parameters to rename the table or place it in
+`UseElarionSettings` (which also maps the nullable `protection` column) takes optional `tableName` and `schema` parameters to rename the table or place it in
 a non-default schema, plus a `snakeCase` toggle (default `true`; `false` switches to PascalCase names — the
 default table becomes `ElarionSettings`): `modelBuilder.UseElarionSettings("app_settings", "app")`.
 
@@ -200,26 +257,26 @@ On a `[GenerateDbSets]` context you can skip the hand-written call: annotate the
 emits the `DbSet<Setting>` and applies the same model configuration through the EF generator's model-config
 seam (`ELSET001` if `[GenerateDbSets]` is missing).
 
-## Consuming as IConfiguration / IOptionsMonitor
+## IConfiguration projection
 
-If you prefer the standard .NET abstractions, `Elarion.Settings.Configuration` surfaces the **global**
-settings as an `IConfiguration` provider with live reload:
+`Elarion.Settings.Configuration` projects the resolver's effective **global** values into `IConfiguration` with
+live reload, for `IOptionsMonitor<T>` and the scheduler's `${...}` variable substitution:
 
 ```csharp
-// On the host builder (WebApplicationBuilder / HostApplicationBuilder):
-builder.AddElarionSettingsConfiguration();
+builder.AddElarionSettingsConfiguration();   // after the other configuration sources
 ```
 
-Now `builder.Configuration["app:title"]` reads from settings, `IOptionsMonitor<T>` reloads when a setting
-changes, and any code already reading `IConfiguration` — including the scheduler's `${...}` variable
-substitution, which re-resolves on every occurrence — picks up runtime changes automatically. Because
-`IConfiguration` is built before the DI container, the background refresher performs the initial load in its
-`StartAsync`, so it completes **before** later-registered hosted services (notably the scheduler) start —
-settings-backed `${...}` placeholders resolve to their stored values, not stale defaults. The initial load is
-time-bounded, so a slow or unavailable store cannot hang startup; on timeout the provider starts empty and
-values populate on the next change. Call `AddElarionSettingsConfiguration` **before** registering any hosted
-service that reads settings-backed configuration at start. Only the `Global` scope is surfaced; per-user
-settings are not app-wide configuration, so read those through `ISettingsManager`.
+It is a **projection, not a second source of truth**: it is derived from the resolver and the resolver never reads
+it back, so it cannot pin a definition and there is no store-versus-configuration precedence switch. Scalar
+definitions become one key; object values are flattened to `key:property` (and `key:0`, `key:1` for arrays) so a
+section binds to your options type. Secrets are never projected, values pinned by configuration are skipped (they
+are already there), and only the global scope is surfaced. Register it after your other sources so a later
+provider does not mask the projected effective value.
+
+Because `IConfiguration` is built before the DI container, the background refresher performs the initial load in
+its `StartAsync`, before later-registered hosted services (notably the scheduler) start. The load is time-bounded
+so a slow store cannot hang startup. The refresher reprojects on store changes and when the rest of the
+configuration reloads (a pin may have appeared); the provider reloads only when its data actually changed.
 
 ## Scheduler integration
 

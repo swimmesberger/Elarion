@@ -19,27 +19,28 @@ public sealed class InProcessSettingsStoreTests {
     public async Task SetThenGet_ReturnsStoredValue() {
         var store = CreateStore(out _);
 
-        await store.SetAsync(SettingsScope.Global, "app:title", "Elarion", cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "app:title", "Elarion", null, cancellationToken: Ct);
 
-        var value = await store.GetAsync(SettingsScope.Global, "app:title", Ct);
-        value.Should().Be("Elarion");
+        var entry = await store.GetAsync(SettingsScope.Global, "app:title", Ct);
+        entry.Should().NotBeNull();
+        entry!.Value.Value.Should().Be("Elarion");
     }
 
     [Fact]
     public async Task Get_ReturnsNull_WhenKeyAbsent() {
         var store = CreateStore(out _);
 
-        var value = await store.GetAsync(SettingsScope.Global, "missing", Ct);
+        var entry = await store.GetAsync(SettingsScope.Global, "missing", Ct);
 
-        value.Should().BeNull();
+        entry.Should().BeNull();
     }
 
     [Fact]
     public async Task Set_AssignsIncrementingVersions() {
         var store = CreateStore(out _);
 
-        var first = await store.SetAsync(SettingsScope.Global, "k", "1", cancellationToken: Ct);
-        var second = await store.SetAsync(SettingsScope.Global, "k", "2", cancellationToken: Ct);
+        var first = await store.SetAsync(SettingsScope.Global, "k", "1", null, cancellationToken: Ct);
+        var second = await store.SetAsync(SettingsScope.Global, "k", "2", null, cancellationToken: Ct);
 
         first.IsSuccess.Should().BeTrue();
         first.Version.Should().Be(1);
@@ -49,21 +50,21 @@ public sealed class InProcessSettingsStoreTests {
     [Fact]
     public async Task Set_WithStaleExpectedVersion_ReturnsConflict() {
         var store = CreateStore(out _);
-        await store.SetAsync(SettingsScope.Global, "k", "1", cancellationToken: Ct);
-        await store.SetAsync(SettingsScope.Global, "k", "2", cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "k", "1", null, cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "k", "2", null, cancellationToken: Ct);
 
-        var result = await store.SetAsync(SettingsScope.Global, "k", "3", 1, Ct);
+        var result = await store.SetAsync(SettingsScope.Global, "k", "3", null, 1, Ct);
 
         result.Status.Should().Be(SettingWriteStatus.ConcurrencyConflict);
-        (await store.GetAsync(SettingsScope.Global, "k", Ct)).Should().Be("2");
+        (await store.GetValueAsync(SettingsScope.Global, "k", Ct)).Should().Be("2");
     }
 
     [Fact]
     public async Task Set_WithMatchingExpectedVersion_Succeeds() {
         var store = CreateStore(out _);
-        await store.SetAsync(SettingsScope.Global, "k", "1", cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "k", "1", null, cancellationToken: Ct);
 
-        var result = await store.SetAsync(SettingsScope.Global, "k", "2", 1, Ct);
+        var result = await store.SetAsync(SettingsScope.Global, "k", "2", null, 1, Ct);
 
         result.IsSuccess.Should().BeTrue();
         result.Version.Should().Be(2);
@@ -73,10 +74,10 @@ public sealed class InProcessSettingsStoreTests {
     public async Task Set_NewKey_WithExpectedExistingVersion_ReturnsConflict() {
         var store = CreateStore(out _);
 
-        var result = await store.SetAsync(SettingsScope.Global, "k", "1", 5, Ct);
+        var result = await store.SetAsync(SettingsScope.Global, "k", "1", null, 5, Ct);
 
         result.Status.Should().Be(SettingWriteStatus.ConcurrencyConflict);
-        (await store.GetAsync(SettingsScope.Global, "k", Ct)).Should().BeNull();
+        (await store.GetValueAsync(SettingsScope.Global, "k", Ct)).Should().BeNull();
     }
 
     [Fact]
@@ -84,42 +85,42 @@ public sealed class InProcessSettingsStoreTests {
         var store = CreateStore(out _);
         var user = SettingsScope.User("u1");
 
-        await store.SetAsync(SettingsScope.Global, "theme", "light", cancellationToken: Ct);
-        await store.SetAsync(user, "theme", "dark", cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "theme", "light", null, cancellationToken: Ct);
+        await store.SetAsync(user, "theme", "dark", null, cancellationToken: Ct);
 
-        (await store.GetAsync(SettingsScope.Global, "theme", Ct)).Should().Be("light");
-        (await store.GetAsync(user, "theme", Ct)).Should().Be("dark");
+        (await store.GetValueAsync(SettingsScope.Global, "theme", Ct)).Should().Be("light");
+        (await store.GetValueAsync(user, "theme", Ct)).Should().Be("dark");
     }
 
     [Fact]
     public async Task Remove_DeletesEntry() {
         var store = CreateStore(out _);
-        await store.SetAsync(SettingsScope.Global, "k", "v", cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "k", "v", null, cancellationToken: Ct);
 
         var removed = await store.RemoveAsync(SettingsScope.Global, "k", cancellationToken: Ct);
 
         removed.Should().BeTrue();
-        (await store.GetAsync(SettingsScope.Global, "k", Ct)).Should().BeNull();
+        (await store.GetValueAsync(SettingsScope.Global, "k", Ct)).Should().BeNull();
     }
 
     [Fact]
     public async Task Remove_WithStaleVersion_DoesNotRemove() {
         var store = CreateStore(out _);
-        await store.SetAsync(SettingsScope.Global, "k", "1", cancellationToken: Ct);
-        await store.SetAsync(SettingsScope.Global, "k", "2", cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "k", "1", null, cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "k", "2", null, cancellationToken: Ct);
 
         var removed = await store.RemoveAsync(SettingsScope.Global, "k", 1, Ct);
 
         removed.Should().BeFalse();
-        (await store.GetAsync(SettingsScope.Global, "k", Ct)).Should().Be("2");
+        (await store.GetValueAsync(SettingsScope.Global, "k", Ct)).Should().Be("2");
     }
 
     [Fact]
     public async Task GetAll_ReturnsOnlyEntriesInScope() {
         var store = CreateStore(out _);
-        await store.SetAsync(SettingsScope.Global, "a", "1", cancellationToken: Ct);
-        await store.SetAsync(SettingsScope.Global, "b", "2", cancellationToken: Ct);
-        await store.SetAsync(SettingsScope.User("u1"), "c", "3", cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "a", "1", null, cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "b", "2", null, cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.User("u1"), "c", "3", null, cancellationToken: Ct);
 
         var all = await store.GetAllAsync(SettingsScope.Global, Ct);
 
@@ -130,7 +131,7 @@ public sealed class InProcessSettingsStoreTests {
     public async Task Set_PublishesChange() {
         var store = CreateStore(out var publisher);
 
-        await store.SetAsync(SettingsScope.Global, "app:title", "Elarion", cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "app:title", "Elarion", null, cancellationToken: Ct);
 
         publisher.Published.Should().ContainSingle()
             .Which.Should().Be((SettingsScope.Global, "app:title"));
@@ -139,7 +140,7 @@ public sealed class InProcessSettingsStoreTests {
     [Fact]
     public async Task Remove_PublishesChange() {
         var store = CreateStore(out var publisher);
-        await store.SetAsync(SettingsScope.Global, "k", "v", cancellationToken: Ct);
+        await store.SetAsync(SettingsScope.Global, "k", "v", null, cancellationToken: Ct);
         publisher.Published.Clear();
 
         await store.RemoveAsync(SettingsScope.Global, "k", cancellationToken: Ct);
@@ -151,7 +152,7 @@ public sealed class InProcessSettingsStoreTests {
     public async Task Set_Conflict_DoesNotPublish() {
         var store = CreateStore(out var publisher);
 
-        await store.SetAsync(SettingsScope.Global, "k", "1", 9, Ct);
+        await store.SetAsync(SettingsScope.Global, "k", "1", null, 9, Ct);
 
         publisher.Published.Should().BeEmpty();
     }

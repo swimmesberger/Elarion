@@ -33,7 +33,7 @@ public sealed class ArchiveInvoice(
         await db.SaveChangesAsync(ct);
 
         // Both of these run on the SAME connection + transaction as the delete above.
-        await settings.SetAsync($"invoice:{command.Id}:archived", "true", cancellationToken: ct);
+        await settings.SetAsync(BillingSettings.LastArchivedInvoice, command.Id, cancellationToken: ct);
         await blobs.SaveAsync(ArchiveRequest(command.Id), command.Pdf, ct);
 
         await tx.CommitAsync(ct);   // all three commit together
@@ -60,7 +60,7 @@ public sealed class ArchiveInvoice(
     public async ValueTask<Result<Unit>> HandleAsync(Command command, CancellationToken ct) {
         db.Invoices.Remove(await db.Invoices.FindAsync([command.Id], ct));
         await db.SaveChangesAsync(ct);
-        await settings.SetAsync($"invoice:{command.Id}:archived", "true", cancellationToken: ct);
+        await settings.SetAsync(BillingSettings.LastArchivedInvoice, command.Id, cancellationToken: ct);
         await blobs.SaveAsync(ArchiveRequest(command.Id), command.Pdf, ct);
         return Result.Success();   // commit; a failed Result or throw rolls all three back
     }

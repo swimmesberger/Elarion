@@ -343,8 +343,13 @@ public sealed class SetPlatformSwitch(IVariantCatalog catalog, ISettingsManager 
         if (!descriptors[0].Values.Contains(command.Value.ToLowerInvariant()))
             return AppError.Validation($"'{command.Value}' is not offered for '{command.Key}'.");
 
-        await settings.SetStringAsync(command.Key, command.Value, cancellationToken: ct);
-        return Result.Success();
+        // PlatformSwitches is a declared setting (see Settings) holding the chosen value per switch key.
+        var chosen = new Dictionary<string, string>(
+            await settings.GetAsync(AppSettings.PlatformSwitches, cancellationToken: ct)) {
+            [command.Key] = command.Value.ToLowerInvariant()
+        };
+        var write = await settings.SetAsync(AppSettings.PlatformSwitches, chosen, cancellationToken: ct);
+        return write.IsSuccess ? Result.Success() : write.Error;
     }
 }
 ```

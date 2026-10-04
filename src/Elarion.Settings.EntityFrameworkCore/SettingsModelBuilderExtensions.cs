@@ -35,6 +35,8 @@ public static class SettingsModelBuilderExtensions {
             builder.Property(setting => setting.Owner).HasColumnName(snakeCase ? "owner" : "Owner").HasMaxLength(256);
             builder.Property(setting => setting.Key).HasColumnName(snakeCase ? "key" : "Key").HasMaxLength(512);
             builder.Property(setting => setting.Value).HasColumnName(snakeCase ? "value" : "Value");
+            builder.Property(setting => setting.Protection)
+                .HasColumnName(snakeCase ? "protection" : "Protection").HasMaxLength(64);
             builder.Property(setting => setting.UpdatedOnUtc)
                 .HasColumnName(snakeCase ? "updated_on_utc" : "UpdatedOnUtc");
 

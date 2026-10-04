@@ -1,4 +1,6 @@
 using System.Threading.Channels;
+using Elarion.Abstractions.Serialization;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -7,11 +9,12 @@ using Microsoft.Extensions.Primitives;
 namespace Elarion.Settings.Configuration;
 
 /// <summary>
-/// Keeps a <see cref="SettingsConfigurationProvider"/> in sync with the global settings. Because
-/// configuration is built before the DI container, the provider starts empty; this hosted service performs
-/// the initial load once the container exists, then reloads whenever the <see cref="ISettingsChangeSource"/>
-/// signals a global change. It is store-agnostic — it reads through <see cref="ISettingsStore"/> on a fresh
-/// scope, so it works with the in-process or EF Core backend alike.
+/// Keeps a <see cref="SettingsConfigurationProvider"/> — the <c>IConfiguration</c> projection of the settings
+/// resolver — in sync with the global settings. Because configuration is built before the DI container, the
+/// provider starts empty; this hosted service performs the initial load once the container exists, then reloads
+/// whenever the <see cref="ISettingsChangeSource"/> signals a global change or the rest of the configuration
+/// reloads (a pin may have appeared or disappeared). It reads through <see cref="ISettingResolver"/> on a fresh
+/// scope, so the projection always reflects the value that takes effect, whatever the store backend.
 /// </summary>
 /// <remarks>
 /// The initial load runs in <see cref="StartAsync"/>, so it completes <b>before</b> subsequently-registered
@@ -27,6 +30,7 @@ public sealed class SettingsConfigurationRefresher(
     SettingsConfigurationProvider provider,
     IServiceScopeFactory scopeFactory,
     ISettingsChangeSource changeSource,
+    IConfiguration configuration,
     ILogger<SettingsConfigurationRefresher> logger) : BackgroundService {
     /// <summary>The bound on the blocking initial load in <see cref="StartAsync"/>, so a slow store cannot hang startup.</summary>
     public static readonly TimeSpan InitialLoadTimeout = TimeSpan.FromSeconds(30);
@@ -36,14 +40,18 @@ public sealed class SettingsConfigurationRefresher(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
 
     private IDisposable? _subscription;
+    private IDisposable? _configurationSubscription;
 
     /// <summary>Reloads the global settings into the provider. Exposed so a host can force a refresh.</summary>
     public async Task RefreshAsync(CancellationToken cancellationToken) {
         await using var scope = scopeFactory.CreateAsyncScope();
-        var store = scope.ServiceProvider.GetRequiredService<ISettingsStore>();
-        var entries = await store.GetAllAsync(SettingsScope.Global, cancellationToken).ConfigureAwait(false);
-        provider.Apply(entries);
-        logger.LogDebug("Reloaded {Count} global setting(s) into configuration.", entries.Count);
+        var resolver = scope.ServiceProvider.GetRequiredService<ISettingResolver>();
+        var serialization = scope.ServiceProvider.GetRequiredService<IElarionJsonSerialization>();
+        var resolved = await resolver.ResolveAllAsync(SettingsScope.Global, null, cancellationToken)
+            .ConfigureAwait(false);
+        var data = SettingsConfigurationProjection.Project(resolved, serialization);
+        provider.Apply(data);
+        logger.LogDebug("Projected {Count} global setting key(s) into configuration.", data.Count);
     }
 
     /// <inheritdoc />
@@ -52,6 +60,12 @@ public sealed class SettingsConfigurationRefresher(
         // the loop (it runs on the writer's thread, so it must not block).
         _subscription = ChangeToken.OnChange(
             () => changeSource.Watch(SettingsScope.Global),
+            () => _signals.Writer.TryWrite(0));
+
+        // A pin appearing or disappearing in the deployment configuration changes the effective values. The
+        // projection's own reload also lands here; the provider drops an unchanged Apply, which ends that cycle.
+        _configurationSubscription = ChangeToken.OnChange(
+            configuration.GetReloadToken,
             () => _signals.Writer.TryWrite(0));
 
         // Load synchronously (bounded) so settings-backed ${...} placeholders are populated before later hosted
@@ -91,6 +105,7 @@ public sealed class SettingsConfigurationRefresher(
     /// <inheritdoc />
     public override async Task StopAsync(CancellationToken cancellationToken) {
         _subscription?.Dispose();
+        _configurationSubscription?.Dispose();
         _signals.Writer.TryComplete();
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
     }

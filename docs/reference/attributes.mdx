@@ -905,6 +905,7 @@ All are `Elarion.Abstractions`, applied to the assembly, marker-only (no paramet
 | `[GenerateClientEventTopics]` | Per-module client-event topic registration and subscribe-time policy metadata. |
 | `[GeneratePermissionCatalog]` | The typed permission/role catalog harvested from handler requirements. |
 | `[GenerateVariantCatalog]` | The typed feature/configuration variant catalog. |
+| `[GenerateSettingDefinitionCatalog]` | The aggregated catalog of declared settings (`ElarionSettingDefinitions.All`). |
 
 ### `[GeneratePermissionCatalog]`
 
@@ -975,6 +976,28 @@ See [Client events](/docs/capabilities/events/client-events).
 ```
 
 See [Feature flags](/docs/concepts/feature-flags).
+
+### `[SettingDefinitions]` and `[Setting]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** `[SettingDefinitions]` on a top-level `static partial` class; `[Setting("key")]` on a `static partial` get-only property of type `SettingDefinition<T>` inside it
+- **Triggers:** the settings-definition generator implements each property as a `SettingDefinition<T>` built from the attribute and adds a per-class `All` list; the container is published in the Elarion manifest. Diagnostics `ELSDEF001`–`ELSDEF007` (invalid container or member, invalid key, duplicate key, secret with a default, pinnable without the global scope, invalid default).
+
+| `[Setting]` parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `key` | `string` (ctor) | — | The hierarchical key; unique case-insensitively (it doubles as the `IConfiguration` key). |
+| `Scopes` | `string[]` (init) | `["global"]` | Scope kinds the setting may be accessed in. |
+| `Secret` | `bool` (init) | `false` | Protected at rest, never described, never projected into `IConfiguration`. Cannot declare a default. |
+| `Pinnable` | `bool` (init) | `false` | Deployment configuration may pin the value. Requires the global scope. |
+| `Description` | `string?` (init) | `null` | Text for admin tooling. |
+| `Default` | `object?` (init) | none | A constant default for scalar settings. |
+| `DefaultFactory` | `string?` (init) | none | `nameof` a static parameterless method returning the value type (lazy, once). Exclusive with `Default`. |
+
+See [Settings](/docs/concepts/settings).
+
+### `[GenerateSettingDefinitionCatalog]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** assembly
+- **Triggers:** emits `ElarionSettingDefinitions.All`, the declared settings of this assembly plus the public `[SettingDefinitions]` containers of referenced assemblies (from the manifest). The host seeds the runtime catalog with `services.AddElarionSettings(o => o.AddDefinitions(ElarionSettingDefinitions.All))`. Marker only. Subsumed by `[UseElarion]`.
 
 ### `[UseElarionEntityFrameworkCore]`
 

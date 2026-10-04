@@ -60,6 +60,7 @@
       Path="src/Elarion.Settings.EntityFrameworkCore.Generators/Elarion.Settings.EntityFrameworkCore.Generators.csproj"/>
     <Project Path="src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj"/>
     <Project Path="src/Elarion.Settings.PostgreSql/Elarion.Settings.PostgreSql.csproj"/>
+    <Project Path="src/Elarion.Settings.DataProtection/Elarion.Settings.DataProtection.csproj"/>
     <Project Path="src/Elarion.Sql/Elarion.Sql.csproj"/>
     <Project Path="src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj"/>
     <Project Path="src/Elarion.Sql.PostgreSql/Elarion.Sql.PostgreSql.csproj"/>

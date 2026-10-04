@@ -76,6 +76,7 @@
     <ProjectReference Include="../../src/Elarion.Settings.EntityFrameworkCore/Elarion.Settings.EntityFrameworkCore.csproj"/>
     <ProjectReference Include="../../src/Elarion.Settings.Configuration/Elarion.Settings.Configuration.csproj"/>
     <ProjectReference Include="../../src/Elarion.Settings.PostgreSql/Elarion.Settings.PostgreSql.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Settings.DataProtection/Elarion.Settings.DataProtection.csproj"/>
     <ProjectReference Include="../../src/Elarion.Sql/Elarion.Sql.csproj"/>
     <ProjectReference Include="../../src/Elarion.Sql.PostgreSql/Elarion.Sql.PostgreSql.csproj"/>
     <ProjectReference Include="../../src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj"/>

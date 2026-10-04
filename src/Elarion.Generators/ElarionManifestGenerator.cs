@@ -136,18 +136,29 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
             .Select(static (groups, _) => groups.ToEquatableArray())
             .WithTrackingName("ManifestConfigurationVariants");
 
+        var settingContainers = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                SettingDefinitionDiscovery.DefinitionsAttributeMetadataName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (ctx, _) => SettingDefinitionDiscovery.CreateContainer(ctx))
+            .Where(static container => container is { Settings.IsEmpty: false })
+            .Select(static (container, _) => new ElarionManifest.SettingContainer(container!.Fqn, container.IsPublic))
+            .Collect()
+            .Select(static (items, _) => items.ToEquatableArray())
+            .WithTrackingName("ManifestSettingContainers");
+
         var output = modules.Combine(moduleEndpointHooks).Combine(httpEndpoints).Combine(rpcMethods)
             .Combine(resourceFilters).Combine(permissions).Combine(roles).Combine(featureVariants)
-            .Combine(configurationVariants)
+            .Combine(configurationVariants).Combine(settingContainers)
             .Select(static (source, ct) => {
-                var ((((((((moduleEntries, moduleEndpointsItems), httpEndpointEntries), rpcMethodEntries),
+                var (((((((((moduleEntries, moduleEndpointsItems), httpEndpointEntries), rpcMethodEntries),
                     resourceFilterEntries), permissionGuards), roleGuards), featureVariantGroups),
-                    configurationVariantGroups) = source;
+                    configurationVariantGroups), settingContainerEntries) = source;
                 ct.ThrowIfCancellationRequested();
                 return BuildManifestOutput(
                     moduleEntries, moduleEndpointsItems, httpEndpointEntries, rpcMethodEntries,
                     resourceFilterEntries, permissionGuards, roleGuards,
-                    featureVariantGroups, configurationVariantGroups);
+                    featureVariantGroups, configurationVariantGroups, settingContainerEntries);
             })
             .WithTrackingName("Manifest");
 
@@ -211,7 +222,8 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
         EquatableArray<PermissionDiscovery.PermissionGuard> permissionGuards,
         EquatableArray<PermissionDiscovery.RoleGuard> roleGuards,
         EquatableArray<EquatableArray<ElarionManifest.Variant>> featureVariantGroups,
-        EquatableArray<EquatableArray<ElarionManifest.Variant>> configurationVariantGroups) {
+        EquatableArray<EquatableArray<ElarionManifest.Variant>> configurationVariantGroups,
+        EquatableArray<ElarionManifest.SettingContainer> settingContainerEntries) {
         var diagnostics = new List<DiagnosticInfo>();
         foreach (var item in moduleEndpointsItems)
         foreach (var diagnostic in item.Diagnostics)
@@ -278,7 +290,7 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
 
         if (modules.Count == 0 && moduleEndpointHooks.Length == 0 && httpEndpoints.Length == 0
             && rpcMethods.Length == 0 && resourceFilters.IsEmpty && permissions.Length == 0 && roles.Length == 0
-            && variants.Length == 0)
+            && variants.Length == 0 && settingContainerEntries.IsEmpty)
             return new ManifestOutput(null, diagnostics.ToEquatableArray());
 
         var sb = new StringBuilder();
@@ -319,6 +331,10 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
 
         foreach (var variant in variants)
             AppendAssemblyMetadata(sb, ElarionManifest.VariantKey, ElarionManifest.EncodeVariant(variant));
+
+        foreach (var container in settingContainerEntries.OrderBy(static c => c.ContainerFqn, StringComparer.Ordinal))
+            AppendAssemblyMetadata(sb, ElarionManifest.SettingContainerKey,
+                ElarionManifest.EncodeSettingContainer(container));
 
         return new ManifestOutput(sb.ToString(), diagnostics.ToEquatableArray());
     }
