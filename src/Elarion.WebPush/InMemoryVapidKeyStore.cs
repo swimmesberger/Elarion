@@ -19,4 +19,25 @@ public sealed class InMemoryVapidKeyStore : IVapidKeyStore {
         ArgumentNullException.ThrowIfNull(candidate);
         return ValueTask.FromResult(Interlocked.CompareExchange(ref _keys, candidate, null) ?? candidate);
     }
+
+    /// <inheritdoc />
+    public ValueTask<VapidKeyImportResult> ImportAsync(
+        VapidKeys keys, bool overwrite = false, CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(keys);
+        keys.Validate();
+        while (true) {
+            var current = Volatile.Read(ref _keys);
+            if (current is not null && Same(current, keys)) return ValueTask.FromResult(VapidKeyImportResult.Unchanged);
+
+            if (current is not null && !overwrite) return ValueTask.FromResult(VapidKeyImportResult.Refused);
+
+            if (Interlocked.CompareExchange(ref _keys, keys, current) == current)
+                return ValueTask.FromResult(current is null ? VapidKeyImportResult.Imported : VapidKeyImportResult.Replaced);
+        }
+    }
+
+    internal static bool Same(VapidKeys left, VapidKeys right) {
+        return string.Equals(left.PublicKey, right.PublicKey, StringComparison.Ordinal)
+               && string.Equals(left.PrivateKey, right.PrivateKey, StringComparison.Ordinal);
+    }
 }

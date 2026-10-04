@@ -80,6 +80,14 @@ Keys configured through `options.PublicKey`/`PrivateKey` never touch the store, 
 `IVapidKeyStore` (a vault, a KMS) registers it after `AddElarionWebPushEntityFrameworkCore` and needs no protector.
 `VapidKeys.Generate()` mints a pair if you want to pin one from the start.
 
+To move an existing pair into the store (so browsers' current subscriptions keep working), call
+`IVapidKeyStore.ImportAsync(keys)` once, before the first push is sent. The EF store protects the private key with
+its own purpose, so you never build the protection format yourself. The result is `Imported`, `Unchanged` when the
+identical pair is already stored (safe to run on every start), or `Refused` when a **different** pair is stored —
+replacing it would invalidate every subscription, so it takes an explicit `overwrite: true` (`Replaced`). Concurrent
+nodes importing different pairs leave exactly one winner. The provider caches the pair per process, so restart other
+nodes after an overwrite.
+
 ## Sending
 
 Resolve `IWebPushSender` (scoped) wherever the trigger lives — a handler, an integration-event consumer, a

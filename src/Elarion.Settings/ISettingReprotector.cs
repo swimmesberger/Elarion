@@ -34,7 +34,7 @@ public sealed record SettingReprotectionReport {
 }
 
 /// <summary>Default <see cref="ISettingReprotector"/> over the store, the catalog and the registered protector.</summary>
-public sealed class SettingReprotector(
+internal sealed class SettingReprotector(
     ISettingsStore store,
     ISettingDefinitionCatalog catalog,
     ISettingValueProtector? protector = null) : ISettingReprotector {

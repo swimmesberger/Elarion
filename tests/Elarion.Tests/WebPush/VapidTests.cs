@@ -90,6 +90,33 @@ public sealed class VapidTests {
     }
 
     [Fact]
+    public async Task InMemoryStore_Import_StoresIsIdempotentAndRefusesADifferentPairWithoutOverwrite() {
+        var store = new InMemoryVapidKeyStore();
+        var known = VapidKeys.Generate();
+        var other = VapidKeys.Generate();
+
+        (await store.ImportAsync(known, cancellationToken: TestToken)).Should().Be(VapidKeyImportResult.Imported);
+        (await store.ImportAsync(known, cancellationToken: TestToken)).Should().Be(VapidKeyImportResult.Unchanged);
+        (await store.ImportAsync(other, cancellationToken: TestToken)).Should().Be(VapidKeyImportResult.Refused);
+        (await store.GetAsync(TestToken)).Should().Be(known);
+        (await store.ImportAsync(other, overwrite: true, TestToken)).Should().Be(VapidKeyImportResult.Replaced);
+        (await store.GetAsync(TestToken)).Should().Be(other);
+    }
+
+    [Fact]
+    public async Task InMemoryStore_Import_RejectsAMismatchedPair() {
+        var store = new InMemoryVapidKeyStore();
+        var mismatched = new VapidKeys {
+            PublicKey = VapidKeys.Generate().PublicKey, PrivateKey = VapidKeys.Generate().PrivateKey
+        };
+
+        var act = async () => await store.ImportAsync(mismatched, cancellationToken: TestToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await store.GetAsync(TestToken)).Should().BeNull();
+    }
+
+    [Fact]
     public async Task Provider_GeneratesOnceAndConcurrentNodesAdoptTheWinner() {
         var store = new InMemoryVapidKeyStore();
         var providers = Enumerable.Range(0, 8)

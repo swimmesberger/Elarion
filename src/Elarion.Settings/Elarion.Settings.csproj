@@ -15,6 +15,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Settings.Configuration"/>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Settings.Configuration"/>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Elarion.Abstractions"/>
     <Using Include="Elarion.Abstractions.Settings"/>
   </ItemGroup>

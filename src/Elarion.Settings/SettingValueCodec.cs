@@ -17,6 +17,15 @@ internal sealed class SettingValueCodec(ISettingValueProtector? protector) {
         return (current.Protect(CreatePurpose(scope, definition.Key), json), current.Scheme);
     }
 
+    /// <summary>
+    /// Protects <paramref name="json"/> with the registered protector regardless of the definition, for a rewrite
+    /// that must keep an already-protected row on its scheme.
+    /// </summary>
+    public (string Value, string Protection) Protect(SettingsScope scope, string key, string json) {
+        var current = protector ?? throw MissingProtector(key);
+        return (current.Protect(CreatePurpose(scope, key), json), current.Scheme);
+    }
+
     public (string Json, bool RequiresReprotection) Decode(SettingsScope scope, string key, SettingEntry entry,
         bool isSecret) {
         if (entry.Value is null) return ("null", false);

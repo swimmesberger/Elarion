@@ -19,7 +19,7 @@ public interface ISettingDefinitionCatalog {
 }
 
 /// <summary>Default <see cref="ISettingDefinitionCatalog"/>, built once from <see cref="SettingsOptions"/>.</summary>
-public sealed class SettingDefinitionCatalog : ISettingDefinitionCatalog {
+internal sealed class SettingDefinitionCatalog : ISettingDefinitionCatalog {
     private readonly Dictionary<string, SettingDefinition> _byKey = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Creates the catalog and validates it.</summary>

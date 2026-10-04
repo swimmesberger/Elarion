@@ -16,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.WebPush.EntityFrameworkCore"/>
     <InternalsVisibleTo Include="Elarion.Tests"/>
   </ItemGroup>
 

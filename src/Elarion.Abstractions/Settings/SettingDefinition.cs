@@ -77,6 +77,15 @@ public abstract class SettingDefinition {
     /// serializer options. <paramref name="reason"/> describes the problem (never the value) when it is not.
     /// </summary>
     public abstract bool TryValidateJson(string json, IElarionJsonSerialization serialization, out string? reason);
+
+    /// <summary>
+    /// Reads <paramref name="json"/> as <see cref="ValueType"/> and writes it back through the canonical serializer
+    /// options, so equivalent spellings (an enum's name in another case, a number with a trailing fraction) converge
+    /// on one form. <paramref name="reason"/> describes the problem (never the value) when the text is not a valid
+    /// value of the type.
+    /// </summary>
+    public abstract bool TryCanonicalizeJson(
+        string json, IElarionJsonSerialization serialization, out string? canonicalJson, out string? reason);
 }
 
 /// <summary>The typed definition of a setting whose value is <typeparamref name="T"/>.</summary>
@@ -145,6 +154,25 @@ public sealed class SettingDefinition<T> : SettingDefinition {
             return true;
         }
         catch (System.Text.Json.JsonException ex) {
+            reason = $"not a valid {typeof(T).Name}: {ex.GetType().Name} at {ex.Path ?? "$"}";
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public override bool TryCanonicalizeJson(
+        string json, IElarionJsonSerialization serialization, out string? canonicalJson, out string? reason) {
+        ArgumentNullException.ThrowIfNull(json);
+        ArgumentNullException.ThrowIfNull(serialization);
+        try {
+            var typeInfo = serialization.GetTypeInfo<T>();
+            var value = System.Text.Json.JsonSerializer.Deserialize(json, typeInfo);
+            canonicalJson = System.Text.Json.JsonSerializer.Serialize(value!, typeInfo);
+            reason = null;
+            return true;
+        }
+        catch (System.Text.Json.JsonException ex) {
+            canonicalJson = null;
             reason = $"not a valid {typeof(T).Name}: {ex.GetType().Name} at {ex.Path ?? "$"}";
             return false;
         }

@@ -8,6 +8,35 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Web Push: `IVapidKeyStore.ImportAsync(keys, overwrite: false)`** imports an existing VAPID key pair into the
+  store under the store's own protection, so an application migrating a pair from elsewhere no longer has to
+  duplicate the private protection purpose format. It returns `VapidKeyImportResult` (`Imported`, `Unchanged` for the
+  identical pair, `Replaced`, `Refused` for a different pair without `overwrite`), validates that the halves match,
+  and is race-safe across nodes (primary-key insert, one winner). **BREAKING for a custom `IVapidKeyStore`:**
+  implement the new member.
+
+### Changed
+- **BREAKING: `ISettingNormalizer` converts every definition type and reports per key.** `NormalizeAsync(scope,
+  options?, ct)` now takes `SettingNormalizationOptions` (`KeyPrefix`, `RemoveUnrecoverable`) instead of a key
+  prefix, and coerces legacy raw text for `bool`, integer/decimal/floating types, enums and string-serialized
+  scalars (not only `string`), keeping text that already is valid JSON and never guessing records or collections.
+  `SettingNormalizationReport` carries one `SettingNormalizationEntry` per key (`Rewritten`, `AlreadyCanonical`,
+  `Unreadable` + reason without the value, `Removed`, `Skipped`) with computed counts; the old `Normalized` and
+  `UnreadableKeys` members are replaced by `Rewritten` and `Where(SettingNormalizationOutcome.Unreadable)`. A secret
+  row keeps its protection state (protected rows stay on their scheme, plaintext rows stay plaintext for the
+  re-protector) and a row whose protection cannot be undone is never removed. `SettingDefinition` gains the abstract
+  `TryCanonicalizeJson` (generated definitions are unaffected). Migration: pass
+  `new SettingNormalizationOptions { KeyPrefix = prefix }`; read `report.Rewritten`/`report.Entries`.
+- **BREAKING: the settings implementation classes are internal.** `SettingPins`, `SettingNormalizer`,
+  `SettingResolver`, `SettingReprotector`, `SettingDefinitionCatalog` and `SettingsManager` were public concrete
+  classes with generic names that collided with application types (an application's own `SettingPins` could not be
+  imported next to `Elarion.Settings`). They are registered by `AddElarionSettings()` and used through their
+  interfaces (`ISettingPins`, `ISettingNormalizer`, `ISettingResolver`, `ISettingReprotector`,
+  `ISettingDefinitionCatalog`, `ISettingsManager`), which stay public. Migration: depend on the interface; to
+  decorate or replace an implementation, register your own implementation of the interface before
+  `AddElarionSettings()` (the registrations use `TryAdd`).
+
 ## [0.2.9] - 2026-10-04
 
 ### Added
