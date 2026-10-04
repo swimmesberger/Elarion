@@ -305,7 +305,9 @@ app-owned and must be rate-limited; sweep expired codes with a `[ScheduledJob]` 
 
 Don't hand-roll Web Push either — `Elarion.WebPush` owns notifying users whose app is **closed** (ADR-0076):
 `AddElarionWebPushEntityFrameworkCore<TDbContext>(o => o.Subject = "mailto:…")` + `[GenerateElarionWebPush]`
-on the context, `app.MapElarionWebPush()` (or three `[Handler]`s delegating to `WebPushSubscriptionService`),
+on the context, three `[Handler]`s delegating to `WebPushSubscriptionService` (subscribe, unsubscribe, public key — so your
+pipeline applies) that `app.MapElarionWebPush()` binds over HTTP (or call them from JSON-RPC), plus `AddElarionSettingsDataProtection()`
+(the VAPID private key is protected at rest),
 then `IWebPushSender.SendToUsersAsync(userIds, new WebPushMessage { Title, Body, Url, Tag }, ct)` from the
 consumer/job that owns the trigger — dead subscriptions are cleaned up for you. Browser side:
 `@swimmesberger/elarion-webpush` (`pushAvailability()`, `enablePush(api)` straight from the click handler,

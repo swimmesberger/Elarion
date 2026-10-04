@@ -105,6 +105,21 @@ convenience; handlers delegating to the service are the first-class path for app
 `[Handler]`s, so the operations appear in the JSON-RPC schema and generated client. The framework does not ship
 `[Handler]`s itself: module ownership, naming, and authorization of handlers are application decisions.
 
+*Amended — the endpoints dispatch to the application's handlers.* `MapElarionWebPush()` first called the service
+directly from three hand-built request delegates. Those bypassed the handler pipeline, so an application's global
+authorization rules, realm/tenant rules, audit and rate-limiting decorators did not apply to subscribe and
+unsubscribe — the only operations of the application that skipped them. The framework still cannot ship
+decorated `[Handler]`s (the pipeline is composed by the generator inside the application's own assembly, and
+module ownership, naming and authorization are application decisions), so the endpoints became **HTTP bindings
+for handlers the application declares**: each call resolves the registered
+`IHandler<PushSubscriptionRequest, Result<Unit>>`, `IHandler<WebPushUnsubscribeRequest, Result<Unit>>` and
+`IHandler<WebPushPublicKeyRequest, Result<WebPushPublicKeyResponse>>` and invokes it, a binding failure is
+answered by the handler's `IHandlerGate` (401/403 before 400, ADR-0071's rule), and mapping fails at startup
+naming the handlers that are missing. The request/response types moved into `Elarion.WebPush` so the handlers
+and the endpoints share them. Rejected: a per-endpoint authorization hook (a second, weaker rule engine that
+audit and rate limiting would still miss), and an undecorated default handler registered by
+`AddElarionWebPush` (the silent bypass this amendment removes).
+
 ### The browser transport is pluggable
 
 The npm helpers take a three-method `WebPushServerApi` (`getPublicKey`, `subscribe`, `unsubscribe`).

@@ -67,6 +67,16 @@ minor releases may include breaking changes.
   history row. A migration with a `suppressTransaction: true` raw SQL operation makes its step non-transactional.
 
 ### Changed
+- **BREAKING: `MapElarionWebPush()` dispatches to application handlers instead of bypassing the handler pipeline.**
+  The endpoints called `WebPushSubscriptionService` directly, so global authorization rules, realm/tenant rules,
+  audit and rate-limiting decorators did not apply to subscribe/unsubscribe. They are now HTTP bindings for three
+  handlers the application declares — `IHandler<PushSubscriptionRequest>`, `IHandler<WebPushUnsubscribeRequest>`,
+  `IHandler<WebPushPublicKeyRequest, Result<WebPushPublicKeyResponse>>` (thin handlers delegating to
+  `WebPushSubscriptionService`, shown on the capability page); a malformed body is answered by the handler's
+  admission gate (401/403) before 400, and `MapElarionWebPush` throws at startup naming a missing handler. The
+  wire shapes are unchanged; `WebPushUnsubscribeRequest` and `WebPushPublicKeyResponse` are now public types in
+  `Elarion.WebPush`, and `PushSubscriptionRequest` gains a non-wire `UserAgent` that the endpoint fills from the
+  header. Migration: declare the three handlers before calling `MapElarionWebPush()`.
 - **BREAKING: `IAuthorizer` gains `AuthorizeGateAsync(requirements, ct)`**, the payload-independent half of
   `AuthorizeAsync` (anonymous opt-out, authentication, permissions, roles, claims). A custom or decorating
   authorizer must implement it; a decorator forwards to its inner `ClaimsAuthorizer`.
