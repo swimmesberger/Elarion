@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-10-04
+
 ### Added
 - **`Elarion.Settings.DataProtection`: secret settings protected at rest.** Definitions marked `Secret = true` are
   encrypted through `ISettingValueProtector` (the scheme is stored as entry metadata, the payload is bound to
@@ -1794,7 +1796,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.7...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.8
 [0.2.7]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.7
 [0.2.6]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.6
 [0.2.5]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.5
