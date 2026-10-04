@@ -31,7 +31,7 @@ public interface ISettingPins {
 }
 
 /// <summary>Default <see cref="ISettingPins"/>.</summary>
-public sealed class SettingPins(
+internal sealed class SettingPins(
     ISettingDefinitionCatalog catalog, SettingsOptions options, IConfiguration? configuration = null) : ISettingPins {
     /// <inheritdoc />
     public bool IsPinned(SettingDefinition definition, SettingsScope scope) {

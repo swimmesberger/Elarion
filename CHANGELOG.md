@@ -8,6 +8,16 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING: the settings implementation classes are internal.** `SettingPins`, `SettingNormalizer`,
+  `SettingResolver`, `SettingReprotector`, `SettingDefinitionCatalog` and `SettingsManager` were public concrete
+  classes with generic names that collided with application types (an application's own `SettingPins` could not be
+  imported next to `Elarion.Settings`). They are registered by `AddElarionSettings()` and used through their
+  interfaces (`ISettingPins`, `ISettingNormalizer`, `ISettingResolver`, `ISettingReprotector`,
+  `ISettingDefinitionCatalog`, `ISettingsManager`), which stay public. Migration: depend on the interface; to
+  decorate or replace an implementation, register your own implementation of the interface before
+  `AddElarionSettings()` (the registrations use `TryAdd`).
+
 ## [0.2.9] - 2026-10-04
 
 ### Added

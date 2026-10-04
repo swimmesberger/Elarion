@@ -45,7 +45,7 @@ public sealed record SettingNormalizationReport {
 }
 
 /// <summary>Default <see cref="ISettingNormalizer"/> over the store, the catalog and the registered protector.</summary>
-public sealed class SettingNormalizer(
+internal sealed class SettingNormalizer(
     ISettingsStore store,
     ISettingDefinitionCatalog catalog,
     IElarionJsonSerialization serialization,

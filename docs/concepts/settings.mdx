@@ -134,6 +134,8 @@ The pin check itself is `ISettingPins` — `IsPinned(definition, scope)`, `GetPi
 **singleton** that needs only the catalog and `IConfiguration`, never the store. Inject it where the scoped
 resolver is not available (a singleton, middleware, options setup).
 
+The resolver stack (`ISettingResolver`, `ISettingPins`, `ISettingsManager`, `ISettingNormalizer`, `ISettingReprotector`, `ISettingDefinitionCatalog`) is exposed as interfaces only; the implementations are internal so their names never collide with application types. Replace one by registering your own implementation of the interface before `AddElarionSettings()`.
+
 ### Unreadable and legacy rows
 
 A stored row that cannot be read — a secret that cannot be decrypted, or a value that is not valid for the

@@ -12,7 +12,7 @@ namespace Elarion.Settings;
 /// current request's <c>ICurrentUser</c>; the user is resolved lazily through <see cref="IServiceProvider"/>
 /// (mirroring <c>HybridHandlerCache</c>) so global-only usage does not require an <c>ICurrentUser</c> registration.
 /// </summary>
-public sealed class SettingsManager(
+internal sealed class SettingsManager(
     ISettingDefinitionCatalog catalog,
     ISettingResolver resolver,
     ISettingPins pins,

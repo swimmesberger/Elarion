@@ -33,7 +33,7 @@ public interface ISettingResolver {
 }
 
 /// <summary>Default <see cref="ISettingResolver"/>.</summary>
-public sealed class SettingResolver : ISettingResolver {
+internal sealed class SettingResolver : ISettingResolver {
     private readonly ISettingDefinitionCatalog _catalog;
     private readonly SettingValueCodec _codec;
     private readonly ISettingPins _pins;
