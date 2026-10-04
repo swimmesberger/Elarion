@@ -58,8 +58,8 @@ value that takes effect.
    whitespace (a blank environment variable or unfilled template must not freeze a setting to `""`).
    `ISettingsManager` reads *through* the resolver, so code never sees a value other than the one that takes
    effect. A write or reset of a pinned definition is refused: `Result<SettingWrite>.Failure` with an `AppError`
-   (`BusinessRule`) whose data is `SettingWriteFailure(key, Pinned)`; a lost optimistic race is `Conflict` with
-   `ConcurrencyConflict`. The configuration layer reads the configuration root's providers but skips
+   (`BusinessRule`, code `settings.pinned`) whose data is `SettingWriteFailure(key)`; a lost optimistic race is
+   `Conflict` with code `settings.concurrency_conflict` ([ADR-0080](0080-errors-are-a-declared-contract-with-a-stable-code.md)). The configuration layer reads the configuration root's providers but skips
    *projection* providers (`ISettingsProjectionProvider`), so the projection cannot feed back into the value it
    is derived from. Configuration text is mapped to canonical JSON: a string setting's value is the string, any
    other type uses its JSON form (bare words accepted for enums and string-like types); a malformed pinned value

@@ -97,14 +97,17 @@ public sealed class SendEmailHandler(ISettingsManager settings) : IHandler<SendE
 }
 
 var write = await settings.SetAsync(AppSettings.Title, "Inbox", cancellationToken: ct);
-if (!write.IsSuccess && write.Error.Data is SettingWriteFailure { Reason: SettingWriteFailureReason.Pinned })
+if (!write.IsSuccess && write.Error.Code == SettingErrorCodes.Pinned)
     // deployment configuration pins the title; the UI should show it read-only
 ```
 
 `GetAsync` returns the **effective** value. `SetAsync` returns `Result<SettingWrite>` (the new version);
-`ResetAsync` removes the stored value so the setting reverts to its default. Failures are typed
-`AppError`s whose `Data` is a `SettingWriteFailure`: `Pinned` (a `BusinessRule` — the stored value would be
-ignored) and `ConcurrencyConflict` (a `Conflict`). Concurrency is opt-in: an unconditional write is
+`ResetAsync` removes the stored value so the setting reverts to its default. Failures are `AppError`s with a stable
+code ([ADR-0080](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md))
+and a `SettingWriteFailure(Key)` payload: `settings.pinned` (`SettingErrorCodes.Pinned`, a `BusinessRule` — the
+stored value would be ignored) and `settings.concurrency_conflict` (`SettingErrorCodes.ConcurrencyConflict`, a
+`Conflict`). A handler that returns them declares them, so the schema and the generated client type them:
+`[ProducesError(SettingErrorCodes.Pinned, ErrorKind.BusinessRule, typeof(SettingWriteFailure))]`. Concurrency is opt-in: an unconditional write is
 last-write-wins; pass `expectedVersion` for optimistic concurrency.
 
 ## The effective-value resolver

@@ -13,7 +13,7 @@ namespace Elarion.Settings;
 /// setting cannot be named at compile time; a definition that was not registered, or one used in a scope it does
 /// not allow, is a programming error and throws <see cref="InvalidOperationException"/>. Runtime conditions are
 /// <c>Result</c> failures: a write to a pinned definition and a lost optimistic race return an
-/// <see cref="AppError"/> whose data is a <see cref="SettingWriteFailure"/>.
+/// <see cref="AppError"/> whose code is <see cref="SettingErrorCodes.Pinned"/> or <see cref="SettingErrorCodes.ConcurrencyConflict"/> and whose data is a <see cref="SettingWriteFailure"/>.
 /// <para>
 /// Scope resolution: an omitted scope means <see cref="SettingsScope.Global"/>. Passing
 /// <see cref="SettingsScope.CurrentUser"/> resolves the owner from <c>ICurrentUser</c> and <b>fails closed</b>
@@ -30,7 +30,7 @@ public interface ISettingsManager {
 
     /// <summary>
     /// Writes the value to the store (protected at rest for a secret definition). Refused with a
-    /// <see cref="SettingWriteFailureReason.Pinned"/> failure while deployment configuration pins the definition.
+    /// <see cref="SettingErrorCodes.Pinned"/> failure while deployment configuration pins the definition.
     /// </summary>
     ValueTask<Result<SettingWrite>> SetAsync<T>(
         SettingDefinition<T> definition,

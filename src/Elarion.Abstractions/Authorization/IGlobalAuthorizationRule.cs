@@ -11,7 +11,7 @@ namespace Elarion.Abstractions.Authorization;
 /// Registered rules run <b>in registration order</b>, after the authenticated gate and <b>before</b> the declared
 /// permission, role, claim, policy, and resource checks. The first rule returning a non-null
 /// <see cref="AppError"/> denies, and that error is returned to the caller <b>unchanged</b> — a rule that must not
-/// disclose the existence of a resource returns <see cref="AppError.NotFound(string, string, object)"/>, one that states the
+/// disclose the existence of a resource returns <see cref="AppError.NotFound"/>, one that states the
 /// denial plainly returns <see cref="AppError.Forbidden(string, string, object)"/>. Returning <see langword="null"/> passes.
 /// </para>
 /// <para>

@@ -197,7 +197,7 @@ dispatcher translates `AppError.Kind` into a JSON-RPC error code through the def
 
 Every error, application or protocol, carries `error.data = { "code": "<stable code>", "data": <typed payload> }`
 (`data` omitted when the error has no payload); the numeric `error.code` is only the coarse kind. Handlers declare
-the codes and payloads they produce with [`[ProducesError]`](/docs/reference/result-and-errors#producserror--the-declared-error-contract),
+the codes and payloads they produce with [`[ProducesError]`](/docs/reference/result-and-errors#produceserror--the-declared-error-contract),
 and the schema export lists them per method.
 
 ## In this section

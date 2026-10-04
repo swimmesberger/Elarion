@@ -92,19 +92,23 @@ public sealed record SettingDescription {
     public string? Description { get; init; }
 }
 
-/// <summary>Why a settings write was refused.</summary>
-public enum SettingWriteFailureReason {
-    /// <summary>The expected version did not match the stored version.</summary>
-    ConcurrencyConflict,
+/// <summary>
+/// The stable error codes of a refused settings write (ADR-0080). A handler that returns the failure of
+/// <see cref="ISettingsManager.SetAsync{T}"/> or <see cref="ISettingsManager.ResetAsync"/> declares the codes it can
+/// surface with <see cref="ProducesErrorAttribute"/>, typically
+/// <c>[ProducesError(SettingErrorCodes.Pinned, ErrorKind.BusinessRule, typeof(SettingWriteFailure))]</c>.
+/// </summary>
+public static class SettingErrorCodes {
+    /// <summary>Deployment configuration pins the definition, so a stored value would be ignored.</summary>
+    public const string Pinned = "settings.pinned";
 
-    /// <summary>Deployment configuration pins the definition, so the stored value would be ignored.</summary>
-    Pinned
+    /// <summary>The expected version did not match the stored version (a lost optimistic race).</summary>
+    public const string ConcurrencyConflict = "settings.concurrency_conflict";
 }
 
-/// <summary>The data carried by the <see cref="AppError"/> of a refused settings write.</summary>
+/// <summary>The data carried by the <see cref="AppError"/> of a refused settings write; the error code says why.</summary>
 /// <param name="Key">The setting key.</param>
-/// <param name="Reason">Why the write was refused.</param>
-public sealed record SettingWriteFailure(string Key, SettingWriteFailureReason Reason);
+public sealed record SettingWriteFailure(string Key);
 
 /// <summary>The success value of a settings write.</summary>
 /// <param name="Version">The new version of the store entry.</param>

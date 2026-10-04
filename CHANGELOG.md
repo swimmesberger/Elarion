@@ -48,8 +48,8 @@ minor releases may include breaking changes.
   `ResetAsync`, `DescribeAsync`, `Watch(definition)`; the string-key `GetAsync(key, fallback)`, `GetStringAsync`,
   `SetStringAsync`, `RemoveAsync` and `SettingWriteResult` on the manager are gone. Reads layer default < store <
   configuration (configuration only for `Pinnable` global definitions; an empty value does not pin unless
-  `EmptyConfigurationValuesPin`), and a write to a pinned definition is refused with a `SettingWriteFailure`
-  (`Pinned`/`ConcurrencyConflict`). Undeclared or unregistered definitions and disallowed scopes throw.
+  `EmptyConfigurationValuesPin`), and a write to a pinned definition is refused with an `AppError` coded
+  `settings.pinned` / `settings.concurrency_conflict` (`SettingErrorCodes`) carrying a `SettingWriteFailure`. Undeclared or unregistered definitions and disallowed scopes throw.
   Migration: declare each key you used, replace string calls with the definition, handle the `Result`.
 - **BREAKING: `ISettingsStore` carries protection metadata.** `GetAsync` returns `SettingEntry?`, `SetAsync` takes
   a `protection` argument, and `SettingEntry` gains `Protection`. The EF `Setting` row gains a nullable

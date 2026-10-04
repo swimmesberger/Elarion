@@ -91,9 +91,11 @@ public sealed class SettingsResolverTests {
 
         write.IsSuccess.Should().BeFalse();
         write.Error.Kind.Should().Be(ErrorKind.BusinessRule);
-        write.Error.Data.Should().Be(new SettingWriteFailure("app:title", SettingWriteFailureReason.Pinned));
+        write.Error.Code.Should().Be(SettingErrorCodes.Pinned);
+        write.Error.Data.Should().Be(new SettingWriteFailure("app:title"));
         reset.IsSuccess.Should().BeFalse();
-        reset.Error.Data.Should().Be(new SettingWriteFailure("app:title", SettingWriteFailureReason.Pinned));
+        reset.Error.Code.Should().Be(SettingErrorCodes.Pinned);
+        reset.Error.Data.Should().Be(new SettingWriteFailure("app:title"));
         (await store.GetAsync(SettingsScope.Global, "app:title", Ct)).Should().BeNull();
     }
 

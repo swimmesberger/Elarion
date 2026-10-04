@@ -59,7 +59,8 @@ public sealed class SettingsManagerTests {
 
         result.IsSuccess.Should().BeFalse();
         result.Error.Kind.Should().Be(ErrorKind.Conflict);
-        result.Error.Data.Should().Be(new SettingWriteFailure("app:title", SettingWriteFailureReason.ConcurrencyConflict));
+        result.Error.Code.Should().Be(SettingErrorCodes.ConcurrencyConflict);
+        result.Error.Data.Should().Be(new SettingWriteFailure("app:title"));
         (await manager.GetAsync(TestSettings.Title, cancellationToken: Ct)).Should().Be("a");
     }
 

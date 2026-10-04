@@ -146,20 +146,20 @@ public sealed class SettingsManager(
 
         if (!resolver.IsPinned(definition, scope)) return null;
 
-        return Result<SettingWrite>.Failure(new AppError {
-            Kind = ErrorKind.BusinessRule,
-            Message = $"Setting '{definition.Key}' is pinned by deployment configuration and cannot be changed " +
-                      "at runtime.",
-            Data = new SettingWriteFailure(definition.Key, SettingWriteFailureReason.Pinned)
-        });
+        return Result<SettingWrite>.Failure(AppError.Create(
+            ErrorKind.BusinessRule,
+            $"Setting '{definition.Key}' is pinned by deployment configuration and cannot be changed " +
+            "at runtime.",
+            SettingErrorCodes.Pinned,
+            new SettingWriteFailure(definition.Key)));
     }
 
     private static Result<SettingWrite> ConcurrencyConflict(SettingDefinition definition) {
-        return Result<SettingWrite>.Failure(new AppError {
-            Kind = ErrorKind.Conflict,
-            Message = $"Setting '{definition.Key}' was changed concurrently; its version no longer matches.",
-            Data = new SettingWriteFailure(definition.Key, SettingWriteFailureReason.ConcurrencyConflict)
-        });
+        return Result<SettingWrite>.Failure(AppError.Create(
+            ErrorKind.Conflict,
+            $"Setting '{definition.Key}' was changed concurrently; its version no longer matches.",
+            SettingErrorCodes.ConcurrencyConflict,
+            new SettingWriteFailure(definition.Key)));
     }
 
     private SettingsScope ResolveScope(SettingsScope? scope) {

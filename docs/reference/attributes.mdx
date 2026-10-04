@@ -111,7 +111,7 @@ See [Telemetry](/docs/capabilities/telemetry) and [Connections — the low-alloc
 ### `[ProducesError]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class (repeatable)
-- **Triggers:** declares a failure the handler can produce — a stable error code, its `ErrorKind`, and an optional typed payload. The generator publishes the declarations (plus the validation, authorization, feature-gate and idempotency failures the framework adds) with the operation; the schema export lists them under the method's `errors`, and the TypeScript client types `error.code`/`error.data` per method. Constructors: `(ErrorKind)`, `(ErrorKind, Type)`, `(string code, ErrorKind)`, `(string code, ErrorKind, Type)`. See [Result & error model](/docs/reference/result-and-errors#producserror--the-declared-error-contract).
+- **Triggers:** declares a failure the handler can produce — a stable error code, its `ErrorKind`, and an optional typed payload. The generator publishes the declarations (plus the validation, authorization, feature-gate and idempotency failures the framework adds) with the operation; the schema export lists them under the method's `errors`, and the TypeScript client types `error.code`/`error.data` per method. Constructors: `(ErrorKind)`, `(ErrorKind, Type)`, `(string code, ErrorKind)`, `(string code, ErrorKind, Type)`. See [Result & error model](/docs/reference/result-and-errors#produceserror--the-declared-error-contract).
 
 ### `[McpHandler]`
 
@@ -902,7 +902,7 @@ See [Cross-module communication](/docs/concepts/cross-module-communication).
 ### `[UseElarion]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** assembly
-- **Triggers:** enables the framework-owned assembly generators at once — handlers, services, scheduled jobs, event consumers, resilience policies, actor facades/registration, authorization-policy registration, client-event topics, the permission catalog, and the variant catalog. Application-owned policy attributes such as pipeline defaults remain explicit, as do host/provider triggers such as `[GenerateModuleBootstrapper]`, `[GenerateDbSets]`, and `[UseElarionSql]`. Marker only — no parameters.
+- **Triggers:** enables the framework-owned assembly generators at once — handlers, services, scheduled jobs, event consumers, resilience policies, actor facades/registration, authorization-policy registration, client-event topics, the permission catalog, the variant catalog, the feature-flag registry, and the setting-definition catalog. Application-owned policy attributes such as pipeline defaults remain explicit, as do host/provider triggers such as `[GenerateModuleBootstrapper]`, `[GenerateDbSets]`, and `[UseElarionSql]`. Marker only — no parameters.
 
 ### Individual generation triggers
 
@@ -920,6 +920,7 @@ All are `Elarion.Abstractions`, applied to the assembly, marker-only (no paramet
 | `[GenerateClientEventTopics]` | Per-module client-event topic registration and subscribe-time policy metadata. |
 | `[GeneratePermissionCatalog]` | The typed permission/role catalog harvested from handler requirements. |
 | `[GenerateVariantCatalog]` | The typed feature/configuration variant catalog. |
+| `[GenerateFeatureFlags]` | The typed `ElarionFeatureFlags` registry and per-module flag registration (ADR-0079). |
 | `[GenerateSettingDefinitionCatalog]` | The aggregated catalog of declared settings (`ElarionSettingDefinitions.All`). |
 
 ### `[GeneratePermissionCatalog]`

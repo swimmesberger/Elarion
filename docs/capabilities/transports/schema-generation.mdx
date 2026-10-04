@@ -15,7 +15,7 @@ pre-validate requests against exactly what the server enforces.
 
 Each method also lists its **declared error contract** (ADR-0080) under `errors`: stable code → `kind` (the kind's
 default code such as `not_found`) and, when the error carries a typed payload, the `data` schema. Handlers declare
-errors with [`[ProducesError]`](/docs/reference/result-and-errors#producserror--the-declared-error-contract); the
+errors with [`[ProducesError]`](/docs/reference/result-and-errors#produceserror--the-declared-error-contract); the
 framework adds validation, authorization, feature-gate and idempotency failures where they are statically known. The
 block is omitted for a method that declares none.
 
