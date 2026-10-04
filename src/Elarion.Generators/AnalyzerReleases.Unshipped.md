@@ -61,6 +61,9 @@
  ELRPC001   | Elarion.JsonRpc                    | Warning  | RPC method handler is not in any module
  ELRPC002   | Elarion.JsonRpc                    | Warning  | RPC handler has no resolvable request/response shape
  ELRPC003   | Elarion.JsonRpc                    | Warning  | Duplicate operation name across the handler bus
+ ELRPC004   | Elarion.JsonRpc                    | Error    | Response member is omitted from the wire contract
+ ELERR001   | Elarion.Errors                     | Error    | Invalid error code
+ ELERR002   | Elarion.Errors                     | Error    | Conflicting error declaration
  ELRES001   | Elarion.Abstractions.Resilience    | Error    | Invalid resilience policy
  ELRES002   | Elarion.Abstractions.Resilience    | Error    | Duplicate resilience policy name
  ELCACHE001 | Elarion.Abstractions.Caching       | Error    | Handler cannot be both cacheable and cache-invalidating

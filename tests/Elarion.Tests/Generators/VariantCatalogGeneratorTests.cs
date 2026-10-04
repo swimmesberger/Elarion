@@ -122,7 +122,7 @@ public sealed class VariantCatalogGeneratorTests {
         // A referenced assembly advertising one public and one internal contract's switch via its manifest.
         var producerSource =
             $$"""
-              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "1")]
+              [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "2")]
               [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Variant.v1", "{{Entry("Sample.Platform", "Email:Backend", "global::Sample.Platform.IEmailSender", "smtp", true, true)}}")]
               [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Variant.v1", "{{Entry("Sample.Platform", "Email:Backend", "global::Sample.Platform.IEmailSender", "office365", false, true)}}")]
               [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Variant.v1", "{{Entry("Sample.Platform", "Search:Engine", "global::Sample.Platform.ISearchEngine", "lucene", true, false)}}")]

@@ -166,7 +166,7 @@ public static class JsonRpcEndpoint {
             await JsonSerializer.SerializeAsync(
                 ctx.Response.Body,
                 JsonRpcResponse.FromError((string?)null,
-                    new RpcError { Code = -32600, Message = $"Batch too large. Max {options.MaxBatchSize}" }),
+                    RpcError.InvalidRequest($"Batch too large. Max {options.MaxBatchSize}")),
                 jsonOptions,
                 ctx.RequestAborted);
             return;
@@ -274,13 +274,10 @@ public static class JsonRpcEndpoint {
         // this endpoint uses (staying AOT-strict), and clients that speak JSON-RPC get a shape they can parse.
         ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
         ctx.Response.ContentType = "application/json";
-        var error = new RpcError {
-            Code = -32600,
-            Message =
+        var error = RpcError.InvalidRequest(
                 $"The HTTP {Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader} header is not allowed on a JSON-RPC batch: " +
                 "it applies to the whole request and cannot key the batch's distinct operations. Carry a per-item key at each " +
-                $"request's params._meta.{Abstractions.Idempotency.IdempotencyKeyNames.MetaKey} instead."
-        };
+                $"request's params._meta.{Abstractions.Idempotency.IdempotencyKeyNames.MetaKey} instead.");
         await JsonSerializer.SerializeAsync(
             ctx.Response.Body, JsonRpcResponse.FromError((string?)null, error), jsonOptions, ctx.RequestAborted);
     }

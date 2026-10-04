@@ -24,8 +24,17 @@ public sealed class HandlerDispatcher {
     /// <summary>Registers a handler under <paramref name="name"/>. Call before <see cref="Freeze"/>.</summary>
     /// <typeparam name="TRequest">The handler request type.</typeparam>
     /// <typeparam name="TResponse">The handler success value type.</typeparam>
+    /// <param name="name">The operation name.</param>
+    /// <param name="transports">The transports that expose the operation.</param>
+    /// <param name="idempotent">Whether the handler is <c>[Idempotent]</c>.</param>
+    /// <param name="errors">
+    /// The failures the operation declares; <see langword="null"/> for a hand-wired route without a contract.
+    /// </param>
     public HandlerDispatcher Map<TRequest, TResponse>(
-        string name, HandlerTransports transports = HandlerTransports.All, bool idempotent = false)
+        string name,
+        HandlerTransports transports = HandlerTransports.All,
+        bool idempotent = false,
+        IReadOnlyList<ErrorContract>? errors = null)
         where TRequest : class {
         if (_frozen is not null)
             throw new InvalidOperationException("Cannot register handlers after Freeze() has been called.");
@@ -33,6 +42,7 @@ public sealed class HandlerDispatcher {
             throw new InvalidOperationException(
                 $"An operation named '{name}' is already registered; operation names must be unique across the bus.");
 
+        var contract = ErrorContractCheck.Create(name, errors);
         _building[name] = new HandlerRoute(
             name,
             typeof(TRequest),
@@ -41,11 +51,13 @@ public sealed class HandlerDispatcher {
             async (request, serviceProvider, ct) => {
                 var handler = serviceProvider.GetRequiredService<IHandler<TRequest, Result<TResponse>>>();
                 var result = await handler.HandleAsync((TRequest)request, ct).ConfigureAwait(false);
-                return result.IsSuccess
-                    ? Result<object>.Success(result.Value!)
-                    : Result<object>.Failure(result.Error);
+                if (result.IsSuccess) return Result<object>.Success(result.Value!);
+
+                contract?.Verify(result.Error, serviceProvider);
+                return Result<object>.Failure(result.Error);
             },
-            idempotent);
+            idempotent,
+            errors);
 
         return this;
     }
@@ -59,7 +71,8 @@ public sealed class HandlerDispatcher {
         string name,
         Func<TRequest, IServiceProvider, CancellationToken, ValueTask<Result<TResponse>>> handler,
         HandlerTransports transports = HandlerTransports.All,
-        bool idempotent = false)
+        bool idempotent = false,
+        IReadOnlyList<ErrorContract>? errors = null)
         where TRequest : class {
         if (_frozen is not null)
             throw new InvalidOperationException("Cannot register handlers after Freeze() has been called.");
@@ -67,6 +80,7 @@ public sealed class HandlerDispatcher {
             throw new InvalidOperationException(
                 $"An operation named '{name}' is already registered; operation names must be unique across the bus.");
 
+        var contract = ErrorContractCheck.Create(name, errors);
         _building[name] = new HandlerRoute(
             name,
             typeof(TRequest),
@@ -74,11 +88,13 @@ public sealed class HandlerDispatcher {
             transports,
             async (request, serviceProvider, ct) => {
                 var result = await handler((TRequest)request, serviceProvider, ct).ConfigureAwait(false);
-                return result.IsSuccess
-                    ? Result<object>.Success(result.Value!)
-                    : Result<object>.Failure(result.Error);
+                if (result.IsSuccess) return Result<object>.Success(result.Value!);
+
+                contract?.Verify(result.Error, serviceProvider);
+                return Result<object>.Failure(result.Error);
             },
-            idempotent);
+            idempotent,
+            errors);
 
         return this;
     }

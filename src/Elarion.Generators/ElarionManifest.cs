@@ -4,7 +4,7 @@ namespace Elarion.Generators;
 
 internal static class ElarionManifest {
     public const string SchemaKey = "Elarion.Manifest.Schema";
-    public const string SchemaVersion = "1";
+    public const string SchemaVersion = "2";
 
     /// <summary>
     /// A referenced assembly advertises an Elarion manifest whose schema version this generator does not
@@ -28,7 +28,8 @@ internal static class ElarionManifest {
     // The CustomizeEndpoint hook type rides a count-gated appended field (no key bump): a 12-field entry
     // predates the hook and decodes with none.
     public const string HttpEndpointKey = "Elarion.Manifest.HttpEndpoint.v2";
-    public const string RpcMethodKey = "Elarion.Manifest.RpcMethod.v1";
+    // v2 appends the Connection transport flag and the declared error contract (ADR-0080).
+    public const string RpcMethodKey = "Elarion.Manifest.RpcMethod.v2";
     public const string ResourceFilterKey = "Elarion.Manifest.ResourceFilter.v1";
     public const string PermissionKey = "Elarion.Manifest.Permission.v1";
     public const string RoleKey = "Elarion.Manifest.Role.v1";
@@ -293,8 +294,8 @@ internal static class ElarionManifest {
             ElarionManifestCodec.EncodeParameters(model.Parameters),
             EncodeBool(model.IsNameInferred),
             EncodeBool(model.IsIdempotent),
-            // Appended (not inserted) so earlier field indices stay stable; count-gated decode below.
-            EncodeBool(model.OnConnection));
+            EncodeBool(model.OnConnection),
+            ElarionManifestCodec.EncodeErrors(model.Errors));
     }
 
     public static string EncodeResourceFilter(ResourceFilter filter) {
@@ -480,22 +481,19 @@ internal static class ElarionManifest {
 
     public static bool TryDecodeRpcMethod(string value, out RpcMethodEmission.Model? model) {
         model = null;
-        // 11 fields = an assembly built before the Connection transport flag existed; decode it with
-        // onConnection = false (that compilation never opted into the connection surface) instead of
-        // silently dropping its handlers from every transport.
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count is not (11 or 12))
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 13)
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null || fields[3] is null ||
-            fields[8] is null || fields[9] is null || fields[10] is null)
+            fields[8] is null || fields[9] is null || fields[10] is null || fields[12] is null)
             return false;
 
-        var onConnection = false;
         if (!TryDecodeBool(fields[5], out var onJsonRpc) ||
             !TryDecodeBool(fields[6], out var onMcp) ||
             !ElarionManifestCodec.TryDecodeParameters(fields[8]!, out var parameters) ||
             !TryDecodeBool(fields[9], out var isNameInferred) ||
             !TryDecodeBool(fields[10], out var isIdempotent) ||
-            (fields.Count == 12 && !TryDecodeBool(fields[11], out onConnection)))
+            !TryDecodeBool(fields[11], out var onConnection) ||
+            !ElarionManifestCodec.TryDecodeErrors(fields[12]!, out var errors))
             return false;
 
         model = new RpcMethodEmission.Model(
@@ -510,7 +508,8 @@ internal static class ElarionManifest {
             fields[7],
             parameters.ToEquatableArray(),
             isNameInferred,
-            isIdempotent);
+            isIdempotent,
+            errors.ToEquatableArray());
         return true;
     }
 
@@ -615,6 +614,35 @@ internal static class ElarionManifestCodec {
         }
 
         parameters = result;
+        return true;
+    }
+
+    public static string EncodeErrors(IReadOnlyList<ErrorContractDiscovery.ErrorDeclaration> errors) {
+        var fields = new string?[errors.Count * 3];
+        for (var i = 0; i < errors.Count; i++) {
+            fields[i * 3] = errors[i].Code;
+            fields[i * 3 + 1] = errors[i].Kind;
+            fields[i * 3 + 2] = errors[i].DataTypeFqn;
+        }
+
+        return EncodeFields(fields);
+    }
+
+    public static bool TryDecodeErrors(string value,
+        out IReadOnlyList<ErrorContractDiscovery.ErrorDeclaration> errors) {
+        errors = [];
+        if (!TryDecodeFields(value, out var fields) || fields.Count % 3 != 0)
+            return false;
+
+        var result = new List<ErrorContractDiscovery.ErrorDeclaration>();
+        for (var i = 0; i < fields.Count; i += 3) {
+            if (fields[i] is null || fields[i + 1] is null)
+                return false;
+
+            result.Add(new ErrorContractDiscovery.ErrorDeclaration(fields[i]!, fields[i + 1]!, fields[i + 2]));
+        }
+
+        errors = result;
         return true;
     }
 

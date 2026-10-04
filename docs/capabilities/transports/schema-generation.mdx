@@ -13,6 +13,36 @@ DataAnnotations constraints as JSON Schema keywords (`minLength`/`maxLength`, `m
 `pattern`, `format` — see [Validation](/docs/concepts/validation)), so the generated client can
 pre-validate requests against exactly what the server enforces.
 
+Each method also lists its **declared error contract** (ADR-0080) under `errors`: stable code → `kind` (the kind's
+default code such as `not_found`) and, when the error carries a typed payload, the `data` schema. Handlers declare
+errors with [`[ProducesError]`](/docs/reference/result-and-errors#producserror--the-declared-error-contract); the
+framework adds validation, authorization, feature-gate and idempotency failures where they are statically known. The
+block is omitted for a method that declares none.
+
+```json
+"errors": {
+  "not_found": { "kind": "not_found" },
+  "token.malformed": { "kind": "validation", "data": { "type": "object", "properties": { "reason": { "type": "string" } }, "required": ["reason"] } }
+}
+```
+
+### Requiredness
+
+One rule, in both directions ([ADR-0082](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0082-requiredness-comes-from-nullability-in-both-directions.md)):
+a **non-nullable** property is `required` on the wire, a **nullable** property is optional. The C# `required`
+modifier and `[JsonRequired]` do not change the schema. For **request** types a non-nullable property with a
+default is also optional to send: a constructor parameter default (`int Size = 10`) or an initializer that yields a
+non-default value (`List<string> Tags { get; init; } = []`). An initializer equal to the CLR default (`= 0`,
+`= false`) is indistinguishable from none, so give such a member a constructor default or make it nullable.
+
+For **response**, event and error-payload types, every non-nullable member is always written, so it is required.
+Result and event types must therefore not opt members out with `[JsonIgnore(Condition = WhenWritingDefault)]` (or
+`WhenWritingNull` on a non-nullable reference): the generator reports `ELRPC004` for a handler response graph, and
+the exporter fails with the member name for event payloads and custom serializer options. Make the member nullable
+to declare it optional. The canonical serializer enforces the contract it exports (`RespectNullableAnnotations` and
+`RespectRequiredConstructorParameters`), so a `null` for a non-nullable member and a missing constructor parameter
+without a default are rejected rather than silently accepted.
+
 ## Build-time export
 
 Add the schema generation package as private build tooling in the host project:

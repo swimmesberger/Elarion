@@ -86,9 +86,26 @@ export const rpcResultSchemas = {
     status: z.string(),
     attempt: z.number().int(),
     maxAttempts: z.number().int(),
-    nextAttemptAt: z.string().nullish(),
-    lastError: z.string().nullish(),
+    nextAttemptAt: z.string().nullish().optional(),
+    lastError: z.string().nullish().optional(),
   }),
 } as const
 
 export type RpcResultSchemas = typeof rpcResultSchemas
+
+export const rpcErrorDataSchemas = {
+  "clients.create": {
+    "validation": z.object({
+      errors: z.array(z.string()),
+      fieldErrors: z.unknown().optional(),
+    }),
+  },
+  "invoices.create": {
+    "validation": z.object({
+      errors: z.array(z.string()),
+      fieldErrors: z.unknown().optional(),
+    }),
+  },
+} as const
+
+export type RpcErrorDataSchemas = typeof rpcErrorDataSchemas

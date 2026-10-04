@@ -13,7 +13,7 @@ namespace Elarion.Pipeline;
 /// handler type via <see cref="HandlerMetadata"/> — never <c>inner.GetType()</c> — so the guard is correct at any
 /// position in the decorator chain (the generator places it just inside the authorization gate, so a disabled
 /// feature never touches caching, the pipeline, or the handler). A gate that is not satisfied short-circuits with
-/// <see cref="AppError.NotFound(string)"/>, deliberately mirroring how Microsoft's MVC <c>[FeatureGate]</c> returns
+/// <see cref="AppError.NotFound(string, string, object)"/>, deliberately mirroring how Microsoft's MVC <c>[FeatureGate]</c> returns
 /// a 404 so a disabled feature is indistinguishable from a missing resource. The failure message is generic on
 /// purpose — echoing the gated feature name would leak the very thing the 404 hides.
 /// </summary>

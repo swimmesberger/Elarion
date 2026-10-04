@@ -28,9 +28,20 @@ export interface JsonSchema {
   maxItems?: number
 }
 
+/**
+ * One declared error of a method (ADR-0080): the kind it fails with (the kind's default code, for example
+ * `not_found`) and, when the error carries a typed payload, the schema of `error.data.data`.
+ */
+export interface RpcErrorSchema {
+  kind: string
+  data?: JsonSchema
+}
+
 export interface RpcMethodSchema {
   params: JsonSchema
   result: JsonSchema
+  /** The declared error contract, keyed by stable error code; omitted when the method declares none. */
+  errors?: Record<string, RpcErrorSchema>
   // Set by the server exporter for [Idempotent] handlers; the generated client attaches an idempotency key
   // (params._meta) to these operations by default.
   idempotent?: boolean

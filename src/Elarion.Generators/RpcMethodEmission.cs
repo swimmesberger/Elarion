@@ -68,21 +68,36 @@ internal static class RpcMethodEmission {
         string? Description,
         EquatableArray<ParameterDescription> Parameters,
         bool IsNameInferred,
-        bool IsIdempotent
+        bool IsIdempotent,
+        EquatableArray<ErrorContractDiscovery.ErrorDeclaration> Errors
     );
 
     /// <summary>
     /// Emits one statement-style <c>Map</c> registration onto the neutral <paramref name="registryVar"/>
     /// (<c>HandlerDispatcher</c>) using the entry's (already module-resolved) operation name and transport flags.
     /// A handler carrying <c>[Idempotent]</c> is registered with <c>idempotent: true</c> so the exported schema
-    /// advertises it and the generated TypeScript client attaches an idempotency key by default.
+    /// advertises it and the generated TypeScript client attaches an idempotency key by default. The operation's
+    /// declared error contract (ADR-0080) is registered with it, so the schema export lists the errors and the
+    /// runtime verifies handler failures against them.
     /// </summary>
     public static void AppendMapHandler(StringBuilder sb, Model entry, string indent, string registryVar) {
         sb.AppendLine(
             $"{indent}{registryVar}.Map<{entry.RequestTypeFqn}, {entry.ResponseTypeFqn}>("
             + $"{Literal(entry.MethodName)}, {TransportsExpression(entry)}"
             + (entry.IsIdempotent ? ", idempotent: true" : "")
-            + ");");
+            + $", errors: {ErrorsExpression(entry)});");
+    }
+
+    private static string ErrorsExpression(Model entry) {
+        const string contract = "global::Elarion.Abstractions.ErrorContract";
+        if (entry.Errors.IsEmpty)
+            return $"global::System.Array.Empty<{contract}>()";
+
+        var items = entry.Errors.Select(static e =>
+            $"new {contract} {{ Code = {Literal(e.Code)}, Kind = global::Elarion.Abstractions.ErrorKind.{e.Kind}"
+            + (e.DataTypeFqn is null ? "" : $", DataType = typeof({e.DataTypeFqn})")
+            + " }");
+        return $"new {contract}[] {{ {string.Join(", ", items)} }}";
     }
 
     /// <summary>The fully-qualified <c>HandlerTransports</c> flag expression for an entry's surfaces.</summary>
@@ -121,7 +136,7 @@ internal static class RpcMethodEmission {
         var mcpMethodType = compilation.GetTypeByMetadataName(McpHandlerAttributeMetadataName);
         var descriptionType = compilation.GetTypeByMetadataName(DescriptionAttributeMetadataName);
         foreach (var attr in ctx.Attributes)
-            if (TryCreateModel(type, attr, mcpMethodType, descriptionType, SymbolDisplayFormat.FullyQualifiedFormat,
+            if (TryCreateModel(type, compilation, attr, mcpMethodType, descriptionType, SymbolDisplayFormat.FullyQualifiedFormat,
                     report, ct, out var model)
                 && model is not null)
                 return model;
@@ -131,6 +146,7 @@ internal static class RpcMethodEmission {
 
     private static bool TryCreateModel(
         INamedTypeSymbol type,
+        Compilation compilation,
         AttributeData attr,
         INamedTypeSymbol? mcpMethodType,
         INamedTypeSymbol? descriptionType,
@@ -166,6 +182,10 @@ internal static class RpcMethodEmission {
 
         var description = GetDescription(type, descriptionType);
         var parameters = CollectParameterDescriptions(requestType, descriptionType);
+        var isIdempotent = HasIdempotentAttribute(type);
+        var errors = ErrorContractDiscovery.Collect(type, requestType, compilation, isIdempotent, report);
+        if (report is not null)
+            ErrorContractDiscovery.VerifyResponseContract(type, responseInner, report);
 
         model = new Model(
             operationName,
@@ -179,7 +199,8 @@ internal static class RpcMethodEmission {
             description,
             parameters,
             isNameInferred,
-            HasIdempotentAttribute(type));
+            isIdempotent,
+            errors);
         return true;
     }
 

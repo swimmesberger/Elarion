@@ -108,6 +108,11 @@ See [JSON-RPC](/docs/capabilities/transports/json-rpc) and [MCP](/docs/capabilit
 
 See [Telemetry](/docs/capabilities/telemetry) and [Connections — the low-allocation dispatch profile](/docs/capabilities/connections/low-allocation).
 
+### `[ProducesError]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** class (repeatable)
+- **Triggers:** declares a failure the handler can produce — a stable error code, its `ErrorKind`, and an optional typed payload. The generator publishes the declarations (plus the validation, authorization, feature-gate and idempotency failures the framework adds) with the operation; the schema export lists them under the method's `errors`, and the TypeScript client types `error.code`/`error.data` per method. Constructors: `(ErrorKind)`, `(ErrorKind, Type)`, `(string code, ErrorKind)`, `(string code, ErrorKind, Type)`. See [Result & error model](/docs/reference/result-and-errors#producserror--the-declared-error-contract).
+
 ### `[McpHandler]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class
@@ -487,7 +492,7 @@ See [Audit trail](/docs/concepts/auditing).
 There is **no Elarion validation attribute**. Request validation is declared with the standard
 `System.ComponentModel.DataAnnotations` attributes on the handler's request DTO — `[Range]`,
 `[MinLength]`/`[MaxLength]`/`[Length]`/`[StringLength]`, `[RegularExpression]`, `[EmailAddress]`,
-`[Url]`, `[Base64String]` — with requiredness from nullability + the `required` modifier (no
+`[Url]`, `[Base64String]` — with requiredness from nullability (ADR-0082; no
 `[Required]` needed). The handler-registration generator auto-attaches the framework
 `ValidationDecorator` (just inside the feature gate) for any handler whose request type graph carries
 validation attributes, and the same attributes are exported to the JSON-RPC schema, MCP tool schemas,

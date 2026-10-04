@@ -103,14 +103,20 @@ public sealed class ElarionMcpTests {
         var tool = new ElarionMcpServerTool("clients.create", new Tool { Name = "create_client" }, true);
 
         var result = tool.ToCallToolResult(
-            new RpcToolResult { IsError = true, Text = "client not found", ErrorCode = -32001 }, Options);
+            new RpcToolResult {
+                IsError = true,
+                Text = "client not found",
+                ErrorCode = -32001,
+                ErrorData = new RpcErrorData { Code = "client.missing", Data = new ValidationErrorData { Errors = ["gone"] } }
+            }, Options);
 
         result.IsError.Should().Be(true);
         result.Content.Should().ContainSingle()
             .Which.Should().BeOfType<TextContentBlock>()
             .Which.Text.Should().Be("client not found");
         result.StructuredContent.Should().NotBeNull();
-        result.StructuredContent!.Value.GetProperty("code").GetInt32().Should().Be(-32001);
+        result.StructuredContent!.Value.GetProperty("code").GetString().Should().Be("client.missing");
+        result.StructuredContent!.Value.GetProperty("data").GetProperty("errors")[0].GetString().Should().Be("gone");
     }
 
     [Fact]

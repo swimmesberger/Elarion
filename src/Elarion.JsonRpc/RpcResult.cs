@@ -46,9 +46,11 @@ public readonly struct RpcResult<T> {
         return new RpcResult<T>(default, error ?? throw new ArgumentNullException(nameof(error)));
     }
 
-    /// <summary>Creates a failed result with the given code, message, and optional data.</summary>
-    public static RpcResult<T> Failure(int code, string message, object? data = null) {
-        return new RpcResult<T>(default, new RpcError { Code = code, Message = message, Data = data });
+    /// <summary>Creates a failed result with the given numeric code, message, stable error code and optional data.</summary>
+    public static RpcResult<T> Failure(int code, string message, string errorCode, object? data = null) {
+        return new RpcResult<T>(
+            default,
+            new RpcError { Code = code, Message = message, Data = new RpcErrorData { Code = errorCode, Data = data } });
     }
 
     /// <summary>
@@ -93,8 +95,10 @@ internal readonly struct RpcResult {
         return new RpcResult(null, error ?? throw new ArgumentNullException(nameof(error)));
     }
 
-    /// <summary>Creates a failed result with the given code, message, and optional data.</summary>
-    public static RpcResult Failure(int code, string message, object? data = null) {
-        return new RpcResult(null, new RpcError { Code = code, Message = message, Data = data });
+    /// <summary>Creates a failed result with the given numeric code, message, stable error code and optional data.</summary>
+    public static RpcResult Failure(int code, string message, string errorCode, object? data = null) {
+        return new RpcResult(
+            null,
+            new RpcError { Code = code, Message = message, Data = new RpcErrorData { Code = errorCode, Data = data } });
     }
 }

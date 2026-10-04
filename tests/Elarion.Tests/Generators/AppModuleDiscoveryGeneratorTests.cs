@@ -52,6 +52,11 @@ public sealed class AppModuleDiscoveryGeneratorTests {
                     public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddElarionHandlerSender(
                         Microsoft.Extensions.DependencyInjection.IServiceCollection services) => services;
                 }
+
+                public static class ErrorContractMonitorServiceCollectionExtensions {
+                    public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddElarionErrorContractMonitor(
+                        Microsoft.Extensions.DependencyInjection.IServiceCollection services) => services;
+                }
             }
 
             namespace Elarion.Abstractions.Serialization {

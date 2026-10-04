@@ -14,5 +14,6 @@ namespace Elarion.JsonRpc;
 [JsonSerializable(typeof(JsonRpcRequest))]
 [JsonSerializable(typeof(JsonRpcResponse))]
 [JsonSerializable(typeof(RpcErrorResponse))]
+[JsonSerializable(typeof(RpcErrorData))]
 [JsonSerializable(typeof(List<JsonRpcResponse>), TypeInfoPropertyName = "ListOfJsonRpcResponse")]
 public sealed partial class JsonRpcJsonContext : JsonSerializerContext;

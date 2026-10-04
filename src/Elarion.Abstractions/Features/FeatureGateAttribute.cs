@@ -2,7 +2,7 @@ namespace Elarion.Abstractions.Features;
 
 /// <summary>
 /// Gates a handler behind one or more feature flags. When any declared gate is not satisfied, the handler is
-/// short-circuited before it runs and the call fails with <see cref="AppError.NotFound(string)"/> — a disabled
+/// short-circuited before it runs and the call fails with <see cref="AppError.NotFound(string, string, object)"/> — a disabled
 /// feature is indistinguishable from a missing one, hiding the roadmap rather than advertising it (the same
 /// hide-it behavior as Microsoft's MVC <c>[FeatureGate]</c>, but as a transport-neutral handler gate that works
 /// identically under JSON-RPC, MCP, and HTTP).

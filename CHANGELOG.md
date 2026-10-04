@@ -76,6 +76,30 @@ minor releases may include breaking changes.
   and `ElarionEvaluationContext.Create` takes a `FeatureEvaluationContext`. Migration: declare every flag you
   gate on, expose, or select variants by; a host with backend flags still registers
   `AddElarionFeatureManagement`/`AddElarionOpenFeature` and now fails at startup without one.
+- **BREAKING: errors are a declared contract with a stable code (ADR-0080).** `AppError.Code` is always present — each
+  `ErrorKind` has a default code (`not_found`, `conflict`, `validation`, `business_rule`, `forbidden`,
+  `unauthorized`, `internal`) and any factory takes a specific one; every factory (all kinds) now takes
+  `(message, string? code = null, object? data = null)` and `AppError.Create(kind, ...)` is the general factory.
+  Handlers declare their failures with `[ProducesError]`; the generator publishes them (plus the implied
+  validation/authorization/feature-gate/idempotency errors) in the manifest and `HandlerDispatcher.Map(..., errors:)`,
+  the schema export lists them per method under `errors`, and development logs an undeclared code once
+  (`IErrorContractMonitor`, registered by `AddElarion`). One wire shape everywhere: JSON-RPC
+  `error.data = { code, data? }` on every error (protocol errors included; `RpcError.Data` and `RpcErrorResponse.Data`
+  are now the required `RpcErrorData`), HTTP ProblemDetails `code` + `data`, gRPC `elarion-error-code` trailer, MCP
+  structured content `{ code, data? }`. The generated TypeScript `RpcError` is `RpcError<TCode, TData>`: `code` is now
+  the stable string, the numeric JSON-RPC code moved to `rpcCode`, `data` is the typed payload; new `RpcMethodError<M>`
+  unions, `isRpcMethodError`, and generated `rpcErrorDataSchemas`. The manifest schema version is now `2`: rebuild
+  referenced module assemblies. *Migration:* change `AppError.X("m", data)` calls to `AppError.X("m", data: data)`,
+  read `error.code`/`error.rpcCode` in TypeScript, regenerate the client, and add `[ProducesError]` to handlers that
+  return specific codes.
+- **BREAKING: requiredness comes from nullability, in both directions (ADR-0082).** A non-nullable property is
+  `required` in `rpc-schema.json` (and the MCP input schemas); a nullable one is optional; a request property with a
+  constructor default or a non-default initializer is optional to send. C# `required`/`[JsonRequired]` no longer change
+  the schema, so `required string? X` is now optional. The canonical serializer enforces the contract
+  (`RespectNullableAnnotations`, `RespectRequiredConstructorParameters`), and result/event types must not use
+  `[JsonIgnore(Condition = WhenWritingDefault/WhenWritingNull)]` on non-nullable members: new error `ELRPC004`, and the
+  exporter fails for event payloads. *Migration:* make optional response members nullable, give optional request members
+  a constructor default, and regenerate `rpc-schema.json` and the TypeScript client.
 - **The EF Web Push subscription store joins the caller's unit of work.** `EfCorePushSubscriptionStore` is now
   scoped over the caller's `TDbContext` instead of a singleton that opened its own scope and connection per
   operation. A subscribe, unsubscribe, or dead-subscription cleanup inside a command now commits or rolls back

@@ -108,13 +108,16 @@ mapping is stable:
 | `BusinessRule` | `FailedPrecondition` | `business-rule` |
 | `Internal` | `Internal` | `internal` |
 
-`RpcException.Status.Detail` is the `AppError.Message`. The lower-case
-`elarion-error-kind` metadata key is the machine-readable compatibility surface. An unknown future
+`RpcException.Status.Detail` is the `AppError.Message`. Every error also carries its stable
+[`AppError.Code`](/docs/reference/result-and-errors#error-codes) in the `elarion-error-code` trailer (for example
+`not_found`, `seat.taken`); codes are lower-case ASCII by construction, so it is always a text trailer. The lower-case
+`elarion-error-kind` and `elarion-error-code` metadata keys are the machine-readable compatibility surface. An unknown future
 `ErrorKind` maps fail-safe to `Internal` and `internal`; it is never exposed as an unknown wire value.
 
-`AppError.Validation` may contain field errors, but phase one intentionally does not serialize them as
+`AppError.Data` payloads (including validation field errors) are not serialized in phase one: gRPC does not
+carry the typed `data` the other transports do. They are not serialized as
 `google.rpc.Status` or any other rich protobuf detail. Such data needs a stable, versioned protobuf
-contract. The kind trailer is preserved now; structured validation details remain a future additive
+contract. The kind and code trailers are preserved now; structured details remain a future additive
 transport decision.
 
 ## Server streaming

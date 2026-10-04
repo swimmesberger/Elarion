@@ -2,7 +2,7 @@
 // Source: Billing sample (rpc-schema.json)
 
 import type { RpcMethods } from './rpc-types.js'
-import { rpcParamsSchemas, rpcResultSchemas } from './rpc-schemas.js'
+import { rpcErrorDataSchemas, rpcParamsSchemas, rpcResultSchemas } from './rpc-schemas.js'
 
 export type RpcMethod = keyof RpcMethods & string
 export type RpcParams<M extends RpcMethod> = RpcMethods[M]['params']
@@ -81,6 +81,13 @@ export type BatchItemResult<M extends RpcMethod = RpcMethod> =
   | { readonly ok: true; readonly result: RpcResult<M> }
   | { readonly ok: false; readonly error: RpcError }
 
+// The declared error contract of a method (ADR-0080): a union of RpcError variants discriminated by the
+// stable `code`, each with its typed `data`. Narrow with `error.code === ...` or `isRpcMethodError`.
+export type RpcErrorCode<M extends RpcMethod> = keyof RpcMethods[M]['errors'] & string
+export type RpcMethodError<M extends RpcMethod> = {
+  [C in RpcErrorCode<M>]: RpcError<C, RpcMethods[M]['errors'][C] extends { data: infer D } ? D : never>
+}[RpcErrorCode<M>]
+
 export type BatchResult<T extends readonly BatchItem[]> = {
   readonly [K in keyof T]: T[K] extends BatchItem<infer M> ? BatchItemResult<M> : never
 }
@@ -155,6 +162,13 @@ const rpcMethodNames = [
 
 const rpcIdempotentMethods: ReadonlySet<RpcMethod> = new Set([])
 
+const rpcErrorCodes: Partial<Record<RpcMethod, readonly string[]>> = {"clients.create":["forbidden","unauthorized","validation"],"clients.get":["forbidden","unauthorized"],"clients.list":["forbidden","unauthorized"],"invoices.clientDunning":["forbidden","unauthorized"],"invoices.create":["forbidden","unauthorized","validation"],"invoices.list":["forbidden","unauthorized"],"invoices.sendStatus":["forbidden","unauthorized"]}
+
+/** True when `error` is an RpcError carrying one of the error codes `method` declares. */
+export function isRpcMethodError<M extends RpcMethod>(method: M, error: unknown): error is RpcMethodError<M> {
+  return error instanceof RpcError && (rpcErrorCodes[method]?.includes(error.code) ?? false)
+}
+
 type JsonRpcId = string | number
 
 interface JsonRpcRequestEnvelope<M extends RpcMethod = RpcMethod> {
@@ -189,57 +203,65 @@ export const ElarionErrorCodes = {
   unauthorized: -32005,
 } as const
 
-export class RpcError extends Error {
-  readonly code: number
-  readonly data?: unknown
+// Every error carries a stable string `code` (the contract clients branch on) and `data` (its typed
+// payload). `rpcCode` is the numeric JSON-RPC code, which only encodes the coarse error kind.
+export class RpcError<TCode extends string = string, TData = unknown> extends Error {
+  /** The stable machine-readable error code, for example "token.malformed" or "not_found". */
+  readonly code: TCode
+  /** The typed error payload declared for this code; undefined when the error carries none. */
+  readonly data: TData
+  /** The numeric JSON-RPC error code (the coarse error kind, see ElarionErrorCodes). */
+  readonly rpcCode: number
 
-  constructor(code: number, message: string, data?: unknown) {
+  constructor(rpcCode: number, message: string, wireData?: unknown) {
     super(message)
     this.name = 'RpcError'
-    this.code = code
-    this.data = data
+    this.rpcCode = rpcCode
+    const envelope = readErrorData(wireData)
+    this.code = (envelope?.code ?? defaultErrorCode(rpcCode)) as TCode
+    this.data = envelope?.data as TData
   }
 
   get isParseError() {
-    return this.code === -32700
+    return this.rpcCode === -32700
   }
 
   get isInvalidRequest() {
-    return this.code === -32600
+    return this.rpcCode === -32600
   }
 
   get isMethodNotFound() {
-    return this.code === -32601
+    return this.rpcCode === -32601
   }
 
   get isInvalidParams() {
-    return this.code === -32602
+    return this.rpcCode === -32602
   }
 
   get isInternalError() {
-    return this.code === -32603
+    return this.rpcCode === -32603
   }
 
   // Elarion application-error kinds (see ElarionErrorCodes). isInvalidParams also covers Validation;
   // isInternalError also covers Internal.
   get isNotFound() {
-    return this.code === ElarionErrorCodes.notFound
+    return this.rpcCode === ElarionErrorCodes.notFound
   }
 
   get isConflict() {
-    return this.code === ElarionErrorCodes.conflict
+    return this.rpcCode === ElarionErrorCodes.conflict
   }
 
   get isForbidden() {
-    return this.code === ElarionErrorCodes.forbidden
+    return this.rpcCode === ElarionErrorCodes.forbidden
   }
 
   get isBusinessRule() {
-    return this.code === ElarionErrorCodes.businessRule
+    return this.rpcCode === ElarionErrorCodes.businessRule
   }
 
   get isUnauthorized() {
-    return this.code === ElarionErrorCodes.unauthorized
+    return this.rpcCode === ElarionErrorCodes.unauthorized
   }
 }
 
@@ -384,7 +406,7 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
         // A spec-compliant server reports request-level failures (e.g. parse errors) with "id": null —
         // surface the server error instead of a generic id-mismatch protocol error.
         if (response.error && (response.id === null || response.id === undefined)) {
-          throw toRpcError(response.error)
+          throw toRpcError(response.error, method, validateResults)
         }
 
         if (!idsEqual(response.id, request.id)) {
@@ -392,7 +414,7 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
         }
 
         if (response.error) {
-          throw toRpcError(response.error)
+          throw toRpcError(response.error, method, validateResults)
         }
 
         return parseResult(method, response.result)
@@ -459,13 +481,17 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
           }
 
           if (response.error) {
-            return { ok: false, error: toRpcError(response.error) }
+            try {
+              return { ok: false, error: toRpcError(response.error, method, validateResults) }
+            } catch (error) {
+              return { ok: false, error: new RpcError(-32603, 'Invalid RPC error payload.', { code: 'internal', data: error }) }
+            }
           }
 
           try {
             return { ok: true, result: parseResult(method, response.result) }
           } catch (error) {
-            return { ok: false, error: new RpcError(-32603, 'Invalid RPC result.', error) }
+            return { ok: false, error: new RpcError(-32603, 'Invalid RPC result.', { code: 'internal', data: error }) }
           }
         }) as BatchResult<T>
       } catch (error) {
@@ -606,8 +632,48 @@ function isJsonRpcErrorObject(value: unknown): value is JsonRpcErrorObject {
   )
 }
 
-function toRpcError(error: JsonRpcErrorObject): RpcError {
-  return new RpcError(error.code, error.message, error.data)
+interface RpcErrorDataSchema {
+  safeParse(value: unknown): { success: true } | { success: false; error: { message: string } }
+}
+
+function toRpcError(error: JsonRpcErrorObject, method?: RpcMethod, validate = false): RpcError {
+  const rpcError = new RpcError(error.code, error.message, error.data)
+  // A declared payload is part of the contract: validate it like a result so clients can trust the typing.
+  if (validate && method !== undefined) {
+    const schemas = rpcErrorDataSchemas as Partial<Record<string, Partial<Record<string, RpcErrorDataSchema>>>>
+    const schema = schemas[method]?.[rpcError.code]
+    if (schema !== undefined) {
+      const parsed = schema.safeParse(rpcError.data)
+      if (!parsed.success) {
+        throw new RpcProtocolError(
+          `Error payload for code ${JSON.stringify(rpcError.code)} of ${JSON.stringify(method)} does not match its declared contract: ${parsed.error.message}`
+        )
+      }
+    }
+  }
+  return rpcError
+}
+
+// The wire shape of error.data is always { code, data? } (ADR-0080).
+function readErrorData(value: unknown): { code: string; data?: unknown } | undefined {
+  if (!isRecord(value) || typeof value.code !== 'string') return undefined
+  return { code: value.code, data: value.data }
+}
+
+// Fallback for a server that sends no error.data: the default code of the numeric kind.
+function defaultErrorCode(rpcCode: number): string {
+  switch (rpcCode) {
+    case -32700: return 'parse_error'
+    case -32600: return 'invalid_request'
+    case -32601: return 'method_not_found'
+    case -32602: return 'invalid_params'
+    case ElarionErrorCodes.notFound: return 'not_found'
+    case ElarionErrorCodes.conflict: return 'conflict'
+    case ElarionErrorCodes.forbidden: return 'forbidden'
+    case ElarionErrorCodes.businessRule: return 'business_rule'
+    case ElarionErrorCodes.unauthorized: return 'unauthorized'
+    default: return 'internal'
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

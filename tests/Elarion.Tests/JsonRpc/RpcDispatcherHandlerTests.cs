@@ -242,7 +242,9 @@ public sealed class RpcDispatcherHandlerTests {
 
     private sealed class FixedCodeErrorTranslator : IAppErrorTranslator<RpcError> {
         public RpcError Translate(AppError error) {
-            return new RpcError { Code = -40404, Message = $"custom: {error.Message}" };
+            return new RpcError {
+                Code = -40404, Message = $"custom: {error.Message}", Data = new RpcErrorData { Code = error.Code }
+            };
         }
     }
 
@@ -266,11 +268,12 @@ public sealed class RpcDispatcherHandlerTests {
     [Fact]
     public void AppErrorMapper_PreservesMessageAndData() {
         var data = new { field = "name" };
-        var error = AppErrorMapper.ToRpcError(AppError.Validation("name is required", data));
+        var error = AppErrorMapper.ToRpcError(AppError.Validation("name is required", data: data));
 
         error.Code.Should().Be(-32602);
         error.Message.Should().Be("name is required");
-        error.Data.Should().BeSameAs(data);
+        error.Data.Code.Should().Be("validation");
+        error.Data.Data.Should().BeSameAs(data);
     }
 
     [Fact]

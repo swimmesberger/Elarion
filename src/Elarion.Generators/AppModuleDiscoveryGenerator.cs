@@ -804,6 +804,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         // The typed in-process mediator send, available wherever handlers are. Idempotent (TryAddScoped).
         sb.AppendLine(
             "        global::Elarion.HandlerSenderServiceCollectionExtensions.AddElarionHandlerSender(services);");
+        // The development-time check that handlers stay inside their declared error contract (ADR-0080).
+        sb.AppendLine(
+            "        global::Elarion.ErrorContractMonitorServiceCollectionExtensions.AddElarionErrorContractMonitor(services);");
         // Contribute every enabled module's source-generated JSON context to the canonical serializer options, so
         // every subsystem (JSON-RPC, MCP, idempotency, caching, outbox, settings) reads one shared configuration.
         sb.AppendLine(

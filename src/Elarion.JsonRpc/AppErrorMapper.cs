@@ -4,7 +4,8 @@ namespace Elarion.JsonRpc;
 
 /// <summary>
 /// Maps the framework's transport-agnostic <see cref="AppError"/> / <see cref="ErrorKind"/> onto JSON-RPC 2.0
-/// error codes. Protocol-level kinds reuse the spec codes (e.g. invalid params, internal error); the remaining
+/// error codes and carries the stable <see cref="AppError.Code"/> and typed <see cref="AppError.Data"/> as
+/// <c>error.data = { code, data? }</c> on every error. Protocol-level kinds reuse the spec codes (e.g. invalid params, internal error); the remaining
 /// application kinds use the reserved JSON-RPC server range (-32000 to -32099).
 /// </summary>
 /// <remarks>
@@ -13,9 +14,16 @@ namespace Elarion.JsonRpc;
 /// <c>IAppErrorTranslator&lt;RpcError&gt;</c> to override it.
 /// </remarks>
 public static class AppErrorMapper {
-    /// <summary>Converts an <see cref="AppError"/> to a JSON-RPC <see cref="RpcError"/>.</summary>
+    /// <summary>
+    /// Converts an <see cref="AppError"/> to a JSON-RPC <see cref="RpcError"/>: the numeric code follows the kind and
+    /// <c>error.data</c> is always <c>{ "code": ..., "data": &lt;payload&gt; }</c>, <c>data</c> omitted when there is no payload.
+    /// </summary>
     public static RpcError ToRpcError(AppError error) {
-        return new RpcError { Code = MapToCode(error.Kind), Message = error.Message, Data = error.Data };
+        return new RpcError {
+            Code = MapToCode(error.Kind),
+            Message = error.Message,
+            Data = new RpcErrorData { Code = error.Code, Data = error.Data }
+        };
     }
 
     /// <summary>Maps an <see cref="ErrorKind"/> to its JSON-RPC integer error code.</summary>

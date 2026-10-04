@@ -73,8 +73,9 @@ interface GeneratedClientModule {
     instrumentation?: TestInstrumentation
   }): RpcClientForTests
 
-  RpcError: new (code: number, message: string, data?: unknown) => Error & {
-    code: number
+  RpcError: new (rpcCode: number, message: string, data?: unknown) => Error & {
+    code: string
+    rpcCode: number
     data?: unknown
     readonly isInvalidParams: boolean
     readonly isInternalError: boolean
@@ -191,7 +192,7 @@ describe('JSON-RPC client generator', () => {
       generated.schemasSource.indexOf('export const rpcResultSchemas')
     )
     expect(generated.clientSource).toContain("import type { RpcMethods } from './rpc-types.js'")
-    expect(generated.clientSource).toContain("import { rpcParamsSchemas, rpcResultSchemas } from './rpc-schemas.js'")
+    expect(generated.clientSource).toContain("import { rpcErrorDataSchemas, rpcParamsSchemas, rpcResultSchemas } from './rpc-schemas.js'")
     expect(generated.clientSource).toContain('export interface RpcApi')
     expect(generated.clientSource).toContain('readonly "a": {')
     expect(generated.clientSource).toContain('readonly "first": RpcEndpoint<"a.first">')
@@ -607,7 +608,7 @@ describe('JSON-RPC client generator', () => {
       fetch: async () => jsonResponse({
         jsonrpc: '2.0',
         id: 'request-2',
-        error: {code: -32602, message: 'Invalid params', data: {field: 'left'}},
+        error: {code: -32602, message: 'Invalid params', data: {code: 'validation', data: {field: 'left'}}},
       }),
       idGenerator: () => 'request-2',
     })
@@ -615,7 +616,8 @@ describe('JSON-RPC client generator', () => {
     await expect(rpcClient.call('math.add', {left: 1, right: 2}))
       .rejects.toMatchObject({
         name: 'RpcError',
-        code: -32602,
+        rpcCode: -32602,
+        code: 'validation',
         data: {field: 'left'},
       })
 
@@ -649,7 +651,8 @@ describe('JSON-RPC client generator', () => {
 
     await expect(client.call('math.add', {left: 1, right: 2})).rejects.toMatchObject({
       name: 'RpcError',
-      code: -32700,
+      rpcCode: -32700,
+      code: 'parse_error',
       message: 'Parse error',
     })
   })
@@ -674,9 +677,50 @@ describe('JSON-RPC client generator', () => {
       rpc.$request.math.add({left: 1, right: 2}),
     ] as const)).rejects.toMatchObject({
       name: 'RpcError',
-      code: -32600,
+      rpcCode: -32600,
+      code: 'invalid_request',
       message: 'Batch too large',
     })
+  })
+
+  it('types declared errors per method and exposes them as discriminated RpcError variants', () => {
+    const schema = rpcClientTestSchema()
+    schema.methods['math.add'].errors = {
+      'math.overflow': {kind: 'business_rule', data: {type: 'object', properties: {limit: {type: 'integer'}}, required: ['limit']}},
+      not_found: {kind: 'not_found'},
+    }
+    const generated = generateRpcClientFiles(schema)
+
+    expect(generated.typesSource).toContain('errors: {')
+    expect(generated.typesSource).toContain('"math.overflow": { kind: "business_rule"; data: {')
+    expect(generated.typesSource).toContain('"not_found": { kind: "not_found"; data: undefined }')
+    expect(generated.typesSource).toContain('errors: {}')
+    expect(generated.schemasSource).toContain('export const rpcErrorDataSchemas = {')
+    expect(generated.schemasSource).toContain('"math.overflow":')
+    expect(generated.clientSource).toContain('export type RpcMethodError<M extends RpcMethod>')
+    expect(generated.clientSource).toContain('const rpcErrorCodes')
+    expect(generated.clientSource).toContain('"math.add":["math.overflow","not_found"]')
+  })
+
+  it('reads the { code, data } wire envelope, validates declared payloads and narrows by code', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+    const respond = (data: unknown) => clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async () => jsonResponse({jsonrpc: '2.0', id: 'r', error: {code: -32004, message: 'too big', data}}),
+      idGenerator: () => 'r',
+    })
+
+    await expect(respond({code: 'math.overflow', data: {limit: 5}}).call('math.add', {left: 1, right: 2}))
+      .rejects.toMatchObject({code: 'math.overflow', rpcCode: -32004, data: {limit: 5}, isBusinessRule: true})
+
+    // A payload that violates the declared contract is a protocol failure, never a silently mistyped error.
+    await expect(respond({code: 'math.overflow', data: {limit: 'x'}}).call('math.add', {left: 1, right: 2}))
+      .rejects.toMatchObject({name: 'RpcProtocolError'})
+
+    // No envelope (a foreign server): the code falls back to the default code of the numeric kind.
+    await expect(respond(undefined).call('math.add', {left: 1, right: 2}))
+      .rejects.toMatchObject({code: 'business_rule', rpcCode: -32004})
   })
 
   it('propagates a transform result of null instead of falling back to the raw value', async () => {
@@ -723,7 +767,8 @@ describe('JSON-RPC client generator', () => {
 
     await expect(notFoundClient.call('math.add', {left: 1, right: 2})).rejects.toMatchObject({
       name: 'RpcError',
-      code: -32001,
+      rpcCode: -32001,
+      code: 'not_found',
       isNotFound: true,
       isConflict: false,
     })
@@ -780,8 +825,8 @@ describe('JSON-RPC client generator', () => {
     ] as const)
 
     expect(results[0]).toMatchObject({ok: true, result: 3})
-    expect(results[1]).toMatchObject({ok: false, error: {code: -32601}})
-    expect(results[2]).toMatchObject({ok: false, error: {code: -32603}})
+    expect(results[1]).toMatchObject({ok: false, error: {rpcCode: -32601}})
+    expect(results[2]).toMatchObject({ok: false, error: {rpcCode: -32603}})
     expect(seenContexts).toEqual([
       {methods: ['math.add', 'user.get', 'math.add'], batch: true},
     ])
@@ -856,7 +901,7 @@ describe('JSON-RPC client generator', () => {
     })
 
     await expect(errorClient.call('math.add', {left: 1, right: 2}))
-      .rejects.toMatchObject({name: 'RpcError', code: -32602})
+      .rejects.toMatchObject({name: 'RpcError', rpcCode: -32602})
     expect(events).toEqual(['start', 'error', 'end'])
   })
 
@@ -1178,7 +1223,7 @@ describe('JSON-RPC client generator', () => {
     ] as const)
 
     expect(results[0]).toMatchObject({ok: true, result: 3})
-    expect(results[1]).toMatchObject({ok: false, error: {code: -32601}})
+    expect(results[1]).toMatchObject({ok: false, error: {rpcCode: -32601}})
     expect(events).toEqual(['start:true:2', 'end'])
   })
 
@@ -1430,6 +1475,8 @@ async function loadGeneratedFileClient(clientSource: string): Promise<GeneratedC
     '  },',
     '}',
     '',
+    'export const rpcErrorDataSchemas = {}',
+    '',
     'export const rpcResultSchemas = {',
     "  'files.roundTrip': {",
     '    parse(value) {',
@@ -1495,6 +1542,10 @@ async function loadGeneratedClient(clientSource: string): Promise<GeneratedClien
     'export const rpcParamsSchemas = {',
     "  'math.add': mathAddParamsSchema(),",
     "  'user.get': userGetParamsSchema(),",
+    '}',
+    '',
+    'export const rpcErrorDataSchemas = {',
+    "  'math.add': { 'math.overflow': { safeParse: (v) => typeof v === 'object' && v !== null && typeof v.limit === 'number' ? { success: true } : { success: false, error: { message: 'limit must be a number' } } } },",
     '}',
     '',
     'export const rpcResultSchemas = {',

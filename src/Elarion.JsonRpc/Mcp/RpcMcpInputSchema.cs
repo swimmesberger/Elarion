@@ -48,7 +48,7 @@ public static class RpcMcpInputSchema {
             ? JsonRpcSchemaExporter.InjectReflectedConstraints
             : (ctx, schema) => injectDescriptions(ctx, JsonRpcSchemaExporter.InjectReflectedConstraints(ctx, schema));
 
-        var schemaNode = JsonRpcSchemaExporter.BuildSchemaNode(requestType, options, transform);
+        var schemaNode = JsonRpcSchemaExporter.BuildSchemaNode(requestType, options, SchemaDirection.Request, transform);
 
         // Parse + clone so the returned element owns its memory independently of the transient JsonNode.
         using var document = JsonDocument.Parse(schemaNode.ToJsonString());
