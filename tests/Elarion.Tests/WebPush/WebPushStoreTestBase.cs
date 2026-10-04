@@ -58,6 +58,26 @@ public abstract class WebPushStoreTestBase<TContext>(IWebPushStoreFixture<TConte
     }
 
     [Fact]
+    public async Task SubscriptionStore_ListSubscribedUserIds_ReturnsDistinctOwnersSorted() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var provider = CreateProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IPushSubscriptionStore>();
+        var (alice, bob, carol) = ($"a-{NewId()}", $"b-{NewId()}", $"c-{NewId()}");
+        using var phone = new TestPushSubscriber(NewEndpoint());
+        using var laptop = new TestPushSubscriber(NewEndpoint());
+        using var tablet = new TestPushSubscriber(NewEndpoint());
+        await store.UpsertAsync(phone.ToSubscription(bob), TestToken);
+        await store.UpsertAsync(laptop.ToSubscription(bob), TestToken);
+        await store.UpsertAsync(tablet.ToSubscription(alice), TestToken);
+
+        (await store.ListSubscribedUserIdsAsync(cancellationToken: TestToken))
+            .Should().ContainInConsecutiveOrder(alice, bob).And.OnlyHaveUniqueItems();
+        (await store.ListSubscribedUserIdsAsync([carol, bob, "nobody"], TestToken)).Should().Equal(bob);
+        (await store.ListSubscribedUserIdsAsync([], TestToken)).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task SubscriptionStore_EmptyUserAgent_IsStoredAsNull() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var provider = CreateProvider();

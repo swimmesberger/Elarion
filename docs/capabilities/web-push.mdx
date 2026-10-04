@@ -124,6 +124,11 @@ Message fields map onto the protocol:
 
 `SendToCurrentUserAsync(message)` sends to the caller's own devices — the "send a test notification" button.
 
+To address an **audience**, ask the store rather than its table: `IPushSubscriptionStore.ListSubscribedUserIdsAsync()`
+returns the distinct ids of every user that owns a subscription, `ListSubscribedUserIdsAsync(candidates)` narrows
+a candidate list to those with at least one device, and `ListByUsersAsync(userIds)` returns the subscriptions
+themselves. A custom store implements all three.
+
 ## Subscribing
 
 Subscriptions belong to the current user (`ICurrentUser`); subscribing requires an authenticated caller.

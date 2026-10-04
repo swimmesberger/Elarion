@@ -76,4 +76,20 @@ public sealed class EfCorePushSubscriptionStore<TDbContext>(TDbContext dbContext
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<string>> ListSubscribedUserIdsAsync(IReadOnlyCollection<string>? among = null,
+        CancellationToken cancellationToken = default) {
+        var query = dbContext.Set<PushSubscriptionEntity>().AsNoTracking().Select(entity => entity.UserId);
+        if (among is not null) {
+            if (among.Count == 0) return [];
+            var owners = among.Distinct(StringComparer.Ordinal).ToList();
+            query = query.Where(userId => owners.Contains(userId));
+        }
+
+        // Ordinal order is applied in memory: a database collation would order differently per provider.
+        var ids = await query.Distinct().ToListAsync(cancellationToken).ConfigureAwait(false);
+        ids.Sort(StringComparer.Ordinal);
+        return ids;
+    }
 }

@@ -18,6 +18,11 @@ minor releases may include breaking changes.
   `ISettingNormalizer.NormalizeAsync` converts legacy raw-string rows of `string` definitions to canonical JSON once,
   idempotently; reads deliberately do not guess (`42` is a valid string and a valid number), other types are reported.
 
+- **Web Push: `IPushSubscriptionStore.ListSubscribedUserIdsAsync(among?)`** answers "which users own subscriptions"
+  (distinct, ordinal-sorted; optionally narrowed to a candidate list) for the in-memory and EF stores, so an
+  application can fan out to an audience without querying the store's table. **BREAKING for a custom
+  `IPushSubscriptionStore`:** implement the new member.
+
 ### Fixed
 - **Settings projection no longer loses every stored setting because of one bad row.** Bulk resolution now flags a
   stored value that is not valid for its definition's type as unreadable (`ResolvedSetting.IsUnreadable`,
