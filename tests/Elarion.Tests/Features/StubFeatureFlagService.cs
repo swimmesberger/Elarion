@@ -8,7 +8,6 @@ namespace Elarion.Tests.Features;
 /// flag, with every queried name and every evaluation context recorded.
 /// </summary>
 internal sealed class StubFeatureFlagService : IFeatureFlagService {
-    private static readonly IServiceProvider EmptyServices = new ServiceCollection().BuildServiceProvider();
 
     public StubFeatureFlagService(params (string Name, bool Enabled)[] flags) {
         foreach (var (name, enabled) in flags) Flags[name] = enabled;
@@ -23,7 +22,7 @@ internal sealed class StubFeatureFlagService : IFeatureFlagService {
     public List<FeatureEvaluationContext> Contexts { get; } = [];
 
     public FeatureEvaluationContext CreateContext() {
-        return new FeatureEvaluationContext { Services = EmptyServices };
+        return new FeatureEvaluationContext();
     }
 
     public ValueTask<bool> IsEnabledAsync(string flag, CancellationToken ct = default) {

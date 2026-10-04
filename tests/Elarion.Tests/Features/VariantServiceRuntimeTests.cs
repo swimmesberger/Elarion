@@ -229,7 +229,7 @@ public sealed class VariantServiceRuntimeTests {
     // Allocates "neural" only to user u-A; everyone else gets no variant (→ default fallback).
     private sealed class FakeVariantService(ICurrentUser currentUser) : IFeatureFlagService {
         public FeatureEvaluationContext CreateContext() {
-            return new FeatureEvaluationContext { Services = null! };
+            return new FeatureEvaluationContext();
         }
 
         public ValueTask<bool> IsEnabledAsync(string flag, CancellationToken ct = default) {

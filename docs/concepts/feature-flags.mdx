@@ -120,7 +120,7 @@ Owners never reach into the ambient DI scope for *who is asking*; they receive a
 | `Roles` | the subject's roles |
 | `TenantId` | the tenant, when [tenant scoping](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0075-ambient-tenant-scoping.md) resolved one and the scope is not a system scope |
 | `Attributes` | extra targeting attributes you supply |
-| `Services` | the scope's services, for resolvers that need them |
+| `Services` | the scope's services, for resolvers that need them; **optional** — a context built by hand (`new FeatureEvaluationContext { UserId = "u-1" }`) carries an empty provider, `GetRequiredService` on it throws a message saying so, and it is never `null`. `flags.CreateContext()` always carries the real scope. |
 
 The overloads without a context use `flags.CreateContext()` (the current request). Pass your own to evaluate for
 someone else — an admin previewing another user's experience, a job acting for a user:

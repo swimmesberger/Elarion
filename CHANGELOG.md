@@ -73,6 +73,11 @@ minor releases may include breaking changes.
   history row. A migration with a `suppressTransaction: true` raw SQL operation makes its step non-transactional.
 
 ### Changed
+- **`FeatureEvaluationContext.Services` is optional.** It was `required`, forcing `Services = null!` in tests and in
+  resolvers that need no services. A hand-built context now carries an empty provider (`GetService` yields `null`,
+  `GetRequiredService` throws a message that names the cause); setting it to `null` throws, so it is never `null`.
+  The ambient path (`FromScope`, `IFeatureFlagService.CreateContext()`) is unchanged and always carries the scope.
+  Source-compatible: existing initializers keep compiling.
 - **BREAKING: `MapElarionWebPush()` dispatches to application handlers instead of bypassing the handler pipeline.**
   The endpoints called `WebPushSubscriptionService` directly, so global authorization rules, realm/tenant rules,
   audit and rate-limiting decorators did not apply to subscribe/unsubscribe. They are now HTTP bindings for three
