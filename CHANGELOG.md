@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-10-04
+
 ### Added
 - **Web Push: `IVapidKeyStore.ImportAsync(keys, overwrite: false)`** imports an existing VAPID key pair into the
   store under the store's own protection, so an application migrating a pair from elsewhere no longer has to
@@ -1918,7 +1920,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.9...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.10
 [0.2.9]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.9
 [0.2.8]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.8
 [0.2.7]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.7
