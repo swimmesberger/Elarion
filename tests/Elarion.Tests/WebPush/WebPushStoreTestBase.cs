@@ -286,8 +286,9 @@ public abstract class WebPushStoreTestBase<TContext>(IWebPushStoreFixture<TConte
         var act = async () => await foreign.GetRequiredService<IVapidKeyProvider>().GetAsync(TestToken);
 
         await act.Should().ThrowAsync<SettingProtectionException>();
-        await using var context = fixture.CreateContext();
-        (await context.Set<VapidKeyEntity>().CountAsync(TestToken)).Should().Be(1);
+        await using (var context = fixture.CreateContext())
+            (await context.Set<VapidKeyEntity>().CountAsync(TestToken)).Should().Be(1);
+        await ClearKeysAsync();
     }
 
     [Fact]
@@ -330,9 +331,15 @@ public abstract class WebPushStoreTestBase<TContext>(IWebPushStoreFixture<TConte
         services.AddElarionWebPushEntityFrameworkCore<TContext>(options => options.Subject = "mailto:ops@example.com");
         await using var provider = services.BuildServiceProvider();
 
-        var keys = await provider.GetRequiredService<IVapidKeyProvider>().GetAsync(TestToken);
+        try {
+            var keys = await provider.GetRequiredService<IVapidKeyProvider>().GetAsync(TestToken);
 
-        (await provider.GetRequiredService<IVapidKeyStore>().GetAsync(TestToken)).Should().Be(keys);
+            (await provider.GetRequiredService<IVapidKeyStore>().GetAsync(TestToken)).Should().Be(keys);
+        }
+        finally {
+            // This host has a key ring of its own: its protected row must not outlive it for the shared-ring tests.
+            await ClearKeysAsync();
+        }
     }
 
     private async Task ClearKeysAsync() {
