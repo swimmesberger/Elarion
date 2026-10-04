@@ -90,6 +90,59 @@ public sealed class EfCoreVapidKeyStore<TDbContext> : IVapidKeyStore
                ?? throw new InvalidOperationException("The VAPID key row vanished right after it was inserted.");
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The private key is protected with the same purpose as a generated pair, so an imported pair is
+    /// indistinguishable from one the store minted. Atomicity rests on the primary key: the insert is
+    /// <c>ON CONFLICT DO NOTHING</c> and the stored row is read back, so concurrent imports of different pairs
+    /// leave one winner and refuse the rest. An overwrite is an explicit, last-writer-wins replacement.
+    /// </remarks>
+    public async ValueTask<VapidKeyImportResult> ImportAsync(
+        VapidKeys keys, bool overwrite = false, CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(keys);
+        keys.Validate();
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<TDbContext>();
+        var sql = InsertSqlCache.GetOrAdd(
+            dbContext.Model,
+            static (_, context) => WebPushEntitySql.BuildVapidKeyInsertSql(context),
+            dbContext);
+        var now = _timeProvider.GetUtcNow();
+        var payload = _protector.Protect(Purpose(keys.PublicKey), keys.PrivateKey);
+        var parameters = WebPushEntitySql.Parameters(dbContext, typeof(VapidKeyEntity),
+            (nameof(VapidKeyEntity.Name), VapidKeyEntity.DefaultName),
+            (nameof(VapidKeyEntity.PublicKey), keys.PublicKey),
+            (nameof(VapidKeyEntity.PrivateKey), payload),
+            (nameof(VapidKeyEntity.Protection), _protector.Scheme),
+            (nameof(VapidKeyEntity.CreatedOnUtc), now));
+        var inserted = await dbContext.Database.ExecuteSqlRawAsync(sql, parameters, cancellationToken)
+            .ConfigureAwait(false);
+        if (inserted > 0) return VapidKeyImportResult.Imported;
+
+        var stored = await ReadAsync(dbContext, cancellationToken).ConfigureAwait(false);
+        // The row vanished between the conflict and the read (a manual delete): insert it afresh.
+        if (stored is null) return await ImportAsync(keys, overwrite, cancellationToken).ConfigureAwait(false);
+
+        if (InMemoryVapidKeyStore.Same(stored, keys)) return VapidKeyImportResult.Unchanged;
+
+        if (!overwrite) return VapidKeyImportResult.Refused;
+
+        var scheme = _protector.Scheme;
+        var replaced = await dbContext.Set<VapidKeyEntity>()
+            .Where(entity => entity.Name == VapidKeyEntity.DefaultName)
+            .ExecuteUpdateAsync(
+                set => set.SetProperty(entity => entity.PublicKey, keys.PublicKey)
+                    .SetProperty(entity => entity.PrivateKey, payload)
+                    .SetProperty(entity => entity.Protection, scheme)
+                    .SetProperty(entity => entity.CreatedOnUtc, now),
+                cancellationToken)
+            .ConfigureAwait(false);
+        // The row vanished between the conflict and the update (a manual delete): insert it afresh.
+        return replaced > 0
+            ? VapidKeyImportResult.Replaced
+            : await ImportAsync(keys, overwrite, cancellationToken).ConfigureAwait(false);
+    }
+
     private static string Purpose(string publicKey) {
         return $"{PurposePrefix}/{VapidKeyEntity.DefaultName}/{publicKey}";
     }

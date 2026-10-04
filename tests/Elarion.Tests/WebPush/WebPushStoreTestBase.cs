@@ -342,6 +342,67 @@ public abstract class WebPushStoreTestBase<TContext>(IWebPushStoreFixture<TConte
         }
     }
 
+    [Fact]
+    public async Task VapidKeyStore_Import_RoundtripsTheExactPairUnderTheStoresOwnProtection() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await ClearKeysAsync();
+        await using var provider = CreateProvider();
+        var store = provider.GetRequiredService<IVapidKeyStore>();
+        var known = VapidKeys.Generate();
+
+        (await store.ImportAsync(known, cancellationToken: TestToken)).Should().Be(VapidKeyImportResult.Imported);
+
+        var read = await store.GetAsync(TestToken);
+        read!.PublicKey.Should().Be(known.PublicKey);
+        read.PrivateKey.Should().Be(known.PrivateKey);
+        await using var context = fixture.CreateContext();
+        var row = await context.Set<VapidKeyEntity>().AsNoTracking().SingleAsync(TestToken);
+        row.PrivateKey.Should().NotContain(known.PrivateKey);
+        row.Protection.Should().Be(DataProtectionSettingValueProtector.SchemeId);
+        (await provider.GetRequiredService<IVapidKeyProvider>().GetAsync(TestToken)).Should().Be(known);
+    }
+
+    [Fact]
+    public async Task VapidKeyStore_Import_SamePairIsANoOp_DifferentPairIsRefusedUnlessOverwritten() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await ClearKeysAsync();
+        await using var provider = CreateProvider();
+        var store = provider.GetRequiredService<IVapidKeyStore>();
+        var known = VapidKeys.Generate();
+        var other = VapidKeys.Generate();
+        await store.ImportAsync(known, cancellationToken: TestToken);
+
+        (await store.ImportAsync(known, cancellationToken: TestToken)).Should().Be(VapidKeyImportResult.Unchanged);
+        (await store.ImportAsync(other, cancellationToken: TestToken)).Should().Be(VapidKeyImportResult.Refused);
+        (await store.GetAsync(TestToken)).Should().Be(known);
+
+        (await store.ImportAsync(other, overwrite: true, TestToken)).Should().Be(VapidKeyImportResult.Replaced);
+        (await store.GetAsync(TestToken)).Should().Be(other);
+        await using var context = fixture.CreateContext();
+        (await context.Set<VapidKeyEntity>().CountAsync(TestToken)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task VapidKeyStore_Import_ConcurrentNodesLeaveExactlyOneWinner() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await ClearKeysAsync();
+        var candidates = Enumerable.Range(0, 6).Select(_ => VapidKeys.Generate()).ToArray();
+        var providers = candidates.Select(_ => CreateProvider()).ToArray();
+        try {
+            var results = await Task.WhenAll(providers.Select((provider, i) =>
+                provider.GetRequiredService<IVapidKeyStore>().ImportAsync(candidates[i], cancellationToken: TestToken)
+                    .AsTask()));
+
+            results.Count(r => r == VapidKeyImportResult.Imported).Should().Be(1);
+            results.Count(r => r == VapidKeyImportResult.Refused).Should().Be(candidates.Length - 1);
+            var winner = await providers[0].GetRequiredService<IVapidKeyStore>().GetAsync(TestToken);
+            candidates.Should().Contain(winner!);
+        }
+        finally {
+            foreach (var provider in providers) await provider.DisposeAsync();
+        }
+    }
+
     private async Task ClearKeysAsync() {
         await using var context = fixture.CreateContext();
         await context.Set<VapidKeyEntity>().ExecuteDeleteAsync(TestToken);

@@ -8,6 +8,14 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Web Push: `IVapidKeyStore.ImportAsync(keys, overwrite: false)`** imports an existing VAPID key pair into the
+  store under the store's own protection, so an application migrating a pair from elsewhere no longer has to
+  duplicate the private protection purpose format. It returns `VapidKeyImportResult` (`Imported`, `Unchanged` for the
+  identical pair, `Replaced`, `Refused` for a different pair without `overwrite`), validates that the halves match,
+  and is race-safe across nodes (primary-key insert, one winner). **BREAKING for a custom `IVapidKeyStore`:**
+  implement the new member.
+
 ### Changed
 - **BREAKING: `ISettingNormalizer` converts every definition type and reports per key.** `NormalizeAsync(scope,
   options?, ct)` now takes `SettingNormalizationOptions` (`KeyPrefix`, `RemoveUnrecoverable`) instead of a key
