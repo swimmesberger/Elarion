@@ -144,11 +144,30 @@ configuration projection) flags it (`IsUnreadable` plus an `UnreadableReason` th
 carries on; a single `GetAsync` of that setting still throws. The configuration projection skips the row and the
 refresher logs its key and reason once.
 
-Rows written before a definition existed typically hold the raw string (`smtp.example.com`) instead of its JSON
-form (`"smtp.example.com"`). Reads do not guess — `42` is a legal string and a legal number — so convert them once
-with `ISettingNormalizer.NormalizeAsync(scope, prefix?)`: for a `string` definition, any stored value that is not a
-JSON string is rewritten as that literal string (protected again when the definition is secret). It is idempotent
-and version-guarded; other types are never guessed and are reported in `UnreadableKeys`.
+Rows written before a definition existed typically hold the raw text (`smtp.example.com`, `30`, `True`, `Red`)
+instead of its JSON form. Reads do not guess — `42` is a legal string and a legal number — so convert them once
+with `ISettingNormalizer.NormalizeAsync(scope, options?)`. For every definition it keeps a value that already is
+valid JSON for the type and otherwise attempts one well-defined coercion of the raw text:
+
+| Definition type | Raw text accepted |
+| --- | --- |
+| `string` | anything, verbatim |
+| `bool` | `true` / `false`, any case, trimmed |
+| integer types, `decimal`, `double`, `float` | invariant-culture number, trimmed (`" 30 "`, `030`); out-of-range is not coerced |
+| enum | a member name, case-insensitive (or the number of a defined member) |
+| `Guid`, `TimeSpan`, `DateTimeOffset`, `Uri`, other string-serialized scalars | the trimmed text, when the type accepts it |
+| records, collections | never coerced — only text that already is valid JSON for the type |
+
+The report lists one entry per examined key — `Rewritten`, `AlreadyCanonical`, `Unreadable` (with a reason that never
+contains the value), `Removed` or `Skipped` (changed concurrently) — so an application can log exactly which keys were
+changed or need attention. `SettingNormalizationOptions.KeyPrefix` limits the run to a subtree;
+`RemoveUnrecoverable = true` deletes rows whose readable text cannot be coerced, so the default applies again
+(the default is to leave them `Unreadable`). The run is idempotent and every write is guarded by the entry's version.
+
+A **secret** row is normalized in place of its plaintext representation and keeps its protection state: a protected row
+is protected again with the same scheme, a legacy plaintext row stays plaintext until `ISettingReprotector` protects
+it. Normalization never changes a row's scheme behind the application's back, and a row whose protection cannot be
+undone (other scheme, lost key, no protector) is reported `Unreadable` and never removed.
 
 ## Secrets
 

@@ -9,6 +9,17 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Changed
+- **BREAKING: `ISettingNormalizer` converts every definition type and reports per key.** `NormalizeAsync(scope,
+  options?, ct)` now takes `SettingNormalizationOptions` (`KeyPrefix`, `RemoveUnrecoverable`) instead of a key
+  prefix, and coerces legacy raw text for `bool`, integer/decimal/floating types, enums and string-serialized
+  scalars (not only `string`), keeping text that already is valid JSON and never guessing records or collections.
+  `SettingNormalizationReport` carries one `SettingNormalizationEntry` per key (`Rewritten`, `AlreadyCanonical`,
+  `Unreadable` + reason without the value, `Removed`, `Skipped`) with computed counts; the old `Normalized` and
+  `UnreadableKeys` members are replaced by `Rewritten` and `Where(SettingNormalizationOutcome.Unreadable)`. A secret
+  row keeps its protection state (protected rows stay on their scheme, plaintext rows stay plaintext for the
+  re-protector) and a row whose protection cannot be undone is never removed. `SettingDefinition` gains the abstract
+  `TryCanonicalizeJson` (generated definitions are unaffected). Migration: pass
+  `new SettingNormalizationOptions { KeyPrefix = prefix }`; read `report.Rewritten`/`report.Entries`.
 - **BREAKING: the settings implementation classes are internal.** `SettingPins`, `SettingNormalizer`,
   `SettingResolver`, `SettingReprotector`, `SettingDefinitionCatalog` and `SettingsManager` were public concrete
   classes with generic names that collided with application types (an application's own `SettingPins` could not be
