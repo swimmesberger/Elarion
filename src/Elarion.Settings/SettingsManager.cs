@@ -15,6 +15,7 @@ namespace Elarion.Settings;
 public sealed class SettingsManager(
     ISettingDefinitionCatalog catalog,
     ISettingResolver resolver,
+    ISettingPins pins,
     ISettingsStore store,
     ISettingsChangeSource changeSource,
     IElarionJsonSerialization jsonSerialization,
@@ -27,13 +28,23 @@ public sealed class SettingsManager(
         SettingDefinition<T> definition,
         SettingsScope? scope = null,
         CancellationToken cancellationToken = default) {
+        return (await GetResolvedAsync(definition, scope, cancellationToken).ConfigureAwait(false)).Value;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<SettingValue<T>> GetResolvedAsync<T>(
+        SettingDefinition<T> definition,
+        SettingsScope? scope = null,
+        CancellationToken cancellationToken = default) {
         var resolved = await resolver.ResolveAsync(definition, ResolveScope(scope), cancellationToken)
             .ConfigureAwait(false);
-        if (resolved.ValueJson is null) return definition.Default;
+        if (resolved.ValueJson is null)
+            return new SettingValue<T>(definition.Default, resolved.Source, resolved.Version, resolved.IsPinned);
 
         try {
             var value = JsonSerializer.Deserialize(resolved.ValueJson, jsonSerialization.GetTypeInfo<T>());
-            return value is null ? definition.Default : value;
+            return new SettingValue<T>(value is null ? definition.Default : value, resolved.Source, resolved.Version,
+                resolved.IsPinned);
         }
         catch (JsonException ex) {
             throw new InvalidOperationException(
@@ -108,6 +119,7 @@ public sealed class SettingsManager(
                 ValueJson = valueJson,
                 Version = setting.Version,
                 IsUnreadable = setting.IsUnreadable,
+                UnreadableReason = setting.UnreadableReason,
                 Description = definition.Description
             });
         }
@@ -131,7 +143,7 @@ public sealed class SettingsManager(
 
     private IChangeToken Combine(IChangeToken storeToken, SettingsScope scope, bool includeConfiguration) {
         if (!includeConfiguration || scope.Kind != SettingsScope.GlobalKind ||
-            resolver.GetConfigurationChangeToken() is not { } configurationToken)
+            pins.GetConfigurationChangeToken() is not { } configurationToken)
             return storeToken;
 
         return new CompositeChangeToken([storeToken, configurationToken]);
@@ -144,7 +156,7 @@ public sealed class SettingsManager(
                 $"Setting '{definition.Key}' does not allow the '{scope.Kind}' scope " +
                 $"(allowed: {string.Join(", ", definition.Scopes)}).");
 
-        if (!resolver.IsPinned(definition, scope)) return null;
+        if (!pins.IsPinned(definition, scope)) return null;
 
         return Result<SettingWrite>.Failure(AppError.Create(
             ErrorKind.BusinessRule,

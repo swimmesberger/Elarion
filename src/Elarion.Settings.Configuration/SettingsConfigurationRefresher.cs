@@ -23,8 +23,9 @@ namespace Elarion.Settings.Configuration;
 /// <i>before</i> any hosted service that reads settings-backed configuration at start (this is what
 /// <c>AddElarionSettingsConfiguration</c> does). The initial load is bounded by
 /// <see cref="InitialLoadTimeout"/> and honors the start cancellation token so a slow or unavailable store
-/// cannot hang host startup indefinitely — on timeout or failure the provider stays empty and the
-/// change-token-driven loop retries on the next signal.
+/// cannot hang host startup indefinitely — on timeout or failure the provider keeps what it has and the
+/// change-token-driven loop retries on the next signal. An unreadable stored row never fails the load: it is
+/// skipped and logged once by key and reason, and every other setting is projected.
 /// </remarks>
 public sealed class SettingsConfigurationRefresher(
     SettingsConfigurationProvider provider,
@@ -39,6 +40,7 @@ public sealed class SettingsConfigurationRefresher(
     private readonly Channel<byte> _signals = Channel.CreateBounded<byte>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
 
+    private readonly HashSet<string> _reported = new(StringComparer.Ordinal);
     private IDisposable? _subscription;
     private IDisposable? _configurationSubscription;
 
@@ -49,9 +51,24 @@ public sealed class SettingsConfigurationRefresher(
         var serialization = scope.ServiceProvider.GetRequiredService<IElarionJsonSerialization>();
         var resolved = await resolver.ResolveAllAsync(SettingsScope.Global, null, cancellationToken)
             .ConfigureAwait(false);
-        var data = SettingsConfigurationProjection.Project(resolved, serialization);
-        provider.Apply(data);
-        logger.LogDebug("Projected {Count} global setting key(s) into configuration.", data.Count);
+        var projection = SettingsConfigurationProjection.Project(resolved, serialization);
+        provider.Apply(projection.Data);
+        ReportProblems(projection.Problems);
+        logger.LogDebug("Projected {Count} global setting key(s) into configuration.", projection.Data.Count);
+    }
+
+    // One unreadable row must not take the rest down, and it must not flood the log on every refresh: report each
+    // key once while it stays broken, and again only if it recovers and breaks anew. Keys and reasons only.
+    private void ReportProblems(IReadOnlyList<SettingsProjectionProblem> problems) {
+        lock (_reported) {
+            _reported.RemoveWhere(key => problems.All(p => !string.Equals(p.Key, key, StringComparison.Ordinal)));
+            foreach (var problem in problems)
+                if (_reported.Add(problem.Key))
+                    logger.LogError(
+                        "Setting '{Key}' is unreadable and was left out of configuration: {Reason}. Fix or reset " +
+                        "the stored value, or run ISettingNormalizer for legacy raw string values.",
+                        problem.Key, problem.Reason);
+        }
     }
 
     /// <inheritdoc />

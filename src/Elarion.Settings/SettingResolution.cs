@@ -27,10 +27,12 @@ public enum SettingSource {
 /// <param name="Version">The store entry's version when the value came from the store, otherwise <see langword="null"/>.</param>
 /// <param name="RequiresReprotection">Whether the stored secret should be re-protected (plaintext or a retired key).</param>
 /// <param name="IsUnreadable">
-/// Whether a stored secret could not be unprotected (only reported by bulk resolution; a single resolution throws
-/// <see cref="SettingProtectionException"/>). The value then falls back to nothing and <see cref="ValueJson"/> is
-/// <see langword="null"/>.
+/// Whether the stored entry could not be read — a secret that cannot be unprotected, or a value that is not valid
+/// for the definition's type (for example a legacy raw string in a non-JSON column). Only reported by bulk
+/// resolution; a single resolution throws instead. The value then falls back to nothing and
+/// <see cref="ValueJson"/> is <see langword="null"/>.
 /// </param>
+/// <param name="UnreadableReason">Why the entry is unreadable; never contains the stored value.</param>
 public readonly record struct ResolvedSetting(
     SettingDefinition Definition,
     SettingsScope Scope,
@@ -39,7 +41,8 @@ public readonly record struct ResolvedSetting(
     string? ValueJson,
     int? Version,
     bool RequiresReprotection = false,
-    bool IsUnreadable = false) {
+    bool IsUnreadable = false,
+    string? UnreadableReason = null) {
     /// <summary>Whether an effective value exists (a stored/pinned value, or a declared default).</summary>
     public bool HasValue => !IsUnreadable && (Source != SettingSource.Default || Definition.HasDefault);
 }
@@ -85,8 +88,15 @@ public sealed record SettingDescription {
     /// <summary>The store entry's version, usable as <c>expectedVersion</c> for an optimistic write.</summary>
     public int? Version { get; init; }
 
-    /// <summary>Whether a stored secret could not be unprotected (for example its key ring is gone).</summary>
+    /// <summary>
+    /// Whether the stored entry could not be read: a secret that cannot be unprotected (for example its key ring
+    /// is gone) or a value that is not valid for the definition's type. The entry is ignored by every consumer
+    /// (the setting falls back to nothing) until it is rewritten or normalized — see <see cref="ISettingNormalizer"/>.
+    /// </summary>
     public bool IsUnreadable { get; init; }
+
+    /// <summary>Why the entry is unreadable; never contains the stored value.</summary>
+    public string? UnreadableReason { get; init; }
 
     /// <summary>The definition's description, if declared.</summary>
     public string? Description { get; init; }
@@ -109,6 +119,19 @@ public static class SettingErrorCodes {
 /// <summary>The data carried by the <see cref="AppError"/> of a refused settings write; the error code says why.</summary>
 /// <param name="Key">The setting key.</param>
 public sealed record SettingWriteFailure(string Key);
+
+/// <summary>
+/// The effective value of one setting together with where it came from, so a caller can tell "unset, so the
+/// default applies" from "explicitly stored" without a nullable value type or a full describe.
+/// </summary>
+/// <param name="Value">The effective value (the declared default when nothing is stored or pinned).</param>
+/// <param name="Source">The layer the value came from; <see cref="SettingSource.Default"/> means unset.</param>
+/// <param name="Version">The store entry's version when <paramref name="Source"/> is <see cref="SettingSource.Store"/>.</param>
+/// <param name="IsPinned">Whether deployment configuration pins the definition.</param>
+public readonly record struct SettingValue<T>(T Value, SettingSource Source, int? Version, bool IsPinned) {
+    /// <summary>Whether the value was set explicitly (stored or pinned) rather than defaulted.</summary>
+    public bool IsSet => Source != SettingSource.Default;
+}
 
 /// <summary>The success value of a settings write.</summary>
 /// <param name="Version">The new version of the store entry.</param>

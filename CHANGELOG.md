@@ -8,6 +8,32 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Settings: pre-host snapshot, `GetResolvedAsync`, singleton pin check, legacy-row normalizer.**
+  `SettingsConfigurationSnapshot.LoadAsync` runs the resolver and projection against a store before the host exists
+  (and `AddElarionSettingsConfiguration(snapshot)` / `AddElarionSettingsSnapshot` seed configuration with it), with
+  `SettingsConfigurationProjection.Flatten` public, so apps no longer copy the decode and flatten logic.
+  `ISettingsManager.GetResolvedAsync<T>` returns `SettingValue<T>` (value, `SettingSource`, `Version`, `IsPinned`) to
+  tell unset from defaulted. `ISettingPins` (singleton) answers `IsPinned`/`GetPinnedText` without a scope.
+  `ISettingNormalizer.NormalizeAsync` converts legacy raw-string rows of `string` definitions to canonical JSON once,
+  idempotently; reads deliberately do not guess (`42` is a valid string and a valid number), other types are reported.
+
+### Fixed
+- **Settings projection no longer loses every stored setting because of one bad row.** Bulk resolution now flags a
+  stored value that is not valid for its definition's type as unreadable (`ResolvedSetting.IsUnreadable`,
+  `UnreadableReason`, also on `SettingDescription`) exactly like an undecryptable secret, and the configuration
+  projection skips only that row; the refresher logs its key and reason once. Previously a single malformed row made
+  the refresh throw and nothing reached `IConfiguration`.
+
+### Changed
+- **BREAKING: settings API tidy-up.** `SettingsConfigurationProjection.Project` returns `SettingsProjection`
+  (`.Data` is the old dictionary, `.Problems` the skipped rows); `ISettingResolver.IsPinned` and
+  `GetConfigurationChangeToken` moved to `ISettingPins`; the `SettingResolver` constructor takes
+  `ISettingPins` and `IElarionJsonSerialization` instead of options and configuration; `SettingDefinition` gains the
+  abstract `TryValidateJson` (generated definitions are unaffected). Structured (record/collection) **defaults** are
+  no longer projected into `IConfiguration` — they were noise keys such as `self.runtime:applyStage`; stored values
+  and scalar defaults still are. Migration: use `.Data` and `ISettingPins`; bind options with their own defaults.
+
 ## [0.2.8] - 2026-10-04
 
 ### Added
