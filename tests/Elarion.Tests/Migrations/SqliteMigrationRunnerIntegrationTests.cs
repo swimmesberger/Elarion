@@ -25,11 +25,11 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
         var runner = CreateRunner(connectionString, "Basic.");
 
         var pendingBefore = await runner.GetPendingAsync(TestToken);
-        pendingBefore.Select(p => p.ScriptName).Should().Equal(
+        pendingBefore.Select(p => p.Name).Should().Equal(
             "V1__create_customers.sql", "V2__add_email.sql", "R__customer_view.sql");
 
         var applied = await runner.MigrateAsync(TestToken);
-        applied.Select(a => a.Version).Should().Equal("1", "2", null);
+        applied.Select(a => a.Step.Version).Should().Equal("1", "2", null);
 
         // The schema is really there: the view selects the column V2 added the table for.
         await using (var connection = new SqliteConnection(connectionString)) {
@@ -53,13 +53,13 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
 
         var changed = CreateRunner(connectionString, "RepeatableChanged.");
         var applied = await changed.MigrateAsync(TestToken);
-        applied.Should().ContainSingle().Which.ScriptName.Should().Be("R__customer_view.sql");
+        applied.Should().ContainSingle().Which.Step.Name.Should().Be("R__customer_view.sql");
 
         // The re-applied view now exposes the email column, and a new history row was appended.
         (await ScalarAsync(connectionString, "SELECT count(email) FROM mig_customer_names")).Should().Be(0L);
         (await ScalarAsync(
             connectionString,
-            "SELECT count(*) FROM elarion_schema_history WHERE script_name = 'R__customer_view.sql'")).Should().Be(2L);
+            "SELECT count(*) FROM elarion_schema_history WHERE step_name = 'R__customer_view.sql'")).Should().Be(2L);
 
         (await changed.MigrateAsync(TestToken)).Should().BeEmpty();
     }
@@ -76,7 +76,7 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
 
         var validation = await edited.ValidateAsync(TestToken);
         validation.IsValid.Should().BeFalse();
-        validation.Errors.Should().ContainSingle(e => e.ScriptName == "V1__create_customers.sql");
+        validation.Errors.Should().ContainSingle(e => e.StepName == "V1__create_customers.sql");
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
         var broken = CreateRunner(connectionString, "FailTx.");
         var act = () => broken.MigrateAsync(TestToken);
         (await act.Should().ThrowAsync<MigrationExecutionException>())
-            .Which.ScriptName.Should().Be("V2__extend_things.sql");
+            .Which.StepName.Should().Be("V2__extend_things.sql");
 
         // V2's INSERT rolled back with its transaction, and no history row exists for it.
         (await ScalarAsync(connectionString, "SELECT count(*) FROM mig_things")).Should().Be(1L);
@@ -94,7 +94,7 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
 
         // Fixing the script is the whole recovery — no resolve step, no repair.
         var applied = await CreateRunner(connectionString, "FailTxFixed.").MigrateAsync(TestToken);
-        applied.Should().ContainSingle().Which.Version.Should().Be("2");
+        applied.Should().ContainSingle().Which.Step.Version.Should().Be("2");
         (await ScalarAsync(connectionString, "SELECT count(*) FROM mig_things")).Should().Be(2L);
     }
 
@@ -122,7 +122,7 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
         (await ScalarAsync(connectionString, "SELECT count(*) FROM mig_points")).Should().Be(1L);
         (await ScalarAsync(
             connectionString,
-            "SELECT count(*) FROM elarion_schema_history WHERE state = 'failed' AND version = '2'")).Should().Be(1L);
+            "SELECT count(*) FROM elarion_schema_history WHERE outcome = 'failed' AND version = '2'")).Should().Be(1L);
 
         // Every subsequent run fails closed, naming the recovery.
         var blocked = () => broken.MigrateAsync(TestToken);
@@ -132,7 +132,7 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
         var fixedRunner = CreateRunner(connectionString, "NoTxFailFixed.");
         await fixedRunner.ResolveFailedAsync("2", ResolveAction.Retry, TestToken);
         var applied = await fixedRunner.MigrateAsync(TestToken);
-        applied.Should().ContainSingle().Which.Version.Should().Be("2");
+        applied.Should().ContainSingle().Which.Step.Version.Should().Be("2");
         (await ScalarAsync(
             connectionString,
             "SELECT count(*) FROM pragma_table_info('mig_points') WHERE name = 'extra'")).Should().Be(1L);
@@ -152,7 +152,7 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
         (await runner.ValidateAsync(TestToken)).IsValid.Should().BeTrue();
         (await ScalarAsync(
             connectionString,
-            "SELECT count(*) FROM elarion_schema_history WHERE state = 'applied' AND version = '2'")).Should().Be(1L);
+            "SELECT count(*) FROM elarion_schema_history WHERE outcome = 'applied' AND version = '2'")).Should().Be(1L);
     }
 
     [Fact]
@@ -162,7 +162,7 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
 
         await runner.BaselineAsync("1", cancellationToken: TestToken);
         var applied = await runner.MigrateAsync(TestToken);
-        applied.Should().ContainSingle().Which.Version.Should().Be("2");
+        applied.Should().ContainSingle().Which.Step.Version.Should().Be("2");
 
         (await ScalarAsync(connectionString, "SELECT count(*) FROM sqlite_master WHERE name = 'mig_base_one'")).Should()
             .Be(0L);
@@ -187,6 +187,21 @@ public sealed class SqliteMigrationRunnerIntegrationTests(SqliteMigrationsFixtur
         results.SelectMany(r => r).Should().HaveCount(3);
         (await ScalarAsync(connectionString, "SELECT count(*) FROM elarion_schema_history")).Should().Be(3L);
         (await ScalarAsync(connectionString, "SELECT count(*) FROM mig_customers")).Should().Be(0L);
+    }
+
+    [Fact]
+    public async Task Migrate_InterleavesSqlAndCodeSteps_InOneVersionSequence() {
+        var connectionString = fixture.CreateConnectionString();
+        var backfill = new DelegateCodeMigration("20260901000200", "backfill name_upper",
+            (context, ct) => context.ExecuteSqlAsync("UPDATE plan_items SET name_upper = upper(name)", ct));
+        var runner = CreateRunner(connectionString, "Interleaved.", o => o.AddCodeMigrations(backfill));
+
+        var applied = await runner.MigrateAsync(TestToken);
+
+        applied.Select(a => a.Step.Kind).Should().Equal("sql", "code", "sql");
+        (await ScalarAsync(connectionString, "SELECT count(*) FROM plan_items WHERE name_upper IN ('A', 'B')"))
+            .Should().Be(2L);
+        (await runner.MigrateAsync(TestToken)).Should().BeEmpty();
     }
 
     private static IMigrationRunner CreateRunner(

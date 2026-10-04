@@ -48,11 +48,15 @@ public sealed class SqliteMigrationsServiceCollectionExtensionsTests {
     }
 
     [Fact]
-    public void WithoutScriptSources_FailsAtRegistration() {
+    public void WithoutAnyStepSource_FailsWhenTheRunnerIsResolved() {
         var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddElarionSqlite("Data Source=unused.db");
+        services.AddElarionMigrations(_ => { });
 
-        var act = () => services.AddElarionMigrations(_ => { });
+        using var provider = services.BuildServiceProvider();
+        var act = () => provider.GetRequiredService<IMigrationRunner>();
 
-        act.Should().Throw<InvalidOperationException>().WithMessage("*AddScripts*");
+        act.Should().Throw<InvalidOperationException>().WithMessage("*at least one step source*");
     }
 }

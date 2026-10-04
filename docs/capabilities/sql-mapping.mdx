@@ -8,7 +8,7 @@ not in question. The gap is the **EF-free host**: an app published NativeAOT on 
 to turn `DbDataReader` rows into records and records into parameters, per row type, by hand.
 `Elarion.Sql` is that tier's access half
 ([ADR-0058](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0058-aot-sql-row-mapping.md)),
-completing the pair with [SQL migrations](/docs/capabilities/sql-migrations) (ADR-0057, the schema
+completing the pair with [migrations](/docs/capabilities/migrations) (ADR-0057, the schema
 half). It is chosen **by tier, not preference**:
 
 | Your app | Data access |
@@ -291,7 +291,7 @@ This tier supplies the same `IUnitOfWork` seam the EF tier does, so the framewor
 [`TransactionDecorator`](/docs/capabilities/entity-framework) wraps a command handler in one
 commit/rollback with no per-handler transaction code. On PostgreSQL, `Elarion.Sql.PostgreSql` registers
 one **central data source** — the shared core, EF Core's `DbContext` analogue — that the access tier and
-[migrations](/docs/capabilities/sql-migrations) both draw from, so the database is configured once:
+[migrations](/docs/capabilities/migrations) both draw from, so the database is configured once:
 
 ```csharp
 // Pick the provider once — one NpgsqlDataSource shared by every subsystem (command logging auto-wired):

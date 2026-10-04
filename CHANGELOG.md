@@ -9,6 +9,28 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Changed
+- **One migration plan: SQL scripts, C# code steps and EF Core migrations share a version sequence, history and
+  lock (ADR-0081, breaking).** `Elarion.Migrations` now merges the steps of every *source* — embedded
+  `V…__`/`R__` scripts, `ICodeMigration` classes, and EF Core migrations (new
+  `Elarion.Migrations.EntityFrameworkCore`) — into one version-ordered sequence under one exclusive lock, so an
+  expand migration, a C# backfill and a contract migration run in that order, once per database. Code steps
+  run in the plan's transaction on the plan's connection by default (failure rolls back, records nothing, stops
+  the plan, retries next start; `UseTransaction => false` is the explicit opt-out for long idempotent batches;
+  `IsAlreadySatisfiedAsync` and `BaselineAsync` cover fresh and adopted databases). The history table is now
+  step-shaped — `installed_rank, kind, version, description, step_name, checksum, outcome, …` — and a table
+  written by the script-only runner is upgraded in place by the first run (rows keep their meaning, nothing
+  re-runs). Migration: rename `MigrationScriptInfo` to `MigrationStepInfo` (`ScriptName` → `Name`;
+  `MigrateAsync` returns `MigrationStepResult` with `.Step`/`.Outcome`/`.Duration`);
+  `MigrationValidationError`/`MigrationExecutionException`/`MigrationFailedStateException` `.ScriptName` →
+  `.StepName`; SQL that read `script_name`/`state` now reads `step_name`/`outcome`; a custom provider
+  implements the narrowed `IMigrationSession` (`Connection`, history operations, `ExecuteSqlAsync(sql,
+  transaction?)` — the runner owns the transaction). "At least one script source" is now "at least one step
+  source", checked when the runner is built, and the `AddElarionMigrations` callback is optional. The migrations
+  page moved from `capabilities/sql-migrations` to `capabilities/migrations`. **EF hosts:** replace
+  `Database.MigrateAsync()` with `AddElarionPostgreSql(cs)` + `AddElarionMigrations(o =>
+  o.AddEntityFrameworkMigrations<AppDbContext>())`; a database EF already migrated needs no baseline (its EF
+  steps are recorded as `satisfied`). Operations EF marks `suppressTransaction` move to a
+  `-- elarion: no-transaction` SQL script.
 - **The EF Web Push subscription store joins the caller's unit of work.** `EfCorePushSubscriptionStore` is now
   scoped over the caller's `TDbContext` instead of a singleton that opened its own scope and connection per
   operation. A subscribe, unsubscribe, or dead-subscription cleanup inside a command now commits or rolls back
@@ -35,6 +57,13 @@ minor releases may include breaking changes.
   the latest, each replacing the last as it is shown.
 
 ### Added
+- **`ICodeMigration` and `Elarion.Migrations.EntityFrameworkCore` (ADR-0081).** `ICodeMigration` is a C# step
+  with a `Version` in the same space as SQL scripts, registered at compile time through
+  `[GenerateContractSetRegistration(typeof(ICodeMigration))]` or `AddCodeMigration<T>()`, resolving its services
+  from a fresh scope per step (`MigrationStepContext`). `IMigrationStepSource` is the extension point for further
+  step kinds; `AddEntityFrameworkMigrations<TContext>()` contributes every EF migration of a context as one step
+  each, executing the migration's own generated SQL in the plan's transaction. See the new
+  [migrations](docs/capabilities/migrations.mdx) page.
 - **SQL array parameters (ADR-0077).** `SqlArray.Of(collection)` binds a collection as **one** array-valued
   parameter instead of the `IN`-list expansion a collection hole gets: `WHERE id = ANY({SqlArray.Of(ids)})`
   renders `= ANY(@p0)` with a typed `T[]` value — one parameter and one cached plan whatever the length, and an
@@ -612,7 +641,7 @@ minor releases may include breaking changes.
   dialects are rejected by design. `AddElarionPostgreSqlMigrations(connectionString | dataSource,
   o => o.AddScripts(assembly, prefix))` registers the runner plus a hosted service that migrates before
   the host reports ready and fails startup on error (`ApplyOnStartup = false` opts out). Documented in
-  the new [SQL migrations](docs/capabilities/sql-migrations.mdx) capability page.
+  the new [SQL migrations](docs/capabilities/migrations.mdx) capability page.
 - **Data-rate shaping helpers (ADR-0055).** `Elarion` core gains the `Elarion.Buffering` namespace with
   the two primitives every telemetry gateway hand-rolls between "device produces samples" and
   "database/UI consume them" — BCL-only, no DI registration, `TimeProvider`-driven for deterministic

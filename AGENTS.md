@@ -41,8 +41,10 @@ it uses. Add `Elarion.Abstractions` only to contract-only assemblies that cannot
 
 - Core packages stay independent of ASP.NET Core, EF Core, and concrete providers. Provider/host packages
   are opt-in siblings, not dependencies pulled into `Elarion` or `Elarion.Abstractions`.
-- Choose a host tier deliberately: EF applications retain EF migrations; EF-free NativeAOT hosts pair
-  `Elarion.Sql` with `Elarion.Migrations` and exactly one migration provider.
+- Choose a host tier deliberately: EF applications author EF migrations and run them as steps of the one
+  migration plan (`Elarion.Migrations.EntityFrameworkCore`); EF-free NativeAOT hosts pair `Elarion.Sql` with
+  `Elarion.Migrations` and exactly one migration provider. SQL scripts, C# code steps, and EF migrations share
+  one version sequence, history, and lock (ADR-0081).
 - `Elarion` bundles `Elarion.Generators`, and `Elarion.EntityFrameworkCore` bundles its EF generator.
   Analyzer assets are not transitive: every assembly that needs a bundled generator must reference the
   appropriate public package directly.

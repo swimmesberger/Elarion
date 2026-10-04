@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Database-neutral SQL migration engine for EF-free (NativeAOT) Elarion hosts (ADR-0060): embedded V{version}__/R__ script discovery, SHA-256 checksums over line-ending-normalized content, out-of-order and repeatable planning, and the roll-forward execution model (history rows commit with their script — no repair command, no failed-row limbo). Drives a database provider through the IMigrationDatabase seam and the neutral AddElarionMigrations over an IMigrationDatabaseFactory a provider registers (Elarion.Sql.PostgreSql, Elarion.Sql.Sqlite). Contains no database driver.</Description>
+    <Description>Database-neutral migration plan (ADR-0060, ADR-0081): SQL scripts (embedded V{version}__/R__ discovery, SHA-256 checksums over line-ending-normalized content) and C# ICodeMigration steps — and, through Elarion.Migrations.EntityFrameworkCore, EF Core migrations — merged into one version-ordered sequence with one history table and one exclusive lock. Out-of-order and repeatable planning, satisfied/baseline adoption, and the roll-forward execution model (a step's history row commits with its transaction — no repair command, no failed-row limbo). Drives a database provider through the IMigrationDatabase seam and the neutral AddElarionMigrations over an IMigrationDatabaseFactory a provider registers (Elarion.Sql.PostgreSql, Elarion.Sql.Sqlite). NativeAOT-compatible; contains no database driver and no EF reference.</Description>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 

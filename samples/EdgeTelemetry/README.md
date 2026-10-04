@@ -148,7 +148,7 @@ The other samples show Elarion's default tier: [Billing](../Billing) is the laye
 [LiveQuotes](../LiveQuotes) the realtime in-memory middle ground. EdgeTelemetry is the third
 position: when the deployment target punishes cold start and footprint, drop EF — not correctness.
 The [SQL mapping](https://elarion.wimmesberger.dev/docs/capabilities/sql-mapping) and
-[SQL migrations](https://elarion.wimmesberger.dev/docs/capabilities/sql-migrations) docs carry the
+[migrations](https://elarion.wimmesberger.dev/docs/capabilities/migrations) docs carry the
 full tier decision table; the short version is the first row of each: **if you can use EF Core, use
 EF Core.** This tier exists for the hosts that can't. The
 [time series](https://elarion.wimmesberger.dev/docs/capabilities/time-series) recipe shows the same

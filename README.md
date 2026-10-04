@@ -125,7 +125,8 @@ public package, grouped by capability, with the reason to add each one.
 | Application model           | `Elarion`                                          | `Validation`, `Resilience`, caching, and feature-flag providers                                                     |
 | Hosting and transports      | `Elarion.JsonRpc`, `Elarion.AspNetCore`            | OpenAPI, MCP, schema generation, Identity, `Elarion.Grpc` for unary/server-streaming mapping, or a custom transport |
 | Persistence                 | `Elarion.EntityFrameworkCore`                      | Unit of work, paging, bulk operations, authorization, idempotency, auditing, scheduling, and coordination           |
-| NativeAOT SQL               | `Elarion.Sql`, `Elarion.Migrations`                | PostgreSQL or SQLite migrations for an EF-free host                                                                 |
+| NativeAOT SQL               | `Elarion.Sql`, `Elarion.Migrations`                | PostgreSQL or SQLite access and the migration plan (SQL + code steps) for an EF-free host                           |
+| Migration plan for EF hosts | `Elarion.Migrations.EntityFrameworkCore`           | EF migrations as plan steps, interleaved with SQL scripts and C# backfills in one history                           |
 | Events and live clients     | `Elarion.Messaging.Outbox`, `Elarion.ClientEvents` | PostgreSQL fan-out and SSE transport; `Elarion.WebPush` to notify users whose app is closed                        |
 | Live state and device links | `Elarion.Actors`, `Elarion.Connections`            | PostgreSQL actor state/home, WebSocket/TCP adapters, simulation, and device identity                                |
 | Blob storage                | `Elarion.Blobs`                                    | PostgreSQL or Azure storage plus direct HTTP or tus upload transports                                               |

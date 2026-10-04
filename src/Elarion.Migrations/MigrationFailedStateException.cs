@@ -8,14 +8,14 @@ namespace Elarion.Migrations;
 /// </summary>
 public sealed class MigrationFailedStateException : MigrationException {
     /// <summary>Creates the exception for the given failed migration.</summary>
-    public MigrationFailedStateException(string version, string scriptName, string message) : base(message) {
+    public MigrationFailedStateException(string version, string stepName, string message) : base(message) {
         Version = version;
-        ScriptName = scriptName;
+        StepName = stepName;
     }
 
     /// <summary>The version of the failed migration — the argument for <see cref="IMigrationRunner.ResolveFailedAsync"/>.</summary>
     public string Version { get; }
 
     /// <summary>The file name of the failed script.</summary>
-    public string ScriptName { get; }
+    public string StepName { get; }
 }

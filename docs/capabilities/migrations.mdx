@@ -1,0 +1,371 @@
+---
+title: Migrations
+description: One migration plan for both host tiers — SQL scripts, C# code steps and EF Core migrations share one version sequence, one history and one lock. Startup-applied, roll-forward, PostgreSQL and SQLite providers.
+---
+
+Elarion applies schema **and data** changes through one **migration plan**
+([ADR-0081](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0081-one-migration-plan.md),
+building on [ADR-0057](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0057-postgresql-sql-migration-runner.md)
+and [ADR-0060](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0060-database-neutral-migration-core.md)).
+A plan is made of typed **steps** contributed by step **sources**:
+
+| Step kind | Source | Declared as |
+| --- | --- | --- |
+| `sql` | Embedded scripts | `V{version}__{description}.sql` (once, ordered) and `R__{description}.sql` (repeatable) |
+| `code` | `ICodeMigration` implementations | A C# class with a `Version`, discovered at compile time |
+| `ef` | EF Core migrations (`Elarion.Migrations.EntityFrameworkCore`) | The `20260713093000_AddDevices` migrations of a `DbContext` |
+
+The runner merges **every** step of **every** source into **one version-ordered sequence**, runs it under
+**one lock** and records it in **one history table**. That is what makes an *expand → backfill → contract*
+release a single ordered plan instead of three tools and a deployment-ordering convention: the expand
+migration, the C# backfill and the contract migration run in that order, once per database, no matter how
+many instances start together.
+
+The engine is **database-neutral**; a provider package supplies the SQL and locking:
+
+| Provider package | Registration | Use it for | Driver |
+| --- | --- | --- | --- |
+| `Elarion.Sql.PostgreSql` | `AddElarionPostgreSql` + `AddElarionMigrations` | Multi-node PostgreSQL hosts (session advisory lock serializes 1–10 nodes) | `Npgsql` |
+| `Elarion.Sql.Sqlite` | `AddElarionSqlite` + `AddElarionMigrations` | Single-node / edge hosts on a local file (one file per node) | `Microsoft.Data.Sqlite` |
+
+Each provider package ships the migration engine **alongside the EF-free tier's access half** — generated
+row mappers over hand-written SQL, [SQL mapping](/docs/capabilities/sql-mapping) (ADR-0058) — so the single
+provider call picks the database for both and they share one data source. `AddElarionMigrations` itself is
+provider-neutral. PostgreSQL runs both together in the
+[`samples/EdgeTelemetry`](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry)
+NativeAOT host.
+
+Pick the packages that match your app:
+
+| Your app | Packages | Steps |
+| --- | --- | --- |
+| EF-free / NativeAOT | `Elarion.Migrations` + a provider (`Elarion.Sql.PostgreSql` / `Elarion.Sql.Sqlite`) | SQL scripts + code steps |
+| Uses EF Core | The same, plus `Elarion.Migrations.EntityFrameworkCore` | EF migrations + SQL scripts + code steps |
+| Either, with real deploy infrastructure | Bundles / `migrations script --idempotent` / Flyway in CI | Replace the tool, don't grow the default |
+
+The EF tier does **not** call `Database.MigrateAsync()` any more — it runs the one runner, with its
+migrations as steps (see [EF Core migrations as steps](#ef-core-migrations-as-steps)). The package ships no
+Elarion framework-table scripts: the EF-based packages remain EF-delivered.
+
+## Quick start
+
+Embed your scripts and register the runner for your database. The API is identical across providers
+apart from the registration method:
+
+```xml
+<ItemGroup>
+  <EmbeddedResource Include="Migrations/**/*.sql" />
+</ItemGroup>
+```
+
+Registration is two steps and identical across providers: pick the database with the provider call, then
+register migrations with the neutral `AddElarionMigrations` — the only line that differs is the provider.
+
+```csharp
+// PostgreSQL — the same call also wires the SQL access tier, on one shared NpgsqlDataSource:
+builder.Services.AddElarionPostgreSql(builder.Configuration.GetConnectionString("Default")!);
+
+// ...or SQLite (single-node / edge):
+builder.Services.AddElarionSqlite(builder.Configuration.GetConnectionString("Default")!);  // "Data Source=app.db"
+
+// Neutral — names no provider:
+builder.Services.AddElarionMigrations(
+    o => o.AddScripts(typeof(Program).Assembly, "MyApp.Migrations."));
+```
+
+`AddElarionMigrations` registers `IMigrationRunner` plus a hosted service that applies pending migrations
+**before the host reports ready** and fails startup on error — serving traffic against a half-migrated
+schema is worse than not starting. Register it before other hosted services that expect the schema (hosted
+services start in registration order); set `ApplyOnStartup = false` to invoke the runner yourself. The
+PostgreSQL provider call also has an `NpgsqlDataSource` overload for hosts that already manage one.
+
+Scripts are plain SQL in your database's own dialect — the runner never rewrites them, so write
+PostgreSQL for the PostgreSQL provider and SQLite for the SQLite provider.
+
+## Code steps
+
+Work a SQL script cannot express — parsing, hashing, calling a domain service, filling a column with
+computed data — is a C# step. Implement `ICodeMigration` and give it a **version in the same space as the
+scripts**:
+
+```csharp
+public sealed class BackfillOrderTotals : ICodeMigration {
+    public string Version => "20260901120000";            // between the expand and contract scripts below
+    public string Description => "backfill order totals";
+
+    public async Task ExecuteAsync(MigrationStepContext context, CancellationToken ct) {
+        // Runs in the plan's transaction on the plan's connection — rolled back together with the history row.
+        await context.ExecuteSqlAsync(
+            "UPDATE orders SET total = (SELECT sum(price * qty) FROM order_lines WHERE order_id = orders.id) WHERE total IS NULL", ct);
+    }
+}
+```
+
+```text
+Migrations/V20260901110000__orders_add_total.sql        -- expand:   ADD COLUMN total numeric NULL
+(BackfillOrderTotals, 20260901120000)                   -- backfill: C#
+Migrations/V20260901130000__orders_require_total.sql    -- contract: SET NOT NULL
+```
+
+The three run in version order, in one run, exactly once per database. Register them at compile time —
+no reflection scan:
+
+```csharp
+public static partial class MigrationRegistrations {
+    [GenerateContractSetRegistration(typeof(ICodeMigration))]   // ADR-0070
+    public static partial IServiceCollection AddCodeMigrations(this IServiceCollection services);
+}
+// builder.Services.AddCodeMigrations();   or one at a time: services.AddCodeMigration<BackfillOrderTotals>();
+```
+
+A code step is stateless metadata held as a singleton: it must not inject scoped services. Everything it
+needs is resolved from `context.Services` — a **fresh scope per step** — such as a `DbContext`, an
+`ISqlSession` or a handler. Without DI (the `PostgreSqlMigrationRunner` façade) pass
+`options.AddCodeMigrations(instance)`.
+
+The semantics mirror a transactional SQL script:
+
+- **Transaction by default.** The step runs in a transaction on `context.Connection` (the connection that
+  holds the migration lock), and its history row commits in that same transaction. Anything written through
+  `context.Connection` / `context.ExecuteSqlAsync` is atomic with the record.
+- **Failure stops the plan.** An exception rolls the transaction back, records **nothing** for the step,
+  throws `MigrationExecutionException` naming it and fails startup. The next start retries it — and no later
+  step runs before it succeeded, because later steps may build on it.
+- **Services bring their own connections.** A `DbContext` or `ISqlSession` resolved from `context.Services`
+  uses a different connection, *outside* the step's transaction: its writes are **not** rolled back on
+  failure. Keep such conversions idempotent (`WHERE` matches only unconverted rows, `ON CONFLICT DO NOTHING`)
+  — or let an EF context adopt `context.Connection`/`context.Transaction` (`Database.SetDbConnection`,
+  `Database.UseTransaction`) to make its writes atomic with the record.
+- **Opt out for long batches.** `UseTransaction => false` runs the step without a transaction so a very large
+  conversion can commit as it goes. The consequence: a failure can leave partial writes behind, still
+  records nothing, and the next start reruns the step — so it **must** be idempotent and resumable. (A SQL
+  `no-transaction` script differs deliberately: a half-applied *schema* fails closed until you resolve it,
+  see below.)
+- **Satisfied.** `IsAlreadySatisfiedAsync` lets a step declare "nothing to do" — a fresh install where the
+  legacy source never existed — and is recorded with outcome `satisfied` without running. Baselining an
+  adopted database covers the rest. Neither is automatic: a guess about "fresh" is a bug waiting to happen.
+- **Exactly once across instances.** The same migration lock as the scripts: a waiting instance re-reads the
+  history *after* it holds the lock, finds the step recorded and does nothing.
+
+A recorded step whose class was later deleted is simply ignored — removing a conversion once it rolled out
+everywhere is the intended cleanup.
+
+## EF Core migrations as steps
+
+The EF tier keeps its **EF migrations** — `dotnet ef migrations add` and the model snapshot are unchanged —
+but runs them through the plan instead of `Database.MigrateAsync()`:
+
+```csharp
+builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(cs));
+builder.Services.AddElarionPostgreSql(cs);                       // the plan's connection and advisory lock
+builder.Services.AddCodeMigration<BackfillOrderTotals>();
+builder.Services.AddElarionMigrations(o => o.AddEntityFrameworkMigrations<AppDbContext>());
+```
+
+Each EF migration becomes one step versioned by the timestamp in its id (`20260901110000_OrdersAddTotal`
+→ `20260901110000`), so it interleaves with scripts and code steps in the same sequence — an EF expand
+migration, a C# backfill, an EF contract migration. An EF step executes the migration's own generated SQL
+(what `dotnet ef migrations script` prints for that one migration) in the plan's transaction, so the migration
+and the plan's history row commit atomically. EF's `__EFMigrationsHistory` row is written by that script as
+well — EF tooling stays truthful — while the plan's history is the authority for ordering and exactly-once.
+
+Notes for EF hosts:
+
+- **Adoption needs no baseline.** On a database EF already migrated, each EF step whose id is listed in
+  `__EFMigrationsHistory` is recorded as `satisfied` the first time the plan runs; only newer steps apply.
+- **EF migrations are transactional steps.** An operation EF marks `suppressTransaction` (for example
+  `CREATE INDEX CONCURRENTLY`) cannot run in the plan's transaction; put it in a
+  `-- elarion: no-transaction` SQL script with a version between the surrounding steps.
+- The step source needs `Elarion.Migrations.EntityFrameworkCore` (which brings
+  `Microsoft.EntityFrameworkCore.Relational`) and supports providers whose migration script is a plain
+  statement batch — PostgreSQL and SQLite. The EF-free NativeAOT tier never references it.
+- Do not also call `Database.Migrate()`/`MigrateAsync()` at startup — two runners over one set of
+  migrations is exactly what the plan removes.
+
+## SQL script conventions
+
+Scripts are embedded resources (discovery reads the assembly manifest — AOT-safe, no filesystem):
+
+| Name | Meaning |
+| --- | --- |
+| `V{version}__{description}.sql` | Versioned: applied exactly once, in version order |
+| `R__{description}.sql` | Repeatable: re-applied whenever its checksum changes, after all versioned scripts, in name order |
+
+- **Use timestamp versions** (`V20260713093000__add_devices.sql`): they make branch-merge collisions
+  structurally rare instead of policing them at deploy time — and they are the same timestamps code steps
+  and EF migrations carry, which is what lets the three interleave.
+- A version belongs to **one step across all kinds**: a script and a code step claiming the same version fail
+  validation naming both.
+- Multi-segment versions separate segments with single underscores (`V1_2__…` is version 1.2) — file
+  names cannot contain dots, because folder paths become dot-separated resource-name segments.
+- Validation is **fail-closed and total**: within the configured scope (assembly + optional resource
+  prefix), every `.sql` resource must be a valid script — duplicate versions, malformed names, and
+  undecodable content each fail naming the offending resource. Nothing is silently skipped.
+- Repeatables are for idempotent `CREATE OR REPLACE` surfaces (views, functions) — never destructive DDL.
+
+**Checksums are SHA-256 over normalized content** (BOM stripped, CRLF→LF), so line-ending churn — git
+`autocrlf`, an editor touching whitespace — can never invalidate an applied script. A genuine mismatch
+fails validation with the script name, both hashes, and the two legal resolutions: revert the edit, or
+add a new script.
+
+## Execution model
+
+One runner, one dedicated connection, guarded by an **exclusive migration lock** so concurrent startups
+serialize, waiters re-read history and no-op. The lock's scope is the provider's:
+
+- **PostgreSQL** takes a **session-level** `pg_advisory_lock` — it serializes the 1–10-node tier across
+  processes, and a crashed runner releases it with its connection (no lock row to clean up).
+- **SQLite** takes a per-file **in-process** lock — SQLite is single-node by design (one file per node,
+  never shared across nodes), so *this process* is the correct scope; `LockTimeout` bounds the wait and
+  `busy_timeout` backstops the unsupported cross-process case.
+
+Each versioned step runs in its own transaction on that connection, and **its history row commits in that
+same transaction**. A failed transactional step therefore leaves *no* history row: fix it and rerun. There is
+no repair command because there is nothing to repair — and no undo either (a dropped column's data cannot be
+un-dropped; roll forward). This invariant is identical on both providers (SQLite has full transactional DDL)
+and for every step kind.
+
+### The history table
+
+One table, `elarion_schema_history`, one row per step:
+
+| Column | Meaning |
+| --- | --- |
+| `installed_rank` | True execution order |
+| `kind` | `sql`, `code`, `ef`, or `baseline` |
+| `version` | Canonical dotted version (null for repeatable scripts), unique |
+| `step_name` | Script file name, code-migration type name, EF migration id |
+| `description` | Human-readable description |
+| `checksum` | SHA-256 of a script's normalized content; null for code and EF steps |
+| `outcome` | `applied`, `satisfied`, `baseline`, or `failed` |
+| `applied_at`, `duration_ms` | Server timestamp and measured duration |
+
+A history table written by the earlier script-only runner (`script_name`, `state`, no `kind`) is **upgraded in
+place** by the first run that holds the lock — columns renamed, rows tagged `sql` (baseline markers
+`baseline`), nothing re-applied; read-only calls (`ValidateAsync`, `GetPendingAsync`) understand the old
+layout meanwhile. Applications that queried `script_name`/`state` directly must switch to
+`step_name`/`outcome`.
+
+### Non-transactional SQL scripts
+
+DDL a database forbids inside a transaction opts out via a directive on the leading comment block:
+
+```sql
+-- elarion: no-transaction
+CREATE INDEX CONCURRENTLY orders_customer_idx ON orders (customer_id);
+```
+
+On **PostgreSQL** this is for statements like `CREATE INDEX CONCURRENTLY`; the runner executes the script
+statement by statement (each as its own implicit transaction — batching them would reintroduce the
+transaction the directive opts out of). On **SQLite** it is rarely needed — SQLite has full transactional
+DDL and no `CREATE INDEX CONCURRENTLY` — and such a script runs in autocommit mode (each statement commits
+on its own). Only a non-transactional script can leave a mid-applied state on failure: the runner records
+an explicit **failed** history row and subsequent runs fail closed, naming the script and the recovery API:
+
+```csharp
+// AddElarionMigrations registers IMigrationRunner — inject/resolve it where you handle recovery:
+IMigrationRunner runner = app.Services.GetRequiredService<IMigrationRunner>();
+
+await runner.ResolveFailedAsync("20260713093000", ResolveAction.Retry);       // rerun the fixed script
+await runner.ResolveFailedAsync("20260713093000", ResolveAction.MarkApplied); // schema was completed by hand
+```
+
+A deliberate in-code decision at the call site — not a CLI habit. An unknown directive (a typo like
+`no-transactoin`) fails validation instead of silently changing transaction semantics.
+
+Failed rows are recorded for **versioned** scripts only: a repeatable script that fails under
+`no-transaction` records nothing — repeatables are idempotent by doctrine and their changed checksum
+was never recorded, so the next run simply retries them. A non-transactional **code** step likewise records
+nothing and is retried (see [Code steps](#code-steps)).
+
+## Migrating into a schema
+
+By default everything lands in the connection's own default schema (`public` on a stock PostgreSQL). To
+keep the application's objects in a schema of their own — **without putting a prefix in a single script** —
+name it on the provider registration:
+
+```csharp
+builder.Services.AddElarionPostgreSql(
+    builder.Configuration.GetConnectionString("Default")!, schema: "app");
+```
+
+There is no migration option for this, deliberately. The schema is the connection's `Search Path`, so **one
+setting steers both** the SQL access tier and migrations: prefix-free scripts and unqualified application
+queries resolve through the same path and cannot drift into different schemas. `schema:` is pure
+convenience — `Search Path=app` in the connection string is the same thing, and wins if you set both. The
+`NpgsqlDataSource` overload takes no `schema` argument for the same reason: your data source already
+carries it.
+
+What migrations add on top is the one thing a connection setting cannot do: the runner **creates the schema
+if it does not exist**, under the migration lock so concurrent starters cannot race, and writes the history
+table schema-qualified — so two schemas in one database keep independent histories and a script that leaves
+`search_path` pointing elsewhere cannot misplace history rows.
+
+<Callout>
+Multi-schema deployments follow from this: one connection string per schema, each with its own history.
+Give them distinct `advisoryLockKey` values to let them migrate concurrently.
+</Callout>
+
+SQLite has no schema concept — its "schema names" are ATTACHed database files — so use a separate database
+file per tenant there instead.
+
+## Out-of-order scripts
+
+When a merge lands a step versioned below one already applied, the default policy is **`Warn`**: the
+step is applied, logged as a warning, and recorded in true execution order (`installed_rank`). The
+history table records what actually happened either way; a strict default only teaches teams a global
+escape flag. Teams that want strict ordering opt into `OutOfOrder = OutOfOrderPolicy.Deny`, which fails
+the run naming the offenders.
+
+## Adopting an existing database
+
+`BaselineAsync(version)` marks an existing schema as already at a version — steps of every kind at or below
+it are treated as applied and never run. It is explicit only (allowed solely while the history is empty);
+there is no `baselineOnMigrate` auto-magic.
+
+`ValidateAsync` (checksum + pending report, no writes) and `GetPendingAsync` back health checks and
+deploy gates; everything ships in the box, no feature tiers:
+
+```csharp
+IMigrationRunner runner = app.Services.GetRequiredService<IMigrationRunner>();
+
+// One-time adoption of an existing database (history must be empty):
+await runner.BaselineAsync("20260713093000", "adopt existing schema", ct);
+
+// Health check / deploy gate — read-only:
+MigrationValidationResult validation = await runner.ValidateAsync(ct);
+if (!validation.IsValid) Report(validation.Errors);          // checksum drift, malformed scripts
+IReadOnlyList<MigrationStepInfo> pending = await runner.GetPendingAsync(ct);
+```
+
+## Options
+
+At least one step source is required. The neutral options apply to every provider:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `AddScripts(assembly, prefix?)` | — | Assemblies + optional resource-name prefix to scan for SQL scripts |
+| `AddCodeMigrations(...)` / `AddCodeMigration<T>()` | — | Code steps (the options form is for non-DI use) |
+| `AddStepSource(source)` | — | A further step source, e.g. `AddEntityFrameworkMigrations<TContext>()` |
+| `HistoryTableName` | `elarion_schema_history` | The runner-created history table |
+| `OutOfOrder` | `Warn` | `Warn` (apply + log) or `Deny` (fail the run) |
+| `ApplyOnStartup` | `true` | Register the migrate-before-ready hosted service |
+| `CommandTimeout` | none | Per-command timeout; long DDL is normal, so unlimited by default. **PostgreSQL only** — SQLite has no server-side statement timeout, so it is ignored there |
+| `LockTimeout` | none | How long to wait for the migration lock (unlimited: serialize behind a long migration) |
+
+The PostgreSQL provider adds two *registration* arguments rather than options: `advisoryLockKey` (a fixed
+constant by default) — distinct keys let two apps sharing one database migrate independent schemas
+concurrently — and `schema` (see [Migrating into a schema](#migrating-into-a-schema)). Both belong to the
+connection, not to the migration set. SQLite adds neither.
+
+## What it deliberately is not
+
+No undo, no repair, no placeholders/variable substitution, no dialect *setting*, no feature tiers, no
+repeatable code steps, no step dependency graph — order is the version, and that is the whole model. A new
+database engine is a new **provider package** implementing the `IMigrationDatabase` seam — never a
+`Dialect` flag on one runner; a new kind of step is a new **step source** implementing `IMigrationStepSource`.
+If you need any of the rejected features, replace the tool (Flyway or Evolve in CI) rather than growing this
+default — the same doctrine as every Elarion seam
+([ADR-0025](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0025-distributed-scheduler-coordination.md)).
+App-side *data access* under AOT is a separate concern, owned by ADR-0058. A conversion too large for a startup
+step — hours of work, progress checkpoints, per-batch leases — belongs in a background job, not the plan.

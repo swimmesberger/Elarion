@@ -1,19 +1,21 @@
 namespace Elarion.Migrations;
 
 /// <summary>
-/// Applies embedded SQL migration scripts to a database (ADR-0057/ADR-0060). Scripts are embedded
-/// resources named <c>V{version}__{description}.sql</c> (versioned, applied once, in version order) or
-/// <c>R__{description}.sql</c> (repeatable, re-applied whenever its checksum changes). The runner is the
-/// EF-free (NativeAOT) tier's schema tool — EF-based applications keep EF Core migrations. The
-/// database-specific work (locking, history-table SQL, script execution) is supplied by a provider
+/// Applies the migration plan to a database (ADR-0057/0060/0081): the steps of every source — embedded SQL
+/// scripts named <c>V{version}__{description}.sql</c> (versioned, applied once) or
+/// <c>R__{description}.sql</c> (repeatable, re-applied whenever its checksum changes), <see cref="ICodeMigration"/>
+/// code steps, and EF Core migrations — merged into <em>one</em> version-ordered sequence with one history and
+/// one lock, so SQL, code and EF steps interleave within a release. It is the schema tool of both host tiers:
+/// the EF-free (NativeAOT) tier with scripts and code steps, EF applications with EF migrations as a step source.
+/// The database-specific work (locking, history-table SQL, SQL execution) is supplied by a provider
 /// through <see cref="IMigrationDatabase"/>; the engine here is provider-neutral.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Execution uses one dedicated connection guarded by an exclusive migration lock, so concurrent
-/// startups serialize and a crashed runner releases the lock with its connection. Each versioned script
-/// runs in its own transaction and its history row commits in that same transaction — a failed
-/// transactional migration leaves no history row and is simply rerun after the script is fixed. There is
+/// startups serialize and a crashed runner releases the lock with its connection. Each versioned step
+/// runs in its own transaction on that connection and its history row commits in that same transaction — a
+/// failed transactional step leaves no history row and is simply rerun after it is fixed. There is
 /// deliberately no repair command and no undo: roll forward.
 /// </para>
 /// <para>
@@ -23,23 +25,25 @@ namespace Elarion.Migrations;
 /// failed history row and every subsequent run fails closed until <see cref="ResolveFailedAsync"/>
 /// decides between retrying and marking the version applied. A failed <em>repeatable</em> script records
 /// nothing — repeatables are idempotent by doctrine and their changed checksum was never recorded, so
-/// the next run simply retries them.
+/// the next run simply retries them. A non-transactional <see cref="ICodeMigration"/> that fails likewise
+/// records nothing and is retried (<see cref="MigrationStep.RecordsFailedRow"/>) — it must be idempotent.
 /// </para>
 /// </remarks>
 public interface IMigrationRunner {
     /// <summary>
-    /// Validates checksums, then applies all pending scripts: versioned scripts in version order
+    /// Validates checksums, then applies all pending steps: versioned steps of every kind in one version order
     /// (out-of-order arrivals per <see cref="MigrationOptions.OutOfOrder"/>), repeatable
-    /// scripts afterwards in name order when their checksum changed.
+    /// scripts afterwards in name order when their checksum changed. A step whose
+    /// <see cref="MigrationStep.IsAlreadySatisfiedAsync"/> holds is recorded as satisfied without running.
     /// </summary>
-    /// <returns>The scripts applied by this run, in execution order; empty when the schema was up to date.</returns>
+    /// <returns>The steps recorded by this run, in execution order; empty when everything was up to date.</returns>
     /// <exception cref="MigrationException">
     /// A script resource is invalid, an applied script's checksum changed, or out-of-order scripts were
     /// found under <see cref="OutOfOrderPolicy.Deny"/>.
     /// </exception>
     /// <exception cref="MigrationFailedStateException">A previous no-transaction migration failed and has not been resolved.</exception>
-    /// <exception cref="MigrationExecutionException">A script failed while executing.</exception>
-    Task<IReadOnlyList<MigrationScriptInfo>> MigrateAsync(CancellationToken cancellationToken = default);
+    /// <exception cref="MigrationExecutionException">A step failed while executing.</exception>
+    Task<IReadOnlyList<MigrationStepResult>> MigrateAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Reports, without writing anything: script-resource problems, checksum mismatches against applied
@@ -47,9 +51,9 @@ public interface IMigrationRunner {
     /// </summary>
     Task<MigrationValidationResult> ValidateAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Returns the scripts a <see cref="MigrateAsync"/> would apply, in execution order, without writing anything.</summary>
-    /// <exception cref="MigrationException">A script resource is invalid.</exception>
-    Task<IReadOnlyList<MigrationScriptInfo>> GetPendingAsync(CancellationToken cancellationToken = default);
+    /// <summary>Returns the steps a <see cref="MigrateAsync"/> would apply, in execution order, without writing anything.</summary>
+    /// <exception cref="MigrationException">A step source reported an invalid step.</exception>
+    Task<IReadOnlyList<MigrationStepInfo>> GetPendingAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Marks an existing database as already at <paramref name="version"/>: scripts at or below it are

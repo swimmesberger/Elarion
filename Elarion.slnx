@@ -46,6 +46,7 @@
     <Project Path="src/Elarion.EntityFrameworkCore.Generators/Elarion.EntityFrameworkCore.Generators.csproj"/>
     <Project Path="src/Elarion.Messaging.InMemory/Elarion.Messaging.InMemory.csproj"/>
     <Project Path="src/Elarion.Migrations/Elarion.Migrations.csproj"/>
+    <Project Path="src/Elarion.Migrations.EntityFrameworkCore/Elarion.Migrations.EntityFrameworkCore.csproj"/>
     <Project Path="src/Elarion.Messaging.Outbox/Elarion.Messaging.Outbox.csproj"/>
     <Project Path="src/Elarion.Messaging.Outbox.Generators/Elarion.Messaging.Outbox.Generators.csproj"/>
     <Project Path="src/Elarion.Paging/Elarion.Paging.csproj"/>

@@ -11,16 +11,20 @@ namespace Elarion.Migrations;
 public sealed record MigrationScriptSource(Assembly Assembly, string? ResourceNamePrefix);
 
 /// <summary>
-/// The database-neutral migration options (ADR-0060) — script sources, history-table name, out-of-order
-/// policy, timeouts, and startup application. Used directly by the neutral <c>AddElarionMigrations</c>
+/// The database-neutral migration options (ADR-0060, ADR-0081) — step sources (embedded SQL scripts, code
+/// migrations, EF Core migrations), history-table name, out-of-order policy, timeouts, and startup application. Used directly by the neutral <c>AddElarionMigrations</c>
 /// registration; a provider may still extend it with engine-specific knobs where a separate options type
 /// is warranted (a PostgreSQL advisory-lock key is a provider-registration argument, not an option here).
 /// </summary>
 public class MigrationOptions {
     private readonly List<MigrationScriptSource> _scriptSources = [];
+    private readonly List<IMigrationStepSource> _stepSources = [];
 
     /// <summary>The assemblies scanned for embedded migration scripts, in registration order.</summary>
     public IReadOnlyList<MigrationScriptSource> ScriptSources => _scriptSources;
+
+    /// <summary>The additional step sources (code migrations, EF Core migrations, …), in registration order.</summary>
+    public IReadOnlyList<IMigrationStepSource> StepSources => _stepSources;
 
     /// <summary>
     /// The history table the runner creates and maintains. A plain identifier, created in the schema the
@@ -72,5 +76,28 @@ public class MigrationOptions {
         ArgumentNullException.ThrowIfNull(assembly);
         _scriptSources.Add(new MigrationScriptSource(assembly, resourceNamePrefix));
         return this;
+    }
+
+    /// <summary>
+    /// Adds a step source whose steps join the plan next to the embedded scripts — the extension point
+    /// <c>Elarion.Migrations.EntityFrameworkCore</c> uses to contribute EF Core migrations.
+    /// </summary>
+    /// <param name="source">The step source.</param>
+    /// <returns>The same options instance for chaining.</returns>
+    public MigrationOptions AddStepSource(IMigrationStepSource source) {
+        ArgumentNullException.ThrowIfNull(source);
+        _stepSources.Add(source);
+        return this;
+    }
+
+    /// <summary>
+    /// Adds code migrations as steps of the plan without dependency injection (see
+    /// <see cref="MigrationServiceCollectionExtensions.AddCodeMigration{T}"/> for the DI path).
+    /// </summary>
+    /// <param name="migrations">The code migrations; each needs a unique <see cref="ICodeMigration.Version"/>.</param>
+    /// <returns>The same options instance for chaining.</returns>
+    public MigrationOptions AddCodeMigrations(params ICodeMigration[] migrations) {
+        ArgumentNullException.ThrowIfNull(migrations);
+        return AddStepSource(new CodeMigrationStepSource(migrations));
     }
 }

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>EF Core migrations as steps of the Elarion migration plan (ADR-0081): every EF migration of a DbContext becomes one version-ordered step beside the application's SQL scripts and code migrations, so an expand migration, a C# backfill and a contract migration run in one release in one ordered sequence, under one advisory lock, in one history. An EF host runs the single Elarion migration runner instead of Database.MigrateAsync(). Targets relational providers whose migration script is a plain statement batch (PostgreSQL, SQLite).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Migrations\Elarion.Migrations.csproj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+  </ItemGroup>
+
+</Project>

@@ -13,7 +13,7 @@ namespace Elarion.Sql.Sqlite;
 public sealed class SqliteMigrationRunner : MigrationRunner {
     /// <summary>Creates a runner that opens its dedicated connection from a SQLite connection string.</summary>
     public SqliteMigrationRunner(string connectionString, MigrationOptions options,
-        ILogger<SqliteMigrationRunner>? logger = null)
-        : base(new SqliteMigrationDatabase(connectionString, options), options, logger) {
+        ILogger<SqliteMigrationRunner>? logger = null, IServiceProvider? services = null)
+        : base(new SqliteMigrationDatabase(connectionString, options), options, logger, services) {
     }
 }
