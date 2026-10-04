@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-10-04
+
 ### Added
 - **Settings: pre-host snapshot, `GetResolvedAsync`, singleton pin check, legacy-row normalizer.**
   `SettingsConfigurationSnapshot.LoadAsync` runs the resolver and projection against a store before the host exists
@@ -1887,7 +1889,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.8...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.9...HEAD
+[0.2.9]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.9
 [0.2.8]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.8
 [0.2.7]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.7
 [0.2.6]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.6
