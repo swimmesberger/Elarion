@@ -25,6 +25,14 @@ minor releases may include breaking changes.
   projection skips only that row; the refresher logs its key and reason once. Previously a single malformed row made
   the refresh throw and nothing reached `IConfiguration`.
 
+- **Schema and runtime now agree on requiredness for nullable constructor parameters (ADR-0082).** A request type
+  such as `record Search(string Query, string? Note)` was exported with `note` optional, but the canonical
+  serializer (`RespectRequiredConstructorParameters`) rejected a request that omitted it with `-32602`. A type-info
+  modifier on the canonical resolver chain (source-generated and reflection resolvers alike, also copied to the HTTP
+  JSON options) now makes every nullable member optional to send and bound as `null`, so apps need no `= null`
+  everywhere; non-nullable members without a default stay required. A nullable `required`/`[JsonRequired]` member is
+  likewise optional on the wire.
+
 ### Changed
 - **BREAKING: settings API tidy-up.** `SettingsConfigurationProjection.Project` returns `SettingsProjection`
   (`.Data` is the old dictionary, `.Problems` the skipped rows); `ISettingResolver.IsPinned` and

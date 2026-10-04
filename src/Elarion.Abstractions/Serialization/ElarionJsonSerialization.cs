@@ -52,7 +52,8 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
             DefaultIgnoreCondition = config.DefaultIgnoreCondition,
             // The serializer enforces the wire contract the schema exports (ADR-0082): a non-nullable member is
             // required, so a null for it is rejected on read and write, and a constructor parameter without a
-            // default must be supplied. Not configurable — the exported schema would stop describing the wire.
+            // default must be supplied (WireRequiredness relaxes that for nullable members, which the schema exports
+            // as optional). Not configurable — the exported schema would stop describing the wire.
             RespectNullableAnnotations = true,
             RespectRequiredConstructorParameters = true
         };
@@ -83,6 +84,12 @@ internal sealed class ElarionJsonSerialization : IElarionJsonSerialization {
         if (config.EnableReflectionFallback) options.TypeInfoResolverChain.Add(CreateReflectionFallbackResolver());
 
         config.PostConfigure?.Invoke(options);
+
+        // One requiredness rule at runtime and in the schema (ADR-0082): a nullable member is optional on the wire.
+        // Wrapped last, in place, so every resolver that contributed — including ones added by PostConfigure — is covered.
+        for (var i = 0; i < options.TypeInfoResolverChain.Count; i++)
+            options.TypeInfoResolverChain[i] = options.TypeInfoResolverChain[i].WithAddedModifier(WireRequiredness.Apply);
+
         options.MakeReadOnly();
         return options;
     }

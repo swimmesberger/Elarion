@@ -40,8 +40,11 @@ Result and event types must therefore not opt members out with `[JsonIgnore(Cond
 `WhenWritingNull` on a non-nullable reference): the generator reports `ELRPC004` for a handler response graph, and
 the exporter fails with the member name for event payloads and custom serializer options. Make the member nullable
 to declare it optional. The canonical serializer enforces the contract it exports (`RespectNullableAnnotations` and
-`RespectRequiredConstructorParameters`), so a `null` for a non-nullable member and a missing constructor parameter
-without a default are rejected rather than silently accepted.
+`RespectRequiredConstructorParameters`), so a `null` for a non-nullable member and a missing non-nullable
+constructor parameter without a default are rejected rather than silently accepted. The reverse holds too: a
+**nullable** member is optional to send everywhere — `record Search(string Query, string? Note)` accepts
+`{"query":"q"}` and binds `Note` to `null`, with no `= null` needed — including a nullable member marked `required` or
+`[JsonRequired]`, which stays a construction-site aid for the compiler only.
 
 ## Build-time export
 
