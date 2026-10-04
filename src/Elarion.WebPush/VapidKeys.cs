@@ -33,14 +33,20 @@ public sealed record VapidKeys {
 
     /// <summary>Throws when the pair is malformed or its halves do not belong together.</summary>
     internal void Validate() {
-        using var signer = CreateSigner();
-        using var verifier = ECDsa.Create(new ECParameters {
-            Curve = ECCurve.NamedCurves.nistP256,
-            Q = P256.DecodePoint(DecodeOrThrow(PublicKey, nameof(PublicKey)))
-        });
-        ReadOnlySpan<byte> probe = "elarion-vapid-probe"u8;
-        if (!verifier.VerifyData(probe, signer.SignData(probe, HashAlgorithmName.SHA256), HashAlgorithmName.SHA256))
-            throw new InvalidOperationException("The VAPID public key does not match the private key.");
+        try {
+            using var signer = CreateSigner();
+            using var verifier = ECDsa.Create(new ECParameters {
+                Curve = ECCurve.NamedCurves.nistP256,
+                Q = P256.DecodePoint(DecodeOrThrow(PublicKey, nameof(PublicKey)))
+            });
+            ReadOnlySpan<byte> probe = "elarion-vapid-probe"u8;
+            if (!verifier.VerifyData(probe, signer.SignData(probe, HashAlgorithmName.SHA256), HashAlgorithmName.SHA256))
+                throw new InvalidOperationException("The VAPID public key does not match the private key.");
+        }
+        catch (CryptographicException ex) {
+            // Some platforms (OpenSSL) reject a mismatched pair while importing it.
+            throw new InvalidOperationException("The VAPID public key does not match the private key.", ex);
+        }
     }
 
     /// <summary>The ES256 signer for VAPID tokens. The caller owns (disposes) it.</summary>
