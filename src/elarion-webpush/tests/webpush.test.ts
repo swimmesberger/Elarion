@@ -8,6 +8,7 @@ import {
   subscribe,
   unsubscribe,
   urlBase64ToUint8Array,
+  WebPushRegistrationError,
   type WebPushServerApi,
   type WebPushSubscriptionJson,
 } from '../src/index.js'
@@ -67,6 +68,8 @@ interface BrowserSetup {
   push?: boolean
   permission?: NotificationPermission
   requestResult?: NotificationPermission
+  /** Replaces the default service-worker container (whose `ready` resolves at once). */
+  serviceWorker?: object
 }
 
 function fakeBrowser(setup: BrowserSetup = {}) {
@@ -83,7 +86,7 @@ function fakeBrowser(setup: BrowserSetup = {}) {
     platform: setup.platform ?? 'Win32',
     maxTouchPoints: setup.maxTouchPoints ?? 0,
     standalone: setup.standalone,
-    ...(push ? { serviceWorker: { ready: Promise.resolve(registration) } } : {}),
+    ...(push ? { serviceWorker: setup.serviceWorker ?? { ready: Promise.resolve(registration) } } : {}),
   })
   vi.stubGlobal('window', {
     ...(push ? { PushManager: class {}, Notification: notification } : {}),
@@ -224,6 +227,88 @@ describe('subscribe and refreshOnStart', () => {
     const explicit = new FakePushManager()
     await subscribe(fakeApi().api, { registration: { pushManager: explicit } as unknown as ServiceWorkerRegistration })
     expect(explicit.current).not.toBeNull()
+  })
+})
+
+describe('registration lookup', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('uses the active registration without waiting for ready, which may never settle', async () => {
+    const pushManager = new FakePushManager()
+    const active = { active: {}, pushManager } as unknown as ServiceWorkerRegistration
+    fakeBrowser({
+      permission: 'granted',
+      serviceWorker: { getRegistration: async () => active, ready: new Promise(() => {}) },
+    })
+
+    await subscribe(fakeApi().api)
+
+    expect(pushManager.current).not.toBeNull()
+  })
+
+  it('waits for ready when the worker is still installing', async () => {
+    const pushManager = new FakePushManager()
+    const registration = { active: {}, pushManager } as unknown as ServiceWorkerRegistration
+    fakeBrowser({
+      permission: 'granted',
+      serviceWorker: {
+        getRegistration: async () => ({ installing: {}, pushManager: new FakePushManager() }),
+        ready: Promise.resolve(registration),
+      },
+    })
+
+    await subscribe(fakeApi().api)
+
+    expect(pushManager.current).not.toBeNull()
+  })
+
+  it('fails with a clear error instead of hanging when no service worker ever takes over', async () => {
+    vi.useFakeTimers()
+    fakeBrowser({
+      permission: 'granted',
+      serviceWorker: { getRegistration: async () => undefined, ready: new Promise(() => {}) },
+    })
+
+    const outcome = subscribe(fakeApi().api, { registrationTimeoutMs: 250 })
+    const assertion = expect(outcome).rejects.toThrow(WebPushRegistrationError)
+    await vi.advanceTimersByTimeAsync(250)
+
+    await assertion
+    await expect(outcome).rejects.toThrow(/navigator\.serviceWorker\.register/)
+  })
+
+  it('asks for permission before any registration lookup, even when no worker will ever activate', async () => {
+    vi.useFakeTimers()
+    const { requestPermission } = fakeBrowser({
+      serviceWorker: { getRegistration: async () => undefined, ready: new Promise(() => {}) },
+    })
+
+    const outcome = enablePush(fakeApi().api, { registrationTimeoutMs: 100 })
+    expect(requestPermission).toHaveBeenCalledTimes(1)
+    const assertion = expect(outcome).rejects.toThrow(WebPushRegistrationError)
+    await vi.advanceTimersByTimeAsync(100)
+
+    await assertion
+  })
+
+  it('bounds refreshOnStart, isSubscribed and unsubscribe the same way', async () => {
+    vi.useFakeTimers()
+    fakeBrowser({
+      permission: 'granted',
+      serviceWorker: { getRegistration: async () => undefined, ready: new Promise(() => {}) },
+    })
+    const options = { registrationTimeoutMs: 100 }
+
+    const outcomes = [
+      expect(refreshOnStart(fakeApi().api, options)).rejects.toThrow(WebPushRegistrationError),
+      expect(isSubscribed(options)).rejects.toThrow(WebPushRegistrationError),
+      expect(unsubscribe(fakeApi().api, options)).rejects.toThrow(WebPushRegistrationError),
+    ]
+    await vi.advanceTimersByTimeAsync(100)
+
+    await Promise.all(outcomes)
   })
 })
 

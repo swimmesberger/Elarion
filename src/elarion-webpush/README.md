@@ -10,7 +10,10 @@ package (`IWebPushSender`, VAPID keys, the subscription store).
 - `enablePush(api)` — asks for permission **inside the click handler** (before any `await`, which Safari
   requires) and subscribes.
 - `subscribe`, `unsubscribe`, `isSubscribed`, and `refreshOnStart(api)` — call the last one on every app start
-  to heal subscriptions the push service rotated or the server cleaned up.
+  to heal subscriptions the push service rotated or the server cleaned up. They subscribe through the page's
+  active service-worker registration (or the `registration` option) and wait at most `registrationTimeoutMs`
+  (10 s) for a worker to activate, then throw a `WebPushRegistrationError` — `navigator.serviceWorker.ready`
+  alone never settles when no worker is registered, for example on a dev server that does not serve one.
 - `@swimmesberger/elarion-webpush/sw` — `registerWebPushHandlers(self)` for the service worker: shows the
   notification, focuses or opens the app at its URL on click, and re-subscribes on `pushsubscriptionchange`.
 

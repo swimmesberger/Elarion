@@ -233,6 +233,10 @@ switch (pushAvailability()) {
 - `enablePush` requests permission **before its first `await`**, because Safari only honours a permission
   request made synchronously inside the user gesture. Call it straight from the click handler.
 - `subscribe`, `unsubscribe`, and `isSubscribed` are the building blocks; `refreshOnStart` never prompts.
+- They subscribe through the page's **active service-worker registration** — or the `registration` option, where
+  you pass what `navigator.serviceWorker.register(...)` returned. Otherwise they wait for a worker to activate for
+  at most `registrationTimeoutMs` (10 s) and throw a `WebPushRegistrationError`; `navigator.serviceWorker.ready`
+  alone never settles when no worker is registered, as on a dev server that does not serve one.
 - `fetchWebPushApi()` targets the `MapElarionWebPush()` endpoints. To use the handlers over JSON-RPC instead,
   adapt the generated client:
 

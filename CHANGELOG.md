@@ -34,6 +34,12 @@ minor releases may include breaking changes.
   `private_key` (1024).
 
 ### Fixed
+- **`@swimmesberger/elarion-webpush`: the registration lookup no longer hangs.** The helpers waited on
+  `navigator.serviceWorker.ready`, which never settles when no worker controls the page (a Vite dev server, a page
+  outside the worker's scope). They now use the page's active registration or the `registration` option, and
+  otherwise wait at most `registrationTimeoutMs` (default 10 s) before throwing a `WebPushRegistrationError` that
+  says how to fix it. `enablePush` keeps requesting permission before its first `await` (now pinned by a test that
+  also covers the failing lookup) so Safari honours the prompt.
 - **Settings projection no longer loses every stored setting because of one bad row.** Bulk resolution now flags a
   stored value that is not valid for its definition's type as unreadable (`ResolvedSetting.IsUnreadable`,
   `UnreadableReason`, also on `SettingDescription`) exactly like an undecryptable secret, and the configuration
