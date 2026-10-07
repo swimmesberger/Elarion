@@ -8,7 +8,18 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Authorization: `[DeclarePermission(resource, verb)]` adds a permission to the generated catalog without requiring
+  it.** A permission that a row-level rule checks on top of a coarser `[RequirePermission]` ("author or manager may
+  delete") could only enter `ElarionPermissions`/`IPermissionCatalog` through a handler attribute, and a second
+  `[RequirePermission]` on the handler ANDs and locks the author out — so role policy derived from the catalog never
+  granted it. Place the attribute on the type that reads the permission; it joins that module's catalog (also
+  cross-assembly through the manifest) and has no runtime effect.
+
 ### Fixed
+- **A `[RequirePermission]`/`[RequireRole]` on a `record` is no longer silently dropped from the permission catalog.**
+  The catalog and manifest generators matched only `ClassDeclarationSyntax`, so the attribute on a record (a
+  client-event contract, a rule type) built green and contributed nothing. Records are matched too.
 - **A nullable enum request member is optional in the exported schema (ADR-0082).** Under a string-enum
   converter `Nullable<TEnum>` is exported as a bare value list with no `type` keyword (`{"enum":["A","B",null]}`), and
   the requiredness rule only looked for `null` in `type`/`anyOf`, so `Medium? Medium` landed in `required` although the

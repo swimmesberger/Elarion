@@ -58,20 +58,34 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator {
 
     /// <inheritdoc/>
     public void Initialize(IncrementalGeneratorInitializationContext context) {
-        var permissions = context.SyntaxProvider
+        var required = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 PermissionDiscovery.RequirePermissionAttributeMetadataName,
-                static (node, _) => node is ClassDeclarationSyntax,
+                static (node, _) => PermissionDiscovery.IsTypeCarrier(node),
                 static (ctx, _) => PermissionDiscovery.ReadPermissions(ctx))
             .Where(static guard => guard is not null)
             .Select(static (guard, _) => guard!)
-            .Collect()
+            .Collect();
+
+        // [DeclarePermission] contributes the same (resource, verb) entry without gating anything, so a permission
+        // that only a row-level rule reads is still in the catalog that role policy grants from.
+        var declared = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                PermissionDiscovery.DeclarePermissionAttributeMetadataName,
+                static (node, _) => PermissionDiscovery.IsTypeCarrier(node),
+                static (ctx, _) => PermissionDiscovery.ReadPermissions(ctx))
+            .Where(static guard => guard is not null)
+            .Select(static (guard, _) => guard!)
+            .Collect();
+
+        var permissions = required.Combine(declared)
+            .Select(static (pair, _) => pair.Left.AddRange(pair.Right).ToEquatableArray())
             .WithTrackingName(TrackingNames.Permissions);
 
         var roles = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 PermissionDiscovery.RequireRoleAttributeMetadataName,
-                static (node, _) => node is ClassDeclarationSyntax,
+                static (node, _) => PermissionDiscovery.IsTypeCarrier(node),
                 static (ctx, _) => PermissionDiscovery.ReadRoles(ctx))
             .Where(static guard => guard is not null)
             .Select(static (guard, _) => guard!)
