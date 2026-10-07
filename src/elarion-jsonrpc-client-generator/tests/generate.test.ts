@@ -231,6 +231,31 @@ describe('JSON-RPC client generator', () => {
     expect(generated.schemasSource).toContain('"nullable.items": z.array(z.number().nullish()),')
   })
 
+  it('makes an unrequired nullable enum an optional key, as the server exports C# Nullable<TEnum>', () => {
+    // A string-enum converter exports a nullable enum as a bare value list with no "type" keyword; the
+    // server leaves it out of "required" (ADR-0082), so callers may omit the key entirely.
+    const schema = {
+      methods: {
+        'meters.create': {
+          params: {
+            type: 'object',
+            properties: {
+              label: {type: 'string'},
+              medium: {enum: ['Water', 'Power', null]},
+            },
+            required: ['label'],
+          },
+          result: {type: 'boolean'},
+        },
+      },
+    } satisfies RpcSchema
+
+    const generated = generateRpcClientFiles(schema)
+
+    expect(generated.typesSource).toContain('medium?: ("Water" | "Power") | null | undefined')
+    expect(generated.schemasSource).toContain('medium: z.enum(["Water", "Power"]).nullish().optional(),')
+  })
+
   it('parenthesizes union item types in arrays', () => {
     const schema = {
       methods: {

@@ -113,9 +113,63 @@ public sealed partial class RequirednessAgreementTests {
         missingRequired.Error!.Code.Should().Be(-32602);
     }
 
-    private static JsonRpcRequest Call(string paramsJson) {
+    public enum Medium {
+        Water,
+        Power
+    }
+
+    public sealed record CreateMeterRequest(string Label, Medium? Medium, Medium Kind);
+
+    public sealed record MeterResponse(string Label, Medium? Medium, Medium Kind);
+
+    [JsonSourceGenerationOptions(UseStringEnumConverter = true)]
+    [JsonSerializable(typeof(CreateMeterRequest))]
+    [JsonSerializable(typeof(MeterResponse))]
+    private sealed partial class StringEnumJsonContext : JsonSerializerContext;
+
+    /// <summary>
+    /// A nullable enum under a string-enum converter is exported as <c>{"enum":["Water","Power",null]}</c> with no
+    /// <c>type</c> keyword. It must still count as nullable — optional to send, optional in the result — exactly like
+    /// the runtime, which binds an omitted nullable enum as <see langword="null"/>.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task NullableEnum_IsOptionalInTheSchema_AndBindsNullWhenOmitted(bool stringEnums) {
+        var services = new ServiceCollection();
+        services.AddElarionJson();
+        services.ConfigureElarionJson(o => {
+            if (stringEnums) o.TypeInfoResolvers.Add(StringEnumJsonContext.Default);
+            else o.EnableReflectionFallback = true;
+        });
+        var options = services.BuildServiceProvider().GetRequiredService<IElarionJsonSerialization>().Options;
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<CreateMeterRequest, MeterResponse>("meters.create", (r, _, _) =>
+                ValueTask.FromResult<Result<MeterResponse>>(new MeterResponse(r.Label, r.Medium, r.Kind)))
+            .Freeze();
+
+        var method = JsonNode.Parse(JsonRpcSchemaExporter.Generate(dispatcher, options))!["methods"]!["meters.create"]!;
+        if (stringEnums)
+            method["params"]!["properties"]!["medium"]!["enum"]!.AsArray().Should().Contain(n => n == null);
+        Names(method["params"]!["required"]).Should().Equal("label", "kind");
+        Names(method["result"]!["required"]).Should().Equal("label", "kind");
+
+        await using var provider = new ServiceCollection().BuildServiceProvider();
+        var kind = stringEnums ? "\"Power\"" : "1";
+        var omitted = await dispatcher.DispatchAsync(
+            Call($$"""{"label":"l","kind":{{kind}}}""", "meters.create"), provider,
+            TestContext.Current.CancellationToken);
+        omitted.Error.Should().BeNull();
+        omitted.Result.Should().BeEquivalentTo(new MeterResponse("l", null, Medium.Power));
+    }
+
+    private static string[] Names(JsonNode? required) {
+        return required!.AsArray().Select(n => n!.GetValue<string>()).ToArray();
+    }
+
+    private static JsonRpcRequest Call(string paramsJson, string method = "search") {
         return new JsonRpcRequest {
-            Jsonrpc = "2.0", Method = "search", Id = "1", Params = JsonDocument.Parse(paramsJson).RootElement
+            Jsonrpc = "2.0", Method = method, Id = "1", Params = JsonDocument.Parse(paramsJson).RootElement
         };
     }
 }

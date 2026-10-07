@@ -8,6 +8,14 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **A nullable enum request member is optional in the exported schema again (ADR-0082).** Under a string-enum
+  converter `Nullable<TEnum>` is exported as a bare value list with no `type` keyword (`{"enum":["A","B",null]}`), and
+  the requiredness rule only looked for `null` in `type`/`anyOf`, so `Medium? Medium` landed in `required` although the
+  runtime binds an omitted value as `null`. The generated TypeScript then demanded the key (`medium: … | null |
+  undefined` instead of `medium?:`). Null membership is now also read from `enum`, for params, results and MCP input
+  schemas alike. Regenerate `rpc-schema.json` and the TypeScript client to pick it up.
+
 ## [0.2.10] - 2026-10-04
 
 ### Added
