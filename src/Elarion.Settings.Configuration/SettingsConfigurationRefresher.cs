@@ -51,7 +51,7 @@ public sealed class SettingsConfigurationRefresher(
         var serialization = scope.ServiceProvider.GetRequiredService<IElarionJsonSerialization>();
         var resolved = await resolver.ResolveAllAsync(SettingsScope.Global, null, cancellationToken)
             .ConfigureAwait(false);
-        var projection = SettingsConfigurationProjection.Project(resolved, serialization);
+        var projection = SettingsConfigurationProjection.Project(resolved, serialization, configuration);
         provider.Apply(projection.Data);
         ReportProblems(projection.Problems);
         logger.LogDebug("Projected {Count} global setting key(s) into configuration.", projection.Data.Count);

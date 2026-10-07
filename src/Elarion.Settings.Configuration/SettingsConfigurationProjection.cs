@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Elarion.Abstractions.Serialization;
+using Microsoft.Extensions.Configuration;
 
 namespace Elarion.Settings.Configuration;
 
@@ -21,6 +22,11 @@ namespace Elarion.Settings.Configuration;
 /// <item><description>A <b>declared default</b> is projected only when it is a scalar. A structured default (a
 /// record or collection) would add a key per property that nobody set, and the binder's target type already
 /// carries those defaults; it appears as soon as a value is stored.</description></item>
+/// <item><description>A declared default never masks deployment configuration: when the deployment configuration
+/// already supplies a non-blank value at the key, the default is left out so <c>IConfiguration</c> keeps that value
+/// until one is stored. The projection is registered after the other sources, so projecting a value nobody set
+/// would otherwise hide appsettings or environment values for every non-pinnable definition that declares a
+/// default.</description></item>
 /// <item><description>A definition without a value is skipped.</description></item>
 /// </list>
 /// Projection is isolated per setting: an unreadable entry (undecryptable, or not valid for its definition's type)
@@ -29,8 +35,17 @@ namespace Elarion.Settings.Configuration;
 /// </remarks>
 public static class SettingsConfigurationProjection {
     /// <summary>Builds the projection data for the given resolved settings.</summary>
+    /// <param name="settings">The resolved settings, typically <c>ISettingResolver.ResolveAllAsync</c> of the global scope.</param>
+    /// <param name="serialization">The canonical JSON options.</param>
+    /// <param name="deploymentConfiguration">
+    /// The host configuration, so a declared default does not mask a value the deployment configures at the same key.
+    /// Projection providers (<see cref="ISettingsProjectionProvider"/>) in an <c>IConfigurationRoot</c> are ignored, so
+    /// passing the root that contains this projection is safe. <see langword="null"/> projects every scalar default.
+    /// </param>
     public static SettingsProjection Project(
-        IEnumerable<ResolvedSetting> settings, IElarionJsonSerialization serialization) {
+        IEnumerable<ResolvedSetting> settings,
+        IElarionJsonSerialization serialization,
+        IConfiguration? deploymentConfiguration = null) {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(serialization);
 
@@ -47,6 +62,11 @@ public static class SettingsConfigurationProjection {
             }
 
             var isDefault = setting.Source == SettingSource.Default;
+            if (isDefault && deploymentConfiguration is not null
+                          && DeploymentConfiguration.ReadValue(deploymentConfiguration, definition.Key,
+                              emptyValuesCount: false) is not null)
+                continue;
+
             var json = isDefault ? definition.SerializeDefault(serialization) : setting.ValueJson;
             if (json is null) continue;
 

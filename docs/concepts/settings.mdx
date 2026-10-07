@@ -321,6 +321,14 @@ nobody set, and the options type already carries its own defaults. An unreadable
 fatal (see above). Register it after your other sources so a later
 provider does not mask the projected effective value.
 
+A declared default never masks deployment configuration: when appsettings or the environment already supply a
+non-blank value at a definition's key, the default is not projected, so `IConfiguration` keeps the deployment value
+until an administrator stores one (a stored value is projected and wins). This makes "appsettings is the fallback,
+the settings store overrides it" work for options bound from configuration, with or without a declared default.
+Only the projection behaves this way — the resolver reads deployment configuration for `Pinnable` definitions only,
+so `ISettingsManager` returns the declared default for such a key. Declare the definition `Pinnable` when the
+deployment value should be authoritative for every reader (and freeze writes).
+
 Because `IConfiguration` is built before the DI container, the background refresher performs the initial load in
 its `StartAsync`, before later-registered hosted services (notably the scheduler) start. The load is time-bounded
 so a slow store cannot hang startup. The refresher reprojects on store changes and when the rest of the

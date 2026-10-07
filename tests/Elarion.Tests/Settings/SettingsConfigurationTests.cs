@@ -278,6 +278,44 @@ public sealed class SettingsConfigurationTests {
         await refresher.StopAsync(Ct);
     }
 
+    [Fact]
+    public async Task Refresher_DoesNotLetADeclaredDefaultMaskDeploymentConfiguration_ButAStoredValueWins() {
+        // user:theme is not pinnable and declares the default "light"; the deployment configures "dark" at the same
+        // key. The projection sits after the deployment sources, so projecting the default would hide "dark".
+        var root = new ConfigurationManager();
+        ((IConfigurationBuilder)root).AddInMemoryCollection(Data(("user:theme", "dark"), ("app:title", " ")));
+        var projection = new SettingsConfigurationSource();
+        ((IConfigurationBuilder)root).Add(projection);
+        using var provider = SettingsTestHost.Build(configurationRoot: root);
+        var refresher = CreateRefresher(provider, projection.Provider, root);
+
+        await refresher.RefreshAsync(Ct);
+
+        root["user:theme"].Should().Be("dark");
+        projection.Provider.TryGet("user:theme", out _).Should().BeFalse();
+        // A blank deployment value means "not set", exactly as for pins, so the default still applies.
+        root["app:title"].Should().Be("Untitled");
+
+        await SettingsTestHost.Scoped<ISettingsManager>(provider)
+            .SetAsync(TestSettings.Theme, "blue", cancellationToken: Ct);
+        await refresher.RefreshAsync(Ct);
+
+        root["user:theme"].Should().Be("blue");
+    }
+
+    [Fact]
+    public async Task Snapshot_DoesNotLetADeclaredDefaultMaskDeploymentConfiguration() {
+        using var provider = SettingsTestHost.Build();
+        var deployment = new ConfigurationBuilder().AddInMemoryCollection(Data(("user:theme", "dark"))).Build();
+
+        var snapshot = await SettingsConfigurationSnapshot.LoadAsync(TestSettings.All,
+            provider.GetRequiredService<ISettingsStore>(), provider.GetRequiredService<IElarionJsonSerialization>(),
+            deployment, cancellationToken: Ct);
+
+        snapshot.Data.Should().NotContainKey("user:theme");
+        snapshot.Data["app:title"].Should().Be("Untitled");
+    }
+
     private static async Task<IReadOnlyDictionary<string, string?>> ProjectAsync(ServiceProvider provider) {
         var resolver = SettingsTestHost.Scoped<ISettingResolver>(provider);
         var resolved = await resolver.ResolveAllAsync(SettingsScope.Global, null, Ct);

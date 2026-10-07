@@ -9,12 +9,20 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Fixed
-- **A nullable enum request member is optional in the exported schema again (ADR-0082).** Under a string-enum
+- **A nullable enum request member is optional in the exported schema (ADR-0082).** Under a string-enum
   converter `Nullable<TEnum>` is exported as a bare value list with no `type` keyword (`{"enum":["A","B",null]}`), and
   the requiredness rule only looked for `null` in `type`/`anyOf`, so `Medium? Medium` landed in `required` although the
   runtime binds an omitted value as `null`. The generated TypeScript then demanded the key (`medium: … | null |
   undefined` instead of `medium?:`). Null membership is now also read from `enum`, for params, results and MCP input
   schemas alike. Regenerate `rpc-schema.json` and the TypeScript client to pick it up.
+- **Settings: a declared default no longer masks deployment configuration in the `IConfiguration` projection.** The
+  projection is registered after the host's other sources, so projecting a scalar default nobody set hid the
+  appsettings/environment value at the same key for every non-pinnable definition (an app binding `SmtpOptions` from
+  `Email:Smtp` had to drop its defaults to keep the appsettings values visible). The refresher and
+  `SettingsConfigurationSnapshot.LoadAsync` now leave a default out when the deployment configuration (every provider
+  except the projection) supplies a non-blank value there; a stored value is still projected and wins.
+  `SettingsConfigurationProjection.Project` takes the configuration as a new optional `deploymentConfiguration`
+  argument (without it every scalar default is projected, as before).
 
 ## [0.2.10] - 2026-10-04
 

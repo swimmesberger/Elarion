@@ -55,7 +55,7 @@ public static class SettingsConfigurationSnapshot {
         var resolver = new SettingResolver(catalog, store, pins, serialization);
         var resolved = await resolver.ResolveAllAsync(SettingsScope.Global, null, cancellationToken)
             .ConfigureAwait(false);
-        return SettingsConfigurationProjection.Project(resolved, serialization);
+        return SettingsConfigurationProjection.Project(resolved, serialization, deploymentConfiguration);
     }
 
     /// <summary>

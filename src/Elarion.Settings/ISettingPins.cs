@@ -44,21 +44,7 @@ internal sealed class SettingPins(
         ArgumentNullException.ThrowIfNull(definition);
         if (configuration is null || !definition.IsPinnable) return null;
 
-        string? raw = null;
-        if (configuration is IConfigurationRoot root) {
-            foreach (var provider in root.Providers.Reverse()) {
-                if (provider is ISettingsProjectionProvider) continue;
-
-                if (provider.TryGet(definition.Key, out raw)) break;
-            }
-        }
-        else {
-            raw = configuration[definition.Key];
-        }
-
-        if (raw is null) return null;
-
-        return !options.EmptyConfigurationValuesPin && string.IsNullOrWhiteSpace(raw) ? null : raw;
+        return DeploymentConfiguration.ReadValue(configuration, definition.Key, options.EmptyConfigurationValuesPin);
     }
 
     /// <inheritdoc />
