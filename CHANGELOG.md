@@ -15,6 +15,12 @@ minor releases may include breaking changes.
   `[RequirePermission]` on the handler ANDs and locks the author out — so role policy derived from the catalog never
   granted it. Place the attribute on the type that reads the permission; it joins that module's catalog (also
   cross-assembly through the manifest) and has no runtime effect.
+- **Settings: `OptionsBuilder<T>.BindSecretSetting(definition, apply)` puts a secret setting on options without
+  `IConfiguration`.** Secrets are never projected, so an adapter whose options bind from configuration (an SMTP
+  password under `Email:Smtp`) could not mark its secret `Secret = true`. The extension (in
+  `Elarion.Settings.Configuration`) applies the stored value from the resolution the projection refresher already
+  performs, keeps only the bound definitions in memory and reloads `IOptionsMonitor`/`IOptionsSnapshot` on change; the
+  rest of the section stays bound from configuration. A non-secret definition is rejected.
 
 ### Fixed
 - **A `[RequirePermission]`/`[RequireRole]` on a `record` is no longer silently dropped from the permission catalog.**

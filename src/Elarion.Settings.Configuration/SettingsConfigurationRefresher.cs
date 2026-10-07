@@ -53,6 +53,8 @@ public sealed class SettingsConfigurationRefresher(
             .ConfigureAwait(false);
         var projection = SettingsConfigurationProjection.Project(resolved, serialization, configuration);
         provider.Apply(projection.Data);
+        // Secrets bound onto options (BindSecretSetting) come from this same resolution, never from IConfiguration.
+        scope.ServiceProvider.GetService<SettingsSecretValues>()?.Apply(resolved);
         ReportProblems(projection.Problems);
         logger.LogDebug("Projected {Count} global setting key(s) into configuration.", projection.Data.Count);
     }
