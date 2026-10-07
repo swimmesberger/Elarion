@@ -24,6 +24,12 @@ minor releases may include breaking changes.
   `SettingsConfigurationProjection.Project` takes the configuration as a new optional `deploymentConfiguration`
   argument (without it every scalar default is projected, as before).
 
+### Documentation
+- **Settings: upgrading a store written before 0.2.8.** Raw-text rows written before definitions existed read as
+  `Unreadable` from 0.2.8 on, and nothing normalizes them automatically. The settings concept page now says so and
+  shows the supported one-time conversion: an `ICodeMigration` step that runs `ISettingNormalizer.NormalizeAsync` once
+  per database, or the same call between the migration and `app.RunAsync()` for hosts that migrate otherwise.
+
 ## [0.2.10] - 2026-10-04
 
 ### Added

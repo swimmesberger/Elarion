@@ -169,6 +169,31 @@ is protected again with the same scheme, a legacy plaintext row stays plaintext 
 it. Normalization never changes a row's scheme behind the application's back, and a row whose protection cannot be
 undone (other scheme, lost key, no protector) is reported `Unreadable` and never removed.
 
+**Upgrading a store written before 0.2.8.** Releases before 0.2.8 accepted raw text on read; from 0.2.8 on, such a
+row reads as `Unreadable` (`GetAsync` throws, the projection skips it and the refresher logs it). Nothing runs the
+normalizer for you — a write behind the application's back on every start would be the wrong default — so run it
+once, after the schema migrations and before the host starts. With the [migration plan](/docs/capabilities/migrations),
+make it a code step so it runs exactly once per database:
+
+```csharp
+public sealed class NormalizeLegacySettings(ILogger<NormalizeLegacySettings> logger) : ICodeMigration {
+    public string Version => "20261007120000";                 // after the migration that created the settings table
+    public string Description => "normalize legacy settings rows";
+    public bool UseTransaction => false;                         // the store writes on its own connection; the run is idempotent
+
+    public async Task ExecuteAsync(MigrationStepContext context, CancellationToken ct) {
+        var normalizer = context.Services.GetRequiredService<ISettingNormalizer>();
+        var report = await normalizer.NormalizeAsync(SettingsScope.Global, cancellationToken: ct);
+        foreach (var entry in report.Where(SettingNormalizationOutcome.Unreadable))
+            logger.LogWarning("Setting {Key} was left unchanged: {Reason}", entry.Key, entry.Reason);
+    }
+}
+```
+
+A host that migrates by other means calls the same `NormalizeAsync` from its startup code between the migration and
+`app.RunAsync()`; it is idempotent, so running it on every start is harmless. Per-user rows need one run per user
+scope.
+
 ## Secrets
 
 Definitions with `Secret = true` are protected at rest through an `ISettingValueProtector`. Add the Data
