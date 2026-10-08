@@ -9,6 +9,20 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **`@swimmesberger/elarion-pwa`: the installable-app shell (ADR-0083).** Install prompt, deploy updates, and an
+  offline-capable service worker were hand-written in every app, with the same helpers copied byte for byte and a
+  different bug in each copy. The new npm package ships them with the safety rules built in:
+  `createInstallPrompt()` captures `beforeinstallprompt` and reports `'prompt' | 'ios' | 'none'` (iPadOS included);
+  `createUpdateWatcher({ currentVersion })` checks for a new build on foreground return and reloads into it only on
+  the next navigation that changed the path, with no dialog open or field focused and at most once a minute — never
+  on the return itself, which wiped a form after the camera; `registerServiceWorker()` registers with
+  `updateViaCache: 'none'`. The `/sw` entry's `registerShellRouter(self, …)` serves navigations network-only (with an
+  offline page) or network-first (an SPA shell), hashed assets cache-first under a whole-build cap, and icons
+  stale-while-revalidate; it never touches server prefixes (matched by path segment), non-GET, cross-origin or
+  `no-store` requests, and never stores a redirected, opaque, partial, `no-store`, or (outside the shell) HTML answer.
+  It composes with `registerWebPushHandlers(self)` in the same worker. The `/vite` entry's `appVersionFile()` publishes
+  `/app-version.json` and bakes the same version into the bundle. The new *Installable apps (PWA)* page also covers
+  bundling the worker, caching headers for ASP.NET Core and Caddy, and the iOS details.
 - **Authorization: `[DeclarePermission(resource, verb)]` adds a permission to the generated catalog without requiring
   it.** A permission that a row-level rule checks on top of a coarser `[RequirePermission]` ("author or manager may
   delete") could only enter `ElarionPermissions`/`IPermissionCatalog` through a handler attribute, and a second

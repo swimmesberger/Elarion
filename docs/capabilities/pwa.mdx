@@ -1,0 +1,396 @@
+---
+title: Installable apps (PWA)
+description: Turn "Add to Home Screen" into an app — an offline-capable service worker that never caches the API or a personal page, an install prompt with iOS instructions, and reloading into a new deploy without losing what the user was typing.
+---
+
+An Elarion frontend added to a phone's Home Screen should behave like an app: open without a browser frame, start
+offline, load its hashed assets from a cache, and — because an installed app is **resumed**, not reopened, and can
+stay in memory for days — move to a new deploy before it talks to an API whose contract changed under it.
+
+The pieces are the same in every app, and so are their traps: a service worker that caches an API answer or a
+server-rendered page with personal data, an auth proxy's login page stored as a script, a stylesheet pinned to the
+first visit, a reload that wipes a form when the user comes back from the camera. `@swimmesberger/elarion-pwa`
+(ADR-0083) owns that plumbing with the safety rules built in. **What** is cached, the manifest, the icons, the
+offline page, and every UI string stay in the application.
+
+| Entry | Role |
+| --- | --- |
+| `@swimmesberger/elarion-pwa` | `createInstallPrompt()`, `createUpdateWatcher()`, `registerServiceWorker()`, standalone/iOS detection. Framework-neutral. |
+| `@swimmesberger/elarion-pwa/sw` | `registerShellRouter(self, …)` — the service worker's install, activate and fetch handlers. |
+| `@swimmesberger/elarion-pwa/vite` | `appVersionFile()` — publishes `/app-version.json` and bakes the same version into the bundle. |
+| `@swimmesberger/elarion-webpush` | Optional: [Web Push](/docs/capabilities/web-push) for the same worker — `registerWebPushHandlers(self)`. |
+
+## Checklist
+
+1. A **manifest** and **icons** in the web build's static directory.
+2. The **head tags**: the manifest link, the iOS tags, `viewport-fit=cover`.
+3. A **service worker** composed from `registerShellRouter` (and `registerWebPushHandlers` if the app sends pushes),
+   bundled into one script at `/sw.js`.
+4. **Registration** and the **update watcher** in the client entry, the watcher wired to the router.
+5. **Caching headers** on the host: hashed assets immutable, everything else revalidated.
+6. The **iOS details**: 16 px inputs, safe-area insets, no rubber-band in standalone mode.
+
+## Manifest and icons
+
+```json title="public/manifest.webmanifest"
+{
+  "id": "/",
+  "name": "Acme Operations",
+  "short_name": "Acme",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "lang": "en",
+  "theme_color": "#0e1733",
+  "background_color": "#0e1733",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
+```
+
+- `192` and `512` PNGs with purpose `any`, and a **maskable** 512 whose mark sits inside the central 80 % circle —
+  launchers crop it to a circle, squircle or teardrop.
+- A **180 px `apple-touch-icon.png`**, full-bleed (no transparent corners — iOS rounds the corners itself and shows
+  transparency as black). iOS ignores the manifest's icons.
+- Generate the PNGs from the app's SVG mark with a script rather than exporting them by hand, so they never drift.
+
+```html title="index.html (or the root route's head)"
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0e1733" />
+<!-- use-credentials: the manifest request carries cookies when an auth proxy sits in front of the app -->
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Acme" />
+<!-- content runs under the status bar; pad the top bar by env(safe-area-inset-top) -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+```
+
+## The service worker
+
+```ts title="src/sw/service-worker.ts"
+import { ELARION_SERVER_PREFIXES, registerShellRouter } from '@swimmesberger/elarion-pwa/sw'
+import { registerWebPushHandlers } from '@swimmesberger/elarion-webpush/sw'
+
+declare const self: ServiceWorkerGlobalScope
+
+registerShellRouter(self, {
+  // Change it when the precache list changes; activate deletes the previous cache.
+  cacheName: 'acme-v1',
+  // Every server endpoint, matched by path segment. Mirror the reverse proxy's API routes and the dev proxy.
+  serverPrefixes: [...ELARION_SERVER_PREFIXES, '/auth', '/attachments', '/.well-known', '/health'],
+  // Server-rendered pages carry personal data: never cached, an offline page instead.
+  navigation: { mode: 'network-only', offlineUrl: '/offline.html' },
+  // Precached and served stale-while-revalidate.
+  staticFiles: ['/manifest.webmanifest', '/favicon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png'],
+  // The app pins its stylesheet to a hash-free name, so it must not be served cache-first.
+  assets: { mutable: (url) => url.pathname.endsWith('.css') },
+})
+
+registerWebPushHandlers(self, { icon: '/icon-192.png', badge: '/icon-192.png' })
+```
+
+The two modules split the worker's events: the shell router handles `install`, `activate` and `fetch`; Web Push
+handles `push`, `notificationclick` and `pushsubscriptionchange`.
+
+### What it does with each request
+
+| Request | Answer |
+| --- | --- |
+| Navigation, `network-only` | Always the network; **nothing is stored**. Offline: the precached `offlineUrl`. |
+| Navigation, `network-first` | The network; a plain HTML answer is kept under `shellUrl` (`/`). Offline: that shell, else `offlineUrl`. |
+| `assets.prefix` (`/assets/`) | Cache first — content-hashed files are immutable. The newest `maxEntries` (400) are kept. |
+| `assets.mutable(url)` | Network first, the cache when offline — for hash-free files under the prefix. |
+| `staticFiles` | Stale-while-revalidate: the cached copy at once, refreshed in the background. |
+| `serverPrefixes`, `bypass(url, request)` | Not touched. |
+| Non-GET, cross-origin, `cache: 'no-store'`, `Range` | Not touched. |
+| Anything else | Not touched — the router only answers what it was told about. |
+
+Only a **plain** answer is ever stored: status 200 (not a partial 206), not reached through a redirect, same-origin
+`basic` (not opaque), and without `Cache-Control: no-store`. HTML is stored only as the `network-first` shell — never
+under an asset URL. Each rule closes a failure the source apps hit:
+
+- An auth proxy (Cloudflare Access, oauth2-proxy) answers an expired session with a **redirect to its login page**.
+  Followed, that is a 200 — stored under an asset URL, cache-first would serve the login page as the script for good.
+- A server whose SPA fallback answers a **missing chunk with `index.html`** would store HTML as a script the same way.
+- A `serverPrefixes` entry is a **path segment**: `/rpc` covers `/rpc` and `/rpc/batch` but not `/rpcx`. A plain
+  string prefix both misses (`/api/` does not cover `/api`) and over-matches.
+- The update check fetches its version file with `cache: 'no-store'`, which the router never answers, so it always
+  sees what is deployed now.
+
+**Choosing the navigation mode is the privacy decision**, which is why it has no default. Use `network-only` when the
+server renders pages (TanStack Start, Next, Razor): their HTML carries the signed-in user's names and records, and
+must not outlive the session on a shared device. Use `network-first` for a static SPA shell (`index.html` that loads
+the app and fetches data over `/rpc`) — then every navigation outside `serverPrefixes` is cached as that shell, so
+any server-rendered page (a login form, an OAuth consent page) **must** be on the list.
+
+**Size `maxEntries` to a whole build.** A larger app emits hundreds of route chunks; a cap below one build evicts
+the running build's own chunks while it is in use, and its next lazy route fails offline. Count the files your build
+writes to `assets/` and keep a margin.
+
+The router precaches the offline page, the shell and the static files on `install`, past the HTTP cache. A precache
+answer that is not plain (a login redirect, a 404, an HTML page for an icon) **fails the install** — the previous
+worker stays in charge and the browser tries again on the next visit, rather than storing a login page as the
+offline page.
+
+To route something yourself, create the router without registering it and fall through to it:
+
+```ts
+import { createShellRouter } from '@swimmesberger/elarion-pwa/sw'
+
+const shell = createShellRouter(self, options)
+self.addEventListener('install', (event) => event.waitUntil(shell.install()))
+self.addEventListener('activate', (event) => event.waitUntil(shell.activate()))
+self.addEventListener('fetch', (event) => {
+  if (new URL(event.request.url).pathname.startsWith('/fonts/')) {
+    event.respondWith(shell.strategies.staleWhileRevalidate(event)) // same safety rules, same cache
+    return
+  }
+  shell.handleFetch(event)
+})
+```
+
+### Bundling the worker
+
+A service worker must be served from the origin root to control the whole app, and it cannot share the app's
+code-split output. Build it as a second, single-file bundle next to the app:
+
+```ts title="vite.sw.config.ts"
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  publicDir: false,
+  build: {
+    outDir: 'dist',        // the app's output directory (dist/client for TanStack Start)
+    emptyOutDir: false,    // runs after the app build — keep its output
+    target: 'es2022',
+    lib: {
+      entry: 'src/sw/service-worker.ts',
+      formats: ['iife'],   // one classic script: every browser runs it
+      name: 'AppServiceWorker',
+      fileName: () => 'sw.js',
+    },
+  },
+})
+```
+
+```json title="package.json"
+"build": "tsc --noEmit && vite build && vite build --config vite.sw.config.ts"
+```
+
+Type-check the worker under the `WebWorker` library — it conflicts with `DOM`, so give `src/sw/` its own
+`tsconfig.json` with `"lib": ["ES2022", "WebWorker"]` and exclude it from the app's. Both modules are typed
+structurally, so the real `self` fits without a cast.
+
+## Registering it
+
+```ts title="src/main.tsx"
+import { registerServiceWorker } from '@swimmesberger/elarion-pwa'
+
+// Production only: under the dev server a worker would sit between the browser and modules hot reload replaces.
+if (import.meta.env.PROD) void registerServiceWorker('/sw.js')
+```
+
+`registerServiceWorker` registers with `updateViaCache: 'none'`, so the browser's update check for `/sw.js` skips the
+HTTP cache, and resolves to `null` instead of throwing where there is no service worker (an old browser, an
+insecure origin, a private mode): an installable shell is an enhancement, the app works without it. With Web Push,
+pass the registration it returns to `enablePush`/`refreshOnStart` as `registration`.
+
+## The install entry
+
+Chromium offers its install prompt once, through `beforeinstallprompt`, as soon as the page qualifies — possibly
+before the UI framework has mounted. Create the controller **at module load** of the client bundle:
+
+```ts title="src/lib/install.ts"
+import { createInstallPrompt } from '@swimmesberger/elarion-pwa'
+
+export const install = createInstallPrompt()
+```
+
+```tsx title="src/components/install-app.tsx"
+import { useSyncExternalStore } from 'react'
+import { install } from '../lib/install'
+
+export function InstallApp() {
+  // 'none' while server rendering: the browser is unknown there, so the entry appears after hydration.
+  const option = useSyncExternalStore(install.subscribe, install.availability, () => 'none' as const)
+  if (option === 'prompt') return <button onClick={() => void install.prompt()}>Install app</button>
+  if (option === 'ios') return <p>Tap Share, then “Add to Home Screen”.</p>
+  return null
+}
+```
+
+| `availability()` | Meaning | Offer |
+| --- | --- | --- |
+| `prompt` | The browser handed over its prompt (Chrome, Edge, Android). | An "Install app" action; `prompt()` resolves to `accepted`, `dismissed` or `unavailable`. |
+| `ios` | iPhone or iPad — no prompt API. iPadOS reports a Mac user agent; the touch screen gives it away. | The share-sheet instructions. Every iOS browser offers "Add to Home Screen" since iOS 16.4. |
+| `none` | Already installed (standalone), or a browser that cannot install (Firefox desktop, an in-app browser, Chromium before the page qualifies). | Nothing — no dead end. |
+
+The controller suppresses Chromium's own install mini-infobar (`preventDefault: false` keeps it) and drops the
+prompt after `appinstalled` or once it was shown — a prompt can be used once. `isStandalone()` and
+`isAppleTouchDevice()` are exported for other UI, such as a "notifications need the Home Screen app on iOS" hint
+(`pushAvailability()` in `@swimmesberger/elarion-webpush` reports that case as `install-first`).
+
+## Reloading into a new deploy
+
+An installed app is resumed, not reopened: after a deploy that adds an enum value, the old client in memory fails
+validation on the new answer and shows an empty list — for days. So the app compares its own build with the one
+the server ships when it returns to the foreground, and reloads into the new one.
+
+**Never on the foreground return itself.** Coming back from the camera (a `capture` file input), a share sheet or a
+password manager is a foreground return too, and the page may hold a whole form in local state — with nothing on
+screen that looks busy, and iOS never asks on `beforeunload`. A first version that reloaded there wiped a
+half-filled form whose photo had just been taken. The watcher therefore only marks the update **pending** and
+applies it on the **next navigation that changed the path**:
+
+- not a search-only navigation (a list filter writing `?q=` on every keystroke) or a router re-resolving the same
+  location;
+- not while a dialog is open (`[role="dialog"]`, `[role="alertdialog"]`, `dialog[open]`) or a text field has focus —
+  pass `isBusy` to add the app's own rule;
+- not within 60 s of the last update reload of the tab (kept in `sessionStorage`), so a proxy serving a stale
+  version file cannot turn every page change into a reload.
+
+At most one check runs per minute (`checkIntervalMs`); no answer (offline, mid-deploy) never reloads, and an answer
+equal to the running build clears a pending update (a rolled-back deploy).
+
+### Publishing the version
+
+```ts title="vite.config.ts"
+import { appVersionFile } from '@swimmesberger/elarion-pwa/vite'
+
+// CI passes the build stamp; a local build is 'dev'.
+const version = process.env.APP_VERSION?.trim() || 'dev'
+
+export default defineConfig({
+  plugins: [appVersionFile({ version, define: '__APP_VERSION__' }), react()],
+})
+```
+
+```ts title="src/env.d.ts"
+declare const __APP_VERSION__: string
+```
+
+The plugin emits `/app-version.json` (`{"version":"…"}`) in the **client** build only — not the SSR environment,
+which has no static directory — and `define` bakes the same string into the bundle, so the two ends cannot drift.
+Serve the file with `Cache-Control: no-cache` from the web build, never routed to the API.
+
+### Wiring the watcher
+
+```ts title="src/lib/updates.ts"
+import { createUpdateWatcher } from '@swimmesberger/elarion-pwa'
+
+export const updates = createUpdateWatcher({
+  currentVersion: __APP_VERSION__,
+  enabled: import.meta.env.PROD, // a dev server publishes no version
+})
+```
+
+With **TanStack Router**, whose `onResolved` event carries `pathChanged`:
+
+```ts
+router.subscribe('onResolved', (event) => updates.navigationResolved({ pathChanged: event.pathChanged }))
+```
+
+With **React Router** (or any router that only reports the location), let the watcher compare paths:
+
+```tsx
+function ApplyUpdates() {
+  const { pathname } = useLocation()
+  useEffect(() => {
+    updates.navigatedTo(pathname)
+  }, [pathname])
+  return null
+}
+```
+
+A response that fails the running build's validation is the surest sign a newer contract is live. Force a check
+there (it still reloads only on the next safe page change):
+
+```ts
+const queryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: (error) => error instanceof ZodError && void updates.check({ force: true }) }),
+})
+```
+
+`isPending()`/`subscribe()` back an "Update available" hint, and `reloadNow()` applies the update at once from an
+explicit "Reload" button. Without a build step to publish a version file, compare the hashed entry script instead —
+`createUpdateWatcher({ currentVersion: currentEntryScript(), servedVersion: entryScriptVersionSource('/') })` — at
+the cost of one shell render per check.
+
+## Caching headers on the host
+
+The worker decides what the **service worker's** cache holds; the HTTP cache needs the same split:
+
+| Path | `Cache-Control` | Why |
+| --- | --- | --- |
+| `/assets/*` (content-hashed) | `public, max-age=31536000, immutable` | A new build has new names. |
+| `/sw.js` | `no-cache` | A stale worker keeps an old caching strategy alive. |
+| `/app-version.json` | `no-cache` | A cached answer hides a deploy. |
+| `/`, `index.html`, `/offline.html` | `no-cache` | The shell must revalidate so a deploy reaches installed apps. |
+| `/manifest.webmanifest`, icons | `no-cache` | A changed name or icon reaches installed apps; serve the manifest as `application/manifest+json`. |
+
+An ASP.NET Core host serving the built app from `wwwroot`:
+
+```csharp
+var staticFiles = new StaticFileOptions {
+    OnPrepareResponse = context => {
+        context.Context.Response.Headers.CacheControl = context.Context.Request.Path.StartsWithSegments("/assets")
+            ? "public, max-age=31536000, immutable"
+            : "no-cache";
+    },
+};
+app.UseDefaultFiles();
+app.UseStaticFiles(staticFiles);
+
+app.MapElarionJsonRpc();
+// The SPA fallback is an endpoint, so the static-file middleware is skipped for it: pass the same options so
+// index.html gets its no-cache header from there too.
+app.MapFallbackToFile("index.html", staticFiles);
+```
+
+ASP.NET Core's default content-type map already serves `.webmanifest` as `application/manifest+json`. Behind
+Caddy, in front of a Node server that sends neither the manifest type nor any `Cache-Control`:
+
+```text title="Caddyfile"
+@manifest path /manifest.webmanifest
+header @manifest {
+	Content-Type "application/manifest+json"
+	Cache-Control "no-cache"
+	defer # apply after the upstream's own headers
+}
+@pwaNoCache path /sw.js /app-version.json /offline.html
+header @pwaNoCache {
+	Cache-Control "no-cache"
+	defer
+}
+```
+
+## iOS details
+
+- **Inputs at 16 px or larger.** iOS Safari zooms into any focused field whose text is smaller and does not zoom back
+  out: `@media (pointer: coarse) { input, select, textarea { font-size: max(16px, 1em); } }`.
+- **Safe-area insets.** With `viewport-fit=cover` and the `black-translucent` status bar the page runs under the
+  notch and the home indicator: pad the top bar by `env(safe-area-inset-top)` and the bottom tab bar by
+  `env(safe-area-inset-bottom)` — including fixed elements such as a bottom sheet's close button.
+- **The dynamic viewport.** Size the shell with `100dvh` (`h-dvh`), not `100vh`, which hides the bottom of the page
+  behind the browser bars.
+- **No rubber-band in standalone mode.** Overscrolling drags the whole shell, header and tab bar included:
+  `@media (display-mode: standalone) { html, body { overscroll-behavior-y: none; } }`.
+- **Web Push needs the Home Screen app.** iOS exposes the Push API only to an installed app (16.4+); see
+  [Web Push](/docs/capabilities/web-push).
+- **The offline page is self-contained.** No stylesheet, script or font request that would fail offline as well —
+  inline its styles, and keep the app's language and colors.
+
+## Limits
+
+- One cache, one origin, one scope. A worker for a sub-path app, background sync, or periodic background fetch is the
+  application's own code — `createShellRouter` and its `strategies` compose with it.
+- The router precaches a fixed list; it does not read a build manifest. Assets are cached on first use, which covers
+  the routes a user actually visited. An app that must work fully offline from the first visit needs a generated
+  precache list (for example Workbox's `injectManifest`) — and then likely Workbox altogether.
+- The update watcher reloads the page; it does not swap modules in place. A page holding unsaved state is protected
+  by the navigation rule, not by the reload.

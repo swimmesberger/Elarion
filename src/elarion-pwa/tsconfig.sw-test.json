@@ -1,0 +1,12 @@
+{
+  // Proves the service-worker module type-checks where it runs: a WebWorker-lib project passing the real `self`,
+  // composed with the Web Push handlers in the same worker.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "WebWorker"],
+    "noEmit": true,
+    "declaration": false,
+    "rootDir": ".."
+  },
+  "include": ["src/sw.ts", "tests/sw-typing.ts"]
+}
