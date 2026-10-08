@@ -96,21 +96,32 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
             .Select(static (filters, _) => filters.ToEquatableArray())
             .WithTrackingName("ManifestResourceFilters");
 
-        var permissions = context.SyntaxProvider
+        var requiredPermissions = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 PermissionDiscovery.RequirePermissionAttributeMetadataName,
-                static (node, _) => node is ClassDeclarationSyntax,
+                static (node, _) => PermissionDiscovery.IsTypeCarrier(node),
                 static (ctx, _) => PermissionDiscovery.ReadPermissions(ctx))
             .Where(static guard => guard is not null)
             .Select(static (guard, _) => guard!)
-            .Collect()
-            .Select(static (guards, _) => guards.ToEquatableArray())
+            .Collect();
+
+        var declaredPermissions = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                PermissionDiscovery.DeclarePermissionAttributeMetadataName,
+                static (node, _) => PermissionDiscovery.IsTypeCarrier(node),
+                static (ctx, _) => PermissionDiscovery.ReadPermissions(ctx))
+            .Where(static guard => guard is not null)
+            .Select(static (guard, _) => guard!)
+            .Collect();
+
+        var permissions = requiredPermissions.Combine(declaredPermissions)
+            .Select(static (pair, _) => pair.Left.AddRange(pair.Right).ToEquatableArray())
             .WithTrackingName("ManifestPermissions");
 
         var roles = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 PermissionDiscovery.RequireRoleAttributeMetadataName,
-                static (node, _) => node is ClassDeclarationSyntax,
+                static (node, _) => PermissionDiscovery.IsTypeCarrier(node),
                 static (ctx, _) => PermissionDiscovery.ReadRoles(ctx))
             .Where(static guard => guard is not null)
             .Select(static (guard, _) => guard!)

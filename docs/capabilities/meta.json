@@ -16,6 +16,7 @@
     "connections",
     "devices",
     "web-push",
+    "pwa",
     "data-rate-shaping",
     "entity-framework",
     "multi-tenancy",

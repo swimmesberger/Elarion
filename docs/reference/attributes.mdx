@@ -519,6 +519,11 @@ Handler requirements are class attributes the handler-registration generator rea
 
 **`Verbs`** (constants, open vocabulary): `Read` (`"read"`), `List` (`"list"`), `Create` (`"create"`), `Update` (`"update"`), `Write` (`"write"`), `Delete` (`"delete"`), `Manage` (`"manage"`).
 
+### `[DeclarePermission]`
+
+- **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class or record (`AllowMultiple`, not inherited)
+- **Triggers:** adds `{resource}.{verb}` to the generated permission catalog (`ElarionPermissions`, `IPermissionCatalog`) of the module whose namespace contains the type, **without** requiring it anywhere. For a permission a row-level rule checks on top of a coarser `[RequirePermission]`, so role policy derived from the catalog can grant it. No runtime effect. Same parameters as `[RequirePermission]`.
+
 ### `[RequireRole]`
 
 - **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class (`AllowMultiple`, inherited)
@@ -926,7 +931,7 @@ All are `Elarion.Abstractions`, applied to the assembly, marker-only (no paramet
 ### `[GeneratePermissionCatalog]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** assembly
-- **Triggers:** runs the `PermissionCatalogGenerator` to harvest every `[RequirePermission]`/`[RequireRole]` in the assembly into a runtime `IPermissionCatalog` (a K8s-style resource + verb catalog, with `Verbs`, in `Elarion.Abstractions.Authorization`) — so admin UIs, role editors, and audits read straight from the handler attributes with no second source of truth to drift. Marker only — no parameters. Subsumed by `[UseElarion]`, or apply it standalone. Diagnostics `ELPERM001` (handler with requirements outside any `[AppModule]`) / `ELPERM002` (two permissions colliding on the same typed accessor).
+- **Triggers:** runs the `PermissionCatalogGenerator` to harvest every `[RequirePermission]`/`[RequireRole]`/`[DeclarePermission]` (on a class or record) in the assembly into a runtime `IPermissionCatalog` (a K8s-style resource + verb catalog, with `Verbs`, in `Elarion.Abstractions.Authorization`) — so admin UIs, role editors, and audits read straight from the handler attributes with no second source of truth to drift. Marker only — no parameters. Subsumed by `[UseElarion]`, or apply it standalone. Diagnostics `ELPERM001` (handler with requirements outside any `[AppModule]`) / `ELPERM002` (two permissions colliding on the same typed accessor).
 
 ```csharp
 [assembly: GeneratePermissionCatalog]

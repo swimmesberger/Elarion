@@ -314,6 +314,13 @@ consumer/job that owns the trigger — dead subscriptions are cleaned up for you
 `refreshOnStart(api)`) and `registerWebPushHandlers(self)` from its `/sw` export in the service worker. Live
 updates for users who have the app open stay client events.
 
+The installable-app shell is `@swimmesberger/elarion-pwa` (ADR-0083), not a hand-written `public/sw.js`:
+`registerShellRouter(self, { cacheName, serverPrefixes: [...ELARION_SERVER_PREFIXES, …], navigation })` from its `/sw`
+export in the same worker as `registerWebPushHandlers` (`network-only` navigations for server-rendered pages with
+personal data, `network-first` for an SPA shell), `registerServiceWorker('/sw.js')`, `createInstallPrompt()` at module
+load, and `createUpdateWatcher({ currentVersion })` wired to the router's resolved navigations — it reloads into a new
+deploy only on a path change with no dialog open or field focused, never on a foreground return.
+
 ## Rules that don't change
 
 - **Errors are values.** Return `Result<T>`; fail with `AppError.Validation / NotFound / Conflict /

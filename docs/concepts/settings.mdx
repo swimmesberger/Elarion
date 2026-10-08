@@ -169,6 +169,31 @@ is protected again with the same scheme, a legacy plaintext row stays plaintext 
 it. Normalization never changes a row's scheme behind the application's back, and a row whose protection cannot be
 undone (other scheme, lost key, no protector) is reported `Unreadable` and never removed.
 
+**Upgrading a store written before 0.2.8.** Releases before 0.2.8 accepted raw text on read; from 0.2.8 on, such a
+row reads as `Unreadable` (`GetAsync` throws, the projection skips it and the refresher logs it). Nothing runs the
+normalizer for you — a write behind the application's back on every start would be the wrong default — so run it
+once, after the schema migrations and before the host starts. With the [migration plan](/docs/capabilities/migrations),
+make it a code step so it runs exactly once per database:
+
+```csharp
+public sealed class NormalizeLegacySettings(ILogger<NormalizeLegacySettings> logger) : ICodeMigration {
+    public string Version => "20261007120000";                 // after the migration that created the settings table
+    public string Description => "normalize legacy settings rows";
+    public bool UseTransaction => false;                         // the store writes on its own connection; the run is idempotent
+
+    public async Task ExecuteAsync(MigrationStepContext context, CancellationToken ct) {
+        var normalizer = context.Services.GetRequiredService<ISettingNormalizer>();
+        var report = await normalizer.NormalizeAsync(SettingsScope.Global, cancellationToken: ct);
+        foreach (var entry in report.Where(SettingNormalizationOutcome.Unreadable))
+            logger.LogWarning("Setting {Key} was left unchanged: {Reason}", entry.Key, entry.Reason);
+    }
+}
+```
+
+A host that migrates by other means calls the same `NormalizeAsync` from its startup code between the migration and
+`app.RunAsync()`; it is idempotent, so running it on every start is harmless. Per-user rows need one run per user
+scope.
+
 ## Secrets
 
 Definitions with `Secret = true` are protected at rest through an `ISettingValueProtector`. Add the Data
@@ -184,12 +209,32 @@ builder.Services.AddElarionSettingsDataProtection();   // Elarion.Settings.DataP
 - **Fail closed:** a secret definition with no `ISettingValueProtector` registered fails host startup. There is
   no unprotected fallback; development hosts use Data Protection's default key ring.
 - `DescribeAsync` never returns a secret's value, and secrets are never projected into `IConfiguration` (it is
-  routinely bound, logged and dumped). Read secrets through `ISettingsManager`.
+  routinely bound, logged and dumped). Read secrets through `ISettingsManager`, or bind one onto options (below).
 - `ISettingReprotector.ReprotectAsync(scope, prefix?)` converges legacy plaintext, rotated keys and older
   schemes; it is idempotent and version-guarded. `AddElarionSettingsDataProtection` also runs it once at start
   for the global scope (`ReprotectOnStartup`).
 - Persist and share the Data Protection key ring in production; a lost key ring makes protected settings
   unrecoverable.
+
+### Secrets on options
+
+An adapter whose options are bound from configuration (an SMTP client reading `Email:Smtp`) cannot receive a secret
+through `IConfiguration`. `BindSecretSetting` (in `Elarion.Settings.Configuration`) sets just the secret member from
+the stored value and leaves the rest of the section bound from configuration:
+
+```csharp
+builder.AddElarionSettingsConfiguration();
+builder.Services.AddOptions<SmtpOptions>()
+    .BindConfiguration("Email:Smtp")                                    // host, port, user
+    .BindSecretSetting(AppSettings.SmtpPassword, static (o, password) => o.Password = password);
+```
+
+The value comes from the resolution the projection refresher already performs (so `AddElarionSettingsConfiguration`
+is required), only the bound definitions are kept in memory, and `IOptionsMonitor<T>`/`IOptionsSnapshot<T>` reload
+when the secret changes. The callback is skipped while the secret is unset or unreadable, so the member keeps its
+configured or default value. Read the options through `IOptionsMonitor<T>` or `IOptionsSnapshot<T>`: the refresher
+loads at host start, after which an `IOptions<T>` value built earlier would stay stale. A non-secret definition is
+rejected — it is already in `IConfiguration`.
 
 ## Describing settings for an admin UI
 
@@ -320,6 +365,14 @@ are already there), and only the global scope is surfaced. A **stored** value is
 nobody set, and the options type already carries its own defaults. An unreadable row is skipped and reported, never
 fatal (see above). Register it after your other sources so a later
 provider does not mask the projected effective value.
+
+A declared default never masks deployment configuration: when appsettings or the environment already supply a
+non-blank value at a definition's key, the default is not projected, so `IConfiguration` keeps the deployment value
+until an administrator stores one (a stored value is projected and wins). This makes "appsettings is the fallback,
+the settings store overrides it" work for options bound from configuration, with or without a declared default.
+Only the projection behaves this way — the resolver reads deployment configuration for `Pinnable` definitions only,
+so `ISettingsManager` returns the declared default for such a key. Declare the definition `Pinnable` when the
+deployment value should be authoritative for every reader (and freeze writes).
 
 Because `IConfiguration` is built before the DI container, the background refresher performs the initial load in
 its `StartAsync`, before later-registered hosted services (notably the scheduler) start. The load is time-bounded

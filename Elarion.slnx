@@ -92,6 +92,7 @@
     <Project Path="src/Elarion/Elarion.csproj"/>
     <Project Path="src/elarion-contributions/elarion-contributions.csproj"/>
     <Project Path="src/elarion-jsonrpc-client-generator/elarion-jsonrpc-client-generator.csproj"/>
+    <Project Path="src/elarion-pwa/elarion-pwa.csproj"/>
     <Project Path="src/elarion-webpush/elarion-webpush.csproj"/>
   </Folder>
   <Folder Name="/samples/">

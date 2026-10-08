@@ -51,8 +51,10 @@ public sealed class SettingsConfigurationRefresher(
         var serialization = scope.ServiceProvider.GetRequiredService<IElarionJsonSerialization>();
         var resolved = await resolver.ResolveAllAsync(SettingsScope.Global, null, cancellationToken)
             .ConfigureAwait(false);
-        var projection = SettingsConfigurationProjection.Project(resolved, serialization);
+        var projection = SettingsConfigurationProjection.Project(resolved, serialization, configuration);
         provider.Apply(projection.Data);
+        // Secrets bound onto options (BindSecretSetting) come from this same resolution, never from IConfiguration.
+        scope.ServiceProvider.GetService<SettingsSecretValues>()?.Apply(resolved);
         ReportProblems(projection.Problems);
         logger.LogDebug("Projected {Count} global setting key(s) into configuration.", projection.Data.Count);
     }

@@ -275,6 +275,10 @@ registerWebPushHandlers(self, { icon: '/icons/192.png', badge: '/icons/badge.png
 The module is ESM: bundle the worker (for example vite-plugin-pwa `injectManifest`) or register it with
 `navigator.serviceWorker.register('/sw.js', { type: 'module' })`.
 
+The same worker usually also makes the app installable: [Installable apps (PWA)](/docs/capabilities/pwa) composes
+`registerShellRouter(self)` from `@swimmesberger/elarion-pwa/sw` — offline shell and asset caching that never touch
+the API — with these handlers, and shows how to bundle the worker into one script.
+
 ## Limits
 
 - One node sends from one database: the fan-out is in-process and bounded, which covers the 1–10 node tier. A

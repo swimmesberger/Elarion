@@ -287,7 +287,10 @@ public static class JsonRpcSchemaExporter {
                 // An unconstrained schema ({} / true) says nothing about null; fall back to the CLR annotation.
                 return direction == SchemaDirection.Request ? property.IsSetNullable : property.IsGetNullable;
             case JsonObject node:
+                // A nullable enum under a string-enum converter is exported as a bare value list with no "type"
+                // keyword ({"enum":["A","B",null]}), so null membership must be read from the enum itself.
                 return TypeUnionContainsNull(node["type"])
+                       || EnumContainsNull(node["enum"])
                        || AnyOfContainsNull(node["anyOf"])
                        || AnyOfContainsNull(node["oneOf"]);
             default:
@@ -304,9 +307,14 @@ public static class JsonRpcSchemaExporter {
         };
     }
 
+    private static bool EnumContainsNull(JsonNode? values) {
+        return values is JsonArray array && array.Any(static item => item is null);
+    }
+
     private static bool AnyOfContainsNull(JsonNode? alternatives) {
         return alternatives is JsonArray array
-               && array.Any(static item => item is JsonObject node && TypeUnionContainsNull(node["type"]));
+               && array.Any(static item => item is JsonObject node
+                                           && (TypeUnionContainsNull(node["type"]) || EnumContainsNull(node["enum"])));
     }
 
     [RequiresUnreferencedCode(SchemaReflectionMessage)]

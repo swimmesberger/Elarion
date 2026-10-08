@@ -242,6 +242,36 @@ Slots that render only inert parts (buttons, menu entries) and mount the payload
 invocation — keep the context-free `render={(item) => …}` form and hand the context over at the call
 site; the Billing sample's client row actions do exactly that.
 
+### Pattern: one navigation point, a desktop sidebar and a phone tab bar
+
+A phone shell (bottom tab bar + a "More" sheet) does not need a second navigation point. Keep the one
+`sidebarItems` point and let each contribution say how it ranks on a phone — the shell picks the tabs:
+
+```ts title="platform/points.ts"
+export interface SidebarItem {
+  readonly label: string
+  readonly icon: LucideIcon
+  readonly to: string
+  /** Phone tab-bar rank (lower first). Unranked items live only under "More". */
+  readonly mobileTab?: number
+}
+```
+
+```ts title="platform/mobile-nav.ts — pure, unit-testable"
+export function mobileTabs<T extends SidebarItem>(visible: readonly T[], max = 4): T[] {
+  return visible
+    .filter((item) => item.mobileTab !== undefined)
+    .sort((a, b) => a.mobileTab! - b.mobileTab!)
+    .slice(0, max)
+}
+```
+
+Rank rather than flag: `useContributions` has already dropped what the user may not see, so a narrowly
+scoped role whose top-ranked areas are hidden falls through to the next ranked ones and still gets a full
+tab bar — a boolean `mobile: true` leaves gaps instead. Don't promote unranked items to fill the bar; the
+"More" sheet renders every visible item, grouped exactly like the desktop sidebar, so nothing becomes
+unreachable. The rank stays app data on an app-owned payload (ADR-0032) — Elarion ships no shell.
+
 ## Reference usage
 
 The [Billing sample's web app](https://github.com/swimmesberger/Elarion/tree/main/samples/Billing/web) is

@@ -146,6 +146,64 @@ public sealed class PermissionCatalogGeneratorTests {
     }
 
     [Fact]
+    public void ARequirementOnARecordJoinsTheCatalog() {
+        // A record is a class: the attribute used to be dropped silently because only ClassDeclarationSyntax matched.
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static partial class AppModule { }
+
+                                  [RequirePermission("absences", Verbs.Manage)]
+                                  public sealed record AbsenceAccess(string UserId);
+
+                                  [RequireRole("auditor")]
+                                  public record AuditAccess;
+                              }
+                              """;
+
+        var result = Generate(source);
+
+        GetGenerated(result, "ElarionPermissions.g.cs").Should().Contain(
+            "public static global::System.Collections.Generic.IReadOnlyList<string> All { get; } = new string[] { \"absences.manage\" };")
+            .And.Contain("Roles { get; } = new string[] { \"auditor\" };");
+        GetGenerated(result, "AppPermissionCatalogExtensions.g.cs").Should().Contain("Permission = \"absences.manage\"");
+    }
+
+    [Fact]
+    public void DeclarePermissionAddsAPermissionThatNoHandlerRequires() {
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static partial class AppModule { }
+
+                                  [RequirePermission("comments", Verbs.Write)]
+                                  public sealed class DeleteComment { }
+
+                                  [DeclarePermission("comments", Verbs.Manage)]
+                                  public sealed record CommentAccess;
+
+                                  [DeclarePermission("comments", Verbs.Write)]
+                                  [DeclarePermission("exports", "run")]
+                                  public sealed class ExportRules { }
+                              }
+                              """;
+
+        var result = Generate(source);
+        var permissions = GetGenerated(result, "ElarionPermissions.g.cs");
+
+        permissions.Should().Contain(
+            "public static global::System.Collections.Generic.IReadOnlyList<string> All { get; } = new string[] { \"comments.manage\", \"comments.write\", \"exports.run\" };");
+        permissions.Should().Contain("public const string Manage = \"comments.manage\";");
+        GetGenerated(result, "AppPermissionCatalogExtensions.g.cs").Should()
+            .Contain("Permission = \"comments.manage\"").And.Contain("Permission = \"exports.run\"");
+        RunForDiagnostics(source).Should().NotContain(d => d.Severity >= DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
     public void IrrelevantEditReusesOutputs() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new PermissionCatalogGenerator(),

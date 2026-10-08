@@ -1,10 +1,12 @@
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Elarion.Generators;
 
 /// <summary>
-/// Shared discovery of <c>[RequirePermission(resource, verb)]</c>/<c>[RequireRole("…")]</c> off a handler, used by
+/// Shared discovery of <c>[RequirePermission(resource, verb)]</c>/<c>[DeclarePermission(resource, verb)]</c>/
+/// <c>[RequireRole("…")]</c> off a class or record (a handler, a client-event contract, a row-level rule), used by
 /// both <see cref="ElarionManifestGenerator"/> (which records them in the assembly manifest for cross-assembly
 /// aggregation) and <see cref="PermissionCatalogGenerator"/> (which emits the runtime catalog contributions and
 /// the compile-time <c>ElarionPermissions</c> static). Keeping it in one place means the two generators can never
@@ -16,6 +18,18 @@ internal static class PermissionDiscovery {
 
     public const string RequireRoleAttributeMetadataName =
         "Elarion.Abstractions.Authorization.RequireRoleAttribute";
+
+    /// <summary>Contributes a permission to the catalog without requiring it (same <c>(resource, verb)</c> shape).</summary>
+    public const string DeclarePermissionAttributeMetadataName =
+        "Elarion.Abstractions.Authorization.DeclarePermissionAttribute";
+
+    /// <summary>
+    /// The syntax a permission or role attribute can sit on. A <c>record</c> is a class too: matching only
+    /// <c>ClassDeclarationSyntax</c> silently dropped an attribute on a record from the catalog.
+    /// </summary>
+    public static bool IsTypeCarrier(SyntaxNode node) {
+        return node is ClassDeclarationSyntax or RecordDeclarationSyntax;
+    }
 
     // Must match RequirePermissionAttribute.Separator — the resource/verb join in the composed permission string.
     public const string Separator = ".";

@@ -351,7 +351,27 @@ the same way services and event consumers are — each module contributes throug
 are included automatically. `AddElarionAuthorization` registers it.
 
 Generation is on under `[assembly: UseElarion]` (or the narrower `[assembly: GeneratePermissionCatalog]`); a
-guarded handler under no module is reported (`ELPERM001`).
+guarded handler under no module is reported (`ELPERM001`). The attributes are read off any `class` or `record`
+(for example a client-event contract), not only handlers.
+
+### Permissions no handler requires
+
+Some permissions are not the whole gate of any handler: a row-level rule reads them on top of a coarser
+requirement ("the author **or** a manager may delete a comment" — the handler requires `comments.write`, the rule
+also accepts `comments.manage`). Adding a second `[RequirePermission]` to the handler is wrong, because requirements
+AND together and would lock the author out. But the permission must still be in the catalog, or role policy derived
+from it never grants it and the rule is dead code. Declare it on the type that reads it:
+
+```csharp
+[DeclarePermission("comments", Verbs.Manage)]    // in the catalog, enforced nowhere
+public sealed record CommentAccess(ICurrentUser User) {
+    public bool CanDelete(Comment comment) =>
+        comment.AuthorId == User.UserId || User.HasClaim("permission", ElarionPermissions.Comments.Manage);
+}
+```
+
+`[DeclarePermission]` joins the owning module's catalog exactly like `[RequirePermission]` (same `ElarionPermissions`
+accessors, same `IPermissionCatalog` entries, cross-assembly through the manifest) and has no runtime effect.
 
 ## See also
 

@@ -103,3 +103,4 @@ designs that are not yet implemented.
 - [ADR-0080: Errors are a declared contract with a stable code — Proposed](0080-errors-are-a-declared-contract-with-a-stable-code.md)
 - [ADR-0081: One migration plan — SQL, code and EF steps share a version sequence, a history and a lock — Proposed](0081-one-migration-plan.md)
 - [ADR-0082: Requiredness comes from nullability, in both directions — Proposed](0082-requiredness-comes-from-nullability-in-both-directions.md)
+- [ADR-0083: The installable-app shell is a framework npm package — safe caching rules built in, the privacy choice left to the app — Proposed](0083-installable-app-shell.md)

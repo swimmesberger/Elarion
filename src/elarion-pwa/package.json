@@ -1,0 +1,62 @@
+{
+  "name": "@swimmesberger/elarion-pwa",
+  "version": "0.1.0",
+  "description": "The installable-app shell for Elarion frontends: install-prompt capture with iOS Home Screen instructions, a deploy-update watcher that reloads only on a safe page change, service-worker registration, a /sw module whose shell router never caches the API, HTML, redirects, or no-store answers, and a /vite plugin that publishes the build version.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./sw": {
+      "types": "./dist/sw.d.ts",
+      "import": "./dist/sw.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.sw-test.json",
+    "test": "npm run typecheck && vitest run",
+    "prepack": "npm run build",
+    "prepare": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swimmesberger/Elarion.git",
+    "directory": "src/elarion-pwa"
+  },
+  "bugs": {
+    "url": "https://github.com/swimmesberger/Elarion/issues"
+  },
+  "homepage": "https://github.com/swimmesberger/Elarion#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "peerDependencies": {
+    "vite": ">=5"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
+  }
+}

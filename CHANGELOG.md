@@ -8,6 +8,59 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **`@swimmesberger/elarion-pwa`: the installable-app shell (ADR-0083).** Install prompt, deploy updates, and an
+  offline-capable service worker were hand-written in every app, with the same helpers copied byte for byte and a
+  different bug in each copy. The new npm package ships them with the safety rules built in:
+  `createInstallPrompt()` captures `beforeinstallprompt` and reports `'prompt' | 'ios' | 'none'` (iPadOS included);
+  `createUpdateWatcher({ currentVersion })` checks for a new build on foreground return and reloads into it only on
+  the next navigation that changed the path, with no dialog open or field focused and at most once a minute — never
+  on the return itself, which wiped a form after the camera; `registerServiceWorker()` registers with
+  `updateViaCache: 'none'`. The `/sw` entry's `registerShellRouter(self, …)` serves navigations network-only (with an
+  offline page) or network-first (an SPA shell), hashed assets cache-first under a whole-build cap, and icons
+  stale-while-revalidate; it never touches server prefixes (matched by path segment), non-GET, cross-origin or
+  `no-store` requests, and never stores a redirected, opaque, partial, `no-store`, or (outside the shell) HTML answer.
+  It composes with `registerWebPushHandlers(self)` in the same worker. The `/vite` entry's `appVersionFile()` publishes
+  `/app-version.json` and bakes the same version into the bundle. The new *Installable apps (PWA)* page also covers
+  bundling the worker, caching headers for ASP.NET Core and Caddy, and the iOS details.
+- **Authorization: `[DeclarePermission(resource, verb)]` adds a permission to the generated catalog without requiring
+  it.** A permission that a row-level rule checks on top of a coarser `[RequirePermission]` ("author or manager may
+  delete") could only enter `ElarionPermissions`/`IPermissionCatalog` through a handler attribute, and a second
+  `[RequirePermission]` on the handler ANDs and locks the author out — so role policy derived from the catalog never
+  granted it. Place the attribute on the type that reads the permission; it joins that module's catalog (also
+  cross-assembly through the manifest) and has no runtime effect.
+- **Settings: `OptionsBuilder<T>.BindSecretSetting(definition, apply)` puts a secret setting on options without
+  `IConfiguration`.** Secrets are never projected, so an adapter whose options bind from configuration (an SMTP
+  password under `Email:Smtp`) could not mark its secret `Secret = true`. The extension (in
+  `Elarion.Settings.Configuration`) applies the stored value from the resolution the projection refresher already
+  performs, keeps only the bound definitions in memory and reloads `IOptionsMonitor`/`IOptionsSnapshot` on change; the
+  rest of the section stays bound from configuration. A non-secret definition is rejected.
+
+### Fixed
+- **A `[RequirePermission]`/`[RequireRole]` on a `record` is no longer silently dropped from the permission catalog.**
+  The catalog and manifest generators matched only `ClassDeclarationSyntax`, so the attribute on a record (a
+  client-event contract, a rule type) built green and contributed nothing. Records are matched too.
+- **A nullable enum request member is optional in the exported schema (ADR-0082).** Under a string-enum
+  converter `Nullable<TEnum>` is exported as a bare value list with no `type` keyword (`{"enum":["A","B",null]}`), and
+  the requiredness rule only looked for `null` in `type`/`anyOf`, so `Medium? Medium` landed in `required` although the
+  runtime binds an omitted value as `null`. The generated TypeScript then demanded the key (`medium: … | null |
+  undefined` instead of `medium?:`). Null membership is now also read from `enum`, for params, results and MCP input
+  schemas alike. Regenerate `rpc-schema.json` and the TypeScript client to pick it up.
+- **Settings: a declared default no longer masks deployment configuration in the `IConfiguration` projection.** The
+  projection is registered after the host's other sources, so projecting a scalar default nobody set hid the
+  appsettings/environment value at the same key for every non-pinnable definition (an app binding `SmtpOptions` from
+  `Email:Smtp` had to drop its defaults to keep the appsettings values visible). The refresher and
+  `SettingsConfigurationSnapshot.LoadAsync` now leave a default out when the deployment configuration (every provider
+  except the projection) supplies a non-blank value there; a stored value is still projected and wins.
+  `SettingsConfigurationProjection.Project` takes the configuration as a new optional `deploymentConfiguration`
+  argument (without it every scalar default is projected, as before).
+
+### Documentation
+- **Settings: upgrading a store written before 0.2.8.** Raw-text rows written before definitions existed read as
+  `Unreadable` from 0.2.8 on, and nothing normalizes them automatically. The settings concept page now says so and
+  shows the supported one-time conversion: an `ICodeMigration` step that runs `ISettingNormalizer.NormalizeAsync` once
+  per database, or the same call between the migration and `app.RunAsync()` for hosts that migrate otherwise.
+
 ## [0.2.10] - 2026-10-04
 
 ### Added
