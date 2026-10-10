@@ -280,7 +280,10 @@ public sealed class UploadAvatar : IHandler<UploadAvatar.Command, Result<UploadA
 The generator detects `IFormFile`/`IFormFileCollection` and `[FromForm]` members, binds them from the
 request form (a non-form content type is a `415`), and marks the endpoint `.DisableAntiforgery()` —
 generator-bound endpoints don't participate in ASP.NET's automatic form antiforgery, so a host that wants
-antiforgery on a form post enforces it deliberately. For a mutation that mixes a path id with a JSON
+antiforgery on a form post enforces it deliberately. A form post is a cross-site "simple" request, so a host
+whose browsers authenticate with a cookie installs `UseElarionCrossOriginProtection()` (see
+[CSRF and cookie authentication](/docs/capabilities/hosting#csrf-and-cookie-authentication)). For a mutation that
+mixes a path id with a JSON
 payload, nest the payload in a `[FromBody]` property:
 
 ```csharp
@@ -366,9 +369,12 @@ code comes from `AppError.Kind`, mirroring how JSON-RPC maps the same kinds to i
 | `BusinessRule` | `422` |
 | `Internal` | `500` |
 
+Every ProblemDetails carries the error's stable `code` (and a `data` member for a typed payload), so a client
+branches on the same string as over JSON-RPC — see [OpenAPI › Typed errors](/docs/capabilities/transports/openapi#typed-errors).
+
 Binding-tier failures use the same contract before the handler runs: an unparseable route/query/header/form
-value or a missing required member is a `400` `ValidationProblem` keyed by the wire name, and a request body
-with a non-JSON content type is a bare `415`.
+value or a missing required member is a `400` `ValidationProblem` (`code: "validation"`) keyed by the wire name,
+and a request body with a non-JSON content type is a bare `415`.
 
 ## HTTP or JSON-RPC?
 

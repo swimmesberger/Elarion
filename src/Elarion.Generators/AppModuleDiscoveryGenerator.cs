@@ -216,6 +216,16 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
                 .ToEquatableArray())
             .WithTrackingName("BootstrapperRpcMethods");
 
+        // The error declarations a handler inherits from its pipeline decorators, module and assembly (ADR-0080),
+        // merged against the current compilation exactly as the manifest generator does; that generator reports
+        // their diagnostics.
+        var scopedRpcMethods = currentRpcMethods
+            .Combine(ModuleProviders.CollectModules(context))
+            .Combine(context.CompilationProvider)
+            .Select(static (source, ct) =>
+                ErrorContractScopes.Apply(source.Left.Left, source.Left.Right, source.Right, null, ct))
+            .WithTrackingName("BootstrapperRpcErrorScopes");
+
         var currentResourceFilters = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 ElarionGeneratorConventions.ResourceFilterAttribute,
@@ -243,7 +253,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
             .Combine(currentModules)
             .Combine(currentModuleEndpoints)
             .Combine(currentHttpEndpoints)
-            .Combine(currentRpcMethods)
+            .Combine(scopedRpcMethods)
             .Combine(currentResourceFilters)
             .Combine(referencedSiblings)
             .Combine(trigger)

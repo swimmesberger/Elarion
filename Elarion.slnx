@@ -12,6 +12,7 @@
     <Project Path="src/Elarion.AspNetCore.Identity/Elarion.AspNetCore.Identity.csproj"/>
     <Project Path="src/Elarion.AspNetCore.Mcp/Elarion.AspNetCore.Mcp.csproj"/>
     <Project Path="src/Elarion.AspNetCore.OpenApi/Elarion.AspNetCore.OpenApi.csproj"/>
+    <Project Path="src/Elarion.AspNetCore.ProxyIdentity/Elarion.AspNetCore.ProxyIdentity.csproj"/>
     <Project Path="src/Elarion.AspNetCore.SchemaGeneration/Elarion.AspNetCore.SchemaGeneration.csproj"/>
     <Project Path="src/Elarion.AspNetCore.SchemaGeneration.Tool/Elarion.AspNetCore.SchemaGeneration.Tool.csproj"/>
     <Project Path="src/Elarion.Actors/Elarion.Actors.csproj"/>
@@ -68,6 +69,7 @@
     <Project Path="src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj"/>
     <Project Path="src/Elarion.EntityFrameworkCore.BulkOperations/Elarion.EntityFrameworkCore.BulkOperations.csproj"/>
     <Project Path="src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj"/>
+    <Project Path="src/Elarion.EntityFrameworkCore.LeasedWork/Elarion.EntityFrameworkCore.LeasedWork.csproj"/>
     <Project Path="src/Elarion.Idempotency.EntityFrameworkCore/Elarion.Idempotency.EntityFrameworkCore.csproj"/>
     <Project Path="src/Elarion.Grpc/Elarion.Grpc.csproj"/>
     <Project Path="src/Elarion.Grpc.AspNetCore/Elarion.Grpc.AspNetCore.csproj"/>

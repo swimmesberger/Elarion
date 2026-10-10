@@ -1125,8 +1125,9 @@ describe('JSON-RPC client generator', () => {
     expect(source).toContain("import { getRequestHeader } from '@tanstack/react-start/server'")
     expect(source).toContain("from './rpc-client.js'")
     expect(source).toContain('export const forwardRequestCookie')
+    expect(source).toContain('export const forwardRequestHeaders = createIsomorphicFn()')
     expect(source).toContain('export function createStartRpcApi')
-    expect(source).toContain("getRequestHeader('cookie')")
+    expect(source).toContain('readonly forwardHeaders?: readonly string[]')
     expect(generated.clientSource).not.toContain('@tanstack')
 
     // The emitted adapter is syntactically valid TypeScript (it strips to runnable JS). It can't be
@@ -1148,6 +1149,54 @@ describe('JSON-RPC client generator', () => {
 
     expect(generated.frameworkAdapterFileName).toBe('client/start.ts')
     expect(generated.frameworkAdapterSource).toContain("from './client/rpc.js'")
+  })
+
+  it('forwards only the request cookie during SSR by default', async () => {
+    const adapter = await loadGeneratedStartAdapter({
+      cookie: 'session=abc',
+      authorization: 'Bearer incoming',
+    })
+
+    const headers = await adapter.module.createStartRpcApi({url: '/rpc'}).headersFor()
+
+    expect(headers).toEqual({cookie: 'session=abc'})
+    expect(adapter.module.forwardRequestCookie()).toEqual({cookie: 'session=abc'})
+  })
+
+  it('forwards the configured request headers during SSR, skipping absent ones', async () => {
+    const adapter = await loadGeneratedStartAdapter({
+      cookie: 'session=abc',
+      'x-forwarded-identity': 'token-1',
+    })
+
+    const headers = await adapter.module.createStartRpcApi({
+      url: '/rpc',
+      forwardHeaders: ['X-Forwarded-Identity', 'cookie', 'x-correlation-id'],
+    }).headersFor()
+
+    expect(headers).toEqual({'x-forwarded-identity': 'token-1', cookie: 'session=abc'})
+    expect(adapter.receivedOptions().forwardHeaders).toBeUndefined()
+  })
+
+  it('forwards nothing for an empty forwardHeaders list and lets explicit headers win', async () => {
+    const adapter = await loadGeneratedStartAdapter({cookie: 'session=abc', 'x-tenant': 'from-request'})
+
+    expect(await adapter.module.createStartRpcApi({url: '/rpc', forwardHeaders: []}).headersFor()).toEqual({})
+
+    const headers = await adapter.module.createStartRpcApi({
+      url: '/rpc',
+      forwardHeaders: ['x-tenant'],
+      headers: () => ({'x-tenant': 'explicit'}),
+    }).headersFor()
+    expect(headers).toEqual({'x-tenant': 'explicit'})
+  })
+
+  it('forwards no request headers in the browser', async () => {
+    const adapter = await loadGeneratedStartAdapter({cookie: 'session=abc', 'x-tenant': 't1'}, 'client')
+
+    expect(await adapter.module.createStartRpcApi({url: '/rpc', forwardHeaders: ['x-tenant']}).headersFor())
+      .toEqual({})
+    expect(adapter.module.forwardRequestHeaders(['cookie'])).toEqual({})
   })
 
   it('omits the framework adapter by default', () => {
@@ -1514,6 +1563,74 @@ async function loadGeneratedFileClient(clientSource: string): Promise<GeneratedC
   ].join('\n'), 'utf-8')
 
   return await import(pathToFileURL(join(dir, 'rpc-client.mjs')).href) as GeneratedClientModule
+}
+
+interface StartAdapterModule {
+  createStartRpcApi(options: {
+    url: string
+    forwardHeaders?: readonly string[]
+    headers?: HeadersInit | (() => HeadersInit | Promise<HeadersInit>)
+  }): { headersFor(): Promise<HeadersInit> }
+
+  forwardRequestHeaders(names: readonly string[]): HeadersInit
+
+  forwardRequestCookie(): HeadersInit
+}
+
+// Loads the generated start-adapter.ts against stand-ins for its imports: `@tanstack/react-start` runs the
+// `.server(...)` or `.client(...)` implementation for the given environment (what the Start compiler leaves in
+// that bundle), `@tanstack/react-start/server` serves `requestHeaders`, and the core client's `createRpcApi`
+// records its options so a test can resolve the headers a call would send.
+async function loadGeneratedStartAdapter(
+  requestHeaders: Record<string, string>,
+  environment: 'server' | 'client' = 'server'
+): Promise<{ module: StartAdapterModule; receivedOptions(): Record<string, unknown> }> {
+  const generated = generateRpcClientFiles(rpcClientTestSchema(), {framework: 'tanstack-start'})
+  const dir = mkdtempSync(join(tmpdir(), 'elarion-start-adapter-'))
+  const jsSource = ts.transpileModule(generated.frameworkAdapterSource as string, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText
+    .replace("from '@tanstack/react-start/server'", "from './react-start-server.mjs'")
+    .replace("from '@tanstack/react-start'", "from './react-start.mjs'")
+    .replace("from './rpc-client.js'", "from './rpc-client.mjs'")
+
+  writeFileSync(join(dir, 'start-adapter.mjs'), jsSource, 'utf-8')
+  writeFileSync(join(dir, 'react-start.mjs'), [
+    'export function createIsomorphicFn() {',
+    '  return {',
+    '    server(serverImpl) {',
+    '      return {',
+    `        client: (clientImpl) => ${environment === 'server' ? 'serverImpl' : 'clientImpl'},`,
+    '      }',
+    '    },',
+    '  }',
+    '}',
+    '',
+  ].join('\n'), 'utf-8')
+  writeFileSync(join(dir, 'react-start-server.mjs'), [
+    `const requestHeaders = ${JSON.stringify(requestHeaders)}`,
+    'export function getRequestHeader(name) {',
+    '  return requestHeaders[name.toLowerCase()]',
+    '}',
+    '',
+  ].join('\n'), 'utf-8')
+  writeFileSync(join(dir, 'rpc-client.mjs'), [
+    'export let receivedOptions',
+    'export function createRpcApi(options) {',
+    '  receivedOptions = options',
+    "  return { headersFor: () => options.headers({ methods: ['math.add'], batch: false }) }",
+    '}',
+    '',
+  ].join('\n'), 'utf-8')
+
+  const module = await import(pathToFileURL(join(dir, 'start-adapter.mjs')).href) as StartAdapterModule
+  const client = await import(pathToFileURL(join(dir, 'rpc-client.mjs')).href) as {
+    receivedOptions: Record<string, unknown>
+  }
+  return {module, receivedOptions: () => client.receivedOptions}
 }
 
 async function loadGeneratedClient(clientSource: string): Promise<GeneratedClientModule> {

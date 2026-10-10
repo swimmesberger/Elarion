@@ -69,7 +69,11 @@ internal static class RpcMethodEmission {
         EquatableArray<ParameterDescription> Parameters,
         bool IsNameInferred,
         bool IsIdempotent,
-        EquatableArray<ErrorContractDiscovery.ErrorDeclaration> Errors
+        EquatableArray<ErrorContractDiscovery.ErrorDeclaration> Errors,
+        // The handler's CLR metadata name, so ErrorContractScopes can re-resolve it from the current compilation.
+        // Only a current-compilation model carries it: a model decoded from a referenced manifest already holds its
+        // complete contract.
+        string? HandlerMetadataName = null
     );
 
     /// <summary>
@@ -200,7 +204,8 @@ internal static class RpcMethodEmission {
             parameters,
             isNameInferred,
             isIdempotent,
-            errors);
+            errors,
+            ModuleScanner.BuildMetadataName(type));
         return true;
     }
 

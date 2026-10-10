@@ -41,37 +41,40 @@ public sealed class ElarionMcpEndToEndTests {
     }
 
     [Fact]
+    public async Task McpServer_RefusesCrossSiteTextPlainPost_With415() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var app = await StartMcpOnlyHostAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+
+            // A cross-site no-cors fetch with a text/plain body that is an MCP envelope: Accept is a CORS-safelisted
+            // header, so the browser sends this without a preflight and with the site's cookies. The MCP transport
+            // refuses the non-JSON content type itself (like /rpc does), so MapElarionMcp needs no extra check.
+            using var formPost = new HttpRequestMessage(HttpMethod.Post, "/mcp") {
+                Content = new StringContent(
+                    """{"jsonrpc":"2.0","method":"tools/call","params":{"name":"echo","arguments":{"name":"x"}},"id":1,"x":"="}""",
+                    System.Text.Encoding.UTF8,
+                    "text/plain")
+            };
+            formPost.Headers.TryAddWithoutValidation("Accept", "application/json, text/event-stream");
+            formPost.Headers.TryAddWithoutValidation("Origin", "https://attacker.example");
+            formPost.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "cross-site");
+            var response = await client.SendAsync(formPost, ct);
+
+            response.StatusCode.Should().Be(System.Net.HttpStatusCode.UnsupportedMediaType);
+        }
+        finally {
+            await app.StopAsync(ct);
+        }
+    }
+
+    [Fact]
     public async Task McpServer_ListsAndCallsTools_OverHttp_WithoutJsonRpcEndpoint() {
         var ct = TestContext.Current.CancellationToken;
-
-        var builder = WebApplication.CreateBuilder();
-        builder.WebHost.UseUrls("http://127.0.0.1:0"); // ephemeral port
-        builder.Logging.ClearProviders();
-
-        builder.Services.AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>();
-        // The plain test DTOs are not in a source-gen context, so opt the canonical serializer into reflection.
-        builder.Services.ConfigureElarionJson(o => o.EnableReflectionFallback = true);
-
-        // Both transports must share ONE registration delegate — the bus is a single shared singleton.
-        static HandlerDispatcher RegisterHandlers(HandlerDispatcher dispatcher) {
-            return dispatcher.Map<EchoCommand, EchoResponse>("echo");
-        }
-
-        builder.Services.AddElarionJsonRpc(RegisterHandlers);
-        builder.Services.AddElarionMcp(
-            new RpcMcpMetadataSource([
-                new RpcMcpMethodMetadata {
-                    MethodName = "echo",
-                    RequestType = typeof(EchoCommand),
-                    Description = "Echoes a greeting."
-                }
-            ]),
-            RegisterHandlers,
-            o => o.ServerName = "Test");
-
-        await using var app = builder.Build();
-        app.MapElarionMcp(); // /mcp only — MapJsonRpc() is intentionally NOT called
-        await app.StartAsync(ct);
+        await using var app = await StartMcpOnlyHostAsync(ct);
 
         try {
             var baseAddress = app.Services.GetRequiredService<IServer>()
@@ -108,5 +111,37 @@ public sealed class ElarionMcpEndToEndTests {
         finally {
             await app.StopAsync(ct);
         }
+    }
+
+    private static async Task<WebApplication> StartMcpOnlyHostAsync(CancellationToken ct) {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0"); // ephemeral port
+        builder.Logging.ClearProviders();
+
+        builder.Services.AddScoped<IHandler<EchoCommand, Result<EchoResponse>>, EchoHandler>();
+        // The plain test DTOs are not in a source-gen context, so opt the canonical serializer into reflection.
+        builder.Services.ConfigureElarionJson(o => o.EnableReflectionFallback = true);
+
+        // Both transports must share ONE registration delegate — the bus is a single shared singleton.
+        static HandlerDispatcher RegisterHandlers(HandlerDispatcher dispatcher) {
+            return dispatcher.Map<EchoCommand, EchoResponse>("echo");
+        }
+
+        builder.Services.AddElarionJsonRpc(RegisterHandlers);
+        builder.Services.AddElarionMcp(
+            new RpcMcpMetadataSource([
+                new RpcMcpMethodMetadata {
+                    MethodName = "echo",
+                    RequestType = typeof(EchoCommand),
+                    Description = "Echoes a greeting."
+                }
+            ]),
+            RegisterHandlers,
+            o => o.ServerName = "Test");
+
+        var app = builder.Build();
+        app.MapElarionMcp(); // /mcp only — MapJsonRpc() is intentionally NOT called
+        await app.StartAsync(ct);
+        return app;
     }
 }

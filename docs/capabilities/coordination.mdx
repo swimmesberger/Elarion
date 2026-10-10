@@ -1,15 +1,16 @@
 ---
 title: Coordination & role leases
-description: Elect one instance for a coarse application role on PostgreSQL, gate work at the holder, and route HTTP traffic to it when needed.
+description: Elect one instance for a coarse application role on PostgreSQL, gate work at the holder, and route HTTP traffic to it when needed — and claim rows of your own queue tables with leased work rows.
 ---
 
-Elarion has three deliberately different coordination shapes. Choose the one that matches the unit
+Elarion has four deliberately different coordination shapes. Choose the one that matches the unit
 being coordinated:
 
 | Need | Primitive | Coordination key |
 | --- | --- | --- |
 | Run one recurring occurrence across the cluster | [Scheduler claim](/docs/capabilities/scheduling/multi-node) | Job + due time |
 | Deliver one integration consumer invocation at a time | [Outbox delivery lease](/docs/capabilities/events/backends) | Message + consumer |
+| Work through your own queue table, one worker per row | [Leased work rows](#leased-work-rows) | Row id + lease token |
 | Make exactly one instance hold a long-lived application role | **Role lease** | Role name |
 
 A role lease answers a coarse question such as “which instance is the maintenance coordinator?” It
@@ -20,7 +21,8 @@ releases immediately; a crashed holder fails over when its lease expires.
 <Callout type="warn">
   A role lease is **not a distributed-lock API**. Do not create one per tenant, record, or work item.
   An application should have a handful of stable roles. Use database constraints and optimistic
-  concurrency for rows, scheduler claims for job occurrences, and outbox leases for messages.
+  concurrency for rows, scheduler claims for job occurrences, outbox leases for messages, and
+  leased work rows for your own queue tables.
 </Callout>
 
 This default targets Elarion's normal scale: roughly 1–10 application nodes on the PostgreSQL the app
@@ -219,3 +221,110 @@ the placement and migration boundaries.
 The full rationale and proxy design are recorded in
 [ADR-0049](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0049-role-leases.md) and
 [ADR-0050](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0050-role-holder-proxy.md).
+
+## Leased work rows
+
+When an application keeps its own queue-shaped table — outbound e-mail or SMS deliveries, webhook
+dispatches, a durable retry table — and workers on any instance must process each row one at a time,
+use the leased-work-row primitive from `Elarion.EntityFrameworkCore.LeasedWork`. It is the same claim
+the outbox delivers integration events with, packaged so a second table does not re-derive its
+invariants from memory:
+
+- **Claim is select → conditional stamp → re-read.** Candidates are read without locks; one
+  `ExecuteUpdate` restating the whole eligibility predicate stamps a lease token and expiry onto the rows
+  that are still eligible; the worker gets back only the rows carrying its token. Concurrent workers
+  never block each other and never receive the same row for the same lease period.
+- **Every finalize is lease-guarded.** Completing, failing, releasing, or renewing a row only matches while
+  the worker's token is still on it. A worker that stalled past its lease learns it lost the row
+  (`false`) instead of overwriting the new owner.
+- **Recovery is by expiry.** A crashed worker releases nothing; its lease lapses and the row becomes
+  claimable again. There is no reaper and no lock to leak.
+- **The claim rides a partial index** over the live rows only, so it stays fast while completed history
+  accumulates.
+
+No statement holds a row lock or a transaction across the work itself. That matters most for outbound
+delivery: a slow SMTP or HTTP call never pins a database connection, and a producer can still update or
+withdraw a row while a worker is busy with it. `SELECT … FOR UPDATE SKIP LOCKED` held across the
+external call does the opposite and is deliberately not the pattern.
+
+### Map the table
+
+The entity implements `ILeasedWorkRow` (`Id`, `LockId`, `LockedUntilUtc`) as ordinary properties.
+Everything else — the completion marker, the attempt counter, the error, a deadline — stays your own
+column:
+
+```csharp
+public sealed class Delivery : ILeasedWorkRow {
+    public required Guid Id { get; init; }
+    public required DateTimeOffset CreatedAtUtc { get; init; }
+    public required DateTimeOffset ExpiresAtUtc { get; init; }
+    public byte[]? Payload { get; set; }
+    public int Attempts { get; set; }
+    public DateTimeOffset? CompletedAtUtc { get; set; }
+    public string? Error { get; set; }
+    public Guid? LockId { get; set; }
+    public DateTimeOffset? LockedUntilUtc { get; set; }
+}
+
+[EntityConfiguration]
+public sealed class DeliveryConfiguration : IEntityTypeConfiguration<Delivery> {
+    public void Configure(EntityTypeBuilder<Delivery> entity) {
+        entity.ToTable("deliveries");
+        // Lease columns plus the partial claim index ix_deliveries_claim over the live queue.
+        entity.HasElarionLeasedWork(d => new { d.CreatedAtUtc, d.Id }, "completed_at_utc IS NULL");
+    }
+}
+```
+
+The claim index lists the queue-order column and then `Id`, matching the claim's ordering. The filter is
+required. If you keep completed rows for a while, add the complementary purge index yourself.
+
+### Claim, work, finalize
+
+```csharp
+private static readonly TimeSpan[] RetryLadder =
+    [TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(15), TimeSpan.FromHours(1), TimeSpan.FromHours(12)];
+
+public async Task<int> DeliverBatchAsync(CancellationToken ct) {
+    var now = time.GetUtcNow();
+    var lockId = Guid.CreateVersion7();
+    var claimed = await db.Deliveries.ClaimPendingAsync(new LeasedWorkClaim<Delivery> {
+        LockId = lockId,
+        NowUtc = now,
+        LeaseUntilUtc = now + TimeSpan.FromMinutes(2),   // well above one batch's worth of calls
+        BatchSize = 20,
+        Eligible = d => d.CompletedAtUtc == null && d.Attempts < 8 && d.ExpiresAtUtc > now,
+        OrderBy = rows => rows.OrderBy(d => d.CreatedAtUtc),
+        // Count the attempt at claim: a worker that dies mid-call still uses one up.
+        OnClaim = s => s.SetProperty(d => d.Attempts, d => d.Attempts + 1),
+    }, ct);
+
+    foreach (var delivery in claimed) {
+        var outcome = await transport.SendAsync(delivery, ct);   // no lock, no transaction held
+        var finished = time.GetUtcNow();
+        var owned = outcome.Succeeded
+            ? await db.Deliveries.FinalizeClaimAsync(delivery.Id, lockId, s => s
+                .SetProperty(d => d.CompletedAtUtc, finished)
+                .SetProperty(d => d.Payload, (byte[]?)null), visibleAfterUtc: null, ct)
+            : await db.Deliveries.FinalizeClaimAsync(delivery.Id, lockId, s => s
+                .SetProperty(d => d.Error, outcome.Error),
+                finished + LeasedWorkBackoff.Ladder(delivery.Attempts, RetryLadder, outcome.RetryAfter), ct);
+        if (!owned) logger.LogWarning("Delivery {Id} was reclaimed by another worker.", delivery.Id);
+    }
+
+    return claimed.Count;
+}
+```
+
+Run the method from a [scheduled job](/docs/capabilities/scheduling) or a `BackgroundService` loop on
+every instance; the claim makes that safe. A failed attempt's finalize sets the retry visibility
+(`LeasedWorkBackoff.Exponential`, or `LeasedWorkBackoff.Ladder`, which honors a longer remote
+`Retry-After`), so a failing row waits instead of blocking the head of the queue. `ReleaseClaimAsync`
+hands back a row without bookkeeping, and `RenewClaimAsync` extends the lease for work that can outlive it.
+
+Delivery stays **at least once**: a worker that crashes after the remote side accepted but before the
+finalize leaves the row to be retried. Give the remote side the row `Id` as its idempotency key where it
+accepts one.
+
+The invariants and the extraction history are recorded in
+[ADR-0073](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0073-leased-work-rows.md).

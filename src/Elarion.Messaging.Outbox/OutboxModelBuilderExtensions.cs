@@ -1,3 +1,4 @@
+using Elarion.EntityFrameworkCore.LeasedWork;
 using Microsoft.EntityFrameworkCore;
 
 namespace Elarion.Messaging.Outbox;
@@ -35,9 +36,11 @@ public static class OutboxModelBuilderExtensions {
             builder.HasIndex(message => message.ProcessedOnUtc)
                 .HasDatabaseName(snakeCase ? $"ix_{table}_purge" : $"IX_{table}_Purge")
                 .HasFilter(snakeCase ? "processed_on_utc IS NOT NULL" : "\"ProcessedOnUtc\" IS NOT NULL");
-            builder.HasIndex(message => new { message.TargetRole, message.OccurredOnUtc, message.Id })
-                .HasDatabaseName(snakeCase ? $"ix_{table}_claim" : $"IX_{table}_Claim")
-                .HasFilter(snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL");
+            // The lease columns and the partial claim index over the live queue (ADR-0073 invariant 4).
+            builder.HasElarionLeasedWork(
+                message => new { message.TargetRole, message.OccurredOnUtc, message.Id },
+                snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL",
+                snakeCase);
 
             builder.Property(message => message.Id)
                 .HasColumnName(snakeCase ? "id" : "Id")
@@ -75,10 +78,6 @@ public static class OutboxModelBuilderExtensions {
                 .HasColumnName(snakeCase ? "attempts" : "Attempts");
             builder.Property(message => message.ProcessedOnUtc)
                 .HasColumnName(snakeCase ? "processed_on_utc" : "ProcessedOnUtc");
-            builder.Property(message => message.LockId)
-                .HasColumnName(snakeCase ? "lock_id" : "LockId");
-            builder.Property(message => message.LockedUntilUtc)
-                .HasColumnName(snakeCase ? "locked_until_utc" : "LockedUntilUtc");
             builder.Property(message => message.Error)
                 .HasColumnName(snakeCase ? "error" : "Error");
         });

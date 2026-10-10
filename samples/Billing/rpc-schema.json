@@ -41,8 +41,14 @@
         ]
       },
       "errors": {
+        "conflict": {
+          "kind": "conflict"
+        },
         "forbidden": {
           "kind": "forbidden"
+        },
+        "not_found": {
+          "kind": "not_found"
         },
         "unauthorized": {
           "kind": "unauthorized"
@@ -119,6 +125,9 @@
         "forbidden": {
           "kind": "forbidden"
         },
+        "not_found": {
+          "kind": "not_found"
+        },
         "unauthorized": {
           "kind": "unauthorized"
         }
@@ -166,6 +175,9 @@
       "errors": {
         "forbidden": {
           "kind": "forbidden"
+        },
+        "not_found": {
+          "kind": "not_found"
         },
         "unauthorized": {
           "kind": "unauthorized"
@@ -283,6 +295,9 @@
         "forbidden": {
           "kind": "forbidden"
         },
+        "not_found": {
+          "kind": "not_found"
+        },
         "unauthorized": {
           "kind": "unauthorized"
         }
@@ -340,8 +355,14 @@
         ]
       },
       "errors": {
+        "business_rule": {
+          "kind": "business_rule"
+        },
         "forbidden": {
           "kind": "forbidden"
+        },
+        "not_found": {
+          "kind": "not_found"
         },
         "unauthorized": {
           "kind": "unauthorized"
@@ -429,6 +450,9 @@
         "forbidden": {
           "kind": "forbidden"
         },
+        "not_found": {
+          "kind": "not_found"
+        },
         "unauthorized": {
           "kind": "unauthorized"
         }
@@ -482,6 +506,9 @@
       "errors": {
         "forbidden": {
           "kind": "forbidden"
+        },
+        "not_found": {
+          "kind": "not_found"
         },
         "unauthorized": {
           "kind": "unauthorized"

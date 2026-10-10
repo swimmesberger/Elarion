@@ -198,6 +198,28 @@ handlers — the generator [skips it](#filtering-by-request-kind) for any handle
 satisfy the constraint, so you never hit a runtime "this handler doesn't return `Result<T>`" failure.
 Prefer this over a reflection-based helper.
 
+### Declaring the errors a decorator adds
+
+A decorator that fails a request returns an `AppError` that no handler can declare, because the handler does not
+know which decorators wrap it. Put [`[ProducesError]`](/docs/reference/result-and-errors#declaring-errors-for-many-operations)
+on the decorator instead: the generator adds the declaration to every operation whose pipeline includes the
+decorator, so the schema and the generated client describe it and the development-time contract check does not
+report it.
+
+```csharp
+[ProducesError("db.constraint", ErrorKind.Conflict, typeof(ConstraintViolation))]
+public sealed class DbConstraintDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
+    : IHandler<TRequest, TResponse>
+    where TRequest : ICommand
+    where TResponse : IResultFailureFactory<TResponse> {
+    // Translates a unique-key violation into the declared conflict.
+}
+```
+
+The generator resolves the decorator list exactly as it builds the pipeline, so a decorator excluded by its `where`
+constraints (here: queries) adds nothing. An `AppliesTo` predicate runs at runtime, so the errors of a conditional
+decorator are declared for every operation it can wrap. A handler's own declaration of the same code wins.
+
 ## Order matters
 
 Decorators run in the order listed in `[DecoratorList]`, outermost first. A pipeline of

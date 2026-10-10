@@ -1,6 +1,7 @@
 # ADR-0073: Leased work rows are a recognized pattern, extracted on second demand
 
-- Status: Accepted
+- Status: Accepted (the extraction trigger fired 2026-10-10; the primitive ships as
+  `Elarion.EntityFrameworkCore.LeasedWork` with the outbox as its first consumer — see the update at the end)
 - Date: 2026-08-15
 - Related: [ADR-0049](0049-role-leases.md) (the one-row identity lease and the coordination taxonomy),
   [ADR-0062](0062-role-affine-routing-and-outbox-delivery.md) (role-affine claims over the outbox's
@@ -123,3 +124,53 @@ changes outbox delivery semantics is a different ADR.
   a pre-agreed API sketch rather than a fresh design argument.
 - If no second consumer ever arrives, this ADR has cost nothing but the page — which is the intended
   trade of the second-demand convention.
+
+## Update (2026-10-10): the trigger fired; the primitive is extracted
+
+**The second consumer.** It arrived as application demand rather than as a framework subsystem: a
+durable outbound notification table (the "notification queue" the trigger above names) with its own
+worker. That counts, because the reason to wait was design input, and such a delivery table differs from
+the outbox in exactly the places this ADR expected a single-consumer helper to get wrong: a per-row
+deadline, a remote `Retry-After`, a ladder instead of exponential backoff, terminal states instead of one
+processed timestamp, a payload purged on completion, a producer that withdraws a queued row, and the
+attempt counted when the row is claimed rather than when it fails. Leaving the pattern as prose has a
+cost too: written from scratch, such a worker tends to claim with `SELECT … FOR UPDATE SKIP LOCKED` and
+hold the row lock and its transaction across the external call — the alternative rejected above. The
+extraction is therefore no longer speculative.
+
+**What shipped.** `Elarion.EntityFrameworkCore.LeasedWork`, a pure EF Core Relational package that the
+outbox now references:
+
+- `ILeasedWorkRow` — only the lease: `Id`, `LockId`, `LockedUntilUtc`. Completion, attempts, error, and
+  any deadline or target stay the consumer's columns.
+- `DbSet<TRow>.ClaimPendingAsync(LeasedWorkClaim<TRow>)` — invariant 1. The claim record carries the
+  lock token, the current time, the lease expiry, the batch size, the consumer's `Eligible` filter, the
+  queue order (`OrderBy`; the primitive appends `ThenBy(Id)`), and optional `OnClaim` setters applied
+  in the stamping update (claim-time attempt counting).
+- `FinalizeClaimAsync(id, lockId, update, visibleAfterUtc)`, `ReleaseClaimAsync`, and
+  `RenewClaimAsync` — invariant 2. Finalize always clears the token and sets `LockedUntilUtc` to the
+  visibility deadline, so the outbox's reuse of the column as its retry backoff is now the primitive's
+  contract. Release and renew were added: the outbox already needed release (ADR-0062), and renewal is
+  the heartbeat a long external call needs.
+- Invariant 3 needs no code: expiry is part of the claim predicate.
+- `EntityTypeBuilder<TRow>.HasElarionLeasedWork(claimIndex, pendingFilter)` — invariant 4. It maps the lease
+  columns and declares the claim index with a **required** filter (`ix_{table}_claim` by default).
+- `LeasedWorkBackoff.Exponential` (the outbox's former private formula) and `LeasedWorkBackoff.Ladder`
+  (with a remote retry-after hint).
+
+The sketch above named `FinalizeAsync`; the shipped names say "claim" throughout (`FinalizeClaimAsync`,
+`ReleaseClaimAsync`, `RenewClaimAsync`) to match the outbox's existing `ReleaseClaimAsync`. The API is a
+set of `DbSet` extensions, not a store type, so a consumer composes it inside its own store or worker.
+
+**Behavior-preservation check.** The outbox's SQL was captured before and after the move. It issues the
+same statements in the same order with the same predicates, parameters, and return values. Three
+differences remain, all textual: the lease conjunct now follows the consumer filter in the claim's
+`WHERE`, one parameter is named `@id` instead of `@groupId`, and `MarkProcessed`'s `SET` list orders
+`error` before the lease columns. The model is unchanged (same lease column names, claim index name,
+columns, and filter), and tests now pin it.
+
+**Still not extracted.** A packaged delivery *queue* on top of the primitive is out of scope: a typed
+payload, a handler returning sent/retry/failed, payload protection, queue caps, a withdraw API, and a
+hosted worker. That layer is application policy, and only one application would adopt it today. It
+stays a documented recipe (the coordination capability page) under the same second-demand convention.
+Lease renewal stays manual; nothing heartbeats a claim automatically.

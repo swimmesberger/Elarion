@@ -325,7 +325,10 @@ deploy only on a path change with no dialog open or field focused, never on a fo
 
 - **Errors are values.** Return `Result<T>`; fail with `AppError.Validation / NotFound / Conflict /
   Forbidden / Unauthorized / BusinessRule / Internal`. Implicit conversions accept both the response
-  and the error. Exceptions are for bugs; every transport translates `AppError` itself.
+  and the error. Exceptions are for bugs; every transport translates `AppError` itself. Declare the codes a
+  handler returns with `[ProducesError]` so the schema and TS client type them (Development logs undeclared ones):
+  shared kind-default codes go once on the assembly or `[AppModule]` class, and a failure a decorator adds goes on
+  the decorator.
 - **Validation is two-tier.** Standard `System.ComponentModel.DataAnnotations` on the request DTO
   (enforced at runtime *and* exported to OpenAPI/JSON-RPC/Zod schemas). Cross-field, async, or DB
   checks belong in the handler, inside its transaction. No FluentValidation, no pre-handler async

@@ -1,3 +1,4 @@
+using Elarion.Abstractions;
 using Microsoft.AspNetCore.Http;
 
 namespace Elarion.AspNetCore;
@@ -36,13 +37,17 @@ public struct ElarionHttpBindingErrors {
 
     /// <summary>
     /// Writes the accumulated failures: a bare status for 415, everything else as the RFC 7807
-    /// <c>ValidationProblem</c> the handler-tier validation failures also use.
+    /// <c>ValidationProblem</c> the handler-tier validation failures also use, including its <c>validation</c> error
+    /// code (ADR-0080).
     /// </summary>
     public readonly Task WriteAsync(HttpContext httpContext) {
         if (_statusCode == StatusCodes.Status415UnsupportedMediaType)
             return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType).ExecuteAsync(httpContext);
 
         var errors = _errors ?? new Dictionary<string, string[]>(StringComparer.Ordinal);
-        return Results.ValidationProblem(errors).ExecuteAsync(httpContext);
+        var extensions = new Dictionary<string, object?> {
+            [HttpAppErrorMapper.CodeExtensionName] = ErrorCodes.Validation
+        };
+        return Results.ValidationProblem(errors, extensions: extensions).ExecuteAsync(httpContext);
     }
 }

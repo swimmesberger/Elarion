@@ -92,6 +92,7 @@ public static class JsonRpcServiceExtensions {
 
     /// <summary>
     /// Maps the JSON-RPC 2.0 POST endpoint at the path specified in <see cref="JsonRpcOptions.EndpointPath"/>.
+    /// The endpoint only accepts a JSON <c>Content-Type</c> (see <see cref="JsonRpcOptions.RequireJsonContentType"/>).
     /// </summary>
     /// <param name="app">The endpoint route builder (typically <see cref="WebApplication"/>).</param>
     /// <returns>The route handler builder for further customization.</returns>

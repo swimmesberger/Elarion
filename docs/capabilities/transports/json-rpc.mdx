@@ -188,6 +188,16 @@ the deliberate scope of `ElarionFile` — small files, up to a few megabytes. Pa
 [staged-blob tier](/docs/capabilities/blob-storage): upload into the pending area and pass the handler a
 blob reference; export as a pending blob and return its reference for a streamed download.
 
+## Requests must be JSON
+
+`/rpc` only accepts a request whose `Content-Type` is `application/json` (or an `application/*+json` type); anything
+else, a missing header included, is refused with HTTP `415` and a JSON-RPC `invalid_request` envelope before the
+body is read. A cross-site `<form enctype="text/plain">` whose field spells out a JSON-RPC envelope would otherwise
+reach the dispatcher with the browser's cookies attached. The generated TypeScript client sends the header; add
+`-H 'content-type: application/json'` to a `curl` call. See
+[CSRF and cookie authentication](/docs/capabilities/hosting#csrf-and-cookie-authentication) for the opt-out
+(`JsonRpcOptions.RequireJsonContentType`) and the cross-origin protection middleware.
+
 ## Errors map once, centrally
 
 Handlers stay transport-agnostic and return [`Result<T>`](/docs/concepts/results-and-errors); the

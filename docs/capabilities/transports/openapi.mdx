@@ -61,6 +61,8 @@ of that `AddElarionOpenApi()` contributes the parts that make it *Elarion's* con
 - **Clean operation ids.** The handler's fully-qualified type name (`Billing.Invoicing.GetInvoice`) is
   normalized to a readable `operationId` (`GetInvoice`), so generated clients get sensible method names.
   Colliding names keep their original id, so ids stay unique.
+- **The error contract's `code` and `data`.** The ProblemDetails schemas declare the stable `code` every Elarion
+  failure carries and its optional `data` payload, so generated clients can [branch on the code](#typed-errors).
 - **The idempotency contract** (below).
 
 ## Idempotency parity
@@ -225,6 +227,37 @@ Prefer the tiniest possible runtime and don't mind addressing operations by path
 + `openapi-fetch` stays a fine choice — `createClient<paths>({ baseUrl }).GET("/clients/{id}", { params: { path:
 { id } } })`. It just trades the `sdk.` drill-down for a ~6&nbsp;kB library and no generated method code.
 </Callout>
+
+### Typed errors
+
+Every Elarion failure over HTTP is an RFC 7807 ProblemDetails that carries the error contract's stable `code`
+([ADR-0080](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md))
+— the same string a JSON-RPC client branches on (`not_found`, `validation`, `seat.taken`, …) — plus a `data` member
+when the error carries a typed payload. Validation failures, binding-tier ones included, use `code: "validation"`
+and keep their field messages in the standard `errors` map. `AddElarionOpenApi()` declares `code` and `data` on the
+document's ProblemDetails schemas, so the generated `error` type has them and a client branches on the code
+directly instead of parsing `detail`:
+
+```ts
+const { data, error } = await sdk.invitations.getInvitationByToken({ path: { token } });
+if (error) {
+  switch (error.code) {
+    case "not_found":
+      return renderExpiredLink();
+    case "invitation.already_answered":
+      return renderAlreadyAnswered(answeredSchema.parse(error.data)); // your own Zod schema for the payload
+    default:
+      throw new Error(error.detail ?? error.title ?? "Request failed");
+  }
+}
+render(data); // typed (and, with the Zod plugin, validated) response DTO
+```
+
+Both members are optional in the schema, because the ProblemDetails component is shared with every route in the
+document, including hand-written ones whose problems an Elarion translator did not produce. The per-operation set
+of declared codes and their payload types is part of `rpc-schema.json` only, so over REST `code` is a `string` and
+`data` is untyped: validate a payload with your own schema at the branch that reads it, or expose the handler over
+JSON-RPC as well to get the [typed error union](/docs/capabilities/transports/typescript-client#error-handling).
 
 ### Automatic idempotency keys
 

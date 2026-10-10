@@ -8,6 +8,103 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Security
+- **BREAKING: `/rpc` refuses a request whose `Content-Type` is not JSON.** `MapElarionJsonRpc` parsed and
+  dispatched any POST body that was valid JSON, so a cross-site `<form enctype="text/plain">` whose field spelled
+  out a JSON-RPC envelope (or a `no-cors` fetch with an untyped body) reached the handlers with the browser's
+  cookies, without a CORS preflight. The endpoint now answers HTTP 415 with a JSON-RPC `invalid_request` envelope
+  unless the content type is `application/json` or `application/*+json`, a missing header included, consistent with
+  the `[HttpEndpoint]` binder; a JSON body makes every cross-origin call preflighted. The generated TypeScript client
+  already sends the header. Migration: add `Content-Type: application/json` to hand-written callers (`curl -d`
+  without `-H`); a host without cookie authentication whose callers cannot send it may set
+  `JsonRpcOptions.RequireJsonContentType = false`. `MapElarionMcp` needs no change: the MCP transport already
+  refuses a non-JSON body with 415 (now covered by a test).
+- **`UseElarionCrossOriginProtection` refuses cross-site WebSocket handshakes.** The protection passes GETs, but a
+  WebSocket handshake is a GET that the browser sends cross-site with its cookies and without CORS, and the opened
+  socket can send and read anything (Cross-Site WebSocket Hijacking) — on `MapElarionConnectionSocket` endpoints,
+  hand-written `UseWebSockets` routes and SignalR hubs alike. A GET whose `Upgrade` header names `websocket` is now
+  judged like an unsafe request: `Sec-Fetch-Site`, then `Origin`, against the request's own origin and
+  `AllowedOrigins`. Same-origin and allowed-origin handshakes, and clients that send no `Origin` (devices, servers),
+  connect as before; other GETs are unaffected. The middleware reads the header itself, so it still belongs before
+  `UseWebSockets` and routing.
+
+### Added
+- **`app.UseElarionCrossOriginProtection(o => …)`: CSRF defense for hosts whose browsers authenticate with a
+  cookie.** Form and file `[HttpEndpoint]` routes, `MapElarionBlobUploads()` and hand-written routes accept
+  cross-site "simple" requests, and ASP.NET Core only offers token-based antiforgery. The middleware (in
+  `Elarion.AspNetCore`, placed before authentication) refuses every method except GET/HEAD/OPTIONS/TRACE, and every
+  WebSocket handshake, when `Sec-Fetch-Site` is `same-site`/`cross-site` and the `Origin` is not in `AllowedOrigins`,
+  or, for browsers without Fetch Metadata, when the `Origin` is neither the request's own origin nor allowed
+  (`Origin: null` and duplicate `Origin` headers included). A request with neither header (server-side rendering,
+  scripts, server-to-server) passes, `ExemptPathPrefixes` leave routes such as an OpenID Connect `form_post` callback
+  alone, and allowed origins are validated at startup. A refusal is HTTP 403 with a ProblemDetails `code` of
+  `cross_origin.refused` (`CrossOriginProtectionErrorCodes.Refused`), written without depending on the host's JSON
+  configuration. The hosting page gains a *CSRF and cookie authentication* section listing what each surface is
+  protected by.
+- **`Elarion.AspNetCore.ProxyIdentity`: authentication for apps behind an authenticating reverse proxy (ADR-0084).**
+  Apps behind Cloudflare Access, Google IAP, oauth2-proxy or an OIDC gateway otherwise each wire the same JwtBearer
+  adapter by hand, and a hand-rolled key cache easily refuses concurrent first requests while its first fetch runs.
+  `AddElarionProxyIdentity(
+  configuration, environment)` binds the `ProxyIdentity` section and reads the token only from the configured header
+  and/or cookie (a `Bearer ` prefix is stripped); it validates issuer, audience (required unless `AllowAnyAudience`),
+  lifetime and signature with `MapInboundClaims = false`. Keys come from a JWKS URL or OpenID Connect discovery
+  through IdentityModel's `ConfigurationManager` (single-flight first fetch, background refresh, current keys kept on
+  a failed or refused refresh; a discovery document must name the configured issuer; the last-known-good grace is off
+  by default). It refuses to start outside Development when disabled or incomplete, maps `ICurrentUser` to the
+  configured subject/e-mail/`roles` claims, and in Development signs requests in as a stand-in identity switchable by
+  the `X-Elarion-Dev-User` header or `elarion-dev-user` cookie. `ExternalIdentity.TryRead` (from a principal or
+  `ICurrentUser`) returns issuer, subject, e-mail with an `EmailTrust` decision, name, groups and roles;
+  `AddElarionProxyIdentitySessionSection()` adds a `proxyIdentity` section to the session snapshot. The new *Proxy
+  identity* page has recipes for each proxy.
+- **Errors: `[ProducesError]` on a decorator, an `[AppModule]` class or the assembly (ADR-0080 update).** A failure
+  many handlers share no longer needs an attribute on each handler. `[assembly: ProducesError(ErrorKind.NotFound)]`
+  declares the kind-default code for every operation in the assembly, the same attribute on a module class for every
+  operation in the module, and on a pipeline decorator for every operation whose resolved `[DecoratorList]` includes
+  it (a decorator excluded by its generic constraints adds nothing; one with an `AppliesTo` predicate adds its errors
+  to every operation it can wrap). The declarations are merged into each operation's manifest entry, dispatcher
+  registration, `rpc-schema.json` and generated TypeScript client, so the Development-only "does not declare" warning
+  no longer fires for them. Per code, the declaration closest to the handler wins: the handler, the framework's
+  implied errors, the decorators, the module, then the assembly. `ELERR001`/`ELERR002` messages now name the
+  declaring type or assembly instead of always saying "Handler". The Billing sample declares `not_found` once for its
+  application assembly; regenerate `rpc-schema.json` and the TypeScript client to pick up new declarations.
+- **OpenAPI: the ProblemDetails schemas declare the error contract's `code` and `data` (ADR-0080).** Every Elarion
+  failure over HTTP carries a stable `code` and, for a typed payload, `data`, but the document only described the
+  standard RFC 7807 members, so a client generated from it (`@hey-api/openapi-ts`, `openapi-typescript`, Kiota) saw
+  the code as an unknown extension and had to cast or parse `detail`. `AddElarionOpenApi()` now adds both as optional
+  members of every `ProblemDetails`-derived schema; the generated `error.code` is a typed `string`.
+- **TypeScript client: the TanStack Start adapter forwards configurable request headers during SSR.** The generated
+  `start-adapter.ts` forwarded only the incoming `cookie`, so an app behind an authenticating reverse proxy (Cloudflare
+  Access, Google IAP, oauth2-proxy) had to hand-copy the isomorphic read for the proxy's identity header — and keep the
+  `createIsomorphicFn().server(...)` shape that import protection requires. `createStartRpcApi` now takes
+  `forwardHeaders` (default `['cookie']`; the list replaces the default, `[]` forwards nothing), and the adapter
+  exports `forwardRequestHeaders(names)` for composing into any other client. Names match case-insensitively, absent
+  headers are skipped, explicit `headers` still win, and nothing is forwarded in the browser. `forwardRequestCookie`
+  stays. Regenerate with `--framework tanstack-start` to pick it up.
+- **`Elarion.EntityFrameworkCore.LeasedWork`: leased work rows for your own queue tables (ADR-0073).** The outbox's
+  work-row lease is now a reusable EF Core primitive, so an outbound delivery, webhook, or retry table no longer
+  rebuilds it from memory. An entity implements `ILeasedWorkRow` (`Id`, `LockId`, `LockedUntilUtc`) and maps it with
+  `HasElarionLeasedWork(claimIndex, pendingFilter)`, which adds the lease columns and a required partial claim index.
+  `ClaimPendingAsync(new LeasedWorkClaim<T> { … })` selects candidates, stamps a lease with one conditional update,
+  and returns only the rows this worker won. The claim takes the consumer's eligibility filter, queue order, and
+  optional `OnClaim` setters, such as counting the attempt at claim time. `FinalizeClaimAsync`, `ReleaseClaimAsync`,
+  and `RenewClaimAsync` update a row only while the caller's token is still on it, and return `false` once another
+  worker has reclaimed it. `LeasedWorkBackoff.Exponential`/`Ladder` compute the retry delay, and `Ladder` honors a
+  longer remote `Retry-After`. No call holds a row lock or a transaction across the work itself. The outbox now
+  claims and finalizes through the primitive. Its delivery behavior, retry formula, and table model are unchanged.
+  The coordination capability page shows a delivery worker built on the primitive.
+
+### Fixed
+- **HTTP binding-tier failures carry `code: "validation"`.** A generated `[HttpEndpoint]` answered an unparseable or
+  missing route/query/header/form value, or an empty or malformed JSON body, with a `ValidationProblem` that had no
+  `code`, unlike the handler-tier validation failure it mirrors, so a client branching on `code` missed it.
+
+### Documentation
+- **TypeScript client: handlers exposed only over REST.** The client page now explains why a handler with
+  `[HttpEndpoint]` but no `[Handler]` has no generated function (`rpc-schema.json` lists the JSON-RPC operations, and
+  REST clients come from the OpenAPI document by design, ADR-0026) and gives the two supported paths: add `[Handler]`
+  to get the generated function and typed error union, or generate from OpenAPI. The OpenAPI page gains a *Typed
+  errors* section that branches on `error.code` instead of hand-parsing ProblemDetails.
+
 ## [0.2.11] - 2026-10-08
 
 ### Added

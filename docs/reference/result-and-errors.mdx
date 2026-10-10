@@ -207,11 +207,51 @@ list (sorted by code) with the operation, in the assembly manifest and the `Hand
 | `[FeatureGate]` | `not_found` |
 | `[Idempotent]` | `idempotency.key_required`, `idempotency.in_progress`, `idempotency.key_reused` |
 
-Diagnostics: `ELERR001` (invalid code), `ELERR002` (one code declared with different kinds or payloads). Whether a
-handler *body* returns an undeclared code is not statically knowable, so it is checked at runtime in the Development
-environment: `IErrorContractMonitor` logs each distinct undeclared code (or kind mismatch) once as a warning.
-`internal` failures and the default `unauthorized`/`forbidden` codes (which authorization defaults can attach without
-a per-handler attribute) are always admitted. Production does no checking.
+### Declaring errors for many operations
+
+A failure that many handlers share does not need an attribute on each of them. `[ProducesError]` also goes on the
+places that cover a group of operations, and the generator merges those declarations into every operation in scope:
+
+| Placed on | Declares the error for |
+| --- | --- |
+| the handler class (or a base class) | that operation |
+| a decorator in the handler's resolved `[DecoratorList]` | every operation the decorator wraps |
+| the `[AppModule]` class | every operation in the module |
+| the assembly (`[assembly: ProducesError(...)]`) | every operation declared in that assembly |
+
+```csharp
+// Kind-default codes the handlers of this assembly return, declared once.
+[assembly: ProducesError(ErrorKind.NotFound)]
+[assembly: ProducesError(ErrorKind.Conflict)]
+
+// A failure the decorator adds to every command it wraps, with its payload.
+[ProducesError("db.constraint", ErrorKind.Conflict, typeof(ConstraintViolation))]
+public sealed class DbConstraintDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
+    : IHandler<TRequest, TResponse> where TRequest : ICommand { ... }
+```
+
+- **Precedence.** When several places declare the same code, the one closest to the handler wins: the handler's own
+  declaration, then the framework's implied errors (the table above), then the decorators in pipeline order
+  (outermost first), then the module, then the assembly. A default never changes a code the handler declares itself,
+  so a handler can add a typed payload to a kind-default code the assembly declares.
+- **Decorators.** The generator resolves the decorator list the same way the pipeline does (handler, then module,
+  then assembly pipeline attribute), and skips a decorator whose generic constraints exclude the handler. An
+  `AppliesTo` predicate is evaluated at runtime, so a conditional decorator's errors are declared for every operation
+  it can wrap. The framework's own decorators (validation, authorization, feature gates, idempotency) are covered by
+  the implied errors.
+- **Scope.** An assembly declaration covers the operations declared in that assembly only, not the operations of
+  referenced module assemblies. Each assembly publishes its merged contracts in its manifest, so a host sees them
+  without declaring anything again.
+- **Trade-off.** A default is a promise that an operation *may* fail with that code. An operation in scope that never
+  returns it carries a variant in the schema and the client union that its callers never see. Declare a default on
+  the narrowest scope that fits: the module rather than the assembly, a decorator rather than its handlers.
+
+Diagnostics: `ELERR001` (invalid code), `ELERR002` (one code declared twice on the same handler, decorator, module or
+assembly with different kinds or payloads). Whether a handler *body* returns an undeclared code is not statically
+knowable, so it is checked at runtime in the Development environment: `IErrorContractMonitor` logs each distinct
+undeclared code (or kind mismatch) once as a warning. A code that a decorator, module or assembly declares counts as
+declared and is not reported. `internal` failures and the default `unauthorized`/`forbidden` codes (which
+authorization defaults can attach without a per-handler attribute) are always admitted. Production does no checking.
 
 ## Wire shape
 

@@ -166,8 +166,8 @@ const rpc = createRpcApi({
 
 ### TanStack Start
 
-During SSR you usually need to forward the incoming request's `cookie` so the RPC call runs as the
-signed-in user. Generate with `--framework tanstack-start` to emit an **opt-in** `start-adapter.ts` next to
+During SSR you usually need to forward the incoming request's `cookie` (or another identity header) so the RPC
+call runs as the signed-in user. Generate with `--framework tanstack-start` to emit an **opt-in** `start-adapter.ts` next to
 the neutral core client (it needs the `@tanstack/react-start` peer dependency):
 
 ```bash
@@ -183,11 +183,38 @@ import { createStartRpcApi } from './generated/start-adapter'
 export const rpc = createStartRpcApi({ url: '/rpc' })
 ```
 
-For finer control the adapter also exports `forwardRequestCookie` — the isomorphic headers function on its
-own — so you can compose it into a plain `createRpcApi({ headers: forwardRequestCookie })` call.
+#### Forwarding other request headers
+
+An app behind an authenticating reverse proxy (Cloudflare Access, Google IAP, oauth2-proxy, …) authenticates
+from a header the proxy sets on the incoming request rather than from a cookie, and an SSR call to the API has to
+carry that header too. Name the headers to forward with `forwardHeaders`:
+
+```ts
+export const rpc = createStartRpcApi({
+  url: '/rpc',
+  forwardHeaders: ['cookie', 'cf-access-jwt-assertion'], // e.g. Cloudflare Access
+})
+```
+
+The list **replaces** the default `['cookie']` — keep `'cookie'` in it when the session cookie should still travel,
+and pass `[]` to forward nothing. Names match case-insensitively and are sent lower-case; a header the incoming
+request does not carry is skipped. In the browser nothing is forwarded (the browser attaches its own cookies), and
+explicitly passed `headers` win over a forwarded header of the same name. Forward identity and correlation headers
+only, never hop-by-hop or framing headers such as `host`, `connection`, or `content-length`.
+
+For finer control the adapter also exports the isomorphic headers functions on their own —
+`forwardRequestHeaders(names)` and `forwardRequestCookie` — so you can compose them into a plain `createRpcApi`
+call, or into any other `fetch`-based client that runs during SSR:
+
+```ts
+import { createRpcApi } from './generated/rpc-client'
+import { forwardRequestHeaders } from './generated/start-adapter'
+
+const rpc = createRpcApi({ url: '/rpc', headers: () => forwardRequestHeaders(['cookie', 'authorization']) })
+```
 
 <Callout type="warn">
-  The cookie read must stay inside `createIsomorphicFn().server(...)`. Importing `@tanstack/react-start/server`
+  The header read must stay inside `createIsomorphicFn().server(...)`. Importing `@tanstack/react-start/server`
   from any module the client bundle can reach — even a dynamic import behind a `typeof window` guard — fails
   `vite build` with `[import-protection] Import denied`. The emitted adapter is structured so the Start
   compiler strips the import (and the read) from the client build; keep that shape if you hand-roll it instead.
@@ -202,7 +229,8 @@ human-readable `message`, and `rpcCode` — the numeric JSON-RPC code, which onl
 and is why it is not called `code`. The wire shape is always `error.data = { code, data? }`
 ([ADR-0080](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md)).
 
-Handlers declare the errors they produce with `[ProducesError]`, and the generator emits them per method: each
+Handlers declare the errors they produce with `[ProducesError]` (on the handler, or once on a decorator, module or
+assembly for errors that many operations share), and the generator emits them per method: each
 method's `errors` entry in `RpcMethods` maps a code to its kind and payload type, and the client exports
 `RpcMethodError<M>`, a union of `RpcError` variants discriminated by `code`, with `data` typed per variant:
 
@@ -326,6 +354,34 @@ dynamic `headers`. The adapter above is the only Elarion-specific piece — wire
 (`WebTracerProvider`, an OTLP exporter, `ZoneContextManager`) as shown for the
 [HTTP client](/docs/capabilities/transports/openapi#trace-client-requests-with-opentelemetry), and see
 [Telemetry & observability](/docs/capabilities/telemetry) for the server side.
+
+## Handlers exposed only over REST
+
+The generator reads `rpc-schema.json`, and that schema lists the operations the JSON-RPC transport serves —
+handlers carrying `[Handler]` with `HandlerTransports.JsonRpc`. A handler that carries only
+[`[HttpEndpoint]`](/docs/capabilities/transports/http-endpoints) (a public link answered without a session, a
+route that must live outside `/rpc`, an endpoint for third-party callers) is not on the JSON-RPC bus, so the
+generated client has no function, no types, and no Zod schemas for it.
+
+That is deliberate. REST's machine-readable contract is the **OpenAPI document**, and Elarion leaves REST client
+generation to the off-the-shelf OpenAPI tooling instead of owning a second, bespoke HTTP client generator
+([ADR-0026](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0026-openapi-http-transport.md)). Folding
+routes, verbs, and route/query/header/body binding into `rpc-schema.json` would make this generator re-implement
+what OpenAPI already describes and what those tools already consume. Pick one of two paths instead — never
+hand-copy the response DTO into a Zod schema, because a C# rename then still compiles and silently breaks the page:
+
+- **The operation does not need to be a REST route.** Add `[Handler]` next to (or instead of) `[HttpEndpoint]`.
+  It joins `rpc-schema.json` and gets the generated function, params/result Zod schemas, and the typed
+  [error union](#error-handling) for its declared codes. Authorization and validation stay on the handler, so an
+  anonymous handler stays anonymous on either transport.
+- **It must stay REST-only.** Add `Elarion.AspNetCore.OpenApi`, export the document, and generate a client from it —
+  the [recommended setup](/docs/capabilities/transports/openapi#generate-a-typed-client) uses `@hey-api/openapi-ts`
+  with its Zod plugin for typed params and runtime-validated responses. Errors arrive as RFC 7807 ProblemDetails
+  with the same stable `code` and `data` members as an `RpcError`; the OpenAPI document declares both, so
+  [branch on `error.code`](/docs/capabilities/transports/openapi#typed-errors) without a cast.
+
+Both clients run side by side: the JSON-RPC client for the operation-shaped API, the OpenAPI-generated one for the
+handful of REST-only routes. Regenerate each from its own contract file in the same build step.
 
 ## Design boundaries
 

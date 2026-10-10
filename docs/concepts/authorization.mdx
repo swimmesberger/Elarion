@@ -298,6 +298,10 @@ The very same `[RequireRole("Admin")]` / `[RequirePolicy("AtLeast21")]` handlers
 Entra's token claims — and would behave identically over JSON-RPC or MCP. That independence is the point:
 authentication is a host concern, authorization is a handler concern, and they meet only at `ICurrentUser`.
 
+An app behind an authenticating reverse proxy (Cloudflare Access, Google IAP, oauth2-proxy) swaps in
+[proxy identity](/docs/capabilities/proxy-identity) the same way: `AddElarionProxyIdentity` validates the forwarded
+token and maps `ICurrentUser`, and the handlers stay unchanged.
+
 ## Permission catalog
 
 A handler declares the permission it needs as a **(resource, verb)** pair — the Kubernetes-RBAC shape —

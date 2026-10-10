@@ -104,3 +104,4 @@ designs that are not yet implemented.
 - [ADR-0081: One migration plan — SQL, code and EF steps share a version sequence, a history and a lock — Proposed](0081-one-migration-plan.md)
 - [ADR-0082: Requiredness comes from nullability, in both directions — Proposed](0082-requiredness-comes-from-nullability-in-both-directions.md)
 - [ADR-0083: The installable-app shell is a framework npm package — safe caching rules built in, the privacy choice left to the app — Proposed](0083-installable-app-shell.md)
+- [ADR-0084: Authenticating-proxy identity is an optional package on IdentityModel's ConfigurationManager — Proposed](0084-authenticating-proxy-identity.md)

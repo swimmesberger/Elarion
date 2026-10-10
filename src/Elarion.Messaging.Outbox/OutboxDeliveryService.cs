@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Elarion.Abstractions.Coordination;
 using Elarion.Abstractions.Messaging;
+using Elarion.EntityFrameworkCore.LeasedWork;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -179,7 +180,11 @@ public sealed class OutboxDeliveryService(
                 message.EventType,
                 message.CorrelationId,
                 message.Attempts + 1);
-            var retryVisibleAfter = timeProvider.GetUtcNow() + ComputeBackoff(message.Attempts + 1);
+            var retryVisibleAfter = timeProvider.GetUtcNow()
+                                    + LeasedWorkBackoff.Exponential(
+                                        message.Attempts + 1,
+                                        options.BaseRetryDelay,
+                                        options.MaxRetryDelay);
             if (!await store.MarkFailedAsync(message.Id, lockId, Describe(ex), retryVisibleAfter, ct)
                     .ConfigureAwait(false)) LogLeaseLost(message);
         }
@@ -194,19 +199,6 @@ public sealed class OutboxDeliveryService(
             message.Id,
             message.MessageId,
             message.EventType);
-    }
-
-    /// <summary>Exponential backoff for the next attempt: <c>BaseRetryDelay × 2^(attempt-1)</c>, capped at <see cref="OutboxOptions.MaxRetryDelay"/>.</summary>
-    private TimeSpan ComputeBackoff(int attempt) {
-        if (options.BaseRetryDelay <= TimeSpan.Zero) return TimeSpan.Zero;
-
-        // Shift on ticks with a guarded exponent so a large attempt count can never overflow into a negative delay.
-        var exponent = Math.Min(attempt - 1, 30);
-        var scaled = options.BaseRetryDelay.Ticks * (1L << exponent);
-        var capTicks = options.MaxRetryDelay.Ticks;
-        if (scaled <= 0 || scaled > capTicks) return options.MaxRetryDelay;
-
-        return TimeSpan.FromTicks(scaled);
     }
 
     private async Task PurgeAsync(CancellationToken ct) {

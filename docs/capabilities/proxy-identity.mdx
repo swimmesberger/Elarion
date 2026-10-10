@@ -1,0 +1,283 @@
+---
+title: Proxy identity
+description: Authenticate an app that sits behind an authenticating reverse proxy (Cloudflare Access, Google IAP, oauth2-proxy, an OIDC gateway) — validate the forwarded token, refuse to start unauthenticated, and develop locally with a stand-in identity.
+---
+
+Many small apps never run a sign-in flow of their own. An **authenticating reverse proxy** in front of them —
+Cloudflare Access, Google Cloud IAP, oauth2-proxy, an OpenID Connect gateway — signs the person in and forwards a
+short-lived **signed token** with every request, in a vendor header or a cookie. The app's job is to validate that
+token, never to trust an unsigned "user" header, and every app ends up rebuilding the same adapter around JwtBearer.
+The optional **`Elarion.AspNetCore.ProxyIdentity`** package is that adapter:
+
+- reads the token **only** from the configured header and/or cookie (a `Bearer ` prefix is stripped);
+- validates issuer, audience, lifetime and signature, with **audience required** unless you opt out explicitly;
+- gets the signing keys from a **JWKS URL** or **OpenID Connect discovery** through IdentityModel's
+  `ConfigurationManager` — no hand-rolled key cache;
+- keeps the token's claim names (`MapInboundClaims = false`) and maps [`ICurrentUser`](/docs/capabilities/current-user)
+  to them;
+- **refuses to start** outside Development when it is disabled or half-configured;
+- gives Development a **stand-in identity** with a user switch, so the app runs locally without the proxy;
+- exposes an `ExternalIdentity` record (issuer, subject, e-mail with a trust decision, name, groups, roles) and an
+  optional session-snapshot section.
+
+Authentication stays a host concern: handlers still declare `[RequirePermission]`/`[RequireRole]` and read
+`ICurrentUser`; only the host wiring changes ([authorization](/docs/concepts/authorization)).
+
+## Wiring
+
+```csharp
+using Elarion.AspNetCore.Identity;        // UseElarionCurrentUser
+using Elarion.AspNetCore.ProxyIdentity;   // AddElarionProxyIdentity
+
+builder.Services.AddElarionProxyIdentity(builder.Configuration, builder.Environment);  // section "ProxyIdentity"
+builder.Services.AddElarionAuthorization();
+
+var app = builder.Build();
+app.UseElarionCrossOriginProtection();   // the proxy's session cookie is an ambient credential (see below)
+app.UseAuthentication();
+app.UseElarionCurrentUser();   // after authentication, before endpoints
+app.UseAuthorization();
+```
+
+`AddElarionProxyIdentity` binds the `ProxyIdentity` section, applies the optional `configure` callback, validates the
+result and throws an `InvalidOperationException` naming the offending setting when it cannot run. It registers the
+proxy scheme (`ProxyIdentityDefaults.AuthenticationScheme`) as the default and returns the `AuthenticationBuilder`, so
+further named schemes can be added. It also registers `ICurrentUser` mapped to the configured subject, e-mail and role
+claims — registration is first-wins, so call it before any other `AddElarionCurrentUser`.
+
+At startup it logs once what the instance accepts (issuer, key source, header, cookie, e-mail trust) and warns when
+audience validation is off or the Development stand-in is active.
+
+## Configuration
+
+```json
+{
+  "ProxyIdentity": {
+    "Enabled": true,
+    "Issuer": "https://myteam.cloudflareaccess.com",
+    "JwksUrl": "https://myteam.cloudflareaccess.com/cdn-cgi/access/certs",
+    "Audiences": [ "4714c1358e65fe4b408ad6d432a5f878f08194bdb4752441fd56faefa9b2b6f2" ],
+    "TokenHeader": "Cf-Access-Jwt-Assertion",
+    "TokenCookie": "CF_Authorization",
+    "EmailTrust": "Trusted",
+    "LogoutUrl": "/cdn-cgi/access/logout"
+  }
+}
+```
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `Enabled` | `false` | Validate proxy tokens. `false` selects the Development stand-in and is refused outside Development. |
+| `Issuer` | — | The exact `iss` of the proxy's tokens. Required when enabled. |
+| `JwksUrl` | — | A bare JSON Web Key Set. Mutually exclusive with `MetadataAddress`. |
+| `MetadataAddress` | — | An OpenID Connect discovery document. With neither set, `{Issuer}/.well-known/openid-configuration` is used. |
+| `RequireHttpsMetadata` | `true` | Key and discovery URLs must be https; turn off only for a local test issuer. |
+| `Audiences` | — | Accepted `aud` values; each entry may be a comma-separated list. Required unless `AllowAnyAudience`. |
+| `AllowAnyAudience` | `false` | Accept any audience of the issuer. Logged as a warning; cannot be combined with `Audiences`. |
+| `TokenHeader` | — | The header carrying the token. At least one of `TokenHeader`/`TokenCookie` is required. |
+| `TokenCookie` | — | The cookie read when the header is absent. |
+| `Claims:Subject` | `sub` | The stable subject; becomes `ICurrentUser.UserId`. |
+| `Claims:Email` | `email` | Becomes `ICurrentUser.Email`. |
+| `Claims:EmailVerified` | `email_verified` | Read under `EmailTrust = Claim`. |
+| `Claims:Name` | `name` | The display name (also the principal's name claim). |
+| `Claims:Groups` | `groups` | Identity-provider groups, exposed on `ExternalIdentity.Groups` only. |
+| `Claims:Roles` | `roles` | Application roles ([RFC 9068 §2.2.3.1](https://www.rfc-editor.org/rfc/rfc9068#section-2.2.3.1)); the role claim of the principal, so `ICurrentUser.Roles` and `[RequireRole]` use it. |
+| `EmailTrust` | `Claim` | `Claim` (verified when `email_verified` is true), `Trusted` (the proxy vouches for every address), `None`. |
+| `LogoutUrl` | — | Where the browser signs out of the proxy; surfaced in the session section. |
+| `ClockSkew` | `00:01:00` | Tolerance for `exp`/`nbf`. Proxy tokens are short-lived, so it is tighter than JwtBearer's five minutes. |
+| `AutomaticRefreshInterval` | `01:00:00` | How long fetched keys are used before a background refresh (library minimum: 5 minutes). |
+| `RefreshInterval` | `00:01:00` | Minimum time between refreshes triggered by an unknown key id (library minimum: 1 second). |
+| `LastKnownGoodLifetime` | `00:00:00` (off) | IdentityModel's last-known-good grace for a configuration a refresh replaced (see below). |
+| `Development:*` | see below | The stand-in identity. |
+
+Set any value from code with the `configure` callback, which runs after binding and before validation:
+
+```csharp
+builder.Services.AddElarionProxyIdentity(builder.Configuration, builder.Environment,
+    options => options.Audiences.Add(builder.Configuration["PUBLIC_HOSTNAME"]!));
+```
+
+## Proxy recipes
+
+Each recipe is the `ProxyIdentity` section; everything not shown keeps its default.
+
+### Cloudflare Access
+
+```json
+{
+  "Enabled": true,
+  "Issuer": "https://<team>.cloudflareaccess.com",
+  "JwksUrl": "https://<team>.cloudflareaccess.com/cdn-cgi/access/certs",
+  "Audiences": [ "<Application Audience (AUD) tag>" ],
+  "TokenHeader": "Cf-Access-Jwt-Assertion",
+  "TokenCookie": "CF_Authorization",
+  "EmailTrust": "Trusted",
+  "LogoutUrl": "/cdn-cgi/access/logout"
+}
+```
+
+Access forwards the header on proxied requests; the cookie covers requests where the header is absent. The
+application token carries `sub` and `email` but no `email_verified`, so decide `EmailTrust` from your login methods
+(`Trusted` for one-time PIN or a directory you trust).
+
+### Google Cloud IAP
+
+```json
+{
+  "Enabled": true,
+  "Issuer": "https://cloud.google.com/iap",
+  "JwksUrl": "https://www.gstatic.com/iap/verify/public_key-jwk",
+  "Audiences": [ "/projects/<project-number>/global/backendServices/<service-id>" ],
+  "TokenHeader": "x-goog-iap-jwt-assertion",
+  "EmailTrust": "Trusted",
+  "Claims": { "Name": null }
+}
+```
+
+IAP signs with ES256 keys, which the JWKS handles like any other. For App Engine the audience is
+`/projects/<project-number>/apps/<project-id>`. The token has no display name.
+
+### oauth2-proxy
+
+With `--pass-authorization-header` (or `--set-authorization-header` behind an `auth_request` proxy) oauth2-proxy
+forwards the identity provider's ID token as `Authorization: Bearer …`:
+
+```json
+{
+  "Enabled": true,
+  "Issuer": "<the --oidc-issuer-url>",
+  "Audiences": [ "<the --client-id>" ],
+  "TokenHeader": "Authorization"
+}
+```
+
+The keys come from the issuer's discovery document. Note the `TokenHeader`: the standard `Authorization` header is
+read **only** when it is configured, because the package never falls back to a location the proxy does not control.
+
+### Any OpenID Connect gateway
+
+A gateway that forwards tokens of a standard OIDC provider needs the issuer, the audience and the header; the keys come
+from discovery. When the discovery document lives somewhere other than `{Issuer}/.well-known/openid-configuration`,
+set `MetadataAddress`:
+
+```json
+{
+  "Enabled": true,
+  "Issuer": "https://login.example.com/tenant/v2.0",
+  "MetadataAddress": "https://login.example.com/tenant/v2.0/.well-known/openid-configuration",
+  "Audiences": [ "api://my-app" ],
+  "TokenHeader": "X-Forwarded-Id-Token",
+  "Claims": { "Subject": "oid" }
+}
+```
+
+A discovery document must name exactly the configured issuer (OpenID Connect Discovery §4.3); one that names another
+issuer is refused, so it can never widen the accepted issuers. Proxies that publish keys in another format than a JWKS
+(for example per-key PEM endpoints) are not covered.
+
+## Signing keys
+
+The package builds one IdentityModel `ConfigurationManager<OpenIdConnectConfiguration>` per scheme; a JWKS URL is
+read through a small retriever into the same configuration shape, so both modes behave identically. The
+configuration is accepted only when it names the configured issuer and holds at least one signing key. What follows is
+the library's behaviour, pinned by the package's tests:
+
+| Situation | Behaviour |
+| --- | --- |
+| First requests after startup | One fetch; every concurrent request waits for it, none is validated against an empty key list. |
+| Key endpoint down at startup | Requests are refused (401, fail-closed); the next request after the endpoint recovers fetches again and succeeds. |
+| Routine refresh | In the background every `AutomaticRefreshInterval`; requests keep using the current keys. |
+| Token with an unknown key id | That request is refused and a background refresh is requested (at most once per `RefreshInterval`); the new key is accepted as soon as it lands. |
+| Refresh fails, or returns no keys / a foreign issuer | The current keys keep serving. |
+| A key the issuer withdrew | Stops validating once the refresh lands, unless `LastKnownGoodLifetime` grants a grace. |
+
+Most proxies publish a new key well before they sign with it, so the routine refresh normally picks it up before the
+first token arrives; lower `AutomaticRefreshInterval` if yours rotates faster. `LastKnownGoodLifetime` is off by
+default although IdentityModel's own default is one hour: that grace keeps accepting tokens signed with a key the
+issuer withdrew, which is the wrong default when a key is withdrawn because it leaked. An outage never needs it.
+
+The keys are fetched with the named `HttpClient` `ProxyIdentityDefaults.HttpClientName` (10-second timeout);
+configure it with `services.AddHttpClient(ProxyIdentityDefaults.HttpClientName)` to add an outbound proxy or a handler.
+
+## Startup refusal
+
+Outside the Development environment, `Enabled: false` throws at startup — a deployment that lost its proxy
+configuration must not come up as "everybody is the development user". An enabled configuration is refused when the
+issuer, the audience (without `AllowAnyAudience`), the token location or the subject claim is missing, when both
+`JwksUrl` and `MetadataAddress` are set, when a key URL is not https (unless `RequireHttpsMetadata` is off), or when a
+refresh interval is below the library minimum.
+
+<Callout type="warn">
+The token only says who the proxy signed in. Make sure the app is reachable **only** through the proxy, and keep the
+audience scoped to this app: without it any other application behind the same issuer could present its tokens here.
+The proxy signs the browser in with its own session cookie and forwards the token on every request it lets through,
+including one that a page on another site makes the browser send. The token is therefore an ambient credential whether
+the app reads it from a header or a cookie: install `UseElarionCrossOriginProtection` (see
+[CSRF and cookie authentication](/docs/capabilities/hosting#csrf-and-cookie-authentication)).
+</Callout>
+
+## Development stand-in
+
+With `Enabled: false` in Development, every request is signed in as the configured developer, with the same claim
+shape a proxy token carries (under your `Claims` names) and the issuer `ProxyIdentityDefaults.DevelopmentIssuer`. The
+`X-Elarion-Dev-User` header or the `elarion-dev-user` cookie (URL-encoded) switches the user: to one of
+`Development:Users` when its e-mail address or subject matches, otherwise to an ad-hoc user with that address, a
+subject of `dev:{address}` and no groups or roles.
+
+```json
+{
+  "ProxyIdentity": {
+    "Enabled": false,
+    "Development": {
+      "Subject": "developer",
+      "Email": "developer@example.com",
+      "Roles": [ "admin" ],
+      "Users": [
+        { "Subject": "reader-1", "Email": "reader@example.com", "Name": "A Reader", "Roles": [ "reader" ] }
+      ]
+    }
+  }
+}
+```
+
+Set `Development:UserHeader`/`UserCookie` to empty to turn the switch off. With `Enabled: true` the real proxy scheme
+runs in Development too, for testing against a staging proxy.
+
+## Reading the identity
+
+Handlers read `ICurrentUser` as always. When the application needs more — linking the person to a local account,
+mapping identity-provider groups to permissions, trusting the address for an invitation — read the `ExternalIdentity`
+record:
+
+```csharp
+// In a handler: transport-neutral, from ICurrentUser.
+var identity = ExternalIdentity.TryRead(currentUser, proxyOptions.Value);   // IOptions<ProxyIdentityOptions>
+if (identity is { EmailVerified: true }) { /* link by e-mail */ }
+
+// In host code: from the request principal.
+var fromRequest = ExternalIdentity.TryRead(httpContext.User, proxyOptions.Value);
+```
+
+| Member | Meaning |
+| --- | --- |
+| `Issuer`, `Subject` | Together the stable key of the person. |
+| `Email`, `EmailVerified` | The address and the `EmailTrust` decision (always false without an address or under `None`). |
+| `Name` | The display name, or null. |
+| `Groups`, `Roles` | Trimmed, de-duplicated values; a JSON array and a single string read the same. |
+| `IsDevelopmentIdentity` | True for the stand-in. |
+
+It grants nothing by itself; account linking and group-to-permission mapping stay application policy.
+
+## Session section
+
+To render an account menu without a second round trip, add the `proxyIdentity` section to the
+[client-capability snapshot](/docs/concepts/client-capabilities):
+
+```csharp
+builder.Services.AddElarionSession(builder.Configuration.GetClientCapabilityManifest());
+builder.Services.AddElarionProxyIdentitySessionSection();
+```
+
+It carries `email`, `name`, `logoutUrl`, `isDevelopmentIdentity` and, for the stand-in, `developmentUserCookie` (the
+cookie a development user switcher sets). It is omitted for an anonymous caller and, like every section, is a read-only
+UX projection.
