@@ -7,6 +7,7 @@
     "transports",
     "current-user",
     "identity",
+    "proxy-identity",
     "caching",
     "resilience",
     "feature-flags",

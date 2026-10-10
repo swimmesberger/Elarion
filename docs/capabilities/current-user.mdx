@@ -120,6 +120,9 @@ builder.Services.AddElarionCurrentUser(options => {
 | `RoleClaimType` | `ClaimTypes.Role` | Claim used to populate `Roles`. |
 | `DefaultRolesWhenAuthenticated` | empty | Roles granted to any authenticated principal. |
 
+Behind an authenticating reverse proxy, [proxy identity](/docs/capabilities/proxy-identity) registers this mapping
+from its own claim-name settings.
+
 ## Relationship to caching
 
 [`CurrentUser`-scoped caching](/docs/capabilities/caching) depends on this abstraction: the cache uses
