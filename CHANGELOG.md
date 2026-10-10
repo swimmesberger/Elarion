@@ -46,6 +46,23 @@ minor releases may include breaking changes.
   implied errors, the decorators, the module, then the assembly. `ELERR001`/`ELERR002` messages now name the
   declaring type or assembly instead of always saying "Handler". The Billing sample declares `not_found` once for its
   application assembly; regenerate `rpc-schema.json` and the TypeScript client to pick up new declarations.
+- **OpenAPI: the ProblemDetails schemas declare the error contract's `code` and `data` (ADR-0080).** Every Elarion
+  failure over HTTP carries a stable `code` and, for a typed payload, `data`, but the document only described the
+  standard RFC 7807 members, so a client generated from it (`@hey-api/openapi-ts`, `openapi-typescript`, Kiota) saw
+  the code as an unknown extension and had to cast or parse `detail`. `AddElarionOpenApi()` now adds both as optional
+  members of every `ProblemDetails`-derived schema; the generated `error.code` is a typed `string`.
+
+### Fixed
+- **HTTP binding-tier failures carry `code: "validation"`.** A generated `[HttpEndpoint]` answered an unparseable or
+  missing route/query/header/form value, or an empty or malformed JSON body, with a `ValidationProblem` that had no
+  `code`, unlike the handler-tier validation failure it mirrors, so a client branching on `code` missed it.
+
+### Documentation
+- **TypeScript client: handlers exposed only over REST.** The client page now explains why a handler with
+  `[HttpEndpoint]` but no `[Handler]` has no generated function (`rpc-schema.json` lists the JSON-RPC operations, and
+  REST clients come from the OpenAPI document by design, ADR-0026) and gives the two supported paths: add `[Handler]`
+  to get the generated function and typed error union, or generate from OpenAPI. The OpenAPI page gains a *Typed
+  errors* section that branches on `error.code` instead of hand-parsing ProblemDetails.
 ### Security
 - **BREAKING: `/rpc` refuses a request whose `Content-Type` is not JSON.** `MapElarionJsonRpc` parsed and
   dispatched any POST body that was valid JSON, so a cross-site `<form enctype="text/plain">` whose field spelled

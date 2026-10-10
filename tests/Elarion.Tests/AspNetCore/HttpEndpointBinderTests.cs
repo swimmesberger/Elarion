@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
+using Elarion.Abstractions;
 using Elarion.AspNetCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -130,6 +131,19 @@ public sealed class HttpEndpointBinderTests {
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             var errors = await ReadProblemErrorsAsync(response, ct);
             errors.GetProperty("Id")[0].GetString().Should().Be("The value 'not-a-guid' is not valid for Id.");
+        });
+    }
+
+    [Fact]
+    public async Task BindingFailure_CarriesTheValidationErrorCode() {
+        // ADR-0080: every HTTP ProblemDetails carries `code`, so a client branches on it the same way for a
+        // binding-tier failure as for a handler-tier validation failure.
+        await RunHostAsync(MapItemEndpoint, static async (client, ct) => {
+            var response = await client.GetAsync("/items/not-a-guid", ct);
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            doc.RootElement.GetProperty("code").GetString().Should().Be(ErrorCodes.Validation);
+            doc.RootElement.TryGetProperty("data", out _).Should().BeFalse();
         });
     }
 

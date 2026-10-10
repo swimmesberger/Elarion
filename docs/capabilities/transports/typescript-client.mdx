@@ -328,6 +328,34 @@ dynamic `headers`. The adapter above is the only Elarion-specific piece — wire
 [HTTP client](/docs/capabilities/transports/openapi#trace-client-requests-with-opentelemetry), and see
 [Telemetry & observability](/docs/capabilities/telemetry) for the server side.
 
+## Handlers exposed only over REST
+
+The generator reads `rpc-schema.json`, and that schema lists the operations the JSON-RPC transport serves —
+handlers carrying `[Handler]` with `HandlerTransports.JsonRpc`. A handler that carries only
+[`[HttpEndpoint]`](/docs/capabilities/transports/http-endpoints) (a public link answered without a session, a
+route that must live outside `/rpc`, an endpoint for third-party callers) is not on the JSON-RPC bus, so the
+generated client has no function, no types, and no Zod schemas for it.
+
+That is deliberate. REST's machine-readable contract is the **OpenAPI document**, and Elarion leaves REST client
+generation to the off-the-shelf OpenAPI tooling instead of owning a second, bespoke HTTP client generator
+([ADR-0026](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0026-openapi-http-transport.md)). Folding
+routes, verbs, and route/query/header/body binding into `rpc-schema.json` would make this generator re-implement
+what OpenAPI already describes and what those tools already consume. Pick one of two paths instead — never
+hand-copy the response DTO into a Zod schema, because a C# rename then still compiles and silently breaks the page:
+
+- **The operation does not need to be a REST route.** Add `[Handler]` next to (or instead of) `[HttpEndpoint]`.
+  It joins `rpc-schema.json` and gets the generated function, params/result Zod schemas, and the typed
+  [error union](#error-handling) for its declared codes. Authorization and validation stay on the handler, so an
+  anonymous handler stays anonymous on either transport.
+- **It must stay REST-only.** Add `Elarion.AspNetCore.OpenApi`, export the document, and generate a client from it —
+  the [recommended setup](/docs/capabilities/transports/openapi#generate-a-typed-client) uses `@hey-api/openapi-ts`
+  with its Zod plugin for typed params and runtime-validated responses. Errors arrive as RFC 7807 ProblemDetails
+  with the same stable `code` and `data` members as an `RpcError`; the OpenAPI document declares both, so
+  [branch on `error.code`](/docs/capabilities/transports/openapi#typed-errors) without a cast.
+
+Both clients run side by side: the JSON-RPC client for the operation-shaped API, the OpenAPI-generated one for the
+handful of REST-only routes. Regenerate each from its own contract file in the same build step.
+
 ## Design boundaries
 
 The generated runtime stays framework-neutral: it uses standard `fetch`, accepts an injected
