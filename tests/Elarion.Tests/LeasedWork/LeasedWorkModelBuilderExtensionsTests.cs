@@ -15,11 +15,12 @@ public sealed class LeasedWorkModelBuilderExtensionsTests {
     }
 
     [Fact]
-    public void HasLeasedWork_MapsTheLeaseColumns_AndAPartialClaimIndex() {
+    public void HasElarionLeasedWork_MapsTheLeaseColumns_AndAPartialClaimIndex() {
         var model = Build(modelBuilder => modelBuilder.Entity<TestDelivery>(entity => {
             entity.ToTable("deliveries");
             entity.HasKey(delivery => delivery.Id);
-            entity.HasLeasedWork(delivery => new { delivery.CreatedAtUtc, delivery.Id }, "completed_at_utc IS NULL");
+            entity.HasElarionLeasedWork(delivery => new { delivery.CreatedAtUtc, delivery.Id },
+                "completed_at_utc IS NULL");
         }));
 
         var delivery = model.FindEntityType(typeof(TestDelivery))!;
@@ -33,11 +34,11 @@ public sealed class LeasedWorkModelBuilderExtensionsTests {
     }
 
     [Fact]
-    public void HasLeasedWork_WithoutSnakeCase_UsesPascalCaseNames() {
+    public void HasElarionLeasedWork_WithoutSnakeCase_UsesPascalCaseNames() {
         var model = Build(modelBuilder => modelBuilder.Entity<TestDelivery>(entity => {
             entity.ToTable("Deliveries");
             entity.HasKey(delivery => delivery.Id);
-            entity.HasLeasedWork(
+            entity.HasElarionLeasedWork(
                 delivery => new { delivery.CreatedAtUtc, delivery.Id },
                 "\"CompletedAtUtc\" IS NULL",
                 snakeCase: false);
@@ -50,11 +51,11 @@ public sealed class LeasedWorkModelBuilderExtensionsTests {
     }
 
     [Fact]
-    public void HasLeasedWork_UsesAnExplicitClaimIndexName() {
+    public void HasElarionLeasedWork_UsesAnExplicitClaimIndexName() {
         var model = Build(modelBuilder => modelBuilder.Entity<TestDelivery>(entity => {
             entity.ToTable("deliveries");
             entity.HasKey(delivery => delivery.Id);
-            entity.HasLeasedWork(
+            entity.HasElarionLeasedWork(
                 delivery => new { delivery.CreatedAtUtc, delivery.Id },
                 "completed_at_utc IS NULL",
                 claimIndexName: "deliveries_pending");
@@ -67,10 +68,10 @@ public sealed class LeasedWorkModelBuilderExtensionsTests {
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void HasLeasedWork_RequiresThePendingFilter(string filter) {
+    public void HasElarionLeasedWork_RequiresThePendingFilter(string filter) {
         var act = () => Build(modelBuilder => modelBuilder.Entity<TestDelivery>(entity => {
             entity.ToTable("deliveries");
-            entity.HasLeasedWork(delivery => new { delivery.CreatedAtUtc, delivery.Id }, filter);
+            entity.HasElarionLeasedWork(delivery => new { delivery.CreatedAtUtc, delivery.Id }, filter);
         }));
 
         act.Should().Throw<ArgumentException>();

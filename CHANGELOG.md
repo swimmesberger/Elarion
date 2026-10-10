@@ -83,7 +83,7 @@ minor releases may include breaking changes.
 - **`Elarion.EntityFrameworkCore.LeasedWork`: leased work rows for your own queue tables (ADR-0073).** The outbox's
   work-row lease is now a reusable EF Core primitive, so an outbound delivery, webhook, or retry table no longer
   rebuilds it from memory. An entity implements `ILeasedWorkRow` (`Id`, `LockId`, `LockedUntilUtc`) and maps it with
-  `HasLeasedWork(claimIndex, pendingFilter)`, which adds the lease columns and a required partial claim index.
+  `HasElarionLeasedWork(claimIndex, pendingFilter)`, which adds the lease columns and a required partial claim index.
   `ClaimPendingAsync(new LeasedWorkClaim<T> { … })` selects candidates, stamps a lease with one conditional update,
   and returns only the rows this worker won. The claim takes the consumer's eligibility filter, queue order, and
   optional `OnClaim` setters, such as counting the attempt at claim time. `FinalizeClaimAsync`, `ReleaseClaimAsync`,

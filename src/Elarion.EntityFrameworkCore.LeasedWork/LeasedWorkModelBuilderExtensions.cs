@@ -39,11 +39,11 @@ public static class LeasedWorkModelBuilderExtensions {
     /// <code>
     /// modelBuilder.Entity&lt;Delivery&gt;(entity => {
     ///     entity.ToTable("deliveries");
-    ///     entity.HasLeasedWork(d => new { d.CreatedAtUtc, d.Id }, "completed_at_utc IS NULL");
+    ///     entity.HasElarionLeasedWork(d => new { d.CreatedAtUtc, d.Id }, "completed_at_utc IS NULL");
     /// });
     /// </code>
     /// </example>
-    public static EntityTypeBuilder<TRow> HasLeasedWork<TRow>(
+    public static EntityTypeBuilder<TRow> HasElarionLeasedWork<TRow>(
         this EntityTypeBuilder<TRow> builder,
         Expression<Func<TRow, object?>> claimIndex,
         string pendingFilter,
@@ -65,7 +65,8 @@ public static class LeasedWorkModelBuilderExtensions {
         if (indexName is null) {
             var table = builder.Metadata.GetTableName()
                         ?? throw new InvalidOperationException(
-                            $"{typeof(TRow).Name} is not mapped to a table. Call ToTable before HasLeasedWork or pass a claim index name.");
+                            $"{typeof(TRow).Name} is not mapped to a table. Call ToTable before " +
+                            $"{nameof(HasElarionLeasedWork)} or pass a claim index name.");
             indexName = snakeCase ? $"ix_{table}_claim" : $"IX_{table}_Claim";
         }
 

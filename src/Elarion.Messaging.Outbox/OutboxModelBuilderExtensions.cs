@@ -37,7 +37,7 @@ public static class OutboxModelBuilderExtensions {
                 .HasDatabaseName(snakeCase ? $"ix_{table}_purge" : $"IX_{table}_Purge")
                 .HasFilter(snakeCase ? "processed_on_utc IS NOT NULL" : "\"ProcessedOnUtc\" IS NOT NULL");
             // The lease columns and the partial claim index over the live queue (ADR-0073 invariant 4).
-            builder.HasLeasedWork(
+            builder.HasElarionLeasedWork(
                 message => new { message.TargetRole, message.OccurredOnUtc, message.Id },
                 snakeCase ? "processed_on_utc IS NULL" : "\"ProcessedOnUtc\" IS NULL",
                 snakeCase);

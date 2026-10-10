@@ -153,7 +153,7 @@ outbox now references:
   contract. Release and renew were added: the outbox already needed release (ADR-0062), and renewal is
   the heartbeat a long external call needs.
 - Invariant 3 needs no code: expiry is part of the claim predicate.
-- `EntityTypeBuilder<TRow>.HasLeasedWork(claimIndex, pendingFilter)` — invariant 4. It maps the lease
+- `EntityTypeBuilder<TRow>.HasElarionLeasedWork(claimIndex, pendingFilter)` — invariant 4. It maps the lease
   columns and declares the claim index with a **required** filter (`ix_{table}_claim` by default).
 - `LeasedWorkBackoff.Exponential` (the outbox's former private formula) and `LeasedWorkBackoff.Ladder`
   (with a remote retry-after hint).

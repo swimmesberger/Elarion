@@ -90,7 +90,7 @@ public sealed class LeasedWorkIntegrationDbContext(DbContextOptions<LeasedWorkIn
             entity.ToTable("TestDeliveries");
             entity.HasKey(delivery => delivery.Id);
             entity.Property(delivery => delivery.Id).ValueGeneratedNever();
-            entity.HasLeasedWork(
+            entity.HasElarionLeasedWork(
                 delivery => new { delivery.Source, delivery.CreatedAtUtc, delivery.Id },
                 "\"CompletedAtUtc\" IS NULL",
                 snakeCase: false);

@@ -7,7 +7,7 @@ namespace Elarion.EntityFrameworkCore.LeasedWork;
 /// <remarks>
 /// <para>
 /// Implement the members as ordinary (implicit) mapped properties with these exact names: the claim and finalize
-/// queries and <see cref="LeasedWorkModelBuilderExtensions.HasLeasedWork{TRow}"/> resolve them by name on the
+/// queries and <see cref="LeasedWorkModelBuilderExtensions.HasElarionLeasedWork{TRow}"/> resolve them by name on the
 /// entity, so an explicit interface implementation is not mapped.
 /// </para>
 /// <para>

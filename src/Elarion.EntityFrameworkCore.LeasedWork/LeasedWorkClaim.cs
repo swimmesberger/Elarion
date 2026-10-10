@@ -46,7 +46,7 @@ public sealed record LeasedWorkClaim<TRow> where TRow : class, ILeasedWorkRow {
 
     /// <summary>
     /// The queue order. The primitive appends <c>ThenBy(Id)</c>, so ties resolve deterministically. Pair it with the
-    /// claim index declared by <see cref="LeasedWorkModelBuilderExtensions.HasLeasedWork{TRow}"/>.
+    /// claim index declared by <see cref="LeasedWorkModelBuilderExtensions.HasElarionLeasedWork{TRow}"/>.
     /// </summary>
     public required Func<IQueryable<TRow>, IOrderedQueryable<TRow>> OrderBy { get; init; }
 

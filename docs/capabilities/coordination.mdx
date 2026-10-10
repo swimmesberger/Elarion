@@ -271,7 +271,7 @@ public sealed class DeliveryConfiguration : IEntityTypeConfiguration<Delivery> {
     public void Configure(EntityTypeBuilder<Delivery> entity) {
         entity.ToTable("deliveries");
         // Lease columns plus the partial claim index ix_deliveries_claim over the live queue.
-        entity.HasLeasedWork(d => new { d.CreatedAtUtc, d.Id }, "completed_at_utc IS NULL");
+        entity.HasElarionLeasedWork(d => new { d.CreatedAtUtc, d.Id }, "completed_at_utc IS NULL");
     }
 }
 ```
