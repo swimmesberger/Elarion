@@ -85,6 +85,15 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
             .Select(static (items, _) => items.ToEquatableArray())
             .WithTrackingName("ManifestRpcMethods");
 
+        // [ProducesError] declarations a handler inherits from its pipeline decorators, its module and its assembly
+        // live in other files, so they are merged in a second stage against the current compilation (ADR-0080).
+        // This generator owns the diagnostics for those declarations.
+        var scopedRpcMethods = rpcMethods
+            .Combine(ModuleProviders.CollectModules(context))
+            .Combine(context.CompilationProvider)
+            .Select(static (source, ct) => ApplyErrorScopes(source.Left.Left, source.Left.Right, source.Right, ct))
+            .WithTrackingName("ManifestRpcErrorScopes");
+
         var resourceFilters = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 ResourceFilterAttributeMetadataName,
@@ -176,7 +185,7 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
             .Select(static (groups, _) => groups.ToEquatableArray())
             .WithTrackingName("ManifestBackendFeatureFlags");
 
-        var output = modules.Combine(moduleEndpointHooks).Combine(httpEndpoints).Combine(rpcMethods)
+        var output = modules.Combine(moduleEndpointHooks).Combine(httpEndpoints).Combine(scopedRpcMethods)
             .Combine(resourceFilters).Combine(permissions).Combine(roles).Combine(featureVariants)
             .Combine(configurationVariants).Combine(settingContainers).Combine(codeFlags).Combine(backendFlags)
             .Select(static (source, ct) => {
@@ -241,6 +250,31 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
         var model = RpcMethodEmission.CreateModel(ctx, diagnostics.Add, ct);
         return new ManifestItem<RpcMethodEmission.Model>(model, diagnostics.ToImmutable().ToEquatableArray());
+    }
+
+    // Merges the inherited error declarations into each discovered operation; scope diagnostics (an invalid or
+    // conflicting declaration on a decorator, module or assembly) travel as one extra model-less item.
+    private static EquatableArray<ManifestItem<RpcMethodEmission.Model>> ApplyErrorScopes(
+        EquatableArray<ManifestItem<RpcMethodEmission.Model>> items,
+        EquatableArray<ModuleScanner.Module> modules,
+        Compilation compilation,
+        CancellationToken ct) {
+        var models = items
+            .Where(static item => item.Model is not null)
+            .Select(static item => item.Model!)
+            .ToEquatableArray();
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+        var scoped = ErrorContractScopes.Apply(models, modules, compilation, diagnostics.Add, ct);
+
+        var result = new List<ManifestItem<RpcMethodEmission.Model>>(items.Length + 1);
+        var index = 0;
+        foreach (var item in items)
+            result.Add(item.Model is null ? item : item with { Model = scoped[index++] });
+
+        if (diagnostics.Count > 0)
+            result.Add(new ManifestItem<RpcMethodEmission.Model>(null, diagnostics.ToImmutable().ToEquatableArray()));
+
+        return result.ToEquatableArray();
     }
 
     private static ManifestOutput BuildManifestOutput(

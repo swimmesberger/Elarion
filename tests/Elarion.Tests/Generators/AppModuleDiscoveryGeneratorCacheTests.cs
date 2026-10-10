@@ -50,6 +50,7 @@ public sealed class AppModuleDiscoveryGeneratorCacheTests {
             "BootstrapperModuleEndpoints",
             "BootstrapperHttpEndpoints",
             "BootstrapperRpcMethods",
+            "BootstrapperRpcErrorScopes",
             "BootstrapperResourceFilters",
             "BootstrapperSiblings",
             "Bootstrapper");
