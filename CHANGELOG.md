@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-10-10
+
 ### Security
 - **BREAKING: `/rpc` refuses a request whose `Content-Type` is not JSON.** `MapElarionJsonRpc` parsed and
   dispatched any POST body that was valid JSON, so a cross-site `<form enctype="text/plain">` whose field spelled
@@ -2072,7 +2074,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.11...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.12...HEAD
+[0.2.12]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.12
 [0.2.11]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.11
 [0.2.10]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.10
 [0.2.9]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.9
