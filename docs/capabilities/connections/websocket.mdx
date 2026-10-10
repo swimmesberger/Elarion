@@ -70,6 +70,12 @@ app.MapElarionConnectionSocket<GatewaySocketHandler>("/gateway/ws",
     o => o.MaxMessageBytes = 64 * 1024);
 ```
 
+A browser attaches its cookies to a WebSocket handshake from any site, and the Same-Origin Policy does not
+apply to the socket. When browser clients authenticate the handshake with a cookie (rather than a token sent in
+the socket, as devices do), install `app.UseElarionCrossOriginProtection()` before `UseWebSockets()`: it refuses a
+cross-site handshake with `403` and lets devices that send no `Origin` through — see
+[CSRF and cookie authentication](/docs/capabilities/hosting#csrf-and-cookie-authentication).
+
 Everything after the handshake is framework: the connection is minted (v7 id, `Transport =
 "websocket"`), registered, observed, pumped, and unregistered on every exit path — client close,
 abrupt death, oversized message (`MessageTooBig`), codec exception (logged, closed), host shutdown.

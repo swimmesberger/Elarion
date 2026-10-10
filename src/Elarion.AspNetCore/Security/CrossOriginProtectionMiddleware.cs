@@ -8,11 +8,11 @@ using Microsoft.Extensions.Logging;
 namespace Elarion.AspNetCore;
 
 /// <summary>
-/// Refuses state-changing requests that a browser sent from a page on another origin, using the Fetch Metadata
-/// <c>Sec-Fetch-Site</c> header and falling back to <c>Origin</c> for browsers that do not send it. A request with
-/// neither header did not come from a browser page (a server, a script, server-side rendering) and passes: a
-/// cross-site attack needs the victim's browser to attach its credentials, and every browser that does so sends at
-/// least one of the two on an unsafe method.
+/// Refuses state-changing requests and WebSocket handshakes that a browser sent from a page on another origin, using
+/// the Fetch Metadata <c>Sec-Fetch-Site</c> header and falling back to <c>Origin</c> for browsers that do not send it.
+/// A request with neither header did not come from a browser page (a server, a script, server-side rendering) and
+/// passes: a cross-site attack needs the victim's browser to attach its credentials, and every browser that does so
+/// sends at least one of the two on an unsafe method and on every WebSocket handshake.
 /// </summary>
 internal sealed class CrossOriginProtectionMiddleware(
     RequestDelegate next,
@@ -28,7 +28,9 @@ internal sealed class CrossOriginProtectionMiddleware(
 
     public Task InvokeAsync(HttpContext context) {
         var request = context.Request;
-        if (IsSafeMethod(request.Method) || IsExempt(request.Path) || IsAllowed(request)) return next(context);
+        if ((IsSafeMethod(request.Method) && !IsWebSocketUpgrade(request)) || IsExempt(request.Path) ||
+            IsAllowed(request))
+            return next(context);
 
         logger.LogInformation(
             "Cross-origin {Method} {Path} refused (Origin {Origin}, Sec-Fetch-Site {SecFetchSite})",
@@ -83,6 +85,24 @@ internal sealed class CrossOriginProtectionMiddleware(
     private static bool IsSafeMethod(string method) {
         return HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method) ||
                HttpMethods.IsTrace(method);
+    }
+
+    // An HTTP/1.1 WebSocket handshake is a GET, but it is not harmless: the browser attaches its cookies to a
+    // cross-site handshake (the Same-Origin Policy does not apply to WebSockets), and the socket it opens can then
+    // send and read anything (Cross-Site WebSocket Hijacking). Page script cannot set Upgrade on fetch, so only a real
+    // WebSocket handshake carries this token. The token is read from the header rather than from
+    // HttpContext.WebSockets.IsWebSocketRequest, which is only set once UseWebSockets has run, usually after this
+    // middleware. An HTTP/2 handshake is an extended CONNECT, which is not a safe method and is already covered.
+    private static bool IsWebSocketUpgrade(HttpRequest request) {
+        foreach (var value in request.Headers.Upgrade) {
+            if (value is null) continue;
+
+            foreach (var token in value.Split(',', StringSplitOptions.TrimEntries)) {
+                if (string.Equals(token, "websocket", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+        }
+
+        return false;
     }
 
     private bool IsExempt(PathString path) {

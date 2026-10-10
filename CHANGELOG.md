@@ -19,19 +19,28 @@ minor releases may include breaking changes.
   without `-H`); a host without cookie authentication whose callers cannot send it may set
   `JsonRpcOptions.RequireJsonContentType = false`. `MapElarionMcp` needs no change: the MCP transport already
   refuses a non-JSON body with 415 (now covered by a test).
+- **`UseElarionCrossOriginProtection` refuses cross-site WebSocket handshakes.** The protection passes GETs, but a
+  WebSocket handshake is a GET that the browser sends cross-site with its cookies and without CORS, and the opened
+  socket can send and read anything (Cross-Site WebSocket Hijacking) — on `MapElarionConnectionSocket` endpoints,
+  hand-written `UseWebSockets` routes and SignalR hubs alike. A GET whose `Upgrade` header names `websocket` is now
+  judged like an unsafe request: `Sec-Fetch-Site`, then `Origin`, against the request's own origin and
+  `AllowedOrigins`. Same-origin and allowed-origin handshakes, and clients that send no `Origin` (devices, servers),
+  connect as before; other GETs are unaffected. The middleware reads the header itself, so it still belongs before
+  `UseWebSockets` and routing.
 
 ### Added
 - **`app.UseElarionCrossOriginProtection(o => …)`: CSRF defense for hosts whose browsers authenticate with a
   cookie.** Form and file `[HttpEndpoint]` routes, `MapElarionBlobUploads()` and hand-written routes accept
   cross-site "simple" requests, and ASP.NET Core only offers token-based antiforgery. The middleware (in
-  `Elarion.AspNetCore`, placed before authentication) refuses every method except GET/HEAD/OPTIONS/TRACE when
-  `Sec-Fetch-Site` is `same-site`/`cross-site` and the `Origin` is not in `AllowedOrigins`, or, for browsers without
-  Fetch Metadata, when the `Origin` is neither the request's own origin nor allowed (`Origin: null` and duplicate
-  `Origin` headers included). A request with neither header (server-side rendering, scripts, server-to-server)
-  passes, `ExemptPathPrefixes` leave routes such as an OpenID Connect `form_post` callback alone, and allowed origins
-  are validated at startup. A refusal is HTTP 403 with a ProblemDetails `code` of `cross_origin.refused`
-  (`CrossOriginProtectionErrorCodes.Refused`), written without depending on the host's JSON configuration. The
-  hosting page gains a *CSRF and cookie authentication* section listing what each surface is protected by.
+  `Elarion.AspNetCore`, placed before authentication) refuses every method except GET/HEAD/OPTIONS/TRACE, and every
+  WebSocket handshake, when `Sec-Fetch-Site` is `same-site`/`cross-site` and the `Origin` is not in `AllowedOrigins`,
+  or, for browsers without Fetch Metadata, when the `Origin` is neither the request's own origin nor allowed
+  (`Origin: null` and duplicate `Origin` headers included). A request with neither header (server-side rendering,
+  scripts, server-to-server) passes, `ExemptPathPrefixes` leave routes such as an OpenID Connect `form_post` callback
+  alone, and allowed origins are validated at startup. A refusal is HTTP 403 with a ProblemDetails `code` of
+  `cross_origin.refused` (`CrossOriginProtectionErrorCodes.Refused`), written without depending on the host's JSON
+  configuration. The hosting page gains a *CSRF and cookie authentication* section listing what each surface is
+  protected by.
 - **`Elarion.AspNetCore.ProxyIdentity`: authentication for apps behind an authenticating reverse proxy (ADR-0084).**
   Apps behind Cloudflare Access, Google IAP, oauth2-proxy or an OIDC gateway otherwise each wire the same JwtBearer
   adapter by hand, and a hand-rolled key cache easily refuses concurrent first requests while its first fetch runs.

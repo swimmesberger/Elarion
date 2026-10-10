@@ -7,18 +7,22 @@ namespace Elarion.AspNetCore;
 /// <summary>Installs the cross-origin request protection (CSRF defense for cookie-authenticated hosts).</summary>
 public static class CrossOriginProtectionApplicationBuilderExtensions {
     /// <summary>
-    /// Refuses state-changing requests (every method except GET, HEAD, OPTIONS, and TRACE) that a browser sent from
-    /// a page on another origin, with HTTP 403 and a ProblemDetails body whose <c>code</c> is
+    /// Refuses state-changing requests (every method except GET, HEAD, OPTIONS, and TRACE) and WebSocket handshakes
+    /// that a browser sent from a page on another origin, with HTTP 403 and a ProblemDetails body whose <c>code</c> is
     /// <see cref="CrossOriginProtectionErrorCodes.Refused"/>. Use it when browsers authenticate with a credential
     /// they attach on their own — a cookie (ASP.NET Core Identity, an authenticating reverse proxy's session
     /// cookie), cached HTTP Basic/Negotiate credentials, or a client certificate. It covers <c>/rpc</c>, form and
-    /// file <c>[HttpEndpoint]</c> routes, blob uploads, and hand-written routes alike, needs no token in the client,
-    /// and needs no identity, so place it early: before authentication and before routing.
+    /// file <c>[HttpEndpoint]</c> routes, blob uploads, WebSocket endpoints such as
+    /// <c>MapElarionConnectionSocket</c>, and hand-written routes alike, needs no token in the client, and needs no
+    /// identity, so place it early: before authentication, before <c>UseWebSockets</c>, and before routing.
     /// </summary>
     /// <remarks>
     /// <para>The decision, in order:</para>
     /// <list type="number">
-    ///   <item>A safe method, or a path under <see cref="CrossOriginProtectionOptions.ExemptPathPrefixes"/>, passes.</item>
+    ///   <item>
+    ///     A safe method that is not a WebSocket handshake (a GET whose <c>Upgrade</c> header names
+    ///     <c>websocket</c>), or a path under <see cref="CrossOriginProtectionOptions.ExemptPathPrefixes"/>, passes.
+    ///   </item>
     ///   <item>More than one <c>Origin</c> header is refused.</item>
     ///   <item>
     ///     With <c>Sec-Fetch-Site</c> (every current browser): <c>same-origin</c> and <c>none</c> pass; any other

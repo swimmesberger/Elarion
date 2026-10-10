@@ -142,6 +142,8 @@ CORS policy allows that origin. What that means for each surface:
 | `MapElarionMcp()` (`/mcp`) | Protected: the MCP transport refuses a non-JSON body with `415`. |
 | `[HttpEndpoint]` with a JSON body (the `POST`/`PUT`/`PATCH` default) | Protected: a non-JSON body is a `415`. |
 | `[HttpEndpoint]` form and file routes, `MapElarionBlobUploads()`, a `POST` that binds only from the route or query, hand-written routes | **Not protected**: these accept simple requests, and generated form routes are `.DisableAntiforgery()`. |
+| WebSocket endpoints: `MapElarionConnectionSocket<THandler>()` ([WebSocket endpoint](/docs/capabilities/connections/websocket)), a hand-written `UseWebSockets` route, a SignalR hub | **Not protected**: the handshake is a `GET` that the browser sends cross-site with its cookies and without CORS, and the open socket can then send and read anything (Cross-Site WebSocket Hijacking). The cross-origin protection covers it. |
+| `MapElarionClientEvents()`, `MapElarionStream<T>()` (server-sent events) | Read-only `GET`s: a page on another origin can make the browser open one, but can read the events only when the host's CORS policy allows that origin. |
 | Any `GET` that changes state | **Not protected**: don't write one. |
 
 ### The JSON content-type requirement on `/rpc`
@@ -177,7 +179,7 @@ app.MapElarionEndpoints(app.Configuration);
 app.MapElarionJsonRpc();
 ```
 
-For every method except `GET`, `HEAD`, `OPTIONS`, and `TRACE`, it reads the
+For every method except `GET`, `HEAD`, `OPTIONS`, and `TRACE`, and for every WebSocket handshake, it reads the
 [Fetch Metadata](https://developer.mozilla.org/docs/Glossary/Fetch_metadata_request_header) header
 `Sec-Fetch-Site` that every current browser sends, and falls back to `Origin` for older ones:
 
@@ -188,6 +190,12 @@ For every method except `GET`, `HEAD`, `OPTIONS`, and `TRACE`, it reads the
   sees them) or one of `AllowedOrigins`; `Origin: null` and more than one `Origin` header are refused.
 - A request with neither header passes: it does not come from a browser page, so it carries no browser credential.
   Server-side rendering, scripts, and server-to-server calls are unaffected.
+
+A WebSocket handshake is a `GET` whose `Upgrade` header names `websocket`; the middleware reads the header itself, so
+it works before `UseWebSockets` and before routing. Browsers send `Origin` on every handshake, so a cross-site one is
+refused with `403` before the socket is accepted, while a device or server client that sends no `Origin` connects as
+before. An HTTP/2 handshake is a `CONNECT`, which is never a safe method. Every other `GET` (including server-sent
+events) is unaffected.
 
 A refusal is HTTP `403` with a ProblemDetails body whose `code` is `cross_origin.refused`
 (`CrossOriginProtectionErrorCodes.Refused`); a registered `IProblemDetailsService` writes it, so host customization

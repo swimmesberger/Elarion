@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using AwesomeAssertions;
@@ -16,9 +17,9 @@ using Xunit;
 namespace Elarion.Tests.AspNetCore;
 
 /// <summary>
-/// <c>UseElarionCrossOriginProtection</c>: state-changing requests a browser sent from another origin are refused
-/// (Fetch Metadata first, <c>Origin</c> as the fallback), safe methods, exempt prefixes, and callers without either
-/// header pass.
+/// <c>UseElarionCrossOriginProtection</c>: state-changing requests and WebSocket handshakes a browser sent from another
+/// origin are refused (Fetch Metadata first, <c>Origin</c> as the fallback), other safe-method requests, exempt
+/// prefixes, and callers without either header pass.
 /// </summary>
 public sealed class CrossOriginProtectionTests {
     private const string OwnOrigin = "https://api.example.com";
@@ -66,6 +67,43 @@ public sealed class CrossOriginProtectionTests {
         });
         var context = CreateContext(method, path, origin is null ? StringValues.Empty : new StringValues(origin),
             secFetchSite);
+
+        await pipeline(context);
+
+        context.Response.StatusCode.Should().Be(passes ? StatusCodes.Status204NoContent : StatusCodes.Status403Forbidden);
+    }
+
+    [Theory]
+    // A WebSocket handshake is a GET, but it is judged like an unsafe request (Cross-Site WebSocket Hijacking).
+    [InlineData("websocket", Attacker, "cross-site", "/ws", false)]
+    [InlineData("WebSocket", Attacker, "cross-site", "/ws", false)]
+    [InlineData("foo, websocket", Attacker, "cross-site", "/ws", false)]
+    [InlineData("websocket", Sibling, "same-site", "/ws", false)]
+    [InlineData("websocket", Attacker, null, "/ws", false)]
+    [InlineData("websocket", "null", null, "/ws", false)]
+    [InlineData("websocket", OwnOrigin, "same-origin", "/ws", true)]
+    [InlineData("websocket", OwnOrigin, null, "/ws", true)]
+    [InlineData("websocket", AllowedOrigin, "cross-site", "/ws", true)]
+    [InlineData("websocket", AllowedOrigin, null, "/ws", true)]
+    // Neither header: a non-browser client (a device, a server) is not a hijacking vector.
+    [InlineData("websocket", null, null, "/ws", true)]
+    [InlineData("websocket", Attacker, "cross-site", "/signin-oidc", true)]
+    // Plain GETs and other upgrade protocols stay safe.
+    [InlineData(null, Attacker, "cross-site", "/ws", true)]
+    [InlineData("h2c", Attacker, "cross-site", "/ws", true)]
+    [InlineData("websocketx", Attacker, null, "/ws", true)]
+    public async Task WebSocketHandshake_JudgedLikeAnUnsafeRequest(
+        string? upgrade, string? origin, string? secFetchSite, string path, bool passes) {
+        var pipeline = BuildPipeline(o => {
+            o.AllowedOrigins.Add(AllowedOrigin);
+            o.ExemptPathPrefixes.Add("/signin-oidc");
+        });
+        var context = CreateContext("GET", path, origin is null ? StringValues.Empty : new StringValues(origin),
+            secFetchSite);
+        if (upgrade is not null) {
+            context.Request.Headers.Connection = "Upgrade";
+            context.Request.Headers.Upgrade = upgrade;
+        }
 
         await pipeline(context);
 
@@ -176,6 +214,76 @@ public sealed class CrossOriginProtectionTests {
             if (origin is not null) request.Headers.TryAddWithoutValidation("Origin", origin.TrimEnd('/'));
             if (secFetchSite is not null) request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", secFetchSite);
             return request;
+        }
+    }
+
+    [Fact]
+    public async Task OverHttp_InFrontOfAWebSocketEndpoint_RefusesCrossSiteHandshake_AndAcceptsOthers() {
+        var ct = TestContext.Current.CancellationToken;
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+
+        await using var app = builder.Build();
+        app.UseElarionCrossOriginProtection(o => o.AllowedOrigins.Add(AllowedOrigin));
+        app.UseWebSockets();
+        app.MapGet("/ws", (RequestDelegate)(async context => {
+            if (!context.WebSockets.IsWebSocketRequest) {
+                context.Response.StatusCode = StatusCodes.Status200OK;
+                await context.Response.WriteAsync("plain", context.RequestAborted);
+                return;
+            }
+
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", context.RequestAborted);
+        }));
+        await app.StartAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First().TrimEnd('/');
+            var socketUri = new Uri(baseAddress.Replace("http://", "ws://") + "/ws");
+
+            var crossSite = await ConnectAsync(socketUri, Attacker, "cross-site", ct);
+            var legacyCrossSite = await ConnectAsync(socketUri, Attacker, null, ct);
+            var sameOrigin = await ConnectAsync(socketUri, baseAddress, "same-origin", ct);
+            var legacySameOrigin = await ConnectAsync(socketUri, baseAddress, null, ct);
+            var allowed = await ConnectAsync(socketUri, AllowedOrigin, "cross-site", ct);
+            var nonBrowser = await ConnectAsync(socketUri, null, null, ct);
+
+            crossSite.Should().Be(HttpStatusCode.Forbidden);
+            legacyCrossSite.Should().Be(HttpStatusCode.Forbidden);
+            sameOrigin.Should().Be(HttpStatusCode.SwitchingProtocols);
+            legacySameOrigin.Should().Be(HttpStatusCode.SwitchingProtocols);
+            allowed.Should().Be(HttpStatusCode.SwitchingProtocols);
+            nonBrowser.Should().Be(HttpStatusCode.SwitchingProtocols);
+
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+            using var plainGet = new HttpRequestMessage(HttpMethod.Get, "/ws");
+            plainGet.Headers.TryAddWithoutValidation("Origin", Attacker);
+            plainGet.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "cross-site");
+            var plain = await client.SendAsync(plainGet, ct);
+            plain.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        finally {
+            await app.StopAsync(ct);
+        }
+
+        static async Task<HttpStatusCode> ConnectAsync(
+            Uri uri, string? origin, string? secFetchSite, CancellationToken ct) {
+            using var socket = new ClientWebSocket();
+            socket.Options.CollectHttpResponseDetails = true;
+            if (origin is not null) socket.Options.SetRequestHeader("Origin", origin);
+            if (secFetchSite is not null) socket.Options.SetRequestHeader("Sec-Fetch-Site", secFetchSite);
+            try {
+                await socket.ConnectAsync(uri, ct);
+            }
+            catch (WebSocketException) {
+                return socket.HttpStatusCode;
+            }
+
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", ct);
+            return socket.HttpStatusCode;
         }
     }
 
