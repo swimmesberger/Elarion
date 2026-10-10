@@ -280,7 +280,10 @@ public sealed class UploadAvatar : IHandler<UploadAvatar.Command, Result<UploadA
 The generator detects `IFormFile`/`IFormFileCollection` and `[FromForm]` members, binds them from the
 request form (a non-form content type is a `415`), and marks the endpoint `.DisableAntiforgery()` —
 generator-bound endpoints don't participate in ASP.NET's automatic form antiforgery, so a host that wants
-antiforgery on a form post enforces it deliberately. For a mutation that mixes a path id with a JSON
+antiforgery on a form post enforces it deliberately. A form post is a cross-site "simple" request, so a host
+whose browsers authenticate with a cookie installs `UseElarionCrossOriginProtection()` (see
+[CSRF and cookie authentication](/docs/capabilities/hosting#csrf-and-cookie-authentication)). For a mutation that
+mixes a path id with a JSON
 payload, nest the payload in a `[FromBody]` property:
 
 ```csharp
