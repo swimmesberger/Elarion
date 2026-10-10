@@ -96,7 +96,7 @@ Decision point 2 made the handler the only place that declares an error. Two kin
 - **Kind-default codes many handlers return.** An application whose clients branch only on the kind returns
   `not_found`, `conflict`, `business_rule` and tier-2 `validation` from most handlers. Each one logged a development
   warning until it carried a `[ProducesError]` per code, which is ceremony with no client value.
-- **Failures a decorator adds.** An application decorator that translates database constraint violations into
+- **Failures a decorator adds.** A pipeline decorator that translates database constraint violations into
   `conflict` fails operations whose handlers never return that code. No handler can declare it, because a handler does
   not know which decorators wrap it.
 

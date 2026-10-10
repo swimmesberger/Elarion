@@ -127,16 +127,16 @@ changes outbox delivery semantics is a different ADR.
 
 ## Update (2026-10-10): the trigger fired; the primitive is extracted
 
-**The second consumer.** It arrived as application demand rather than as a framework subsystem: an
-application on Elarion built a durable outbound notification table (the "notification queue" the trigger
-above names) with its own worker. That counts, because the reason to wait was design input, and the
-delivery table differs from the outbox in exactly the places this ADR expected a single-consumer helper
-to get wrong: a per-row deadline, a remote `Retry-After`, a ladder instead of exponential backoff,
-terminal states instead of one processed timestamp, a payload purged on completion, a producer that
-withdraws a queued row, and the attempt counted when the row is claimed rather than when it fails. It
-also showed the cost of leaving the pattern as prose: written from scratch, that worker claimed with
-`SELECT … FOR UPDATE SKIP LOCKED` and held the row lock and its transaction across the external call —
-the alternative rejected above. The extraction is therefore no longer speculative.
+**The second consumer.** It arrived as application demand rather than as a framework subsystem: a
+durable outbound notification table (the "notification queue" the trigger above names) with its own
+worker. That counts, because the reason to wait was design input, and such a delivery table differs from
+the outbox in exactly the places this ADR expected a single-consumer helper to get wrong: a per-row
+deadline, a remote `Retry-After`, a ladder instead of exponential backoff, terminal states instead of one
+processed timestamp, a payload purged on completion, a producer that withdraws a queued row, and the
+attempt counted when the row is claimed rather than when it fails. Leaving the pattern as prose has a
+cost too: written from scratch, such a worker tends to claim with `SELECT … FOR UPDATE SKIP LOCKED` and
+hold the row lock and its transaction across the external call — the alternative rejected above. The
+extraction is therefore no longer speculative.
 
 **What shipped.** `Elarion.EntityFrameworkCore.LeasedWork`, a pure EF Core Relational package that the
 outbox now references:

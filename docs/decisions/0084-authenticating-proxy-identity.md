@@ -10,16 +10,16 @@
 
 Small apps are often deployed behind an authenticating reverse proxy — Cloudflare Access, Google Cloud IAP,
 oauth2-proxy, an OpenID Connect gateway — and run no sign-in flow of their own. The proxy forwards a signed token in a
-vendor header or a cookie. Two independent applications on Elarion each rebuilt the same adapter around JwtBearer:
-read the token from the vendor location only, validate issuer and audience with an explicit any-audience opt-in, fetch
-keys from a JWKS URL or discovery, refuse to start unauthenticated outside Development, provide a Development stand-in
-identity with a user switch, and read an issuer/subject/e-mail record from the principal.
+vendor header or a cookie. Without framework support, every such application rebuilds the same adapter around
+JwtBearer: read the token from the vendor location only, validate issuer and audience with an explicit any-audience
+opt-in, fetch keys from a JWKS URL or discovery, refuse to start unauthenticated outside Development, provide a
+Development stand-in identity with a user switch, and read an issuer/subject/e-mail record from the principal.
 
-Both copies hand-rolled the signing-key cache. One of them let exactly one caller fetch while every concurrent request
-read the cached key list — which is empty on the first fetch — so a burst of first requests after a cold start was
-refused; the same happened for a minute after any failed fetch. The other avoided the cold-start half with an explicit
-warm-up call at startup. The security-relevant parts (audience fail-closed, startup refusal, which header is trusted)
-were easy to get subtly wrong.
+The signing-key cache is the part most often hand-rolled, and the easiest to get wrong. A cache that lets exactly one
+caller fetch while every concurrent request reads the cached key list — still empty during the first fetch — refuses a
+burst of first requests after a cold start, and again for as long as a failed fetch is remembered; avoiding that takes
+an explicit warm-up at startup. The security-relevant parts (audience fail-closed, startup refusal, which header is
+trusted) are just as easy to get subtly wrong.
 
 ## Decision
 
@@ -60,7 +60,8 @@ Ship the adapter as a new optional package, `Elarion.AspNetCore.ProxyIdentity`:
 ## Rejected alternatives
 
 - **A hand-rolled key store with a refresh-on-unknown-`kid` wait.** It would make the first request after a rotation
-  succeed, but it re-implements caching, rate limiting and single-flight, which is exactly where both copies had bugs.
+  succeed, but it re-implements caching, rate limiting and single-flight, which is exactly where hand-rolled caches go
+  wrong.
   The one refused request per rotation is the cheaper trade-off.
 - **Trusting a plain identity header** (`X-Forwarded-Email`). Anything that reaches the app without the proxy can set
   it; validating the signed token is the point.
