@@ -9,7 +9,7 @@
 
 ## Context
 
-Downstream apps (e.g. ImmoCentral) each hand-roll handler authorization: an `AuthorizationDecorator`
+Downstream apps each hand-roll handler authorization: an `AuthorizationDecorator`
 reading a `[RequirePermission]` attribute, an `IPermissionChecker` over `HttpContext`, and — when using
 ASP.NET Core Identity with snake_case — a hand-written `OnModelCreating` block remapping the Identity
 tables. The framework should own these as reusable, domain-neutral building blocks, while keeping the
