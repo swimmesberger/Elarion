@@ -8,6 +8,18 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Security
+- **BREAKING: `/rpc` refuses a request whose `Content-Type` is not JSON.** `MapElarionJsonRpc` parsed and
+  dispatched any POST body that was valid JSON, so a cross-site `<form enctype="text/plain">` whose field spelled
+  out a JSON-RPC envelope (or a `no-cors` fetch with an untyped body) reached the handlers with the browser's
+  cookies, without a CORS preflight. The endpoint now answers HTTP 415 with a JSON-RPC `invalid_request` envelope
+  unless the content type is `application/json` or `application/*+json`, a missing header included, consistent with
+  the `[HttpEndpoint]` binder; a JSON body makes every cross-origin call preflighted. The generated TypeScript client
+  already sends the header. Migration: add `Content-Type: application/json` to hand-written callers (`curl -d`
+  without `-H`); a host without cookie authentication whose callers cannot send it may set
+  `JsonRpcOptions.RequireJsonContentType = false`. `MapElarionMcp` needs no change: the MCP transport already
+  refuses a non-JSON body with 415 (now covered by a test).
+
 ### Added
 - **`app.UseElarionCrossOriginProtection(o => …)`: CSRF defense for hosts whose browsers authenticate with a
   cookie.** Form and file `[HttpEndpoint]` routes, `MapElarionBlobUploads()` and hand-written routes accept
@@ -20,10 +32,10 @@ minor releases may include breaking changes.
   are validated at startup. A refusal is HTTP 403 with a ProblemDetails `code` of `cross_origin.refused`
   (`CrossOriginProtectionErrorCodes.Refused`), written without depending on the host's JSON configuration. The
   hosting page gains a *CSRF and cookie authentication* section listing what each surface is protected by.
-
 - **`Elarion.AspNetCore.ProxyIdentity`: authentication for apps behind an authenticating reverse proxy (ADR-0084).**
-  Apps behind Cloudflare Access, Google IAP, oauth2-proxy or an OIDC gateway each rebuilt the same JwtBearer adapter,
-  and hand-rolled key caches refused concurrent first requests while the first fetch ran. `AddElarionProxyIdentity(
+  Apps behind Cloudflare Access, Google IAP, oauth2-proxy or an OIDC gateway otherwise each wire the same JwtBearer
+  adapter by hand, and a hand-rolled key cache easily refuses concurrent first requests while its first fetch runs.
+  `AddElarionProxyIdentity(
   configuration, environment)` binds the `ProxyIdentity` section and reads the token only from the configured header
   and/or cookie (a `Bearer ` prefix is stripped); it validates issuer, audience (required unless `AllowAnyAudience`),
   lifetime and signature with `MapInboundClaims = false`. Keys come from a JWKS URL or OpenID Connect discovery
@@ -51,7 +63,6 @@ minor releases may include breaking changes.
   standard RFC 7807 members, so a client generated from it (`@hey-api/openapi-ts`, `openapi-typescript`, Kiota) saw
   the code as an unknown extension and had to cast or parse `detail`. `AddElarionOpenApi()` now adds both as optional
   members of every `ProblemDetails`-derived schema; the generated `error.code` is a typed `string`.
-
 - **TypeScript client: the TanStack Start adapter forwards configurable request headers during SSR.** The generated
   `start-adapter.ts` forwarded only the incoming `cookie`, so an app behind an authenticating reverse proxy (Cloudflare
   Access, Google IAP, oauth2-proxy) had to hand-copy the isomorphic read for the proxy's identity header — and keep the
@@ -72,6 +83,7 @@ minor releases may include breaking changes.
   longer remote `Retry-After`. No call holds a row lock or a transaction across the work itself. The outbox now
   claims and finalizes through the primitive. Its delivery behavior, retry formula, and table model are unchanged.
   The coordination capability page shows a delivery worker built on the primitive.
+
 ### Fixed
 - **HTTP binding-tier failures carry `code: "validation"`.** A generated `[HttpEndpoint]` answered an unparseable or
   missing route/query/header/form value, or an empty or malformed JSON body, with a `ValidationProblem` that had no
@@ -83,17 +95,6 @@ minor releases may include breaking changes.
   REST clients come from the OpenAPI document by design, ADR-0026) and gives the two supported paths: add `[Handler]`
   to get the generated function and typed error union, or generate from OpenAPI. The OpenAPI page gains a *Typed
   errors* section that branches on `error.code` instead of hand-parsing ProblemDetails.
-### Security
-- **BREAKING: `/rpc` refuses a request whose `Content-Type` is not JSON.** `MapElarionJsonRpc` parsed and
-  dispatched any POST body that was valid JSON, so a cross-site `<form enctype="text/plain">` whose field spelled
-  out a JSON-RPC envelope (or a `no-cors` fetch with an untyped body) reached the handlers with the browser's
-  cookies, without a CORS preflight. The endpoint now answers HTTP 415 with a JSON-RPC `invalid_request` envelope
-  unless the content type is `application/json` or `application/*+json`, a missing header included, consistent with
-  the `[HttpEndpoint]` binder; a JSON body makes every cross-origin call preflighted. The generated TypeScript client
-  already sends the header. Migration: add `Content-Type: application/json` to hand-written callers (`curl -d`
-  without `-H`); a host without cookie authentication whose callers cannot send it may set
-  `JsonRpcOptions.RequireJsonContentType = false`. `MapElarionMcp` needs no change: the MCP transport already
-  refuses a non-JSON body with 415 (now covered by a test).
 
 ## [0.2.11] - 2026-10-08
 
