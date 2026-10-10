@@ -17,13 +17,24 @@ namespace Elarion.AspNetCore;
 public static class JsonRpcEndpoint {
     /// <summary>
     /// Handles an incoming HTTP request as a JSON-RPC 2.0 call.
-    /// Detects whether the body is a single request object or a batch array.
+    /// Detects whether the body is a single request object or a batch array. A request whose <c>Content-Type</c> is
+    /// not JSON is refused with HTTP 415 unless <see cref="JsonRpcOptions.RequireJsonContentType"/> is turned off.
     /// </summary>
     public static async Task HandleRpc(HttpContext ctx) {
         var options = ctx.RequestServices.GetRequiredService<IOptions<JsonRpcOptions>>().Value;
         var dispatcher = ctx.RequestServices.GetRequiredService<JsonRpcDispatcher>();
         var logger = ctx.RequestServices.GetRequiredService<ILogger<JsonRpcDispatcher>>();
         var jsonOptions = dispatcher.JsonOptions;
+
+        // Refuse before reading the body: a non-JSON body is the shape of a cross-site form or no-cors fetch,
+        // which the browser sends without a CORS preflight and with the site's cookies (JsonRpcOptions).
+        if (options.RequireJsonContentType && !ctx.Request.HasJsonContentType()) {
+            logger.LogWarning(
+                "JSON-RPC request refused: Content-Type {ContentType} is not JSON",
+                ctx.Request.ContentType ?? "(none)");
+            await WriteUnsupportedMediaType(ctx, jsonOptions);
+            return;
+        }
 
         JsonDocument doc;
         var parseStartTimestamp = Stopwatch.GetTimestamp();
@@ -278,6 +289,18 @@ public static class JsonRpcEndpoint {
                 $"The HTTP {Abstractions.Idempotency.IdempotencyKeyNames.HttpHeader} header is not allowed on a JSON-RPC batch: " +
                 "it applies to the whole request and cannot key the batch's distinct operations. Carry a per-item key at each " +
                 $"request's params._meta.{Abstractions.Idempotency.IdempotencyKeyNames.MetaKey} instead.");
+        await JsonSerializer.SerializeAsync(
+            ctx.Response.Body, JsonRpcResponse.FromError((string?)null, error), jsonOptions, ctx.RequestAborted);
+    }
+
+    private static async Task WriteUnsupportedMediaType(HttpContext ctx, JsonSerializerOptions jsonOptions) {
+        // HTTP 415 like the REST binder, with a JSON-RPC Invalid Request envelope (-32600) so a JSON-RPC client gets
+        // a body it can parse; the body is written through the same JSON-RPC context as every other envelope.
+        RecordEndpointInvalidRequest("_invalid", "unsupported-media-type");
+        ctx.Response.StatusCode = StatusCodes.Status415UnsupportedMediaType;
+        ctx.Response.ContentType = "application/json";
+        var error = RpcError.InvalidRequest(
+            "Unsupported media type: a JSON-RPC request must be sent with Content-Type: application/json.");
         await JsonSerializer.SerializeAsync(
             ctx.Response.Body, JsonRpcResponse.FromError((string?)null, error), jsonOptions, ctx.RequestAborted);
     }

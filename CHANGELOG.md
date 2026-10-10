@@ -8,6 +8,18 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Security
+- **BREAKING: `/rpc` refuses a request whose `Content-Type` is not JSON.** `MapElarionJsonRpc` parsed and
+  dispatched any POST body that was valid JSON, so a cross-site `<form enctype="text/plain">` whose field spelled
+  out a JSON-RPC envelope (or a `no-cors` fetch with an untyped body) reached the handlers with the browser's
+  cookies, without a CORS preflight. The endpoint now answers HTTP 415 with a JSON-RPC `invalid_request` envelope
+  unless the content type is `application/json` or `application/*+json`, a missing header included, consistent with
+  the `[HttpEndpoint]` binder; a JSON body makes every cross-origin call preflighted. The generated TypeScript client
+  already sends the header. Migration: add `Content-Type: application/json` to hand-written callers (`curl -d`
+  without `-H`); a host without cookie authentication whose callers cannot send it may set
+  `JsonRpcOptions.RequireJsonContentType = false`. `MapElarionMcp` needs no change: the MCP transport already
+  refuses a non-JSON body with 415 (now covered by a test).
+
 ## [0.2.11] - 2026-10-08
 
 ### Added
