@@ -126,6 +126,7 @@ public sealed class CurrentUserTransportTests {
             RequestServices = requestScope,
             User = Authenticated(userId)
         };
+        context.Request.ContentType = "application/json";
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         context.Response.Body = new MemoryStream();
         return context;

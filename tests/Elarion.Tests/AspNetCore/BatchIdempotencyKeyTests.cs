@@ -116,6 +116,7 @@ public sealed class BatchIdempotencyKeyTests {
         };
         if (idempotencyKey is not null) context.Request.Headers[IdempotencyKeyNames.HttpHeader] = idempotencyKey;
 
+        context.Request.ContentType = "application/json";
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         context.Response.Body = new MemoryStream();
         return context;

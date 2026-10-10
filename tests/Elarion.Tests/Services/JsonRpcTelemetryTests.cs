@@ -207,6 +207,7 @@ public sealed class JsonRpcTelemetryTests {
         var context = new DefaultHttpContext {
             RequestServices = provider
         };
+        context.Request.ContentType = "application/json";
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         context.Response.Body = new MemoryStream();
         return context;
