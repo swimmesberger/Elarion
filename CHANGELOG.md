@@ -8,6 +8,11 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **HTTP binding-tier failures carry `code: "validation"`.** A generated `[HttpEndpoint]` answered an unparseable or
+  missing route/query/header/form value, or an empty or malformed JSON body, with a `ValidationProblem` that had no
+  `code`, unlike the handler-tier validation failure it mirrors, so a client branching on `code` missed it.
+
 ## [0.2.11] - 2026-10-08
 
 ### Added
