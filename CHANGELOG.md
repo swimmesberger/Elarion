@@ -20,6 +20,13 @@ minor releases may include breaking changes.
   missing route/query/header/form value, or an empty or malformed JSON body, with a `ValidationProblem` that had no
   `code`, unlike the handler-tier validation failure it mirrors, so a client branching on `code` missed it.
 
+### Documentation
+- **TypeScript client: handlers exposed only over REST.** The client page now explains why a handler with
+  `[HttpEndpoint]` but no `[Handler]` has no generated function (`rpc-schema.json` lists the JSON-RPC operations, and
+  REST clients come from the OpenAPI document by design, ADR-0026) and gives the two supported paths: add `[Handler]`
+  to get the generated function and typed error union, or generate from OpenAPI. The OpenAPI page gains a *Typed
+  errors* section that branches on `error.code` instead of hand-parsing ProblemDetails.
+
 ## [0.2.11] - 2026-10-08
 
 ### Added
