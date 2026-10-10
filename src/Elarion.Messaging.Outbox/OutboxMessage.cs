@@ -1,3 +1,5 @@
+using Elarion.EntityFrameworkCore.LeasedWork;
+
 namespace Elarion.Messaging.Outbox;
 
 /// <summary>
@@ -9,7 +11,7 @@ namespace Elarion.Messaging.Outbox;
 /// resolves consumers to several roles writes one envelope per distinct role, all sharing
 /// <see cref="MessageId"/> as their inbox/idempotency identity.
 /// </remarks>
-public sealed class OutboxMessage {
+public sealed class OutboxMessage : ILeasedWorkRow {
     /// <summary>The unique delivery-group identifier (primary key and lease/finalize identity).</summary>
     public required Guid Id { get; init; }
 
