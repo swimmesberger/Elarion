@@ -8,6 +8,16 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **TypeScript client: the TanStack Start adapter forwards configurable request headers during SSR.** The generated
+  `start-adapter.ts` forwarded only the incoming `cookie`, so an app behind an authenticating reverse proxy (Cloudflare
+  Access, Google IAP, oauth2-proxy) had to hand-copy the isomorphic read for the proxy's identity header — and keep the
+  `createIsomorphicFn().server(...)` shape that import protection requires. `createStartRpcApi` now takes
+  `forwardHeaders` (default `['cookie']`; the list replaces the default, `[]` forwards nothing), and the adapter
+  exports `forwardRequestHeaders(names)` for composing into any other client. Names match case-insensitively, absent
+  headers are skipped, explicit `headers` still win, and nothing is forwarded in the browser. `forwardRequestCookie`
+  stays. Regenerate with `--framework tanstack-start` to pick it up.
+
 ## [0.2.11] - 2026-10-08
 
 ### Added
