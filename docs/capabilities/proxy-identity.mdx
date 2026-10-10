@@ -33,6 +33,7 @@ builder.Services.AddElarionProxyIdentity(builder.Configuration, builder.Environm
 builder.Services.AddElarionAuthorization();
 
 var app = builder.Build();
+app.UseElarionCrossOriginProtection();   // the proxy's session cookie is an ambient credential (see below)
 app.UseAuthentication();
 app.UseElarionCurrentUser();   // after authentication, before endpoints
 app.UseAuthorization();
@@ -209,7 +210,10 @@ refresh interval is below the library minimum.
 <Callout type="warn">
 The token only says who the proxy signed in. Make sure the app is reachable **only** through the proxy, and keep the
 audience scoped to this app: without it any other application behind the same issuer could present its tokens here.
-A token in a cookie is an ambient credential — protect unsafe requests against cross-site use.
+The proxy signs the browser in with its own session cookie and forwards the token on every request it lets through,
+including one that a page on another site makes the browser send. The token is therefore an ambient credential whether
+the app reads it from a header or a cookie: install `UseElarionCrossOriginProtection` (see
+[CSRF and cookie authentication](/docs/capabilities/hosting#csrf-and-cookie-authentication)).
 </Callout>
 
 ## Development stand-in
