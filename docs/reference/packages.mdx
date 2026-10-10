@@ -36,6 +36,7 @@ Protocols remain host-neutral where possible; ASP.NET packages own only their wi
 | `Elarion.AspNetCore.Mcp` | Handlers should be exposed as an MCP server over Streamable HTTP. This is the only package referencing the MCP SDK. |
 | `Elarion.AspNetCore.SchemaGeneration` | An ASP.NET build should export `rpc-schema.json` for client generation. |
 | `Elarion.AspNetCore.Identity` | An ASP.NET host needs Identity registration, EF stores, `ICurrentUser` claims mapping, and the default authorizer. |
+| `Elarion.AspNetCore.ProxyIdentity` | The app sits behind an authenticating reverse proxy (Cloudflare Access, Google IAP, oauth2-proxy, an OIDC gateway) and must validate the token it forwards in a header or cookie, refuse to start unauthenticated, and run locally with a stand-in identity. See [proxy identity](/docs/capabilities/proxy-identity). |
 
 See [transport capabilities](/docs/capabilities/transports) and
 [writing a custom transport](/docs/capabilities/transports/custom-transports).

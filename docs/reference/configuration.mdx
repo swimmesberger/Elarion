@@ -130,6 +130,32 @@ Properties read by `Elarion.AspNetCore.SchemaGeneration` during build:
 
 See [Schema generation](/docs/capabilities/transports/schema-generation).
 
+## Proxy identity
+
+`AddElarionProxyIdentity(configuration, environment)` binds the `ProxyIdentity` section (package
+`Elarion.AspNetCore.ProxyIdentity`). Outside Development it refuses to start unless `Enabled` is `true` and the
+section is complete.
+
+| Key | Default |
+| --- | --- |
+| `ProxyIdentity:Enabled` | `false` |
+| `ProxyIdentity:Issuer` | — (required when enabled) |
+| `ProxyIdentity:JwksUrl` / `ProxyIdentity:MetadataAddress` | — (neither: `{Issuer}/.well-known/openid-configuration`) |
+| `ProxyIdentity:RequireHttpsMetadata` | `true` |
+| `ProxyIdentity:Audiences` | — (required unless `AllowAnyAudience`) |
+| `ProxyIdentity:AllowAnyAudience` | `false` |
+| `ProxyIdentity:TokenHeader` / `ProxyIdentity:TokenCookie` | — (at least one) |
+| `ProxyIdentity:Claims:{Subject,Email,EmailVerified,Name,Groups,Roles}` | `sub`, `email`, `email_verified`, `name`, `groups`, `roles` |
+| `ProxyIdentity:EmailTrust` | `Claim` |
+| `ProxyIdentity:LogoutUrl` | — |
+| `ProxyIdentity:ClockSkew` | `00:01:00` |
+| `ProxyIdentity:AutomaticRefreshInterval` | `01:00:00` |
+| `ProxyIdentity:RefreshInterval` | `00:01:00` |
+| `ProxyIdentity:LastKnownGoodLifetime` | `00:00:00` (off) |
+| `ProxyIdentity:Development:*` | `developer` / `developer@example.com`, switch header `X-Elarion-Dev-User`, cookie `elarion-dev-user` |
+
+See [Proxy identity](/docs/capabilities/proxy-identity).
+
 ## Current user (options, not config)
 
 `AddElarionCurrentUser(options => …)` configures claim mapping in code rather than `appsettings`:

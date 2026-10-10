@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Optional ASP.NET Core authentication for Elarion apps behind an authenticating reverse proxy (Cloudflare Access, Google IAP, oauth2-proxy, any OIDC gateway): AddElarionProxyIdentity validates the token the proxy forwards in a header or cookie with JwtBearer (issuer, audience, signing keys from a JWKS URL or OIDC discovery through IdentityModel's ConfigurationManager), refuses to start unauthenticated outside Development, maps ICurrentUser, provides a Development stand-in identity with a user switch, and reads an ExternalIdentity record.</Description>
+    <!-- Options bind from IConfiguration through the configuration-binding source generator, not the reflection binder. -->
+    <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj"/>
+    <ProjectReference Include="..\Elarion.AspNetCore\Elarion.AspNetCore.csproj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer"/>
+  </ItemGroup>
+
+</Project>

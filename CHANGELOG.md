@@ -21,6 +21,20 @@ minor releases may include breaking changes.
   (`CrossOriginProtectionErrorCodes.Refused`), written without depending on the host's JSON configuration. The
   hosting page gains a *CSRF and cookie authentication* section listing what each surface is protected by.
 
+- **`Elarion.AspNetCore.ProxyIdentity`: authentication for apps behind an authenticating reverse proxy (ADR-0084).**
+  Apps behind Cloudflare Access, Google IAP, oauth2-proxy or an OIDC gateway each rebuilt the same JwtBearer adapter,
+  and hand-rolled key caches refused concurrent first requests while the first fetch ran. `AddElarionProxyIdentity(
+  configuration, environment)` binds the `ProxyIdentity` section and reads the token only from the configured header
+  and/or cookie (a `Bearer ` prefix is stripped); it validates issuer, audience (required unless `AllowAnyAudience`),
+  lifetime and signature with `MapInboundClaims = false`. Keys come from a JWKS URL or OpenID Connect discovery
+  through IdentityModel's `ConfigurationManager` (single-flight first fetch, background refresh, current keys kept on
+  a failed or refused refresh; a discovery document must name the configured issuer; the last-known-good grace is off
+  by default). It refuses to start outside Development when disabled or incomplete, maps `ICurrentUser` to the
+  configured subject/e-mail/`roles` claims, and in Development signs requests in as a stand-in identity switchable by
+  the `X-Elarion-Dev-User` header or `elarion-dev-user` cookie. `ExternalIdentity.TryRead` (from a principal or
+  `ICurrentUser`) returns issuer, subject, e-mail with an `EmailTrust` decision, name, groups and roles;
+  `AddElarionProxyIdentitySessionSection()` adds a `proxyIdentity` section to the session snapshot. The new *Proxy
+  identity* page has recipes for each proxy.
 ### Security
 - **BREAKING: `/rpc` refuses a request whose `Content-Type` is not JSON.** `MapElarionJsonRpc` parsed and
   dispatched any POST body that was valid JSON, so a cross-site `<form enctype="text/plain">` whose field spelled
