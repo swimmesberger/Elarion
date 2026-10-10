@@ -8,6 +8,19 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Errors: `[ProducesError]` on a decorator, an `[AppModule]` class or the assembly (ADR-0080 update).** A failure
+  many handlers share no longer needs an attribute on each handler. `[assembly: ProducesError(ErrorKind.NotFound)]`
+  declares the kind-default code for every operation in the assembly, the same attribute on a module class for every
+  operation in the module, and on a pipeline decorator for every operation whose resolved `[DecoratorList]` includes
+  it (a decorator excluded by its generic constraints adds nothing; one with an `AppliesTo` predicate adds its errors
+  to every operation it can wrap). The declarations are merged into each operation's manifest entry, dispatcher
+  registration, `rpc-schema.json` and generated TypeScript client, so the Development-only "does not declare" warning
+  no longer fires for them. Per code, the declaration closest to the handler wins: the handler, the framework's
+  implied errors, the decorators, the module, then the assembly. `ELERR001`/`ELERR002` messages now name the
+  declaring type or assembly instead of always saying "Handler". The Billing sample declares `not_found` once for its
+  application assembly; regenerate `rpc-schema.json` and the TypeScript client to pick up new declarations.
+
 ## [0.2.11] - 2026-10-08
 
 ### Added
