@@ -819,6 +819,81 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_RegistersInheritedErrorDeclarations_WithEachOperation() {
+        // Assembly and module defaults plus a decorator's declaration reach the registered contract, so the
+        // runtime check admits those codes and the schema export lists them.
+        const string hostSource =
+            """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+            using Elarion.Abstractions.Pipeline;
+            using Elarion.AspNetCore;
+
+            [assembly: GenerateModuleBootstrapper]
+            [assembly: ProducesError(ErrorKind.NotFound)]
+            [assembly: Host.App.AppPipeline]
+
+            namespace Host.App {
+                public sealed record ConstraintProblem(string Constraint);
+
+                [ProducesError(ErrorKind.Conflict, typeof(ConstraintProblem))]
+                public sealed class ConstraintDecorator<TRequest, TResponse>(IHandler<TRequest, TResponse> inner)
+                    : IHandler<TRequest, TResponse> where TRequest : ICommand {
+                    public ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) =>
+                        inner.HandleAsync(request, ct);
+                }
+
+                [DecoratorList(typeof(ConstraintDecorator<,>))]
+                [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
+                public sealed class AppPipelineAttribute : Attribute;
+
+                [AppModule("App", Kind = AppModuleKind.Core)]
+                [ProducesError(ErrorKind.BusinessRule)]
+                public static class AppModule { }
+
+                [Handler("things.get")]
+                public sealed class GetThing : IHandler<GetThing.Query, Result<GetThing.Response>> {
+                    public sealed record Query : IQuery { public required Guid Id { get; init; } }
+                    public sealed record Response(string Name);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("thing"));
+                }
+
+                [Handler("things.archive")]
+                public sealed class ArchiveThing : IHandler<ArchiveThing.Command, Result<ArchiveThing.Response>> {
+                    public sealed record Command : ICommand { public required Guid Id { get; init; } }
+                    public sealed record Response(bool Ok);
+                    public ValueTask<Result<Response>> HandleAsync(Command request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(true));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(hostSource, [], out var compilationWithGenerated);
+
+        const string contract = "global::Elarion.Abstractions.ErrorContract";
+        const string kind = "global::Elarion.Abstractions.ErrorKind";
+        generated.Should().Contain(
+            "dispatcher.Map<global::Host.App.GetThing.Query, global::Host.App.GetThing.Response>(\"things.get\", "
+            + "global::Elarion.Abstractions.HandlerTransports.All, errors: "
+            + $"new {contract}[] {{ new {contract} {{ Code = \"business_rule\", Kind = {kind}.BusinessRule }}, "
+            + $"new {contract} {{ Code = \"not_found\", Kind = {kind}.NotFound }} }});");
+        generated.Should().Contain(
+            "dispatcher.Map<global::Host.App.ArchiveThing.Command, global::Host.App.ArchiveThing.Response>(\"things.archive\", "
+            + "global::Elarion.Abstractions.HandlerTransports.All, errors: "
+            + $"new {contract}[] {{ new {contract} {{ Code = \"business_rule\", Kind = {kind}.BusinessRule }}, "
+            + $"new {contract} {{ Code = \"conflict\", Kind = {kind}.Conflict, DataType = typeof(global::Host.App.ConstraintProblem) }}, "
+            + $"new {contract} {{ Code = \"not_found\", Kind = {kind}.NotFound }} }});");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Bootstrapper_WarnsOnHostCompilationHandlerUnderNoModule() {
         const string hostSource =
             """

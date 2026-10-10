@@ -202,7 +202,8 @@ human-readable `message`, and `rpcCode` — the numeric JSON-RPC code, which onl
 and is why it is not called `code`. The wire shape is always `error.data = { code, data? }`
 ([ADR-0080](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md)).
 
-Handlers declare the errors they produce with `[ProducesError]`, and the generator emits them per method: each
+Handlers declare the errors they produce with `[ProducesError]` (on the handler, or once on a decorator, module or
+assembly for errors that many operations share), and the generator emits them per method: each
 method's `errors` entry in `RpcMethods` maps a code to its kind and payload type, and the client exports
 `RpcMethodError<M>`, a union of `RpcError` variants discriminated by `code`, with `data` typed per variant:
 

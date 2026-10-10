@@ -52,6 +52,9 @@ and any factory takes a specific one: `AppError.Conflict("Seat taken.", code: "s
 A handler **declares** the failures it can produce with `[ProducesError("seat.taken", ErrorKind.Conflict, typeof(SeatTaken))]`;
 the declaration flows into the JSON-RPC schema and the generated TypeScript client, which types `error.code` and
 `error.data` per method. See the [reference](/docs/reference/result-and-errors#produceserror--the-declared-error-contract).
+Failures that many handlers share are declared once: on the assembly or the `[AppModule]` class for kind-default
+codes such as `not_found`, or on the decorator that adds them (see
+[Declaring errors for many operations](/docs/reference/result-and-errors#declaring-errors-for-many-operations)).
 
 ### Error kinds
 

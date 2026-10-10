@@ -7,9 +7,11 @@ namespace Elarion.Generators;
 /// <summary>
 /// Collects a handler's declared error contract (ADR-0080): the <c>[ProducesError]</c> declarations on the handler
 /// plus the failures the framework pipeline adds where they are statically knowable (request validation,
-/// authorization requirements, feature gates, idempotency). The result is published with the operation, so the
-/// schema export and the generated clients describe every failure the operation can report. Also verifies that the
-/// response graph does not opt members out of the serializer contract (ADR-0082).
+/// authorization requirements, feature gates, idempotency); <see cref="ErrorContractScopes"/> later adds the
+/// declarations the operation inherits from its pipeline decorators, its module and its assembly. The result is
+/// published with the operation, so the schema export and the generated clients describe every failure the
+/// operation can report. Also verifies that the response graph does not opt members out of the serializer contract
+/// (ADR-0082).
 /// </summary>
 internal static class ErrorContractDiscovery {
     public const string ProducesErrorAttributeMetadataName = "Elarion.Abstractions.ProducesErrorAttribute";
@@ -45,7 +47,7 @@ internal static class ErrorContractDiscovery {
     public static readonly DiagnosticDescriptor InvalidErrorCode = new(
         "ELERR001",
         "Invalid error code",
-        "Handler '{0}' declares error code '{1}' which is not valid: use lower-case ASCII letters, digits and "
+        "'{0}' declares error code '{1}' which is not valid: use lower-case ASCII letters, digits and "
         + "underscores in dot-separated segments (for example \"token.malformed\")",
         "Elarion.Errors",
         DiagnosticSeverity.Error,
@@ -54,7 +56,7 @@ internal static class ErrorContractDiscovery {
     public static readonly DiagnosticDescriptor ConflictingErrorDeclaration = new(
         "ELERR002",
         "Conflicting error declaration",
-        "Handler '{0}' declares error code '{1}' more than once with a different kind or payload type; a code "
+        "'{0}' declares error code '{1}' more than once with a different kind or payload type; a code "
         + "has exactly one kind and one payload type",
         "Elarion.Errors",
         DiagnosticSeverity.Error,
@@ -73,6 +75,10 @@ internal static class ErrorContractDiscovery {
     public sealed record ErrorDeclaration(string Code, string Kind, string? DataTypeFqn);
 
     /// <summary>The handler's declared and implied errors, sorted by code; reports invalid or conflicting declarations.</summary>
+    /// <remarks>
+    /// Declarations inherited from outside the handler class (pipeline decorators, the module, the assembly) are
+    /// added by a later stage, <see cref="ErrorContractScopes"/>, because they live in other files.
+    /// </remarks>
     public static EquatableArray<ErrorDeclaration> Collect(
         INamedTypeSymbol handler,
         INamedTypeSymbol requestType,
@@ -80,39 +86,57 @@ internal static class ErrorContractDiscovery {
         bool isIdempotent,
         Action<DiagnosticInfo>? report) {
         var byCode = new Dictionary<string, ErrorDeclaration>(System.StringComparer.Ordinal);
-
+        var owner = handler.ToDisplayString();
+        var location = handler.Locations.FirstOrDefault();
         for (var current = handler; current is not null; current = current.BaseType)
-            foreach (var attribute in current.GetAttributes()) {
-                if (attribute.AttributeClass?.ToDisplayString() != ProducesErrorAttributeMetadataName)
-                    continue;
-
-                if (!TryReadDeclaration(attribute, out var declaration))
-                    continue;
-
-                if (!IsValidCode(declaration.Code)) {
-                    report?.Invoke(DiagnosticInfo.Create(
-                        InvalidErrorCode, handler.Locations.FirstOrDefault(), handler.ToDisplayString(),
-                        declaration.Code));
-                    continue;
-                }
-
-                if (byCode.TryGetValue(declaration.Code, out var existing)) {
-                    if (existing != declaration)
-                        report?.Invoke(DiagnosticInfo.Create(
-                            ConflictingErrorDeclaration, handler.Locations.FirstOrDefault(),
-                            handler.ToDisplayString(), declaration.Code));
-
-                    continue;
-                }
-
-                byCode[declaration.Code] = declaration;
-            }
+            ReadDeclarations(current.GetAttributes(), owner, _ => location, byCode, report);
 
         foreach (var implied in ImpliedErrors(handler, requestType, compilation, isIdempotent))
             if (!byCode.ContainsKey(implied.Code))
                 byCode[implied.Code] = implied;
 
-        return byCode.Values
+        return Sorted(byCode.Values);
+    }
+
+    /// <summary>
+    /// Reads the <c>[ProducesError]</c> declarations among <paramref name="attributes"/> into
+    /// <paramref name="byCode"/>, keeping the first declaration of a code. An invalid code (ELERR001) and a second
+    /// declaration of a code with a different kind or payload (ELERR002) are reported against
+    /// <paramref name="owner"/>, the type or assembly that carries the attributes.
+    /// </summary>
+    public static void ReadDeclarations(
+        IEnumerable<AttributeData> attributes,
+        string owner,
+        Func<AttributeData, Location?> locate,
+        Dictionary<string, ErrorDeclaration> byCode,
+        Action<DiagnosticInfo>? report) {
+        foreach (var attribute in attributes) {
+            if (attribute.AttributeClass?.ToDisplayString() != ProducesErrorAttributeMetadataName)
+                continue;
+
+            if (!TryReadDeclaration(attribute, out var declaration))
+                continue;
+
+            if (!IsValidCode(declaration.Code)) {
+                report?.Invoke(DiagnosticInfo.Create(InvalidErrorCode, locate(attribute), owner, declaration.Code));
+                continue;
+            }
+
+            if (byCode.TryGetValue(declaration.Code, out var existing)) {
+                if (existing != declaration)
+                    report?.Invoke(DiagnosticInfo.Create(
+                        ConflictingErrorDeclaration, locate(attribute), owner, declaration.Code));
+
+                continue;
+            }
+
+            byCode[declaration.Code] = declaration;
+        }
+    }
+
+    /// <summary>The declarations in ordinal code order — the published, deterministic contract order.</summary>
+    public static EquatableArray<ErrorDeclaration> Sorted(IEnumerable<ErrorDeclaration> declarations) {
+        return declarations
             .OrderBy(static d => d.Code, System.StringComparer.Ordinal)
             .ToEquatableArray();
     }

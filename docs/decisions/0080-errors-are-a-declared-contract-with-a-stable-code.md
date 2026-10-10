@@ -88,3 +88,47 @@ the generated client** — the same shape as every other declared contract.
   collides with payloads that already have a `code` member.
 - **Declaring errors in a side registry instead of on the handler.** The contract belongs next to the code that
   returns it, where attributes already carry authorization, idempotency and gates.
+
+## Update (2026-10-10): decorator, module and assembly declarations
+
+Decision point 2 made the handler the only place that declares an error. Two kinds of failure did not fit:
+
+- **Kind-default codes many handlers return.** An application whose clients branch only on the kind returns
+  `not_found`, `conflict`, `business_rule` and tier-2 `validation` from most handlers. Each one logged a development
+  warning until it carried a `[ProducesError]` per code, which is ceremony with no client value.
+- **Failures a decorator adds.** An application decorator that translates database constraint violations into
+  `conflict` fails operations whose handlers never return that code. No handler can declare it, because a handler does
+  not know which decorators wrap it.
+
+`[ProducesError]` therefore also applies to the assembly and to classes other than the handler, with the same four
+constructors. The generator merges, into each operation's contract:
+
+1. the handler's own declarations (and its base classes'), then the implied errors of decision point 2;
+2. the declarations on the decorators of its resolved `[DecoratorList]`, in pipeline order;
+3. the declarations on its `[AppModule]` class;
+4. the declarations on its assembly.
+
+The first place to declare a code wins, so a default never changes a code the handler declares itself (a handler can
+add a typed payload to an assembly's kind-default code). `ELERR001` and `ELERR002` apply to each place on its own.
+
+The decorator list is resolved by the code that builds the handler's pipeline, so the declared contract and the
+pipeline cannot disagree, and a decorator excluded by its generic constraints contributes nothing. An `AppliesTo`
+predicate runs at runtime and is not statically knowable, so a conditional decorator's declarations are added to every
+operation it can wrap. Over-declaring costs a variant in the schema and the client union that callers never see;
+under-declaring costs a development warning and an untyped error, so the over-approximation is the safer side.
+
+The declarations live in other files than the handler, so the generator merges them in a second stage that combines
+the discovered operations with the module list and the current compilation, re-resolving each handler by metadata
+name. Per-handler discovery stays cached per syntax tree. An assembly declaration covers the operations declared in
+that assembly; each assembly publishes its merged contracts in its manifest, so referenced modules need nothing new.
+
+Rejected alternatives:
+
+- **A separate `[ElarionErrorDefaults(params ErrorKind[])]` attribute.** It could only declare kind-default codes,
+  not a specific code or a payload, and it would have been a second attribute for the same fact. One attribute that
+  means "this scope produces this error" reads the same on every scope.
+- **Most-specific-scope-wins replacement, as `[ElarionAuthorizationDefaults]` does.** Authorization defaults are one
+  policy, so replacing makes sense. A contract is a set: a module adding a code must not drop the assembly's codes.
+  Precedence is therefore per code.
+- **Turning off the runtime check for kind-default codes.** It silences the warning but leaves the schema and the
+  client without the codes, and it cannot express a decorator's specific codes.

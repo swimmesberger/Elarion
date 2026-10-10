@@ -43,7 +43,8 @@ internal sealed class LoggingErrorContractMonitor(ILogger logger) : IErrorContra
         if (declared is null)
             logger.LogWarning(
                 "Operation {Operation} failed with error code {Code} ({Kind}) that it does not declare. " +
-                "Add [ProducesError] to the handler so the schema and generated clients describe it.",
+                "Declare it with [ProducesError] on the handler, on the decorator that returns it, or as a module or " +
+                "assembly default, so the schema and generated clients describe it.",
                 operation, error.Code, error.Kind);
         else
             logger.LogWarning(

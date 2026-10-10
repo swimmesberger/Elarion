@@ -12,7 +12,9 @@ export interface RpcMethods {
     number: string
   }
     errors: {
+      "conflict": { kind: "conflict"; data: undefined }
       "forbidden": { kind: "forbidden"; data: undefined }
+      "not_found": { kind: "not_found"; data: undefined }
       "unauthorized": { kind: "unauthorized"; data: undefined }
       "validation": { kind: "validation"; data: {
         errors: string[]
@@ -32,6 +34,7 @@ export interface RpcMethods {
   }
     errors: {
       "forbidden": { kind: "forbidden"; data: undefined }
+      "not_found": { kind: "not_found"; data: undefined }
       "unauthorized": { kind: "unauthorized"; data: undefined }
     }
   }
@@ -47,6 +50,7 @@ export interface RpcMethods {
   }
     errors: {
       "forbidden": { kind: "forbidden"; data: undefined }
+      "not_found": { kind: "not_found"; data: undefined }
       "unauthorized": { kind: "unauthorized"; data: undefined }
     }
   }
@@ -78,6 +82,7 @@ export interface RpcMethods {
   }
     errors: {
       "forbidden": { kind: "forbidden"; data: undefined }
+      "not_found": { kind: "not_found"; data: undefined }
       "unauthorized": { kind: "unauthorized"; data: undefined }
     }
   }
@@ -94,7 +99,9 @@ export interface RpcMethods {
     sendJobId: string
   }
     errors: {
+      "business_rule": { kind: "business_rule"; data: undefined }
       "forbidden": { kind: "forbidden"; data: undefined }
+      "not_found": { kind: "not_found"; data: undefined }
       "unauthorized": { kind: "unauthorized"; data: undefined }
       "validation": { kind: "validation"; data: {
         errors: string[]
@@ -116,6 +123,7 @@ export interface RpcMethods {
   }
     errors: {
       "forbidden": { kind: "forbidden"; data: undefined }
+      "not_found": { kind: "not_found"; data: undefined }
       "unauthorized": { kind: "unauthorized"; data: undefined }
     }
   }
@@ -132,6 +140,7 @@ export interface RpcMethods {
   }
     errors: {
       "forbidden": { kind: "forbidden"; data: undefined }
+      "not_found": { kind: "not_found"; data: undefined }
       "unauthorized": { kind: "unauthorized"; data: undefined }
     }
   }

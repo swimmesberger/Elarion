@@ -5,7 +5,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace Elarion.Generators;
 
 public sealed partial class HandlerRegistrationGenerator {
-    private static AttributeData? ResolveDecoratorListFromPipelineAttributes(
+    internal static AttributeData? ResolveDecoratorListFromPipelineAttributes(
         INamedTypeSymbol classSymbol,
         Compilation compilation,
         IReadOnlyList<(string Namespace, AttributeData DecoratorList)> moduleDecoratorLists) {
@@ -25,7 +25,7 @@ public sealed partial class HandlerRegistrationGenerator {
     /// meta-attribute usually sits on a pipeline-attribute CLASS in another file, so a cached read against the
     /// module's own tree would go stale when that class changes.
     /// </summary>
-    private static (List<(string Namespace, AttributeData DecoratorList)> DecoratorLists,
+    internal static (List<(string Namespace, AttributeData DecoratorList)> DecoratorLists,
         List<(string Namespace, bool RequireAuthenticated)> AuthDefaults,
         List<string> AuditDefaultNamespaces,
         List<(string Namespace, int TelemetryMode)> TelemetryDefaults) BuildModuleMaps(
@@ -262,7 +262,7 @@ public sealed partial class HandlerRegistrationGenerator {
 
     // A decorator is `Decorator<TRequest, TResponse>`; it applies to a handler only if the handler's request
     // (TRequest) and response (TResponse) satisfy the decorator's type-parameter constraints.
-    private static bool SatisfiesConstraints(INamedTypeSymbol definition, ITypeSymbol requestType,
+    internal static bool SatisfiesConstraints(INamedTypeSymbol definition, ITypeSymbol requestType,
         ITypeSymbol responseType) {
         var typeParameters = definition.TypeParameters;
         if (typeParameters.Length != 2)

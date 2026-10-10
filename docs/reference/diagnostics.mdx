@@ -26,7 +26,7 @@ JSON-RPC method emission for `[Handler]` handlers. See
 | ELRPC003 | Warning | Two handlers resolve to the same operation name on the shared bus (e.g. an inferred name colliding with another inferred or explicit one); one would silently win at runtime. | Give one handler an explicit `[Handler("...")]` name so every operation name is unique across the bus. |
 | ELRPC004 | Error | A non-nullable member of a handler's response graph is annotated `[JsonIgnore(Condition = WhenWritingDefault)]` (or `WhenWritingNull` on a non-nullable reference). Non-nullable members are required on the wire, so the serializer must always write them. | Make the member nullable to declare it optional, or remove the ignore condition. |
 | ELERR001 | Error | A `[ProducesError]` code is not lower-case ASCII letters, digits and underscores in dot-separated segments. | Use a code such as `token.malformed`. |
-| ELERR002 | Error | One error code is declared more than once on a handler with a different kind or payload type. | Declare each code once; a code has exactly one kind and one payload. |
+| ELERR002 | Error | One error code is declared more than once on a handler (with its base classes), a decorator, a module or an assembly with a different kind or payload type. | Declare each code once per place; a code has exactly one kind and one payload. A narrower place may declare a code again to override a wider one. |
 
 ## ELHTTP — HTTP endpoint generation
 

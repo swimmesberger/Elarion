@@ -162,7 +162,7 @@ const rpcMethodNames = [
 
 const rpcIdempotentMethods: ReadonlySet<RpcMethod> = new Set([])
 
-const rpcErrorCodes: Partial<Record<RpcMethod, readonly string[]>> = {"clients.create":["forbidden","unauthorized","validation"],"clients.get":["forbidden","unauthorized"],"clients.list":["forbidden","unauthorized"],"invoices.clientDunning":["forbidden","unauthorized"],"invoices.create":["forbidden","unauthorized","validation"],"invoices.list":["forbidden","unauthorized"],"invoices.sendStatus":["forbidden","unauthorized"]}
+const rpcErrorCodes: Partial<Record<RpcMethod, readonly string[]>> = {"clients.create":["conflict","forbidden","not_found","unauthorized","validation"],"clients.get":["forbidden","not_found","unauthorized"],"clients.list":["forbidden","not_found","unauthorized"],"invoices.clientDunning":["forbidden","not_found","unauthorized"],"invoices.create":["business_rule","forbidden","not_found","unauthorized","validation"],"invoices.list":["forbidden","not_found","unauthorized"],"invoices.sendStatus":["forbidden","not_found","unauthorized"]}
 
 /** True when `error` is an RpcError carrying one of the error codes `method` declares. */
 export function isRpcMethodError<M extends RpcMethod>(method: M, error: unknown): error is RpcMethodError<M> {

@@ -19,8 +19,10 @@ namespace Billing.Application.Modules.Invoicing.Handlers;
 /// <summary>Persists a <c>Draft</c> invoice and enqueues the send job in deferred-retry mode, returning
 /// the stable <c>JobId</c> so the caller can poll progress. Requires the <c>invoices.write</c> permission.
 /// The <see cref="InvoiceCreated"/> integration event is recorded in the same unit of work — it commits
-/// with the invoice, or not at all.</summary>
+/// with the invoice, or not at all. <c>[ProducesError]</c> declares the credit-limit refusal that Core's
+/// account-standing contract returns; the assembly-wide <c>not_found</c> default covers the unknown client.</summary>
 [Handler("invoices.create")]
+[ProducesError(ErrorKind.BusinessRule)]
 [RequirePermission("invoices", Verbs.Write)]
 [CacheInvalidate("invoices")]
 [Auditable] // framework audit trail (ADR-0045): one compliance record per invocation; SetResource below pins the resource
