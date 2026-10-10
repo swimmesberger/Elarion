@@ -8,6 +8,13 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **OpenAPI: the ProblemDetails schemas declare the error contract's `code` and `data` (ADR-0080).** Every Elarion
+  failure over HTTP carries a stable `code` and, for a typed payload, `data`, but the document only described the
+  standard RFC 7807 members, so a client generated from it (`@hey-api/openapi-ts`, `openapi-typescript`, Kiota) saw
+  the code as an unknown extension and had to cast or parse `detail`. `AddElarionOpenApi()` now adds both as optional
+  members of every `ProblemDetails`-derived schema; the generated `error.code` is a typed `string`.
+
 ### Fixed
 - **HTTP binding-tier failures carry `code: "validation"`.** A generated `[HttpEndpoint]` answered an unparseable or
   missing route/query/header/form value, or an empty or malformed JSON body, with a `ValidationProblem` that had no

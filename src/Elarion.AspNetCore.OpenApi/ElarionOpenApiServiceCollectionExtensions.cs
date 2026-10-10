@@ -57,6 +57,9 @@ public static class ElarionOpenApiServiceCollectionExtensions {
             // [AllowedValues] parity: same story — the RPC/MCP schemas emit the enum keyword for a declared
             // value set (e.g. a configuration-variant vocabulary); mirror it onto the OpenAPI document.
             options.AddSchemaTransformer<ElarionAllowedValuesSchemaTransformer>();
+            // Error contract (ADR-0080): every Elarion ProblemDetails carries a stable `code` and, for a typed
+            // payload, `data` — document both so generated clients can branch on the code without a cast.
+            options.AddSchemaTransformer<ElarionProblemDetailsSchemaTransformer>();
             configureOptions?.Invoke(options);
         });
 

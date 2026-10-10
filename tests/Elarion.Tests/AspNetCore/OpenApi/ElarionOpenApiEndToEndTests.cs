@@ -212,6 +212,17 @@ public sealed partial class ElarionOpenApiEndToEndTests {
             post.GetProperty("responses").TryGetProperty("404", out _).Should().BeTrue();
             post.GetProperty("responses").TryGetProperty("409", out _).Should().BeTrue();
 
+            // (e2) …and their schemas document the error contract's `code`/`data` extension members (ADR-0080), so an
+            // off-the-shelf client generator types `error.code` instead of leaving it an unknown extension.
+            foreach (var status in new[] { "400", "404" }) {
+                var properties = ResolveSchema(root, post.GetProperty("responses").GetProperty(status)
+                        .GetProperty("content").GetProperty("application/problem+json").GetProperty("schema"))
+                    .GetProperty("properties");
+                properties.GetProperty("code").GetProperty("type").GetString().Should().Be("string");
+                properties.TryGetProperty("data", out _).Should().BeTrue();
+                properties.TryGetProperty("title", out _).Should().BeTrue();
+            }
+
             // (b) The body type schema resolved through the source-gen context (reflection off) — proving the wiring.
             root.GetProperty("components").GetProperty("schemas")
                 .TryGetProperty(nameof(CreatePaymentResponse), out _).Should().BeTrue();
@@ -479,6 +490,13 @@ public sealed partial class ElarionOpenApiEndToEndTests {
         finally {
             await app.StopAsync(ct);
         }
+    }
+
+    private static JsonElement ResolveSchema(JsonElement document, JsonElement schema) {
+        if (!schema.TryGetProperty("$ref", out var reference)) return schema;
+
+        var name = reference.GetString()!["#/components/schemas/".Length..];
+        return document.GetProperty("components").GetProperty("schemas").GetProperty(name);
     }
 
     private static bool HasParameter(JsonElement operation, string location, string name) {
