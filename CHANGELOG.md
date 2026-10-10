@@ -52,6 +52,14 @@ minor releases may include breaking changes.
   the code as an unknown extension and had to cast or parse `detail`. `AddElarionOpenApi()` now adds both as optional
   members of every `ProblemDetails`-derived schema; the generated `error.code` is a typed `string`.
 
+- **TypeScript client: the TanStack Start adapter forwards configurable request headers during SSR.** The generated
+  `start-adapter.ts` forwarded only the incoming `cookie`, so an app behind an authenticating reverse proxy (Cloudflare
+  Access, Google IAP, oauth2-proxy) had to hand-copy the isomorphic read for the proxy's identity header — and keep the
+  `createIsomorphicFn().server(...)` shape that import protection requires. `createStartRpcApi` now takes
+  `forwardHeaders` (default `['cookie']`; the list replaces the default, `[]` forwards nothing), and the adapter
+  exports `forwardRequestHeaders(names)` for composing into any other client. Names match case-insensitively, absent
+  headers are skipped, explicit `headers` still win, and nothing is forwarded in the browser. `forwardRequestCookie`
+  stays. Regenerate with `--framework tanstack-start` to pick it up.
 ### Fixed
 - **HTTP binding-tier failures carry `code: "validation"`.** A generated `[HttpEndpoint]` answered an unparseable or
   missing route/query/header/form value, or an empty or malformed JSON body, with a `ValidationProblem` that had no

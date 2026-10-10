@@ -166,8 +166,8 @@ const rpc = createRpcApi({
 
 ### TanStack Start
 
-During SSR you usually need to forward the incoming request's `cookie` so the RPC call runs as the
-signed-in user. Generate with `--framework tanstack-start` to emit an **opt-in** `start-adapter.ts` next to
+During SSR you usually need to forward the incoming request's `cookie` (or another identity header) so the RPC
+call runs as the signed-in user. Generate with `--framework tanstack-start` to emit an **opt-in** `start-adapter.ts` next to
 the neutral core client (it needs the `@tanstack/react-start` peer dependency):
 
 ```bash
@@ -183,11 +183,38 @@ import { createStartRpcApi } from './generated/start-adapter'
 export const rpc = createStartRpcApi({ url: '/rpc' })
 ```
 
-For finer control the adapter also exports `forwardRequestCookie` — the isomorphic headers function on its
-own — so you can compose it into a plain `createRpcApi({ headers: forwardRequestCookie })` call.
+#### Forwarding other request headers
+
+An app behind an authenticating reverse proxy (Cloudflare Access, Google IAP, oauth2-proxy, …) authenticates
+from a header the proxy sets on the incoming request rather than from a cookie, and an SSR call to the API has to
+carry that header too. Name the headers to forward with `forwardHeaders`:
+
+```ts
+export const rpc = createStartRpcApi({
+  url: '/rpc',
+  forwardHeaders: ['cookie', 'cf-access-jwt-assertion'], // e.g. Cloudflare Access
+})
+```
+
+The list **replaces** the default `['cookie']` — keep `'cookie'` in it when the session cookie should still travel,
+and pass `[]` to forward nothing. Names match case-insensitively and are sent lower-case; a header the incoming
+request does not carry is skipped. In the browser nothing is forwarded (the browser attaches its own cookies), and
+explicitly passed `headers` win over a forwarded header of the same name. Forward identity and correlation headers
+only, never hop-by-hop or framing headers such as `host`, `connection`, or `content-length`.
+
+For finer control the adapter also exports the isomorphic headers functions on their own —
+`forwardRequestHeaders(names)` and `forwardRequestCookie` — so you can compose them into a plain `createRpcApi`
+call, or into any other `fetch`-based client that runs during SSR:
+
+```ts
+import { createRpcApi } from './generated/rpc-client'
+import { forwardRequestHeaders } from './generated/start-adapter'
+
+const rpc = createRpcApi({ url: '/rpc', headers: () => forwardRequestHeaders(['cookie', 'authorization']) })
+```
 
 <Callout type="warn">
-  The cookie read must stay inside `createIsomorphicFn().server(...)`. Importing `@tanstack/react-start/server`
+  The header read must stay inside `createIsomorphicFn().server(...)`. Importing `@tanstack/react-start/server`
   from any module the client bundle can reach — even a dynamic import behind a `typeof window` guard — fails
   `vite build` with `[import-protection] Import denied`. The emitted adapter is structured so the Start
   compiler strips the import (and the read) from the client build; keep that shape if you hand-roll it instead.

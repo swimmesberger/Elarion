@@ -125,14 +125,22 @@ The core client stays framework-neutral, but you can opt into a framework adapte
 npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generated --framework tanstack-start
 ```
 
-It exports `createStartRpcApi` — a `createRpcApi` with request-scoped cookie forwarding pre-wired for SSR — and
-`forwardRequestCookie`, the isomorphic headers function on its own. The core client never imports the adapter, so
-consumers that don't opt in stay framework-neutral and their output is byte-identical.
+It exports `createStartRpcApi` — a `createRpcApi` with request-scoped header forwarding pre-wired for SSR (the
+`cookie` by default) — plus the isomorphic headers functions on their own: `forwardRequestHeaders(names)` and
+`forwardRequestCookie`. The core client never imports the adapter, so consumers that don't opt in stay
+framework-neutral and their output is byte-identical.
 
 ```ts
 import { createStartRpcApi } from './generated/start-adapter'
 
 export const rpc = createStartRpcApi({ url: '/rpc' })
+
+// Behind an authenticating reverse proxy, forward its identity header too. The list replaces the default,
+// so keep 'cookie' in it when the session cookie should still travel.
+export const proxiedRpc = createStartRpcApi({
+  url: '/rpc',
+  forwardHeaders: ['cookie', 'cf-access-jwt-assertion'], // e.g. Cloudflare Access
+})
 ```
 
 ## Client-side tracing
