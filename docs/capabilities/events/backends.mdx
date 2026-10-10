@@ -193,7 +193,9 @@ multiple execution targets.
 the finalizing worker still owning the lease it claimed under. If a worker stalls past its lease and another
 worker legitimately reclaims and delivers the message, the stalled worker's late finalize matches zero rows,
 is skipped, and is logged at `Warning` — it can never wipe the new owner's active lease and trigger
-overlapping redelivery.
+overlapping redelivery. The claim and the guarded finalize are the
+[leased work rows](/docs/capabilities/coordination#leased-work-rows) primitive, which an application can
+reuse for its own queue tables.
 
 **Failures back off.** A failed delivery is made invisible for `BaseRetryDelay × 2^(attempts-1)` (capped at
 `MaxRetryDelay`) via a visibility timeout, so a poison consumer no longer re-enters the front of every claim

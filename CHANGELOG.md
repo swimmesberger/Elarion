@@ -60,6 +60,18 @@ minor releases may include breaking changes.
   exports `forwardRequestHeaders(names)` for composing into any other client. Names match case-insensitively, absent
   headers are skipped, explicit `headers` still win, and nothing is forwarded in the browser. `forwardRequestCookie`
   stays. Regenerate with `--framework tanstack-start` to pick it up.
+- **`Elarion.EntityFrameworkCore.LeasedWork`: leased work rows for your own queue tables (ADR-0073).** The outbox's
+  work-row lease is now a reusable EF Core primitive, so an outbound delivery, webhook, or retry table no longer
+  rebuilds it from memory. An entity implements `ILeasedWorkRow` (`Id`, `LockId`, `LockedUntilUtc`) and maps it with
+  `HasLeasedWork(claimIndex, pendingFilter)`, which adds the lease columns and a required partial claim index.
+  `ClaimPendingAsync(new LeasedWorkClaim<T> { … })` selects candidates, stamps a lease with one conditional update,
+  and returns only the rows this worker won. The claim takes the consumer's eligibility filter, queue order, and
+  optional `OnClaim` setters, such as counting the attempt at claim time. `FinalizeClaimAsync`, `ReleaseClaimAsync`,
+  and `RenewClaimAsync` update a row only while the caller's token is still on it, and return `false` once another
+  worker has reclaimed it. `LeasedWorkBackoff.Exponential`/`Ladder` compute the retry delay, and `Ladder` honors a
+  longer remote `Retry-After`. No call holds a row lock or a transaction across the work itself. The outbox now
+  claims and finalizes through the primitive. Its delivery behavior, retry formula, and table model are unchanged.
+  The coordination capability page shows a delivery worker built on the primitive.
 ### Fixed
 - **HTTP binding-tier failures carry `code: "validation"`.** A generated `[HttpEndpoint]` answered an unparseable or
   missing route/query/header/form value, or an empty or malformed JSON body, with a `ValidationProblem` that had no

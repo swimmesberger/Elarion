@@ -18,6 +18,8 @@ public sealed class OutboxModelBuilderExtensionsTests {
         outboxMessage!.GetTableName().Should().Be("elarion_outbox_messages");
         outboxMessage.GetSchema().Should().BeNull();
         outboxMessage.FindProperty(nameof(OutboxMessage.TraceParent))!.GetColumnName().Should().Be("trace_parent");
+        outboxMessage.FindProperty(nameof(OutboxMessage.LockId))!.GetColumnName().Should().Be("lock_id");
+        outboxMessage.FindProperty(nameof(OutboxMessage.LockedUntilUtc))!.GetColumnName().Should().Be("locked_until_utc");
     }
 
     [Fact]
@@ -65,6 +67,8 @@ public sealed class OutboxModelBuilderExtensionsTests {
         outboxMessage.Should().NotBeNull();
         outboxMessage!.GetTableName().Should().Be("app_outbox");
         outboxMessage.GetSchema().Should().Be("messaging");
+        outboxMessage.GetIndexes().Select(index => index.GetDatabaseName())
+            .Should().BeEquivalentTo("ix_app_outbox_purge", "ix_app_outbox_claim");
     }
 
     [Fact]
@@ -79,6 +83,12 @@ public sealed class OutboxModelBuilderExtensionsTests {
         outboxMessage.FindProperty(nameof(OutboxMessage.TraceParent))!.GetColumnName().Should().Be("TraceParent");
 
         outboxMessage.FindProperty(nameof(OutboxMessage.ProcessedOnUtc))!.GetColumnName().Should().Be("ProcessedOnUtc");
+        outboxMessage.FindProperty(nameof(OutboxMessage.LockId))!.GetColumnName().Should().Be("LockId");
+        outboxMessage.FindProperty(nameof(OutboxMessage.LockedUntilUtc))!.GetColumnName().Should().Be("LockedUntilUtc");
+        var claimIndex = outboxMessage.GetIndexes()
+            .Single(index => index.Properties.Count == 3);
+        claimIndex.GetDatabaseName().Should().Be("IX_ElarionOutboxMessages_Claim");
+        claimIndex.GetFilter().Should().Be("\"ProcessedOnUtc\" IS NULL");
         var purgeIndex = outboxMessage.GetIndexes()
             .Single(index => index.Properties.Count == 1
                              && index.Properties[0].Name == nameof(OutboxMessage.ProcessedOnUtc));

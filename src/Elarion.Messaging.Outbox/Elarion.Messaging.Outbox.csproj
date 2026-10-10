@@ -9,6 +9,8 @@
     <!-- The inbox (ADR-0022) is default-on for handler-form integration consumers, so the delivery tier wires the
          idempotency building blocks (AddElarionIdempotency lives in the core runtime package). -->
     <ProjectReference Include="..\Elarion\Elarion.csproj"/>
+    <!-- The claim/finalize lease and the partial claim index come from the leased-work-row primitive (ADR-0073). -->
+    <ProjectReference Include="..\Elarion.EntityFrameworkCore.LeasedWork\Elarion.EntityFrameworkCore.LeasedWork.csproj"/>
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>EF Core leased work rows for Elarion (ADR-0073): a provider-neutral claim / lease-guarded finalize primitive and partial claim index for queue-shaped tables, so a durable delivery table never holds a row lock or transaction across an external call.</Description>
+  </PropertyGroup>
+
+  <!-- Relational, not the provider-neutral base package: the model extension declares column names and the
+       filtered (partial) claim index, both relational concepts. No Elarion package is referenced; the primitive
+       is pure EF so any queue-shaped table — framework or application — can adopt it. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational"/>
+  </ItemGroup>
+
+</Project>

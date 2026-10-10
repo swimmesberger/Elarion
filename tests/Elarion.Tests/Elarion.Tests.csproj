@@ -99,6 +99,7 @@
     <ProjectReference Include="../../src/Elarion.Generators/Elarion.Generators.csproj"/>
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore/Elarion.EntityFrameworkCore.csproj"/>
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.UnitOfWork/Elarion.EntityFrameworkCore.UnitOfWork.csproj"/>
+    <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.LeasedWork/Elarion.EntityFrameworkCore.LeasedWork.csproj"/>
     <ProjectReference Include="../../src/Elarion.Idempotency.EntityFrameworkCore/Elarion.Idempotency.EntityFrameworkCore.csproj"/>
     <ProjectReference Include="../../src/Elarion.Auditing.EntityFrameworkCore/Elarion.Auditing.EntityFrameworkCore.csproj"/>
     <ProjectReference Include="../../src/Elarion.Auditing.EntityFrameworkCore.Generators/Elarion.Auditing.EntityFrameworkCore.Generators.csproj"/>
