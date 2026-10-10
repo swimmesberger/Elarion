@@ -17,8 +17,9 @@ namespace Billing.Application.Modules.Clients.Handlers;
 /// decorator (ADR-0027) ahead of the default pipeline (logging → transaction), so a bad request never opens a
 /// transaction. The handler scopes the row to the current user, invalidates the clients cache on success, and
 /// is exposed over JSON-RPC and as an MCP tool. The <c>[Description]</c> attributes flow through to the MCP
-/// tool surface.</summary>
+/// tool surface. <c>[ProducesError]</c> declares the duplicate-email conflict, so the generated client types it.</summary>
 [Handler("clients.create")]
+[ProducesError(ErrorKind.Conflict)]
 [HttpEndpoint("clients")]
 [RequirePermission("clients", Verbs.Write)]
 [CacheInvalidate("clients")]
