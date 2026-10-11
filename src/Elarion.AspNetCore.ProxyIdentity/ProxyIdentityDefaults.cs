@@ -27,6 +27,20 @@ public static class ProxyIdentityDefaults {
     /// <summary>The cookie that switches the Development stand-in to another user (an URL-encoded e-mail address or subject).</summary>
     public const string DevelopmentUserCookie = "elarion-dev-user";
 
+    /// <summary>
+    /// The user switch value (header or cookie) that makes the Development stand-in sign nobody in for the request, so
+    /// the application's signed-out behaviour can be seen locally: the request stays anonymous, no
+    /// <see cref="IExternalIdentityFeature"/> is captured, and the roles and groups switches are ignored. Removing the
+    /// switch returns to the configured developer. The value is reserved: no configured stand-in user may use it as
+    /// subject or e-mail address. Validated proxy tokens never read it.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// X-Elarion-Dev-User: -
+    /// </code>
+    /// </example>
+    public const string DevelopmentSignedOutUser = "-";
+
     /// <summary>The request header that sets the Development stand-in's roles (comma-separated), replacing the configured ones.</summary>
     public const string DevelopmentRolesHeader = "X-Elarion-Dev-Roles";
 

@@ -163,9 +163,16 @@ public static class ProxyIdentityServiceCollectionExtensions {
                     + $"authenticating proxy ({section}:Issuer, a key source and {section}:Audiences) and set "
                     + $"{section}:Enabled=true, or run in Development to use the stand-in identity.";
             }
-            return string.IsNullOrWhiteSpace(options.Development.Subject) || string.IsNullOrWhiteSpace(options.Development.Email)
-                ? $"{section}:Development:Subject and :Email must not be empty."
-                : null;
+            var development = options.Development;
+            if (string.IsNullOrWhiteSpace(development.Subject) || string.IsNullOrWhiteSpace(development.Email)) {
+                return $"{section}:Development:Subject and :Email must not be empty.";
+            }
+            // The user switch reads the reserved value as "signed out", so a user configured under it could never be selected.
+            return IsSignedOutValue(development.Subject) || IsSignedOutValue(development.Email)
+                || development.Users.Any(user => IsSignedOutValue(user.Subject) || IsSignedOutValue(user.Email))
+                    ? $"{section}:Development: '{ProxyIdentityDefaults.DevelopmentSignedOutUser}' is the reserved signed-out "
+                        + "value of the user switch and cannot be the Subject or Email of a stand-in user."
+                    : null;
         }
 
         if (string.IsNullOrWhiteSpace(options.Issuer)) {
@@ -212,5 +219,10 @@ public static class ProxyIdentityServiceCollectionExtensions {
             return $"{section}:RefreshInterval must be at least one second (the IdentityModel minimum).";
         }
         return null;
+    }
+
+    /// <summary>Whether <paramref name="value"/> reads as the reserved signed-out value once the switch trims it.</summary>
+    private static bool IsSignedOutValue(string? value) {
+        return string.Equals(value?.Trim(), ProxyIdentityDefaults.DevelopmentSignedOutUser, StringComparison.Ordinal);
     }
 }
