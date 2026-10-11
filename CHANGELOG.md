@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-10-11
+
 ### Fixed
 - **Proxy identity: the `proxyIdentity` session section no longer reports `logoutUrl` for the Development stand-in.**
   The section carried the proxy's sign-out URL whenever `ProxyIdentityOptions.LogoutUrl` was configured, also when the
@@ -2123,7 +2125,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.14...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.15...HEAD
+[0.2.15]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.15
 [0.2.14]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.14
 [0.2.13]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.13
 [0.2.12]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.12
