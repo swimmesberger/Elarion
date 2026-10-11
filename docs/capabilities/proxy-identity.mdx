@@ -269,6 +269,10 @@ is challenged with `401`, no `IExternalIdentityFeature` is captured, and the rol
 since there is nobody to give them to. The [session section](#session-section) carries no identity but still names the
 switch cookies, so a development switcher can sign back in; removing the switch returns to the configured developer.
 
+A client-side development menu does not need to hard-code the value: the section's `developmentSignedOutUser` member
+carries it whenever the user switch cookie is named, so the menu sets `developmentUserCookie` to that value instead
+of a literal `-`.
+
 Like every switch value it is trimmed, and it is reserved: `AddElarionProxyIdentity`
 refuses a stand-in user — the configured developer or a `Development:Users` entry — whose subject or e-mail address
 is `-`. It belongs to the stand-in alone; validated proxy tokens never read the switch.
@@ -393,7 +397,9 @@ It carries `email`, `name`, `logoutUrl` and `isDevelopmentIdentity` for whoever 
 request, so they survive an application [replacing the principal](#replacing-the-principal). `logoutUrl` is omitted for
 the Development stand-in, which has no proxy session to end. While the stand-in is
 configured (`Enabled: false`) it also names the cookies a development switcher sets — `developmentUserCookie`,
-`developmentRolesCookie` and `developmentGroupsCookie`, each omitted when that switch is turned off. Those names are
+`developmentRolesCookie` and `developmentGroupsCookie`, each omitted when that switch is turned off. Alongside the user
+switch cookie it carries `developmentSignedOutUser`, the reserved value (`-`) that signs nobody in, so a switcher reads it
+instead of hard-coding it; it is omitted exactly where `developmentUserCookie` is. Those names are
 static configuration, so they are present whoever is signed in, including a person the application treats as
 anonymous because no local account matches, and also while nobody is, with the user switch
 [signed out](#seeing-the-signed-out-state-in-development) (`-`). The section is omitted when the proxy signed nobody in and the stand-in

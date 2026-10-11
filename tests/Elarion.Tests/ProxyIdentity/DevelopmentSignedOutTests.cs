@@ -114,6 +114,7 @@ public sealed class DevelopmentSignedOutTests {
             section.Value.GetProperty("developmentUserCookie").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentUserCookie);
             section.Value.GetProperty("developmentRolesCookie").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentRolesCookie);
             section.Value.GetProperty("developmentGroupsCookie").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentGroupsCookie);
+            section.Value.GetProperty("developmentSignedOutUser").GetString().Should().Be(SignedOut);
         }
     }
 

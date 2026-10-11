@@ -8,6 +8,13 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Proxy identity: the `proxyIdentity` session section names the signed-out switch value.** The section already
+  named the development switch cookies whenever the stand-in is configured, but a client-side development menu still had
+  to hard-code the reserved signed-out user value. It now carries `developmentSignedOutUser`
+  (`ProxyIdentityDefaults.DevelopmentSignedOutUser`, `-`) exactly where `developmentUserCookie` is present, whoever is
+  signed in or signed out, and omits it otherwise — so never for a real proxy deployment.
+
 ## [0.2.16] - 2026-10-11
 
 ### Added
