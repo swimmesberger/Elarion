@@ -120,12 +120,43 @@ public sealed class ExternalIdentityTests {
         section.Should().BeEquivalentTo(new ProxyIdentitySection {
             Email = "dev@example.com",
             Name = "Dev",
-            LogoutUrl = "/logout",
             IsDevelopmentIdentity = true,
             DevelopmentUserCookie = ProxyIdentityDefaults.DevelopmentUserCookie,
             DevelopmentRolesCookie = ProxyIdentityDefaults.DevelopmentRolesCookie,
             DevelopmentGroupsCookie = ProxyIdentityDefaults.DevelopmentGroupsCookie,
         });
+    }
+
+    [Fact]
+    public async Task SessionSection_OmitsTheLogoutUrlForTheStandIn_ButKeepsTheSwitchCookies() {
+        _options.LogoutUrl = "/logout";
+        var user = new FakeCurrentUser {
+            IsAuthenticated = true,
+            Claims = [("iss", ProxyIdentityDefaults.DevelopmentIssuer), ("sub", "developer")],
+        };
+
+        var section = (ProxyIdentitySection)(await Contributor(user).GetSectionAsync(TestContext.Current.CancellationToken))!;
+
+        section.IsDevelopmentIdentity.Should().BeTrue();
+        section.LogoutUrl.Should().BeNull();
+        section.DevelopmentUserCookie.Should().Be(ProxyIdentityDefaults.DevelopmentUserCookie);
+        section.DevelopmentRolesCookie.Should().Be(ProxyIdentityDefaults.DevelopmentRolesCookie);
+        section.DevelopmentGroupsCookie.Should().Be(ProxyIdentityDefaults.DevelopmentGroupsCookie);
+    }
+
+    [Fact]
+    public async Task SessionSection_CarriesTheLogoutUrlForAProxyIdentity() {
+        _options.Enabled = true;
+        _options.LogoutUrl = "/logout";
+        var user = new FakeCurrentUser {
+            IsAuthenticated = true,
+            Claims = [("iss", "https://issuer.example"), ("sub", "user-1")],
+        };
+
+        var section = (ProxyIdentitySection)(await Contributor(user).GetSectionAsync(TestContext.Current.CancellationToken))!;
+
+        section.IsDevelopmentIdentity.Should().BeFalse();
+        section.LogoutUrl.Should().Be("/logout");
     }
 
     [Fact]

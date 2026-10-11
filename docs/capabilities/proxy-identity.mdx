@@ -363,7 +363,8 @@ builder.Services.AddElarionProxyIdentitySessionSection();
 ```
 
 It carries `email`, `name`, `logoutUrl` and `isDevelopmentIdentity` for whoever the proxy signed in, read from the
-request, so they survive an application [replacing the principal](#replacing-the-principal). While the stand-in is
+request, so they survive an application [replacing the principal](#replacing-the-principal). `logoutUrl` is omitted for
+the Development stand-in, which has no proxy session to end. While the stand-in is
 configured (`Enabled: false`) it also names the cookies a development switcher sets — `developmentUserCookie`,
 `developmentRolesCookie` and `developmentGroupsCookie`, each omitted when that switch is turned off. Those names are
 static configuration, so they are present whoever is signed in, including a person the application treats as

@@ -33,7 +33,7 @@ public sealed class ReplacedPrincipalIdentityTests {
         section.Should().NotBeNull();
         section!.Value.GetProperty("email").GetString().Should().Be("developer@example.com");
         section.Value.GetProperty("name").GetString().Should().Be("Developer");
-        section.Value.GetProperty("logoutUrl").GetString().Should().Be("/logout");
+        section.Value.TryGetProperty("logoutUrl", out _).Should().BeFalse();
         section.Value.GetProperty("isDevelopmentIdentity").GetBoolean().Should().BeTrue();
         section.Value.GetProperty("developmentUserCookie").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentUserCookie);
         section.Value.GetProperty("developmentRolesCookie").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentRolesCookie);
