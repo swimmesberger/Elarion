@@ -246,6 +246,33 @@ subject of `dev:{address}` and no groups or roles (the
 Set `Development:UserHeader`/`UserCookie` to empty to turn the switch off. With `Enabled: true` the real proxy scheme
 runs in Development too, for testing against a staging proxy.
 
+| User switch value | Signs in |
+| --- | --- |
+| absent or empty | the configured developer (`Development:Subject`/`Email`) |
+| the e-mail address or subject of a `Development:Users` entry | that user |
+| any other value | an ad-hoc user with that address, subject `dev:{address}`, no groups or roles |
+| `-` (`ProxyIdentityDefaults.DevelopmentSignedOutUser`) | nobody: the request is anonymous ([signed-out state](#seeing-the-signed-out-state-in-development)) |
+
+### Seeing the signed-out state in development
+
+The stand-in signs someone in on every request, but the application also has a signed-out face — a landing page, a
+sign-in prompt, the `401` an `[Authorize]` endpoint returns. Set the user switch to the reserved value **`-`** to see it:
+
+```http
+GET /api/settings
+X-Elarion-Dev-User: -
+```
+
+or set the `elarion-dev-user` cookie to `-`. For that request the stand-in signs nobody in — the same outcome as a proxy
+that forwarded no token: `HttpContext.User` and `ICurrentUser` are anonymous, an endpoint that requires authorization
+is challenged with `401`, no `IExternalIdentityFeature` is captured, and the roles and groups switches are ignored,
+since there is nobody to give them to. The [session section](#session-section) carries no identity but still names the
+switch cookies, so a development switcher can sign back in; removing the switch returns to the configured developer.
+
+Like every switch value it is trimmed, and it is reserved: `AddElarionProxyIdentity`
+refuses a stand-in user — the configured developer or a `Development:Users` entry — whose subject or e-mail address
+is `-`. It belongs to the stand-in alone; validated proxy tokens never read the switch.
+
 ### Switching roles and groups
 
 An identity provider grants roles and groups that configuration cannot predict for an ad-hoc user — an owner or admin
@@ -368,7 +395,8 @@ the Development stand-in, which has no proxy session to end. While the stand-in 
 configured (`Enabled: false`) it also names the cookies a development switcher sets — `developmentUserCookie`,
 `developmentRolesCookie` and `developmentGroupsCookie`, each omitted when that switch is turned off. Those names are
 static configuration, so they are present whoever is signed in, including a person the application treats as
-anonymous because no local account matches. The section is omitted when the proxy signed nobody in and the stand-in
+anonymous because no local account matches, and also while nobody is, with the user switch
+[signed out](#seeing-the-signed-out-state-in-development) (`-`). The section is omitted when the proxy signed nobody in and the stand-in
 is not configured; like every section, it is a read-only UX projection.
 
 The snapshot endpoint is anonymous-friendly (`MapElarionSession()` adds no authorization), which is what lets a

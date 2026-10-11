@@ -156,6 +156,9 @@ section is complete.
 | `ProxyIdentity:Development:{RolesHeader,RolesCookie}` | `X-Elarion-Dev-Roles`, `elarion-dev-roles` |
 | `ProxyIdentity:Development:{GroupsHeader,GroupsCookie}` | `X-Elarion-Dev-Groups`, `elarion-dev-groups` |
 
+The user switch value `-` (`ProxyIdentityDefaults.DevelopmentSignedOutUser`) signs nobody in for the request; it is
+reserved, so no stand-in user (`Development:Subject`/`Email`, `Development:Users:*:Subject`/`Email`) may use it.
+
 See [Proxy identity](/docs/capabilities/proxy-identity).
 
 ## Current user (options, not config)

@@ -8,6 +8,18 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Proxy identity: a signed-out value for the Development user switch.** The stand-in signed someone in on every
+  request, so the application's signed-out behaviour could not be seen locally. The user switch value `-`
+  (`ProxyIdentityDefaults.DevelopmentSignedOutUser`), in the `X-Elarion-Dev-User` header or the `elarion-dev-user`
+  cookie, now makes the stand-in sign nobody in for that request — the same outcome as a proxy that forwarded no token:
+  the request is anonymous, an endpoint requiring authorization is challenged with `401`, no `IExternalIdentityFeature`
+  is captured, and the roles and groups switches are ignored. The `proxyIdentity` session section carries no identity
+  but still names the development switch cookies, so a switcher can sign back in; removing the switch returns to the
+  configured developer. The value is reserved: `AddElarionProxyIdentity` refuses a stand-in user (the configured
+  developer or a `Development:Users` entry) whose subject or e-mail address is `-`. Validated proxy tokens never read
+  the switch.
+
 ## [0.2.15] - 2026-10-11
 
 ### Fixed

@@ -39,8 +39,8 @@ Ship the adapter as a new optional package, `Elarion.AspNetCore.ProxyIdentity`:
   Identity-provider `groups` are exposed on the `ExternalIdentity` record only, because mapping them to permissions is
   application policy.
 - A Development-only stand-in scheme emits the same claim shape with a distinct issuer and switches users by header or
-  cookie. An optional `proxyIdentity` session-snapshot section carries the address, the logout URL and the stand-in
-  flag.
+  cookie; the reserved switch value `-` signs nobody in, so the signed-out state is reachable without the proxy. An
+  optional `proxyIdentity` session-snapshot section carries the address, the logout URL and the stand-in flag.
 - The accepted identity is captured into `HttpContext.Features` (`IExternalIdentityFeature`) by the token validation
   and the stand-in, so an application that replaces the principal after authentication (a local account, or an
   anonymous principal for a person without one) still reads who the proxy signed in

@@ -10,7 +10,8 @@ namespace Elarion.AspNetCore.ProxyIdentity;
 /// Stands in for the proxy during local development: every request is signed in with the claim shape a proxy token
 /// carries (under the configured <see cref="ProxyIdentityOptions.Claims"/> names), built from
 /// <see cref="ProxyIdentityOptions.Development"/>, with the issuer <see cref="ProxyIdentityDefaults.DevelopmentIssuer"/>.
-/// The user switch selects the user; the roles and groups switches replace that user's roles and groups.
+/// The user switch selects the user, or signs nobody in with <see cref="ProxyIdentityDefaults.DevelopmentSignedOutUser"/>;
+/// the roles and groups switches replace that user's roles and groups.
 /// </summary>
 /// <remarks>
 /// Registered only while <see cref="ProxyIdentityOptions.Enabled"/> is false, which <c>AddElarionProxyIdentity</c>
@@ -28,7 +29,14 @@ internal sealed class DevelopmentIdentityHandler(
     protected override Task<AuthenticateResult> HandleAuthenticateAsync() {
         var options = proxyOptions.Value;
         var development = options.Development;
-        var user = Resolve(development, ReadSwitch(development.UserHeader, development.UserCookie, emptyIsValue: false));
+        var switchedTo = ReadSwitch(development.UserHeader, development.UserCookie, emptyIsValue: false);
+        if (switchedTo == ProxyIdentityDefaults.DevelopmentSignedOutUser) {
+            // Signed out: nobody is signed in, as when the proxy forwarded no token, so the roles and groups switches have
+            // nobody to apply to, and no identity may linger in the request's features.
+            ExternalIdentityFeature.Capture(Context, null, options);
+            return Task.FromResult(AuthenticateResult.NoResult());
+        }
+        var user = Resolve(development, switchedTo);
         var names = options.Claims;
         // A present roles/groups switch replaces the resolved user's values for this request; absent, they stay.
         var groups = SwitchedList(development.GroupsHeader, development.GroupsCookie) ?? user.Groups;

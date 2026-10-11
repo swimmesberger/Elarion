@@ -181,7 +181,9 @@ public enum ProxyEmailTrust {
 /// <see cref="Users"/> when its e-mail address or subject matches, otherwise an ad-hoc user with that e-mail address and
 /// no groups or roles. The roles switch (<see cref="RolesHeader"/>, <see cref="RolesCookie"/>) and the groups switch
 /// (<see cref="GroupsHeader"/>, <see cref="GroupsCookie"/>) replace the resolved user's roles or groups for the request,
-/// so role- and group-dependent behaviour can be tested with any user.
+/// so role- and group-dependent behaviour can be tested with any user. The user switch value
+/// <see cref="ProxyIdentityDefaults.DevelopmentSignedOutUser"/> (<c>-</c>) signs nobody in, so the application's
+/// signed-out behaviour can be seen; it is reserved and must not be the subject or e-mail address of a configured user.
 /// </summary>
 /// <remarks>
 /// Every switch exists only where the stand-in does: <see cref="ProxyIdentityOptions.Enabled"/> = <see langword="false"/>,
