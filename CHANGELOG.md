@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-10-11
+
 ### Added
 - **Proxy identity: roles and groups switches for the Development stand-in.** The stand-in could switch to any ad-hoc
   user by e-mail address, but that user had no roles or groups, so testing role-dependent behaviour (an owner or admin
@@ -2097,7 +2099,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.12...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.13...HEAD
+[0.2.13]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.13
 [0.2.12]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.12
 [0.2.11]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.11
 [0.2.10]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.10
