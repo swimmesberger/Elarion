@@ -45,6 +45,13 @@ public sealed record ProxyIdentitySection {
     /// (<see cref="ProxyDevelopmentIdentityOptions.GroupsCookie"/>); present whenever the Development stand-in is configured.
     /// </summary>
     public string? DevelopmentGroupsCookie { get; init; }
+
+    /// <summary>
+    /// The reserved user switch value that signs nobody in (<see cref="ProxyIdentityDefaults.DevelopmentSignedOutUser"/>),
+    /// for a development switcher to set in <see cref="DevelopmentUserCookie"/> instead of hard-coding it; present exactly
+    /// when <see cref="DevelopmentUserCookie"/> is, so never for a real proxy deployment.
+    /// </summary>
+    public string? DevelopmentSignedOutUser { get; init; }
 }
 
 /// <summary>Source-generated JSON metadata for <see cref="ProxyIdentitySection"/>.</summary>
@@ -82,6 +89,7 @@ internal sealed class ProxyIdentitySessionContributor(
         if (identity is null && development is null) {
             return ValueTask.FromResult<object?>(null);
         }
+        var userCookie = NullIfEmpty(development?.UserCookie);
         return ValueTask.FromResult<object?>(new ProxyIdentitySection {
             Email = identity?.Email,
             Name = identity?.Name,
@@ -89,9 +97,10 @@ internal sealed class ProxyIdentitySessionContributor(
                 ? null
                 : proxy.LogoutUrl,
             IsDevelopmentIdentity = identity?.IsDevelopmentIdentity ?? false,
-            DevelopmentUserCookie = NullIfEmpty(development?.UserCookie),
+            DevelopmentUserCookie = userCookie,
             DevelopmentRolesCookie = NullIfEmpty(development?.RolesCookie),
             DevelopmentGroupsCookie = NullIfEmpty(development?.GroupsCookie),
+            DevelopmentSignedOutUser = userCookie is null ? null : ProxyIdentityDefaults.DevelopmentSignedOutUser,
         });
     }
 

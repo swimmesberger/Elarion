@@ -124,6 +124,7 @@ public sealed class ExternalIdentityTests {
             DevelopmentUserCookie = ProxyIdentityDefaults.DevelopmentUserCookie,
             DevelopmentRolesCookie = ProxyIdentityDefaults.DevelopmentRolesCookie,
             DevelopmentGroupsCookie = ProxyIdentityDefaults.DevelopmentGroupsCookie,
+            DevelopmentSignedOutUser = ProxyIdentityDefaults.DevelopmentSignedOutUser,
         });
     }
 
@@ -142,6 +143,7 @@ public sealed class ExternalIdentityTests {
         section.DevelopmentUserCookie.Should().Be(ProxyIdentityDefaults.DevelopmentUserCookie);
         section.DevelopmentRolesCookie.Should().Be(ProxyIdentityDefaults.DevelopmentRolesCookie);
         section.DevelopmentGroupsCookie.Should().Be(ProxyIdentityDefaults.DevelopmentGroupsCookie);
+        section.DevelopmentSignedOutUser.Should().Be(ProxyIdentityDefaults.DevelopmentSignedOutUser);
     }
 
     [Fact]
@@ -175,6 +177,8 @@ public sealed class ExternalIdentityTests {
         section.DevelopmentUserCookie.Should().BeNull();
         section.DevelopmentRolesCookie.Should().BeNull();
         section.DevelopmentGroupsCookie.Should().Be("team-cookie");
+        // Without a user switch cookie there is nothing for the reserved value to be set in.
+        section.DevelopmentSignedOutUser.Should().BeNull();
     }
 
     [Fact]
@@ -192,6 +196,7 @@ public sealed class ExternalIdentityTests {
         section.DevelopmentUserCookie.Should().BeNull();
         section.DevelopmentRolesCookie.Should().BeNull();
         section.DevelopmentGroupsCookie.Should().BeNull();
+        section.DevelopmentSignedOutUser.Should().BeNull();
     }
 
     [Fact]
@@ -213,6 +218,7 @@ public sealed class ExternalIdentityTests {
             DevelopmentUserCookie = ProxyIdentityDefaults.DevelopmentUserCookie,
             DevelopmentRolesCookie = ProxyIdentityDefaults.DevelopmentRolesCookie,
             DevelopmentGroupsCookie = ProxyIdentityDefaults.DevelopmentGroupsCookie,
+            DevelopmentSignedOutUser = ProxyIdentityDefaults.DevelopmentSignedOutUser,
         });
     }
 

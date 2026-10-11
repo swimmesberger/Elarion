@@ -38,6 +38,7 @@ public sealed class ReplacedPrincipalIdentityTests {
         section.Value.GetProperty("developmentUserCookie").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentUserCookie);
         section.Value.GetProperty("developmentRolesCookie").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentRolesCookie);
         section.Value.GetProperty("developmentGroupsCookie").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentGroupsCookie);
+        section.Value.GetProperty("developmentSignedOutUser").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentSignedOutUser);
     }
 
     [Fact]
@@ -52,6 +53,7 @@ public sealed class ReplacedPrincipalIdentityTests {
         section.Value.GetProperty("developmentUserCookie").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentUserCookie);
         section.Value.GetProperty("developmentRolesCookie").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentRolesCookie);
         section.Value.GetProperty("developmentGroupsCookie").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentGroupsCookie);
+        section.Value.GetProperty("developmentSignedOutUser").GetString().Should().Be(ProxyIdentityDefaults.DevelopmentSignedOutUser);
     }
 
     [Fact]
@@ -95,6 +97,7 @@ public sealed class ReplacedPrincipalIdentityTests {
         section.Value.GetProperty("name").GetString().Should().Be("A User");
         section.Value.GetProperty("isDevelopmentIdentity").GetBoolean().Should().BeFalse();
         section.Value.TryGetProperty("developmentUserCookie", out _).Should().BeFalse();
+        section.Value.TryGetProperty("developmentSignedOutUser", out _).Should().BeFalse();
     }
 
     [Fact]
