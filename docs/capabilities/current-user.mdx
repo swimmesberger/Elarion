@@ -123,6 +123,18 @@ builder.Services.AddElarionCurrentUser(options => {
 Behind an authenticating reverse proxy, [proxy identity](/docs/capabilities/proxy-identity) registers this mapping
 from its own claim-name settings.
 
+### One mapping per host
+
+A host has exactly one mapping, and the **first registration wins**: `AddElarionCurrentUser` (and with it
+`AddElarionClaimsCurrentUser`, `AddElarionIdentity` and `AddElarionProxyIdentity`, which call it) registers the
+`ClaimsCurrentUserOptions` singleton with `TryAdd`, so a later call's mapping is ignored without an error.
+
+When the application builds or replaces the principal itself — a local account's principal from ASP.NET Core
+Identity, a hand-built one — build it under the claim types of the mapping in effect rather than registering a second
+mapping. `ClaimsCurrentUserOptions` is resolvable from DI for exactly that; with Identity, point
+`IdentityOptions.ClaimsIdentity` at it. [Replacing the principal](/docs/capabilities/proxy-identity#replacing-the-principal)
+shows the recipe.
+
 ## Relationship to caching
 
 [`CurrentUser`-scoped caching](/docs/capabilities/caching) depends on this abstraction: the cache uses

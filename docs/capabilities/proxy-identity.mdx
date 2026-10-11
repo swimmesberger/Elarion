@@ -44,7 +44,8 @@ app.UseAuthorization();
 result and throws an `InvalidOperationException` naming the offending setting when it cannot run. It registers the
 proxy scheme (`ProxyIdentityDefaults.AuthenticationScheme`) as the default and returns the `AuthenticationBuilder`, so
 further named schemes can be added. It also registers `ICurrentUser` mapped to the configured subject, e-mail and role
-claims — registration is first-wins, so call it before any other `AddElarionCurrentUser`.
+claims — registration is first-wins, so call it before any other `AddElarionCurrentUser`; an application that
+signs in a principal of its own builds it under these names ([replacing the principal](#replacing-the-principal)).
 
 At startup it logs once what the instance accepts (issuer, key source, header, cookie, e-mail trust) and warns when
 audience validation is off or the Development stand-in is active.
@@ -295,6 +296,47 @@ var fromRequest = ExternalIdentity.TryRead(httpContext.User, proxyOptions.Value)
 | `IsDevelopmentIdentity` | True for the stand-in. |
 
 It grants nothing by itself; account linking and group-to-permission mapping stay application policy.
+
+## Replacing the principal
+
+Some applications replace the proxy's principal after authentication, in a middleware between `UseAuthentication` and
+`UseElarionCurrentUser`: they link the person to a local account and sign in that account's principal (built with
+ASP.NET Core Identity's `IUserClaimsPrincipalFactory<TUser>`), or build a principal by hand, for example one carrying
+permissions mapped from identity-provider groups. `ICurrentUser` reads whatever principal is in place through **one**
+claim mapping, `ClaimsCurrentUserOptions`, so the replacement must carry its claims under that mapping's names.
+
+The mapping in effect is the **first one registered**. `AddElarionCurrentUser` adds it with `TryAdd`, and so do the
+packages that call it — `AddElarionProxyIdentity` (the proxy's names: `sub`, `email`, `roles` by default) and
+`AddElarionIdentity` (Identity's `ClaimTypes.NameIdentifier`/`Email`/`Role`). A later registration is ignored without
+an error. So with the proxy identity registered first, a principal built under Identity's default claim types has no
+user id `ICurrentUser` can find.
+
+Don't fix that with a second mapping: which one wins would depend on registration order, and the proxy's own principal
+(the stand-in included) would no longer be read. Keep the one mapping and build the replacement under its names, read
+from DI. With ASP.NET Core Identity, point `IdentityOptions.ClaimsIdentity` at the mapping, so the claims-principal
+factory emits those names:
+
+```csharp
+using Elarion.Identity;            // ClaimsCurrentUserOptions
+using Microsoft.AspNetCore.Identity;
+
+builder.Services.AddElarionProxyIdentity(builder.Configuration, builder.Environment);  // registers the mapping
+builder.Services.AddElarionIdentity<AppUser, AppRole, AppDbContext>();                 // its mapping is ignored
+
+// The factory names claims after IdentityOptions.ClaimsIdentity: use the mapping in effect, whichever call supplied it.
+builder.Services.AddOptions<IdentityOptions>()
+    .Configure<ClaimsCurrentUserOptions>((identity, currentUser) => {
+        identity.ClaimsIdentity.UserIdClaimType = currentUser.UserIdClaimType;
+        identity.ClaimsIdentity.EmailClaimType = currentUser.EmailClaimType;
+        identity.ClaimsIdentity.RoleClaimType = currentUser.RoleClaimType;
+    });
+```
+
+Identity's own readers, such as `UserManager.GetUserId(principal)`, use the same `IdentityOptions` and follow along. A
+hand-built principal takes the claim types from an injected `ClaimsCurrentUserOptions` and passes `RoleClaimType` as
+the `ClaimsIdentity` role type, so `ClaimsPrincipal.IsInRole` agrees with `ICurrentUser.Roles`. Code that hard-codes `ClaimTypes.*`
+to read the user should read `ICurrentUser` instead. Read `ExternalIdentity` from the proxy's principal before the
+swap: afterwards `TryRead` sees only what the replacement carries.
 
 ## Session section
 
