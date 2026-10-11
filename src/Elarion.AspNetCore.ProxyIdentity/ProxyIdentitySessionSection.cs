@@ -29,6 +29,18 @@ public sealed record ProxyIdentitySection {
     /// present for the Development stand-in identity.
     /// </summary>
     public string? DevelopmentUserCookie { get; init; }
+
+    /// <summary>
+    /// The cookie a development switcher sets to choose the stand-in's roles
+    /// (<see cref="ProxyDevelopmentIdentityOptions.RolesCookie"/>); only present for the Development stand-in identity.
+    /// </summary>
+    public string? DevelopmentRolesCookie { get; init; }
+
+    /// <summary>
+    /// The cookie a development switcher sets to choose the stand-in's groups
+    /// (<see cref="ProxyDevelopmentIdentityOptions.GroupsCookie"/>); only present for the Development stand-in identity.
+    /// </summary>
+    public string? DevelopmentGroupsCookie { get; init; }
 }
 
 /// <summary>Source-generated JSON metadata for <see cref="ProxyIdentitySection"/>.</summary>
@@ -50,15 +62,20 @@ internal sealed class ProxyIdentitySessionContributor(ICurrentUser user, IOption
         if (ExternalIdentity.TryRead(user, proxy) is not { } identity) {
             return ValueTask.FromResult<object?>(null);
         }
+        var development = identity.IsDevelopmentIdentity ? proxy.Development : null;
         return ValueTask.FromResult<object?>(new ProxyIdentitySection {
             Email = identity.Email,
             Name = identity.Name,
             LogoutUrl = string.IsNullOrWhiteSpace(proxy.LogoutUrl) ? null : proxy.LogoutUrl,
             IsDevelopmentIdentity = identity.IsDevelopmentIdentity,
-            DevelopmentUserCookie = identity.IsDevelopmentIdentity && !string.IsNullOrEmpty(proxy.Development.UserCookie)
-                ? proxy.Development.UserCookie
-                : null,
+            DevelopmentUserCookie = NullIfEmpty(development?.UserCookie),
+            DevelopmentRolesCookie = NullIfEmpty(development?.RolesCookie),
+            DevelopmentGroupsCookie = NullIfEmpty(development?.GroupsCookie),
         });
+    }
+
+    private static string? NullIfEmpty(string? value) {
+        return string.IsNullOrEmpty(value) ? null : value;
     }
 }
 

@@ -1,5 +1,6 @@
 using System.Net;
 using AwesomeAssertions;
+using Elarion.AspNetCore.ProxyIdentity;
 using Xunit;
 
 namespace Elarion.Tests.ProxyIdentity;
@@ -177,6 +178,35 @@ public sealed class ProxyIdentityTokenTests {
         whoAmI.UserId.Should().Be("object-1");
         whoAmI.Email.Should().Be("user@example.com");
         whoAmI.Roles.Should().Be("reader");
+    }
+
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    public async Task DevelopmentSwitches_AreNotReadWithProxyTokens(string environment) {
+        var keys = new FakeKeyEndpoint();
+        keys.Documents[ProxyIdentityTestHost.JwksUrl] = TestSigningKey.Jwks(_key);
+        await using var host = await ProxyIdentityTestHost.StartAsync(ProxyIdentityTestHost.JwksSettings(), keys, environment);
+        var token = _key.Mint(Issuer, Audience, new Dictionary<string, object> {
+            ["sub"] = "user-1", ["roles"] = new[] { "reader" }, ["groups"] = new[] { "staff" },
+        });
+
+        var whoAmI = await host.WhoAmIAsync(
+            header: token,
+            headers: new Dictionary<string, string> {
+                [ProxyIdentityDefaults.DevelopmentUserHeader] = "someone@example.com",
+                [ProxyIdentityDefaults.DevelopmentRolesHeader] = "owner",
+                [ProxyIdentityDefaults.DevelopmentGroupsHeader] = "auditors",
+            },
+            cookies: new Dictionary<string, string> {
+                [ProxyIdentityDefaults.DevelopmentRolesCookie] = "owner",
+                [ProxyIdentityDefaults.DevelopmentGroupsCookie] = "auditors",
+            });
+
+        whoAmI.UserId.Should().Be("user-1");
+        whoAmI.Roles.Should().Be("reader");
+        whoAmI.Groups.Should().Be("staff");
+        whoAmI.IsDevelopmentIdentity.Should().BeFalse();
     }
 
     private string Unsigned() {

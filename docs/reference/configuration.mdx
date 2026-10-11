@@ -153,6 +153,8 @@ section is complete.
 | `ProxyIdentity:RefreshInterval` | `00:01:00` |
 | `ProxyIdentity:LastKnownGoodLifetime` | `00:00:00` (off) |
 | `ProxyIdentity:Development:*` | `developer` / `developer@example.com`, switch header `X-Elarion-Dev-User`, cookie `elarion-dev-user` |
+| `ProxyIdentity:Development:{RolesHeader,RolesCookie}` | `X-Elarion-Dev-Roles`, `elarion-dev-roles` |
+| `ProxyIdentity:Development:{GroupsHeader,GroupsCookie}` | `X-Elarion-Dev-Groups`, `elarion-dev-groups` |
 
 See [Proxy identity](/docs/capabilities/proxy-identity).
 

@@ -158,18 +158,30 @@ internal sealed class ProxyIdentityTestHost(WebApplication app, HttpClient clien
         return new ProxyIdentityTestHost(app, new HttpClient { BaseAddress = new Uri(baseAddress) });
     }
 
-    /// <summary>Calls <c>/whoami</c> with the given header and cookie values (null omits them).</summary>
+    /// <summary>
+    /// Calls <c>/whoami</c> with the given header and cookie values (null omits them), plus any further
+    /// <paramref name="headers"/> and (already encoded) <paramref name="cookies"/>.
+    /// </summary>
     public async Task<WhoAmI> WhoAmIAsync(
         string? header = null,
         string? cookie = null,
         string headerName = TokenHeader,
-        string cookieName = TokenCookie) {
+        string cookieName = TokenCookie,
+        IReadOnlyDictionary<string, string>? headers = null,
+        IReadOnlyDictionary<string, string>? cookies = null) {
         using var request = new HttpRequestMessage(HttpMethod.Get, "/whoami");
         if (header is not null) {
             request.Headers.TryAddWithoutValidation(headerName, header);
         }
+        foreach (var (name, value) in headers ?? new Dictionary<string, string>()) {
+            request.Headers.TryAddWithoutValidation(name, value);
+        }
+        var cookiePairs = (cookies ?? new Dictionary<string, string>()).Select(pair => $"{pair.Key}={pair.Value}").ToList();
         if (cookie is not null) {
-            request.Headers.Add("Cookie", $"{cookieName}={cookie}");
+            cookiePairs.Insert(0, $"{cookieName}={cookie}");
+        }
+        if (cookiePairs.Count > 0) {
+            request.Headers.Add("Cookie", string.Join("; ", cookiePairs));
         }
         using var response = await Client.SendAsync(request, TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);

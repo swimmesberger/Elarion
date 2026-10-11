@@ -8,6 +8,20 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Proxy identity: roles and groups switches for the Development stand-in.** The stand-in could switch to any ad-hoc
+  user by e-mail address, but that user had no roles or groups, so testing role-dependent behaviour (an owner or admin
+  role the identity provider grants) needed a configured `Development:Users` entry per address.
+  `ProxyDevelopmentIdentityOptions.RolesHeader`/`RolesCookie` (defaults `X-Elarion-Dev-Roles`/`elarion-dev-roles`)
+  carry a comma-separated list that replaces the resolved user's roles for the request — the configured developer, a
+  `Users` entry or an ad-hoc user alike; an empty header (or a cookie of `,`, since ASP.NET Core drops empty cookies)
+  means no roles, and without the switch the configured roles stay. The roles are emitted under the configured
+  `Claims:Roles` name, so `ICurrentUser.Roles`, `[RequireRole]` and `ExternalIdentity.Roles` see them.
+  `GroupsHeader`/`GroupsCookie` (`X-Elarion-Dev-Groups`/`elarion-dev-groups`) do the same for groups. Like the user
+  switch they exist only with `Enabled: false`, which is refused outside Development; validated proxy tokens never
+  read them. The `proxyIdentity` session section adds `developmentRolesCookie` and `developmentGroupsCookie` beside
+  `developmentUserCookie`, so a switcher UI can set all three.
+
 ## [0.2.12] - 2026-10-10
 
 ### Security
