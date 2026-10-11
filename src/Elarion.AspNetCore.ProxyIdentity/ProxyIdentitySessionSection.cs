@@ -19,7 +19,10 @@ public sealed record ProxyIdentitySection {
     /// <summary>The signed-in display name, or null.</summary>
     public string? Name { get; init; }
 
-    /// <summary>Where the browser signs out of the proxy (<see cref="ProxyIdentityOptions.LogoutUrl"/>), or null.</summary>
+    /// <summary>
+    /// Where the browser signs out of the proxy (<see cref="ProxyIdentityOptions.LogoutUrl"/>), or null. Omitted for the
+    /// Development stand-in, which has no proxy session to end.
+    /// </summary>
     public string? LogoutUrl { get; init; }
 
     /// <summary>Whether this is the Development stand-in identity.</summary>
@@ -82,7 +85,9 @@ internal sealed class ProxyIdentitySessionContributor(
         return ValueTask.FromResult<object?>(new ProxyIdentitySection {
             Email = identity?.Email,
             Name = identity?.Name,
-            LogoutUrl = identity is null || string.IsNullOrWhiteSpace(proxy.LogoutUrl) ? null : proxy.LogoutUrl,
+            LogoutUrl = identity is null || identity.IsDevelopmentIdentity || string.IsNullOrWhiteSpace(proxy.LogoutUrl)
+                ? null
+                : proxy.LogoutUrl,
             IsDevelopmentIdentity = identity?.IsDevelopmentIdentity ?? false,
             DevelopmentUserCookie = NullIfEmpty(development?.UserCookie),
             DevelopmentRolesCookie = NullIfEmpty(development?.RolesCookie),

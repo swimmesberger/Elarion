@@ -8,6 +8,12 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **Proxy identity: the `proxyIdentity` session section no longer reports `logoutUrl` for the Development stand-in.**
+  The section carried the proxy's sign-out URL whenever `ProxyIdentityOptions.LogoutUrl` was configured, also when the
+  identity was the stand-in, where there is no proxy session to end. `logoutUrl` is now present only for a real proxy
+  identity; the development switch cookie names are unaffected.
+
 ## [0.2.14] - 2026-10-11
 
 ### Fixed
