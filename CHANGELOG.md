@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-10-11
+
 ### Added
 - **Proxy identity: a signed-out value for the Development user switch.** The stand-in signed someone in on every
   request, so the application's signed-out behaviour could not be seen locally. The user switch value `-`
@@ -2137,7 +2139,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.15...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.16...HEAD
+[0.2.16]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.16
 [0.2.15]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.15
 [0.2.14]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.14
 [0.2.13]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.13
