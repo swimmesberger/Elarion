@@ -8,6 +8,22 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **Proxy identity: the `proxyIdentity` session section survives an application replacing the principal.** The
+  section read `ExternalIdentity` from `ICurrentUser`, which needs the token's `iss` and `sub`. An application that
+  follows *Replacing the principal* — signing in a local account's principal after proxy authentication, or an
+  anonymous one for a person it has no account for — therefore got no section: no address or name for its account
+  menu, and no development switch cookie names for a person it treats as anonymous, which is exactly who a development
+  user switcher must reach. The proxy scheme (`OnTokenValidated`) and the Development stand-in now capture the
+  identity they accepted into `HttpContext.Features` as the new `IExternalIdentityFeature`, and the new
+  `ExternalIdentity.TryRead(HttpContext, ProxyIdentityOptions)` reads it before falling back to `HttpContext.User`;
+  ASP.NET Core's own authentication result cannot serve here, because assigning `HttpContext.User` clears it. The
+  section reads the request (also from a JSON-RPC or MCP call; `AddElarionProxyIdentitySessionSection` now registers
+  `IHttpContextAccessor`) and falls back to `ICurrentUser` without one. `developmentUserCookie`,
+  `developmentRolesCookie` and `developmentGroupsCookie` are static configuration and now appear whenever the stand-in
+  is configured (`Enabled: false`), independent of the identity; the section is omitted only when the proxy signed
+  nobody in and the stand-in is not configured. The principal and `ICurrentUser` readers are unchanged.
+
 ## [0.2.13] - 2026-10-11
 
 ### Added

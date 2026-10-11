@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Elarion.Abstractions.Identity;
 using Elarion.Session;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -25,20 +26,20 @@ public sealed record ProxyIdentitySection {
     public bool IsDevelopmentIdentity { get; init; }
 
     /// <summary>
-    /// The cookie a development user switcher sets (<see cref="ProxyDevelopmentIdentityOptions.UserCookie"/>); only
-    /// present for the Development stand-in identity.
+    /// The cookie a development user switcher sets (<see cref="ProxyDevelopmentIdentityOptions.UserCookie"/>); present
+    /// whenever the Development stand-in is configured, whoever is signed in.
     /// </summary>
     public string? DevelopmentUserCookie { get; init; }
 
     /// <summary>
     /// The cookie a development switcher sets to choose the stand-in's roles
-    /// (<see cref="ProxyDevelopmentIdentityOptions.RolesCookie"/>); only present for the Development stand-in identity.
+    /// (<see cref="ProxyDevelopmentIdentityOptions.RolesCookie"/>); present whenever the Development stand-in is configured.
     /// </summary>
     public string? DevelopmentRolesCookie { get; init; }
 
     /// <summary>
     /// The cookie a development switcher sets to choose the stand-in's groups
-    /// (<see cref="ProxyDevelopmentIdentityOptions.GroupsCookie"/>); only present for the Development stand-in identity.
+    /// (<see cref="ProxyDevelopmentIdentityOptions.GroupsCookie"/>); present whenever the Development stand-in is configured.
     /// </summary>
     public string? DevelopmentGroupsCookie { get; init; }
 }
@@ -50,8 +51,20 @@ public sealed record ProxyIdentitySection {
 [JsonSerializable(typeof(ProxyIdentitySection))]
 public sealed partial class ProxyIdentitySessionJsonContext : JsonSerializerContext;
 
-/// <summary>Contributes <see cref="ProxyIdentitySection"/> under <see cref="SectionName"/>; omitted for an anonymous caller.</summary>
-internal sealed class ProxyIdentitySessionContributor(ICurrentUser user, IOptions<ProxyIdentityOptions> options)
+/// <summary>
+/// Contributes <see cref="ProxyIdentitySection"/> under <see cref="SectionName"/>: who the proxy signed in, plus the
+/// development switch cookies while the stand-in is configured; omitted when there is neither.
+/// </summary>
+/// <remarks>
+/// The identity comes from the request (<see cref="ExternalIdentity.TryRead(HttpContext, ProxyIdentityOptions)"/>), so
+/// it survives an application replacing the principal after authentication; dispatch without an HTTP request falls back
+/// to <see cref="ICurrentUser"/>. The switch cookie names are static configuration and do not depend on the identity: a
+/// person the application treats as anonymous still gets them, so a development switcher can sign in as someone else.
+/// </remarks>
+internal sealed class ProxyIdentitySessionContributor(
+    ICurrentUser user,
+    IOptions<ProxyIdentityOptions> options,
+    IHttpContextAccessor httpContextAccessor)
     : IClientSnapshotContributor {
     public const string SectionName = "proxyIdentity";
 
@@ -59,15 +72,18 @@ internal sealed class ProxyIdentitySessionContributor(ICurrentUser user, IOption
 
     public ValueTask<object?> GetSectionAsync(CancellationToken ct) {
         var proxy = options.Value;
-        if (ExternalIdentity.TryRead(user, proxy) is not { } identity) {
+        var identity = (httpContextAccessor.HttpContext is { } context ? ExternalIdentity.TryRead(context, proxy) : null)
+            ?? ExternalIdentity.TryRead(user, proxy);
+        // The switches exist exactly where the stand-in does: with Enabled false, which is refused outside Development.
+        var development = proxy.Enabled ? null : proxy.Development;
+        if (identity is null && development is null) {
             return ValueTask.FromResult<object?>(null);
         }
-        var development = identity.IsDevelopmentIdentity ? proxy.Development : null;
         return ValueTask.FromResult<object?>(new ProxyIdentitySection {
-            Email = identity.Email,
-            Name = identity.Name,
-            LogoutUrl = string.IsNullOrWhiteSpace(proxy.LogoutUrl) ? null : proxy.LogoutUrl,
-            IsDevelopmentIdentity = identity.IsDevelopmentIdentity,
+            Email = identity?.Email,
+            Name = identity?.Name,
+            LogoutUrl = identity is null || string.IsNullOrWhiteSpace(proxy.LogoutUrl) ? null : proxy.LogoutUrl,
+            IsDevelopmentIdentity = identity?.IsDevelopmentIdentity ?? false,
             DevelopmentUserCookie = NullIfEmpty(development?.UserCookie),
             DevelopmentRolesCookie = NullIfEmpty(development?.RolesCookie),
             DevelopmentGroupsCookie = NullIfEmpty(development?.GroupsCookie),
@@ -87,6 +103,8 @@ public static class ProxyIdentitySessionServiceCollectionExtensions {
     /// </summary>
     public static IServiceCollection AddElarionProxyIdentitySessionSection(this IServiceCollection services) {
         ArgumentNullException.ThrowIfNull(services);
+        // The section reads the identity captured on the request, also from a JSON-RPC or MCP call's dispatch scope.
+        services.AddHttpContextAccessor();
         return services.AddElarionClientSnapshotContributor<ProxyIdentitySessionContributor>(ProxyIdentitySessionJsonContext.Default);
     }
 }

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Elarion.Abstractions.Identity;
+using Microsoft.AspNetCore.Http;
 
 namespace Elarion.AspNetCore.ProxyIdentity;
 
@@ -9,9 +10,11 @@ namespace Elarion.AspNetCore.ProxyIdentity;
 /// the e-mail address for an invitation is application policy built on top of it.
 /// </summary>
 /// <remarks>
-/// Read it from the request principal in host code (<see cref="TryRead(ClaimsPrincipal, ProxyIdentityOptions)"/>) or,
-/// transport-neutrally inside a handler, from <see cref="ICurrentUser"/>
-/// (<see cref="TryRead(ICurrentUser, ProxyIdentityOptions)"/>).
+/// Read it from the request in host code (<see cref="TryRead(HttpContext, ProxyIdentityOptions)"/>), which keeps
+/// working after the application replaced the principal; from a principal
+/// (<see cref="TryRead(ClaimsPrincipal, ProxyIdentityOptions)"/>); or, transport-neutrally inside a handler, from
+/// <see cref="ICurrentUser"/> (<see cref="TryRead(ICurrentUser, ProxyIdentityOptions)"/>). The last two see only what
+/// the principal in place carries.
 /// </remarks>
 public sealed record ExternalIdentity {
     /// <summary>The claim the issuer is read from. JwtBearer keeps inbound claim names, so this is the token's own <c>iss</c>.</summary>
@@ -44,6 +47,22 @@ public sealed record ExternalIdentity {
 
     /// <summary>Whether this is the Development stand-in identity rather than a token the proxy signed.</summary>
     public bool IsDevelopmentIdentity => Issuer == ProxyIdentityDefaults.DevelopmentIssuer;
+
+    /// <summary>
+    /// Reads who the proxy (or the Development stand-in) signed in for this request: the identity captured when the
+    /// token was accepted (<see cref="IExternalIdentityFeature"/>), else the one <see cref="HttpContext.User"/> carries,
+    /// else null.
+    /// </summary>
+    /// <remarks>
+    /// The captured identity survives an application replacing <see cref="HttpContext.User"/> after authentication —
+    /// with a local account's principal, or with an anonymous one for a person it has no account for — so code after
+    /// that swap still learns who the proxy signed in.
+    /// </remarks>
+    public static ExternalIdentity? TryRead(HttpContext context, ProxyIdentityOptions options) {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(options);
+        return context.Features.Get<IExternalIdentityFeature>()?.Identity ?? TryRead(context.User, options);
+    }
 
     /// <summary>
     /// Reads the identity from an authenticated principal, or returns null when the principal is anonymous or carries

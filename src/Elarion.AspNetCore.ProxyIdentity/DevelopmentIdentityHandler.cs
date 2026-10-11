@@ -53,7 +53,10 @@ internal sealed class DevelopmentIdentityHandler(
         var nameType = string.IsNullOrEmpty(names.Name) ? names.Subject : names.Name;
         var roleType = string.IsNullOrEmpty(names.Roles) ? ClaimTypes.Role : names.Roles;
         var identity = new ClaimsIdentity(claims, ProxyIdentityDefaults.DevelopmentScheme, nameType, roleType);
-        var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), ProxyIdentityDefaults.DevelopmentScheme);
+        var principal = new ClaimsPrincipal(identity);
+        // Kept beside the principal, so it survives an application replacing HttpContext.User (IExternalIdentityFeature).
+        ExternalIdentityFeature.Capture(Context, principal, options);
+        var ticket = new AuthenticationTicket(principal, ProxyIdentityDefaults.DevelopmentScheme);
         return Task.FromResult(AuthenticateResult.Success(ticket));
     }
 

@@ -38,8 +38,11 @@ public static class ProxyIdentityServiceCollectionExtensions {
     /// <c>ICurrentUser</c> registration is first-wins: call this before any other <c>AddElarionCurrentUser</c> so the
     /// proxy's claim names apply. An application that replaces the principal after authentication (a local account's
     /// principal, a hand-built one) builds it under the claim types of the <c>ClaimsCurrentUserOptions</c> in effect
-    /// rather than registering a second mapping. Pair it with <c>app.UseAuthentication()</c> and
-    /// <c>app.UseElarionCurrentUser()</c>.
+    /// rather than registering a second mapping; <see cref="ExternalIdentity.TryRead(HttpContext, ProxyIdentityOptions)"/>
+    /// still returns the proxy's identity after such a swap. Pair it with <c>app.UseAuthentication()</c> and
+    /// <c>app.UseElarionCurrentUser()</c>. The scheme's <c>JwtBearerEvents</c> restrict where the token is read from and
+    /// capture the identity (<see cref="IExternalIdentityFeature"/>): a host that customizes them wraps the existing
+    /// handlers rather than replacing the events instance.
     /// </remarks>
     /// <example>
     /// <code>
@@ -123,6 +126,12 @@ public static class ProxyIdentityServiceCollectionExtensions {
                 } else {
                     context.NoResult();
                 }
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = context => {
+                // Kept beside the principal, so it survives an application replacing HttpContext.User — which also
+                // drops ASP.NET Core's own authentication result (IExternalIdentityFeature).
+                ExternalIdentityFeature.Capture(context.HttpContext, context.Principal, options);
                 return Task.CompletedTask;
             },
         };

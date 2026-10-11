@@ -130,7 +130,8 @@ internal sealed class ProxyIdentityTestHost(WebApplication app, HttpClient clien
         Dictionary<string, string?> settings,
         FakeKeyEndpoint? keys = null,
         string environment = "Production",
-        Action<IServiceCollection>? services = null) {
+        Action<IServiceCollection>? services = null,
+        Action<WebApplication>? afterAuthentication = null) {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environment });
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
@@ -143,6 +144,8 @@ internal sealed class ProxyIdentityTestHost(WebApplication app, HttpClient clien
 
         var app = builder.Build();
         app.UseAuthentication();
+        // Where an application replaces the principal or maps further endpoints.
+        afterAuthentication?.Invoke(app);
         app.UseElarionCurrentUser();
         app.MapGet("/whoami", (ICurrentUser user, HttpContext context, IOptions<ProxyIdentityOptions> options) => {
             if (!user.IsAuthenticated || ExternalIdentity.TryRead(context.User, options.Value) is not { } identity) {
