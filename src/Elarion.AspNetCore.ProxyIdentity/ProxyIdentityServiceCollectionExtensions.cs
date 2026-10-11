@@ -36,7 +36,10 @@ public static class ProxyIdentityServiceCollectionExtensions {
     /// </exception>
     /// <remarks>
     /// <c>ICurrentUser</c> registration is first-wins: call this before any other <c>AddElarionCurrentUser</c> so the
-    /// proxy's claim names apply. Pair it with <c>app.UseAuthentication()</c> and <c>app.UseElarionCurrentUser()</c>.
+    /// proxy's claim names apply. An application that replaces the principal after authentication (a local account's
+    /// principal, a hand-built one) builds it under the claim types of the <c>ClaimsCurrentUserOptions</c> in effect
+    /// rather than registering a second mapping. Pair it with <c>app.UseAuthentication()</c> and
+    /// <c>app.UseElarionCurrentUser()</c>.
     /// </remarks>
     /// <example>
     /// <code>

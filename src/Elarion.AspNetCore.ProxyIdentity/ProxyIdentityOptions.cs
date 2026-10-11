@@ -179,8 +179,14 @@ public enum ProxyEmailTrust {
 /// The Development stand-in identity: every request is signed in with the same claim shape a proxy token carries. The
 /// request header <see cref="UserHeader"/> or the cookie <see cref="UserCookie"/> switches to another user — one of
 /// <see cref="Users"/> when its e-mail address or subject matches, otherwise an ad-hoc user with that e-mail address and
-/// no groups or roles.
+/// no groups or roles. The roles switch (<see cref="RolesHeader"/>, <see cref="RolesCookie"/>) and the groups switch
+/// (<see cref="GroupsHeader"/>, <see cref="GroupsCookie"/>) replace the resolved user's roles or groups for the request,
+/// so role- and group-dependent behaviour can be tested with any user.
 /// </summary>
+/// <remarks>
+/// Every switch exists only where the stand-in does: <see cref="ProxyIdentityOptions.Enabled"/> = <see langword="false"/>,
+/// which is refused outside the Development environment. With proxy tokens enabled no switch is read.
+/// </remarks>
 public sealed class ProxyDevelopmentIdentityOptions {
     /// <summary>The subject of the default stand-in user. Defaults to <c>developer</c>.</summary>
     public string Subject { get; set; } = "developer";
@@ -205,6 +211,43 @@ public sealed class ProxyDevelopmentIdentityOptions {
 
     /// <summary>The cookie that switches the user (URL-encoded), or null/empty to disable it. Defaults to <see cref="ProxyIdentityDefaults.DevelopmentUserCookie"/>.</summary>
     public string? UserCookie { get; set; } = ProxyIdentityDefaults.DevelopmentUserCookie;
+
+    /// <summary>
+    /// The request header that sets the stand-in's roles, or null/empty to disable it. Defaults to
+    /// <see cref="ProxyIdentityDefaults.DevelopmentRolesHeader"/>. The value is a comma-separated list (trimmed,
+    /// de-duplicated) that replaces the resolved user's roles — the configured developer, a <see cref="Users"/> entry or an
+    /// ad-hoc user alike; an empty value means no roles. Without the header the cookie <see cref="RolesCookie"/> is read,
+    /// and without either the configured roles stay. A value longer than 256 characters is ignored.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// X-Elarion-Dev-User: new.person@example.com
+    /// X-Elarion-Dev-Roles: owner,admin
+    /// </code>
+    /// </example>
+    public string? RolesHeader { get; set; } = ProxyIdentityDefaults.DevelopmentRolesHeader;
+
+    /// <summary>
+    /// The cookie (URL-encoded, comma-separated) that sets the stand-in's roles when <see cref="RolesHeader"/> is absent,
+    /// or null/empty to disable it. Defaults to <see cref="ProxyIdentityDefaults.DevelopmentRolesCookie"/>; same
+    /// semantics as the header. ASP.NET Core ignores a cookie whose value is empty, so a cookie clears the roles with a
+    /// list of no entries (<c>,</c>); removing the cookie restores the configured roles.
+    /// </summary>
+    public string? RolesCookie { get; set; } = ProxyIdentityDefaults.DevelopmentRolesCookie;
+
+    /// <summary>
+    /// The request header that sets the stand-in's groups, or null/empty to disable it. Defaults to
+    /// <see cref="ProxyIdentityDefaults.DevelopmentGroupsHeader"/>. Same semantics as <see cref="RolesHeader"/>: a
+    /// comma-separated list that replaces the resolved user's groups, an empty value meaning no groups.
+    /// </summary>
+    public string? GroupsHeader { get; set; } = ProxyIdentityDefaults.DevelopmentGroupsHeader;
+
+    /// <summary>
+    /// The cookie (URL-encoded, comma-separated) that sets the stand-in's groups when <see cref="GroupsHeader"/> is
+    /// absent, or null/empty to disable it. Defaults to <see cref="ProxyIdentityDefaults.DevelopmentGroupsCookie"/>; like
+    /// <see cref="RolesCookie"/>, a list of no entries (<c>,</c>) means no groups.
+    /// </summary>
+    public string? GroupsCookie { get; set; } = ProxyIdentityDefaults.DevelopmentGroupsCookie;
 }
 
 /// <summary>A named Development stand-in user (<see cref="ProxyDevelopmentIdentityOptions.Users"/>).</summary>

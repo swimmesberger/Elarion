@@ -10,6 +10,7 @@ namespace Elarion.AspNetCore.ProxyIdentity;
 /// Stands in for the proxy during local development: every request is signed in with the claim shape a proxy token
 /// carries (under the configured <see cref="ProxyIdentityOptions.Claims"/> names), built from
 /// <see cref="ProxyIdentityOptions.Development"/>, with the issuer <see cref="ProxyIdentityDefaults.DevelopmentIssuer"/>.
+/// The user switch selects the user; the roles and groups switches replace that user's roles and groups.
 /// </summary>
 /// <remarks>
 /// Registered only while <see cref="ProxyIdentityOptions.Enabled"/> is false, which <c>AddElarionProxyIdentity</c>
@@ -26,8 +27,12 @@ internal sealed class DevelopmentIdentityHandler(
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync() {
         var options = proxyOptions.Value;
-        var user = Resolve(options.Development, Switched(options.Development));
+        var development = options.Development;
+        var user = Resolve(development, ReadSwitch(development.UserHeader, development.UserCookie, emptyIsValue: false));
         var names = options.Claims;
+        // A present roles/groups switch replaces the resolved user's values for this request; absent, they stay.
+        var groups = SwitchedList(development.GroupsHeader, development.GroupsCookie) ?? user.Groups;
+        var roles = SwitchedList(development.RolesHeader, development.RolesCookie) ?? user.Roles;
 
         var claims = new List<Claim> {
             new(ExternalIdentity.IssuerClaim, ProxyIdentityDefaults.DevelopmentIssuer),
@@ -42,8 +47,8 @@ internal sealed class DevelopmentIdentityHandler(
         if (!string.IsNullOrEmpty(names.Name) && !string.IsNullOrWhiteSpace(user.Name)) {
             claims.Add(new Claim(names.Name, user.Name));
         }
-        AddAll(claims, names.Groups, user.Groups);
-        AddAll(claims, names.Roles, user.Roles);
+        AddAll(claims, names.Groups, groups);
+        AddAll(claims, names.Roles, roles);
 
         var nameType = string.IsNullOrEmpty(names.Name) ? names.Subject : names.Name;
         var roleType = string.IsNullOrEmpty(names.Roles) ? ClaimTypes.Role : names.Roles;
@@ -75,19 +80,36 @@ internal sealed class DevelopmentIdentityHandler(
         return string.IsNullOrWhiteSpace(subject) ? "dev:" + email.ToLowerInvariant() : subject;
     }
 
-    private string? Switched(ProxyDevelopmentIdentityOptions development) {
-        if (!string.IsNullOrEmpty(development.UserHeader)) {
-            var header = Request.Headers[development.UserHeader].ToString().Trim();
-            if (header.Length is > 0 and <= MaxSwitchLength) {
-                return header;
-            }
+    /// <summary>
+    /// The trimmed value of a switch: the header when the request carries an acceptable one, else the (URL-encoded)
+    /// cookie; null when neither is present, the switch is disabled, or the value is too long. An empty value counts as
+    /// absent unless <paramref name="emptyIsValue"/>, where it is a deliberate "none".
+    /// </summary>
+    private string? ReadSwitch(string? headerName, string? cookieName, bool emptyIsValue) {
+        if (!string.IsNullOrEmpty(headerName)
+            && Request.Headers.TryGetValue(headerName, out var header)
+            && Accept(header.ToString(), emptyIsValue) is { } fromHeader) {
+            return fromHeader;
         }
-        if (!string.IsNullOrEmpty(development.UserCookie)
-            && Request.Cookies.TryGetValue(development.UserCookie, out var cookie)
-            && Uri.UnescapeDataString(cookie).Trim() is { Length: > 0 and <= MaxSwitchLength } value) {
-            return value;
+        if (!string.IsNullOrEmpty(cookieName)
+            && Request.Cookies.TryGetValue(cookieName, out var cookie)
+            && Accept(Uri.UnescapeDataString(cookie), emptyIsValue) is { } fromCookie) {
+            return fromCookie;
         }
         return null;
+    }
+
+    /// <summary>The comma-separated values of a list switch (trimmed, de-duplicated), or null when the switch is absent.</summary>
+    private IReadOnlyList<string>? SwitchedList(string? headerName, string? cookieName) {
+        return ReadSwitch(headerName, cookieName, emptyIsValue: true)?
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static string? Accept(string raw, bool emptyIsValue) {
+        var value = raw.Trim();
+        return value.Length <= MaxSwitchLength && (emptyIsValue || value.Length > 0) ? value : null;
     }
 
     private static void AddAll(List<Claim> claims, string? claimType, IEnumerable<string> values) {

@@ -16,7 +16,8 @@ The optional **`Elarion.AspNetCore.ProxyIdentity`** package is that adapter:
 - keeps the token's claim names (`MapInboundClaims = false`) and maps [`ICurrentUser`](/docs/capabilities/current-user)
   to them;
 - **refuses to start** outside Development when it is disabled or half-configured;
-- gives Development a **stand-in identity** with a user switch, so the app runs locally without the proxy;
+- gives Development a **stand-in identity** with user, roles and groups switches, so the app runs locally without the
+  proxy;
 - exposes an `ExternalIdentity` record (issuer, subject, e-mail with a trust decision, name, groups, roles) and an
   optional session-snapshot section.
 
@@ -43,7 +44,8 @@ app.UseAuthorization();
 result and throws an `InvalidOperationException` naming the offending setting when it cannot run. It registers the
 proxy scheme (`ProxyIdentityDefaults.AuthenticationScheme`) as the default and returns the `AuthenticationBuilder`, so
 further named schemes can be added. It also registers `ICurrentUser` mapped to the configured subject, e-mail and role
-claims — registration is first-wins, so call it before any other `AddElarionCurrentUser`.
+claims — registration is first-wins, so call it before any other `AddElarionCurrentUser`; an application that
+signs in a principal of its own builds it under these names ([replacing the principal](#replacing-the-principal)).
 
 At startup it logs once what the instance accepts (issuer, key source, header, cookie, e-mail trust) and warns when
 audience validation is off or the Development stand-in is active.
@@ -222,7 +224,8 @@ With `Enabled: false` in Development, every request is signed in as the configur
 shape a proxy token carries (under your `Claims` names) and the issuer `ProxyIdentityDefaults.DevelopmentIssuer`. The
 `X-Elarion-Dev-User` header or the `elarion-dev-user` cookie (URL-encoded) switches the user: to one of
 `Development:Users` when its e-mail address or subject matches, otherwise to an ad-hoc user with that address, a
-subject of `dev:{address}` and no groups or roles.
+subject of `dev:{address}` and no groups or roles (the
+[roles and groups switches](#switching-roles-and-groups) give it some).
 
 ```json
 {
@@ -242,6 +245,32 @@ subject of `dev:{address}` and no groups or roles.
 
 Set `Development:UserHeader`/`UserCookie` to empty to turn the switch off. With `Enabled: true` the real proxy scheme
 runs in Development too, for testing against a staging proxy.
+
+### Switching roles and groups
+
+An identity provider grants roles and groups that configuration cannot predict for an ad-hoc user — an owner or admin
+role, a team group. The **roles switch** sets them per request, for any user the stand-in signs in:
+
+```http
+GET /api/settings
+X-Elarion-Dev-User: new.person@example.com
+X-Elarion-Dev-Roles: owner,admin
+```
+
+The `X-Elarion-Dev-Roles` header, or the `elarion-dev-roles` cookie (URL-encoded) when the header is absent, carries a
+comma-separated list. When present it **replaces** the resolved user's roles — the configured developer, a
+`Development:Users` entry or an ad-hoc user alike; absent, the configured roles stay. Values are trimmed and
+de-duplicated, and are emitted under the configured `Claims:Roles` name, so `ICurrentUser.Roles`, `[RequireRole]` and
+`ExternalIdentity.Roles` see them exactly as they would see a proxy token's roles. An empty header means no roles;
+ASP.NET Core ignores a cookie with an empty value, so a cookie clears the roles with `,` (a list of no entries), and
+removing the cookie restores the configured ones. A value longer than 256 characters is ignored.
+
+The **groups switch** — `X-Elarion-Dev-Groups` header, `elarion-dev-groups` cookie — works the same way for
+`ExternalIdentity.Groups`, so an application that maps identity-provider groups to its own permissions can be tested
+too. Set `Development:RolesHeader`/`RolesCookie` or `GroupsHeader`/`GroupsCookie` to empty to turn a switch off.
+
+Like the user switch, these exist only where the stand-in does: with `Enabled: false`, which is refused outside
+Development. When proxy tokens are validated, no switch is read, in any environment.
 
 ## Reading the identity
 
@@ -268,6 +297,47 @@ var fromRequest = ExternalIdentity.TryRead(httpContext.User, proxyOptions.Value)
 
 It grants nothing by itself; account linking and group-to-permission mapping stay application policy.
 
+## Replacing the principal
+
+Some applications replace the proxy's principal after authentication, in a middleware between `UseAuthentication` and
+`UseElarionCurrentUser`: they link the person to a local account and sign in that account's principal (built with
+ASP.NET Core Identity's `IUserClaimsPrincipalFactory<TUser>`), or build a principal by hand, for example one carrying
+permissions mapped from identity-provider groups. `ICurrentUser` reads whatever principal is in place through **one**
+claim mapping, `ClaimsCurrentUserOptions`, so the replacement must carry its claims under that mapping's names.
+
+The mapping in effect is the **first one registered**. `AddElarionCurrentUser` adds it with `TryAdd`, and so do the
+packages that call it — `AddElarionProxyIdentity` (the proxy's names: `sub`, `email`, `roles` by default) and
+`AddElarionIdentity` (Identity's `ClaimTypes.NameIdentifier`/`Email`/`Role`). A later registration is ignored without
+an error. So with the proxy identity registered first, a principal built under Identity's default claim types has no
+user id `ICurrentUser` can find.
+
+Don't fix that with a second mapping: which one wins would depend on registration order, and the proxy's own principal
+(the stand-in included) would no longer be read. Keep the one mapping and build the replacement under its names, read
+from DI. With ASP.NET Core Identity, point `IdentityOptions.ClaimsIdentity` at the mapping, so the claims-principal
+factory emits those names:
+
+```csharp
+using Elarion.Identity;            // ClaimsCurrentUserOptions
+using Microsoft.AspNetCore.Identity;
+
+builder.Services.AddElarionProxyIdentity(builder.Configuration, builder.Environment);  // registers the mapping
+builder.Services.AddElarionIdentity<AppUser, AppRole, AppDbContext>();                 // its mapping is ignored
+
+// The factory names claims after IdentityOptions.ClaimsIdentity: use the mapping in effect, whichever call supplied it.
+builder.Services.AddOptions<IdentityOptions>()
+    .Configure<ClaimsCurrentUserOptions>((identity, currentUser) => {
+        identity.ClaimsIdentity.UserIdClaimType = currentUser.UserIdClaimType;
+        identity.ClaimsIdentity.EmailClaimType = currentUser.EmailClaimType;
+        identity.ClaimsIdentity.RoleClaimType = currentUser.RoleClaimType;
+    });
+```
+
+Identity's own readers, such as `UserManager.GetUserId(principal)`, use the same `IdentityOptions` and follow along. A
+hand-built principal takes the claim types from an injected `ClaimsCurrentUserOptions` and passes `RoleClaimType` as
+the `ClaimsIdentity` role type, so `ClaimsPrincipal.IsInRole` agrees with `ICurrentUser.Roles`. Code that hard-codes `ClaimTypes.*`
+to read the user should read `ICurrentUser` instead. Read `ExternalIdentity` from the proxy's principal before the
+swap: afterwards `TryRead` sees only what the replacement carries.
+
 ## Session section
 
 To render an account menu without a second round trip, add the `proxyIdentity` section to the
@@ -278,6 +348,6 @@ builder.Services.AddElarionSession(builder.Configuration.GetClientCapabilityMani
 builder.Services.AddElarionProxyIdentitySessionSection();
 ```
 
-It carries `email`, `name`, `logoutUrl`, `isDevelopmentIdentity` and, for the stand-in, `developmentUserCookie` (the
-cookie a development user switcher sets). It is omitted for an anonymous caller and, like every section, is a read-only
-UX projection.
+It carries `email`, `name`, `logoutUrl`, `isDevelopmentIdentity` and, for the stand-in, the cookies a development
+switcher sets: `developmentUserCookie`, `developmentRolesCookie` and `developmentGroupsCookie` (each omitted when that
+switch is turned off). It is omitted for an anonymous caller and, like every section, is a read-only UX projection.

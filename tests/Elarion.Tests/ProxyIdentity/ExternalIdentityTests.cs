@@ -119,7 +119,43 @@ public sealed class ExternalIdentityTests {
             LogoutUrl = "/logout",
             IsDevelopmentIdentity = true,
             DevelopmentUserCookie = ProxyIdentityDefaults.DevelopmentUserCookie,
+            DevelopmentRolesCookie = ProxyIdentityDefaults.DevelopmentRolesCookie,
+            DevelopmentGroupsCookie = ProxyIdentityDefaults.DevelopmentGroupsCookie,
         });
+    }
+
+    [Fact]
+    public async Task SessionSection_OmitsDisabledSwitchCookies() {
+        _options.Development.UserCookie = null;
+        _options.Development.RolesCookie = "";
+        _options.Development.GroupsCookie = "team-cookie";
+        var user = new FakeCurrentUser {
+            IsAuthenticated = true,
+            Claims = [("iss", ProxyIdentityDefaults.DevelopmentIssuer), ("sub", "developer")],
+        };
+        var contributor = new ProxyIdentitySessionContributor(user, Options.Create(_options));
+
+        var section = (ProxyIdentitySection)(await contributor.GetSectionAsync(TestContext.Current.CancellationToken))!;
+
+        section.DevelopmentUserCookie.Should().BeNull();
+        section.DevelopmentRolesCookie.Should().BeNull();
+        section.DevelopmentGroupsCookie.Should().Be("team-cookie");
+    }
+
+    [Fact]
+    public async Task SessionSection_OmitsSwitchCookiesForAProxyIdentity() {
+        var user = new FakeCurrentUser {
+            IsAuthenticated = true,
+            Claims = [("iss", "https://issuer.example"), ("sub", "user-1")],
+        };
+        var contributor = new ProxyIdentitySessionContributor(user, Options.Create(_options));
+
+        var section = (ProxyIdentitySection)(await contributor.GetSectionAsync(TestContext.Current.CancellationToken))!;
+
+        section.IsDevelopmentIdentity.Should().BeFalse();
+        section.DevelopmentUserCookie.Should().BeNull();
+        section.DevelopmentRolesCookie.Should().BeNull();
+        section.DevelopmentGroupsCookie.Should().BeNull();
     }
 
     [Fact]
