@@ -283,9 +283,14 @@ record:
 var identity = ExternalIdentity.TryRead(currentUser, proxyOptions.Value);   // IOptions<ProxyIdentityOptions>
 if (identity is { EmailVerified: true }) { /* link by e-mail */ }
 
-// In host code: from the request principal.
-var fromRequest = ExternalIdentity.TryRead(httpContext.User, proxyOptions.Value);
+// In host code: from the request. Keeps working after the application replaced the principal.
+var fromRequest = ExternalIdentity.TryRead(httpContext, proxyOptions.Value);
 ```
+
+The request reader returns the identity captured when the token (or the stand-in) was accepted, kept in
+`HttpContext.Features` as `IExternalIdentityFeature`, and falls back to `httpContext.User`. The `ICurrentUser` and
+`ClaimsPrincipal` readers see only the principal in place
+([replacing the principal](#replacing-the-principal)).
 
 | Member | Meaning |
 | --- | --- |
@@ -335,8 +340,17 @@ builder.Services.AddOptions<IdentityOptions>()
 Identity's own readers, such as `UserManager.GetUserId(principal)`, use the same `IdentityOptions` and follow along. A
 hand-built principal takes the claim types from an injected `ClaimsCurrentUserOptions` and passes `RoleClaimType` as
 the `ClaimsIdentity` role type, so `ClaimsPrincipal.IsInRole` agrees with `ICurrentUser.Roles`. Code that hard-codes `ClaimTypes.*`
-to read the user should read `ICurrentUser` instead. Read `ExternalIdentity` from the proxy's principal before the
-swap: afterwards `TryRead` sees only what the replacement carries.
+to read the user should read `ICurrentUser` instead.
+
+The replacement does not carry the proxy's issuer, so `ExternalIdentity.TryRead(ICurrentUser, …)` and
+`TryRead(ClaimsPrincipal, …)` return null after the swap — ASP.NET Core also drops its own authentication result once
+`HttpContext.User` is assigned. The proxy scheme and the stand-in therefore capture the identity when they accept the
+token, as `IExternalIdentityFeature` in `HttpContext.Features`. Read it with
+`ExternalIdentity.TryRead(httpContext, options)`: it returns who the proxy signed in whether the application put a
+local account's principal in place or, for a person it has no account for, an anonymous one. The
+[session section](#session-section) reads it the same way. The capture runs in the scheme's `JwtBearerEvents`
+(`OnTokenValidated`); a host that customizes those events for this scheme wraps the existing handlers rather than
+replacing the events instance.
 
 ## Session section
 
@@ -348,6 +362,15 @@ builder.Services.AddElarionSession(builder.Configuration.GetClientCapabilityMani
 builder.Services.AddElarionProxyIdentitySessionSection();
 ```
 
-It carries `email`, `name`, `logoutUrl`, `isDevelopmentIdentity` and, for the stand-in, the cookies a development
-switcher sets: `developmentUserCookie`, `developmentRolesCookie` and `developmentGroupsCookie` (each omitted when that
-switch is turned off). It is omitted for an anonymous caller and, like every section, is a read-only UX projection.
+It carries `email`, `name`, `logoutUrl` and `isDevelopmentIdentity` for whoever the proxy signed in, read from the
+request, so they survive an application [replacing the principal](#replacing-the-principal). While the stand-in is
+configured (`Enabled: false`) it also names the cookies a development switcher sets — `developmentUserCookie`,
+`developmentRolesCookie` and `developmentGroupsCookie`, each omitted when that switch is turned off. Those names are
+static configuration, so they are present whoever is signed in, including a person the application treats as
+anonymous because no local account matches. The section is omitted when the proxy signed nobody in and the stand-in
+is not configured; like every section, it is a read-only UX projection.
+
+The snapshot endpoint is anonymous-friendly (`MapElarionSession()` adds no authorization), which is what lets a
+switcher reach a person without an account. A host that puts `.RequireAuthorization()` on it hides the section from
+exactly that person; the names are also available outside the snapshot from `IOptions<ProxyIdentityOptions>`
+(`Development.UserCookie`, `RolesCookie` and `GroupsCookie`, meaningful while `Enabled` is false).

@@ -41,6 +41,13 @@ Ship the adapter as a new optional package, `Elarion.AspNetCore.ProxyIdentity`:
 - A Development-only stand-in scheme emits the same claim shape with a distinct issuer and switches users by header or
   cookie. An optional `proxyIdentity` session-snapshot section carries the address, the logout URL and the stand-in
   flag.
+- The accepted identity is captured into `HttpContext.Features` (`IExternalIdentityFeature`) by the token validation
+  and the stand-in, so an application that replaces the principal after authentication (a local account, or an
+  anonymous principal for a person without one) still reads who the proxy signed in
+  (`ExternalIdentity.TryRead(HttpContext, …)`), and the session section with it. ASP.NET Core's own
+  `IAuthenticateResultFeature` cannot serve: assigning `HttpContext.User` clears it. The section names the development
+  switch cookies whenever the stand-in is configured, independent of the identity, because they are static
+  configuration a switcher needs precisely for a person the application does not know.
 
 ## Consequences
 

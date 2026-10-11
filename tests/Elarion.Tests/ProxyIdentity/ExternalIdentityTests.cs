@@ -2,12 +2,16 @@ using System.Security.Claims;
 using AwesomeAssertions;
 using Elarion.AspNetCore.ProxyIdentity;
 using Elarion.Tests.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Elarion.Tests.ProxyIdentity;
 
-/// <summary>Reading <see cref="ExternalIdentity"/> from a principal or from <c>ICurrentUser</c>, and the session section built on it.</summary>
+/// <summary>
+/// Reading <see cref="ExternalIdentity"/> from a request, a principal or <c>ICurrentUser</c>, and the session section built
+/// on it.
+/// </summary>
 public sealed class ExternalIdentityTests {
     private readonly ProxyIdentityOptions _options = new();
 
@@ -108,7 +112,7 @@ public sealed class ExternalIdentityTests {
             IsAuthenticated = true,
             Claims = [("iss", ProxyIdentityDefaults.DevelopmentIssuer), ("sub", "developer"), ("email", "dev@example.com"), ("name", "Dev")],
         };
-        Elarion.Session.IClientSnapshotContributor contributor = new ProxyIdentitySessionContributor(user, Options.Create(_options));
+        Elarion.Session.IClientSnapshotContributor contributor = Contributor(user);
 
         var section = await contributor.GetSectionAsync(TestContext.Current.CancellationToken);
 
@@ -133,7 +137,7 @@ public sealed class ExternalIdentityTests {
             IsAuthenticated = true,
             Claims = [("iss", ProxyIdentityDefaults.DevelopmentIssuer), ("sub", "developer")],
         };
-        var contributor = new ProxyIdentitySessionContributor(user, Options.Create(_options));
+        var contributor = Contributor(user);
 
         var section = (ProxyIdentitySection)(await contributor.GetSectionAsync(TestContext.Current.CancellationToken))!;
 
@@ -144,11 +148,12 @@ public sealed class ExternalIdentityTests {
 
     [Fact]
     public async Task SessionSection_OmitsSwitchCookiesForAProxyIdentity() {
+        _options.Enabled = true;
         var user = new FakeCurrentUser {
             IsAuthenticated = true,
             Claims = [("iss", "https://issuer.example"), ("sub", "user-1")],
         };
-        var contributor = new ProxyIdentitySessionContributor(user, Options.Create(_options));
+        var contributor = Contributor(user);
 
         var section = (ProxyIdentitySection)(await contributor.GetSectionAsync(TestContext.Current.CancellationToken))!;
 
@@ -159,10 +164,77 @@ public sealed class ExternalIdentityTests {
     }
 
     [Fact]
-    public async Task SessionSection_IsOmittedForAnAnonymousCaller() {
-        var contributor = new ProxyIdentitySessionContributor(new FakeCurrentUser(), Options.Create(_options));
+    public async Task SessionSection_IsOmittedForAnAnonymousCaller_WithoutTheStandIn() {
+        _options.Enabled = true;
+        var contributor = Contributor(new FakeCurrentUser());
 
         (await contributor.GetSectionAsync(TestContext.Current.CancellationToken)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SessionSection_NamesTheSwitchCookiesForAnAnonymousCaller_WhileTheStandInIsConfigured() {
+        _options.LogoutUrl = "/logout";
+        var contributor = Contributor(new FakeCurrentUser());
+
+        var section = await contributor.GetSectionAsync(TestContext.Current.CancellationToken);
+
+        section.Should().BeEquivalentTo(new ProxyIdentitySection {
+            DevelopmentUserCookie = ProxyIdentityDefaults.DevelopmentUserCookie,
+            DevelopmentRolesCookie = ProxyIdentityDefaults.DevelopmentRolesCookie,
+            DevelopmentGroupsCookie = ProxyIdentityDefaults.DevelopmentGroupsCookie,
+        });
+    }
+
+    [Fact]
+    public async Task SessionSection_ReadsTheCapturedIdentity_WhenTheRequestPrincipalNoLongerCarriesIt() {
+        _options.Enabled = true;
+        var context = new DefaultHttpContext { User = Principal(new Claim("sub", "account-1")) };
+        ExternalIdentityFeature.Capture(context, Principal(
+            new Claim("iss", "https://issuer.example"), new Claim("sub", "user-1"), new Claim("email", "user@example.com")), _options);
+        var contributor = new ProxyIdentitySessionContributor(
+            new FakeCurrentUser { IsAuthenticated = true, Claims = [("sub", "account-1")] },
+            Options.Create(_options),
+            new HttpContextAccessor { HttpContext = context });
+
+        var section = (ProxyIdentitySection)(await contributor.GetSectionAsync(TestContext.Current.CancellationToken))!;
+
+        section.Email.Should().Be("user@example.com");
+        section.IsDevelopmentIdentity.Should().BeFalse();
+    }
+
+    [Fact]
+    public void HttpContext_PrefersTheCapturedIdentity_OverTheReplacedPrincipal() {
+        var context = new DefaultHttpContext();
+        ExternalIdentityFeature.Capture(context, Principal(new Claim("iss", "https://issuer.example"), new Claim("sub", "user-1")), _options);
+        context.User = Principal(new Claim("iss", "https://other.example"), new Claim("sub", "account-1"));
+
+        var identity = ExternalIdentity.TryRead(context, _options)!;
+
+        identity.Issuer.Should().Be("https://issuer.example");
+        identity.Subject.Should().Be("user-1");
+    }
+
+    [Fact]
+    public void HttpContext_WithoutACapturedIdentity_ReadsThePrincipal() {
+        var context = new DefaultHttpContext { User = Principal(new Claim("iss", "https://issuer.example"), new Claim("sub", "user-1")) };
+
+        ExternalIdentity.TryRead(context, _options)!.Subject.Should().Be("user-1");
+        ExternalIdentity.TryRead(new DefaultHttpContext(), _options).Should().BeNull();
+    }
+
+    [Fact]
+    public void Capture_WithoutAnIdentity_ClearsAnEarlierOne() {
+        var context = new DefaultHttpContext();
+        ExternalIdentityFeature.Capture(context, Principal(new Claim("iss", "i"), new Claim("sub", "s")), _options);
+
+        ExternalIdentityFeature.Capture(context, Principal(new Claim("sub", "s")), _options);
+
+        context.Features.Get<IExternalIdentityFeature>().Should().BeNull();
+    }
+
+    /// <summary>A contributor outside an HTTP request, so it reads the current user.</summary>
+    private ProxyIdentitySessionContributor Contributor(FakeCurrentUser user) {
+        return new ProxyIdentitySessionContributor(user, Options.Create(_options), new HttpContextAccessor());
     }
 
     private static ClaimsPrincipal Principal(params Claim[] claims) {
