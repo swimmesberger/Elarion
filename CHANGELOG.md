@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-10-12
+
 ### Added
 - **Proxy identity: the `proxyIdentity` session section names the signed-out switch value.** The section already
   named the development switch cookies whenever the stand-in is configured, but a client-side development menu still had
@@ -2146,7 +2148,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.16...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.17...HEAD
+[0.2.17]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.17
 [0.2.16]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.16
 [0.2.15]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.15
 [0.2.14]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.14
