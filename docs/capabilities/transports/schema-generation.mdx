@@ -11,7 +11,9 @@ Beyond each operation's request/response shapes, the exported schema carries `[D
 `idempotent` flag for [`[Idempotent]`](/docs/concepts/idempotency) operations, and the request DTOs'
 DataAnnotations constraints as JSON Schema keywords (`minLength`/`maxLength`, `minimum`/`maximum`,
 `pattern`, `format` — see [Validation](/docs/concepts/validation)), so the generated client can
-pre-validate requests against exactly what the server enforces.
+pre-validate requests against exactly what the server enforces. An attribute's explicit `ErrorMessage` rides along
+under `x-elarion-error-messages`, keyed by constraint keyword (see
+[Error messages](/docs/concepts/validation#error-messages)).
 
 Each method also lists its **declared error contract** (ADR-0080) under `errors`: stable code → `kind` (the kind's
 default code such as `not_found`) and, when the error carries a typed payload, the `data` schema. Handlers declare

@@ -184,6 +184,93 @@ public sealed class JsonRpcSchemaExporterTests {
     }
 
     [Fact]
+    public void Generate_CarriesExplicitErrorMessages_KeyedByConstraintKeyword() {
+        var fields = ExportParamsFields<MessagedRequest>("sample.messaged");
+
+        // The explicit message rides next to the keyword it explains; the keyword itself is unchanged.
+        var code = fields.GetProperty("code");
+        code.GetProperty("pattern").GetString().Should().Be("^[A-Z]{3}$");
+        var codeMessages = code.GetProperty("x-elarion-error-messages");
+        codeMessages.GetProperty("pattern").GetString().Should().Be("Code must be three capital letters.");
+        // Placeholders are formatted exactly as the server's validator formats them: {0} display name, {1} bound.
+        codeMessages.GetProperty("maxLength").GetString().Should().Be("Code must be at most 20 characters.");
+
+        // One attribute producing two keywords carries its message on both; [Display(Name)] is the display name.
+        var labelMessages = fields.GetProperty("label").GetProperty("x-elarion-error-messages");
+        labelMessages.GetProperty("minLength").GetString().Should().Be("Shown label needs 2 to 10 characters.");
+        labelMessages.GetProperty("maxLength").GetString().Should().Be("Shown label needs 2 to 10 characters.");
+
+        fields.GetProperty("quantity").GetProperty("x-elarion-error-messages").GetProperty("minimum")
+            .GetString().Should().Be("Quantity must be between 1 and 9.");
+        fields.GetProperty("email").GetProperty("x-elarion-error-messages").GetProperty("format")
+            .GetString().Should().Be("Enter a valid address.");
+        fields.GetProperty("mode").GetProperty("x-elarion-error-messages").GetProperty("enum")
+            .GetString().Should().Be("Pick fast or slow.");
+
+        // A resource-based message is resolved at export time.
+        fields.GetProperty("reference").GetProperty("x-elarion-error-messages").GetProperty("pattern")
+            .GetString().Should().Be("Reference must start with R.");
+    }
+
+    [Fact]
+    public void Generate_ExportedErrorMessages_MatchTheServerValidatorsMessages() {
+        var fields = ExportParamsFields<MessagedRequest>("sample.messaged");
+        var invalid = new MessagedRequest {
+            Code = "abc", Label = "x", Quantity = 0, Email = "nope", Mode = "medium", Reference = "x",
+            Note = "ok", Contact = "a@b.c", Overridden = "ok"
+        };
+        var results = new List<ValidationResult>();
+
+        Validator.TryValidateObject(invalid, new ValidationContext(invalid), results, validateAllProperties: true);
+
+        // The client must show the text the server would send for the same violation.
+        string ExportedMessage(string field, string keyword) =>
+            fields.GetProperty(field).GetProperty("x-elarion-error-messages").GetProperty(keyword).GetString()!;
+
+        results.Select(static result => result.ErrorMessage).Should().BeEquivalentTo(
+            ExportedMessage("code", "pattern"),
+            ExportedMessage("label", "minLength"),
+            ExportedMessage("quantity", "minimum"),
+            ExportedMessage("email", "format"),
+            ExportedMessage("mode", "enum"),
+            ExportedMessage("reference", "pattern"));
+    }
+
+    [Fact]
+    public void Generate_OmitsDefaultErrorMessages() {
+        var fields = ExportParamsFields<MessagedRequest>("sample.messaged");
+
+        // The framework's default messages stay out of the schema: only an explicit message is contract.
+        fields.GetProperty("note").GetProperty("maxLength").GetInt32().Should().Be(5);
+        fields.GetProperty("note").TryGetProperty("x-elarion-error-messages", out _).Should().BeFalse();
+        fields.GetProperty("contact").GetProperty("format").GetString().Should().Be("email");
+        fields.GetProperty("contact").TryGetProperty("x-elarion-error-messages", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Generate_LaterAttributeWithoutMessage_DropsEarlierMessageForTheSameKeyword() {
+        var fields = ExportParamsFields<MessagedRequest>("sample.messaged");
+
+        // Keywords are last-wins, so a message must not outlive the bound it described.
+        var overridden = fields.GetProperty("overridden");
+        overridden.GetProperty("maxLength").GetInt32().Should().Be(10);
+        overridden.TryGetProperty("x-elarion-error-messages", out _).Should().BeFalse();
+    }
+
+    private static JsonElement ExportParamsFields<TRequest>(string method) where TRequest : class {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<TRequest, PingResponse>(
+                method,
+                (_, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse("ok")))
+            .Freeze();
+
+        using var doc = JsonDocument.Parse(JsonRpcSchemaExporter.Generate(dispatcher, options));
+        return doc.RootElement.GetProperty("methods").GetProperty(method).GetProperty("params")
+            .GetProperty("properties").Clone();
+    }
+
+    [Fact]
     public void Generate_EmitsCapabilitiesVocabulary_EnabledModulesSortedAndStructuredPermissions() {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         var dispatcher = new JsonRpcDispatcher(options)
@@ -344,6 +431,42 @@ public sealed class JsonRpcSchemaExporterTests {
         [MaxLength(10)] public required IReadOnlyList<string> Tags { get; init; }
 
         public required string Untouched { get; init; }
+    }
+
+    private sealed record MessagedRequest {
+        [RegularExpression("^[A-Z]{3}$", ErrorMessage = "Code must be three capital letters.")]
+        [StringLength(20, ErrorMessage = "{0} must be at most {1} characters.")]
+        public required string Code { get; init; }
+
+        [Display(Name = "Shown label")]
+        [StringLength(10, MinimumLength = 2, ErrorMessage = "{0} needs {2} to {1} characters.")]
+        public required string Label { get; init; }
+
+        [Range(1, 9, ErrorMessage = "{0} must be between {1} and {2}.")]
+        public required int Quantity { get; init; }
+
+        [EmailAddress(ErrorMessage = "Enter a valid address.")]
+        public required string Email { get; init; }
+
+        [AllowedValues("fast", "slow", ErrorMessage = "Pick fast or slow.")]
+        public required string Mode { get; init; }
+
+        [RegularExpression("^R", ErrorMessageResourceType = typeof(MessageResources),
+            ErrorMessageResourceName = nameof(MessageResources.ReferencePattern))]
+        public required string Reference { get; init; }
+
+        [StringLength(5)] public required string Note { get; init; }
+
+        [EmailAddress] public required string Contact { get; init; }
+
+        [MaxLength(5, ErrorMessage = "Too long.")]
+        [StringLength(10)]
+        public required string Overridden { get; init; }
+    }
+
+    // Stands in for a generated .resx designer class: a public static string getter per message.
+    private static class MessageResources {
+        public static string ReferencePattern => "{0} must start with R.";
     }
 
     private sealed record DescribedRequest {

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Reflection;
 using Elarion.Abstractions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -421,6 +422,13 @@ public static class JsonRpcSchemaExporter {
     }
 
     /// <summary>
+    /// The vendor keyword carrying a constraint's explicit error message, keyed by the constraint keyword it
+    /// belongs to (e.g. <c>{"pattern": "Code must be three capital letters."}</c>). Read by the TypeScript client
+    /// generator so client-side pre-validation reports the same message as the server.
+    /// </summary>
+    internal const string ErrorMessagesKeyword = "x-elarion-error-messages";
+
+    /// <summary>
     /// Injects JSON Schema validation keywords from a property's
     /// <c>System.ComponentModel.DataAnnotations</c> attributes, mirroring
     /// <c>Microsoft.AspNetCore.OpenApi</c>'s attribute→keyword mapping (plus
@@ -430,51 +438,125 @@ public static class JsonRpcSchemaExporter {
     /// declaration order with last-wins on duplicate keywords, matching Microsoft. Reads the attributes
     /// reflectively — appropriate for this build-time exporter.
     /// </summary>
+    /// <remarks>
+    /// An attribute with an explicit message (<see cref="ValidationAttribute.ErrorMessage"/> or
+    /// <see cref="ValidationAttribute.ErrorMessageResourceName"/>) also records that message under
+    /// <see cref="ErrorMessagesKeyword"/> for every keyword it produced, formatted exactly as the server's
+    /// validator formats it (<see cref="ValidationAttribute.FormatErrorMessage"/> with the member's display
+    /// name), so a client shows the same text before and after the round trip. Resource-based messages are
+    /// resolved once, in the exporting process's UI culture. Default framework messages stay out of the schema:
+    /// they are generic English text a client library already has its own wording for.
+    /// </remarks>
     internal static JsonNode InjectReflectedConstraints(JsonSchemaExporterContext ctx, JsonNode schema) {
         if (ctx.PropertyInfo?.AttributeProvider is not { } provider || schema is not JsonObject obj) return schema;
 
+        JsonObject? messages = null;
         // Type patterns intentionally match subclasses: a reusable custom constraint deriving a mapped
         // attribute (e.g. a [Slug] : RegularExpressionAttribute) reaches every schema surface for free.
-        foreach (var attribute in provider.GetCustomAttributes(false))
-            switch (attribute) {
-                case RangeAttribute range:
-                    ApplyRange(obj, range);
-                    break;
-                case MinLengthAttribute minLength:
-                    obj[IsArraySchema(obj) ? "minItems" : "minLength"] = minLength.Length;
-                    break;
-                case MaxLengthAttribute maxLength:
-                    obj[IsArraySchema(obj) ? "maxItems" : "maxLength"] = maxLength.Length;
-                    break;
-                case LengthAttribute length: {
-                    var isArray = IsArraySchema(obj);
-                    obj[isArray ? "minItems" : "minLength"] = length.MinimumLength;
-                    obj[isArray ? "maxItems" : "maxLength"] = length.MaximumLength;
-                    break;
-                }
-                case StringLengthAttribute stringLength:
-                    if (stringLength.MinimumLength > 0) obj["minLength"] = stringLength.MinimumLength;
+        foreach (var attribute in provider.GetCustomAttributes(false)) {
+            var keywords = ApplyConstraint(obj, attribute);
+            if (keywords.Length == 0) continue;
 
-                    obj["maxLength"] = stringLength.MaximumLength;
-                    break;
-                case RegularExpressionAttribute regularExpression:
-                    obj["pattern"] = regularExpression.Pattern;
-                    break;
-                case UrlAttribute:
-                    obj["format"] = "uri";
-                    break;
-                case EmailAddressAttribute:
-                    obj["format"] = "email";
-                    break;
-                case Base64StringAttribute:
-                    obj["format"] = "byte";
-                    break;
-                case AllowedValuesAttribute allowedValues:
-                    obj["enum"] = CreateEnumArray(allowedValues.Values);
-                    break;
-            }
+            // Last-wins per keyword, like the keyword itself: a later attribute without an explicit message
+            // must not leave an earlier attribute's message attached to its own bound.
+            var message = ExplicitErrorMessage((ValidationAttribute)attribute, provider);
+            foreach (var keyword in keywords)
+                if (message is null) messages?.Remove(keyword);
+                else (messages ??= new JsonObject())[keyword] = message;
+        }
+
+        if (messages is { Count: > 0 }) obj[ErrorMessagesKeyword] = messages;
 
         return schema;
+    }
+
+    /// <summary>
+    /// Writes the JSON Schema keywords one DataAnnotations attribute maps to and returns the keywords written
+    /// (empty for an attribute without a mapping, or a <see cref="RangeAttribute"/> bound that does not fit).
+    /// </summary>
+    private static string[] ApplyConstraint(JsonObject obj, object attribute) {
+        switch (attribute) {
+            case RangeAttribute range:
+                return ApplyRange(obj, range);
+            case MinLengthAttribute minLength: {
+                var keyword = IsArraySchema(obj) ? "minItems" : "minLength";
+                obj[keyword] = minLength.Length;
+                return [keyword];
+            }
+            case MaxLengthAttribute maxLength: {
+                var keyword = IsArraySchema(obj) ? "maxItems" : "maxLength";
+                obj[keyword] = maxLength.Length;
+                return [keyword];
+            }
+            case LengthAttribute length: {
+                var isArray = IsArraySchema(obj);
+                obj[isArray ? "minItems" : "minLength"] = length.MinimumLength;
+                obj[isArray ? "maxItems" : "maxLength"] = length.MaximumLength;
+                return isArray ? ["minItems", "maxItems"] : ["minLength", "maxLength"];
+            }
+            case StringLengthAttribute stringLength:
+                if (stringLength.MinimumLength > 0) obj["minLength"] = stringLength.MinimumLength;
+
+                obj["maxLength"] = stringLength.MaximumLength;
+                return stringLength.MinimumLength > 0 ? ["minLength", "maxLength"] : ["maxLength"];
+            case RegularExpressionAttribute regularExpression:
+                obj["pattern"] = regularExpression.Pattern;
+                return ["pattern"];
+            case UrlAttribute:
+                obj["format"] = "uri";
+                return ["format"];
+            case EmailAddressAttribute:
+                obj["format"] = "email";
+                return ["format"];
+            case Base64StringAttribute:
+                obj["format"] = "byte";
+                return ["format"];
+            case AllowedValuesAttribute allowedValues:
+                obj["enum"] = CreateEnumArray(allowedValues.Values);
+                return ["enum"];
+            default:
+                return [];
+        }
+    }
+
+    /// <summary>
+    /// The message the server reports for a violation of <paramref name="attribute"/> when the attribute declares
+    /// one explicitly, or <see langword="null"/> when it relies on the framework default. Formats with the same
+    /// display name the generated validation metadata uses: <c>[Display(Name = …)]</c>, else the CLR member name.
+    /// </summary>
+    private static string? ExplicitErrorMessage(ValidationAttribute attribute, ICustomAttributeProvider provider) {
+        if (attribute.ErrorMessageResourceName is null &&
+            (attribute.ErrorMessage is not { } message || message == FrameworkDefaultMessage(attribute)))
+            return null;
+
+        var displayName = provider.GetCustomAttributes(typeof(DisplayAttribute), false)
+            is [DisplayAttribute { Name.Length: > 0 } display, ..]
+            ? display.Name
+            : (provider as MemberInfo)?.Name ?? string.Empty;
+
+        try {
+            return attribute.FormatErrorMessage(displayName);
+        }
+        catch (InvalidOperationException ex) {
+            throw new InvalidOperationException(
+                $"Cannot export the error message of [{attribute.GetType().Name}] on '{displayName}': {ex.Message}",
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// The built-in message a <see cref="DataTypeAttribute"/>-derived framework attribute reports through
+    /// <see cref="ValidationAttribute.ErrorMessage"/> without being given one (the other mapped attributes keep
+    /// their default behind a resource accessor, so their <c>ErrorMessage</c> is <see langword="null"/>). Built
+    /// per call so it follows the current UI culture like the attribute instance did.
+    /// </summary>
+    private static string? FrameworkDefaultMessage(ValidationAttribute attribute) {
+        return attribute switch {
+            EmailAddressAttribute => new EmailAddressAttribute().ErrorMessage,
+            UrlAttribute => new UrlAttribute().ErrorMessage,
+            Base64StringAttribute => new Base64StringAttribute().ErrorMessage,
+            _ => null
+        };
     }
 
     /// <summary>
@@ -508,12 +590,25 @@ public static class JsonRpcSchemaExporter {
         return array;
     }
 
-    private static void ApplyRange(JsonObject schema, RangeAttribute range) {
-        if (TryConvertRangeOperand(range.Minimum, out var minimum))
-            schema[range.MinimumIsExclusive ? "exclusiveMinimum" : "minimum"] = minimum;
+    private static string[] ApplyRange(JsonObject schema, RangeAttribute range) {
+        string? minimumKeyword = null;
+        string? maximumKeyword = null;
+        if (TryConvertRangeOperand(range.Minimum, out var minimum)) {
+            minimumKeyword = range.MinimumIsExclusive ? "exclusiveMinimum" : "minimum";
+            schema[minimumKeyword] = minimum;
+        }
 
-        if (TryConvertRangeOperand(range.Maximum, out var maximum))
-            schema[range.MaximumIsExclusive ? "exclusiveMaximum" : "maximum"] = maximum;
+        if (TryConvertRangeOperand(range.Maximum, out var maximum)) {
+            maximumKeyword = range.MaximumIsExclusive ? "exclusiveMaximum" : "maximum";
+            schema[maximumKeyword] = maximum;
+        }
+
+        return (minimumKeyword, maximumKeyword) switch {
+            ({ } min, { } max) => [min, max],
+            ({ } min, null) => [min],
+            (null, { } max) => [max],
+            _ => []
+        };
     }
 
     /// <summary>

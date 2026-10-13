@@ -19,6 +19,10 @@ public sealed class RpcMcpInputSchemaTests {
 
         [System.ComponentModel.DataAnnotations.Range(1, 10)]
         public required int Priority { get; init; }
+
+        [System.ComponentModel.DataAnnotations.RegularExpression("^[A-Z]{3}$",
+            ErrorMessage = "Code must be three capital letters.")]
+        public string? Code { get; init; }
     }
 
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) {
@@ -77,5 +81,13 @@ public sealed class RpcMcpInputSchemaTests {
 
         schema.GetProperty("properties").GetProperty("displayName")
             .GetProperty("maxLength").GetInt32().Should().Be(50);
+    }
+
+    [Fact]
+    public void Build_CarriesExplicitErrorMessages_LikeTheJsonRpcSchema() {
+        var schema = RpcMcpInputSchema.Build(typeof(ConstrainedCommand), Options, []);
+
+        schema.GetProperty("properties").GetProperty("code").GetProperty("x-elarion-error-messages")
+            .GetProperty("pattern").GetString().Should().Be("Code must be three capital letters.");
     }
 }
