@@ -8,6 +8,22 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Validation messages reach the generated client.** The JSON-RPC schema export (and the MCP tool input schemas built
+  by the same exporter) dropped a DataAnnotations attribute's `ErrorMessage`, so client-side pre-validation reported
+  Zod's generic English text. An attribute with an explicit message — `ErrorMessage`, or a resource message through
+  `ErrorMessageResourceType`/`ErrorMessageResourceName`, resolved at export time — now exports it under the vendor
+  keyword `x-elarion-error-messages`, keyed by the constraint keyword it produced (`{"pattern": "…"}`), formatted
+  exactly as the server's validator formats it (display name and bounds filled in). Default framework messages stay
+  out. The TypeScript client generator passes each message to the matching Zod check
+  (`.regex(new RegExp("…"), "…")`, `.max(20, "…")`, `z.enum([...], { message: "…" })`); schemas without messages
+  generate byte-identically.
+- **`RpcParamsValidationError.fieldErrors`.** A local params validation failure offered only Zod's error as `cause`,
+  so a form that marks fields from a server validation error (`data.fieldErrors`) marked nothing. The generated error
+  now exposes `fieldErrors: Record<string, string[]>`, built from the Zod issues in the server's key notation
+  (`"address.street"`, `"lines[1].sku"`, `""` for the params object), so one form helper handles both. `cause` is
+  unchanged.
+
 ## [0.2.17] - 2026-10-12
 
 ### Added

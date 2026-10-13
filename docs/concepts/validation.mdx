@@ -91,6 +91,44 @@ public sealed record Command : ICommand {
 Because `[Slug]` *is* a `RegularExpressionAttribute`, the runtime validator enforces it and every
 schema exports it as a `pattern` — the subclass changes nothing about the plumbing.
 
+### Error messages
+
+An attribute's **explicit** message travels with its constraint. `ErrorMessage` (or a resource message via
+`ErrorMessageResourceType`/`ErrorMessageResourceName`) is exported under the vendor keyword
+`x-elarion-error-messages`, keyed by the JSON Schema keyword the attribute produced:
+
+```csharp
+public sealed record Command : ICommand {
+    [RegularExpression("^[A-Z]{3}$", ErrorMessage = "Code must be three capital letters.")]
+    [StringLength(20, ErrorMessage = "{0} must be at most {1} characters.")]
+    public required string Code { get; init; }
+}
+```
+
+```json
+"code": {
+  "type": "string",
+  "maxLength": 20,
+  "pattern": "^[A-Z]{3}$",
+  "x-elarion-error-messages": {
+    "pattern": "Code must be three capital letters.",
+    "maxLength": "Code must be at most 20 characters."
+  }
+}
+```
+
+The exporter formats the message exactly as the server's validator does (`FormatErrorMessage` with the
+`[Display(Name)]` or the member name, so `{0}`/`{1}`/`{2}` placeholders are filled in), so the generated
+client reports the same text before the round trip that the server would after it. An attribute that
+produces two keywords (`[StringLength]` with a minimum, `[Length]`, `[Range]`) carries its message on both.
+Keywords stay last-wins: a later attribute without a message for the same keyword drops the earlier message.
+
+- **Only explicit messages are exported.** An attribute relying on the framework's default text adds nothing;
+  the client then shows its own validation library's wording.
+- **Resource messages are resolved at export time**, in the exporting process's UI culture, so the schema
+  carries one language. When the server localizes per request, the client's pre-flight text is that one
+  language; the server's response still follows the request culture.
+
 ## Enforcement
 
 Reference the opt-in **`Elarion.Validation`** package and register it once in the host:
@@ -169,7 +207,9 @@ Over JSON-RPC the same structure rides in `error.data.data` under the stable cod
 ```
 
 Because a client-side Zod pre-flight failure and a server 400 key violations by the same wire paths, a
-form binds either one to the same input field.
+form binds either one to the same input field: the generated client's `RpcParamsValidationError` exposes
+`fieldErrors` in exactly this notation (see
+[Params validation](/docs/capabilities/transports/typescript-client#params-validation)).
 
 ## One attribute, four surfaces
 
@@ -179,9 +219,9 @@ same declaration:
 | Surface | How the constraint gets there |
 | --- | --- |
 | Runtime enforcement | The generated per-module resolver + the auto-attached `ValidationDecorator`. |
-| [JSON-RPC schema](/docs/capabilities/transports/schema-generation) & [MCP tools](/docs/capabilities/transports/mcp) | `JsonRpcSchemaExporter` injects the JSON Schema keywords; MCP tool input schemas share the same builder. |
+| [JSON-RPC schema](/docs/capabilities/transports/schema-generation) & [MCP tools](/docs/capabilities/transports/mcp) | `JsonRpcSchemaExporter` injects the JSON Schema keywords and explicit messages (`x-elarion-error-messages`); MCP tool input schemas share the same builder. |
 | [OpenAPI document](/docs/capabilities/transports/openapi) | `Microsoft.AspNetCore.OpenApi` maps DataAnnotations natively (reflection-off); `Elarion.AspNetCore.OpenApi` adds `format: "email"` parity. |
-| [Generated Zod client](/docs/capabilities/transports/typescript-client) | The Zod emitter maps the keywords (`.min()`, `.max()`, `.regex()`, `.gte()`, `.email()`, …) and the client pre-validates params before the wire. |
+| [Generated Zod client](/docs/capabilities/transports/typescript-client) | The Zod emitter maps the keywords (`.min()`, `.max()`, `.regex()`, `.gte()`, `.email()`, …) with their explicit messages, and the client pre-validates params before the wire. |
 
 ## Tier 2 — business rules in the handler
 

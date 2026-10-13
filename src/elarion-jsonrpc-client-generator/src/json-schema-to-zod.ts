@@ -24,12 +24,12 @@ export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent =
     const allStrings = values.every((value) => typeof value === 'string')
     let zodExpression: string
     if (allStrings && values.length > 0) {
-      zodExpression = `z.enum([${values.map((value) => JSON.stringify(value)).join(', ')}])`
+      zodExpression = `z.enum([${values.map((value) => JSON.stringify(value)).join(', ')}]${paramsArg(resolved, 'enum')})`
     } else {
       const literals = values.map((value) => `z.literal(${JSON.stringify(value)})`)
       zodExpression = literals.length === 1
-        ? literals[0]
-        : `z.union([${literals.join(', ')}])`
+        ? `z.literal(${JSON.stringify(values[0])}${paramsArg(resolved, 'enum')})`
+        : `z.union([${literals.join(', ')}]${paramsArg(resolved, 'enum')})`
     }
     return nullish(zodExpression, nullable)
   }
@@ -72,28 +72,47 @@ function nullish(expression: string, nullable: boolean): string {
   return nullable ? `${expression}.nullish()` : expression
 }
 
+// A Zod check call carrying, as its last argument, the explicit DataAnnotations message the server exporter
+// attached to the check's JSON Schema keyword. Checks take the plain-string message form, which Zod v3 and v4
+// both accept without deprecation. No message → no argument, so message-free schemas stay byte-identical.
+function check(name: string, args: readonly string[], schema: JsonSchema, keyword: string): string {
+  const message = errorMessage(schema, keyword)
+  return `.${name}(${(message === undefined ? args : [...args, JSON.stringify(message)]).join(', ')})`
+}
+
+// Schema constructors (z.enum, z.literal, z.union) take the message as `{ message }`, the one params form
+// Zod v3 (no string shorthand there) and v4 share.
+function paramsArg(schema: JsonSchema, keyword: string): string {
+  const message = errorMessage(schema, keyword)
+  return message === undefined ? '' : `, { message: ${JSON.stringify(message)} }`
+}
+
+function errorMessage(schema: JsonSchema, keyword: string): string | undefined {
+  return schema['x-elarion-error-messages']?.[keyword]
+}
+
 // Constraint keywords apply to the inner type in a deterministic modifier order — base type, then
 // `.int()`, then bounds (min-side before max-side), then format/regex refinements — with `.nullish()`
 // always appended last by the caller.
 function stringSchema(schema: JsonSchema): string {
   let expression = 'z.string()'
   if (schema.minLength !== undefined) {
-    expression += `.min(${schema.minLength})`
+    expression += check('min', [String(schema.minLength)], schema, 'minLength')
   }
   if (schema.maxLength !== undefined) {
-    expression += `.max(${schema.maxLength})`
+    expression += check('max', [String(schema.maxLength)], schema, 'maxLength')
   }
   if (schema.format === 'uuid') {
-    expression += '.uuid()'
+    expression += check('uuid', [], schema, 'format')
   } else if (schema.format === 'email') {
-    expression += '.email()'
+    expression += check('email', [], schema, 'format')
   } else if (schema.format === 'uri') {
-    expression += '.url()'
+    expression += check('url', [], schema, 'format')
   }
   if (schema.pattern !== undefined) {
     // new RegExp(<JSON string literal>) is deterministic and safe for any pattern content (slashes,
     // quotes, backslashes) — a /.../ regex literal would need its own escaping rules.
-    expression += `.regex(new RegExp(${JSON.stringify(schema.pattern)}))`
+    expression += check('regex', [`new RegExp(${JSON.stringify(schema.pattern)})`], schema, 'pattern')
   }
   return expression
 }
@@ -104,16 +123,16 @@ function numberSchema(schema: JsonSchema, base: string): string {
     expression += '.int()'
   }
   if (schema.minimum !== undefined) {
-    expression += `.gte(${schema.minimum})`
+    expression += check('gte', [String(schema.minimum)], schema, 'minimum')
   }
   if (schema.exclusiveMinimum !== undefined) {
-    expression += `.gt(${schema.exclusiveMinimum})`
+    expression += check('gt', [String(schema.exclusiveMinimum)], schema, 'exclusiveMinimum')
   }
   if (schema.maximum !== undefined) {
-    expression += `.lte(${schema.maximum})`
+    expression += check('lte', [String(schema.maximum)], schema, 'maximum')
   }
   if (schema.exclusiveMaximum !== undefined) {
-    expression += `.lt(${schema.exclusiveMaximum})`
+    expression += check('lt', [String(schema.exclusiveMaximum)], schema, 'exclusiveMaximum')
   }
   return expression
 }
@@ -121,10 +140,10 @@ function numberSchema(schema: JsonSchema, base: string): string {
 function arraySchema(expression: string, schema: JsonSchema): string {
   let result = expression
   if (schema.minItems !== undefined) {
-    result += `.min(${schema.minItems})`
+    result += check('min', [String(schema.minItems)], schema, 'minItems')
   }
   if (schema.maxItems !== undefined) {
-    result += `.max(${schema.maxItems})`
+    result += check('max', [String(schema.maxItems)], schema, 'maxItems')
   }
   return result
 }

@@ -76,7 +76,10 @@ before validation, or set `validateResults: false` when another layer validates 
 Params validation is also enabled by default through `rpcParamsSchemas`: single calls and batch items are checked
 against the exported schema's constraints (lengths, ranges, patterns, formats) before the request is sent, and a failure
 throws `RpcParamsValidationError` locally — naming the method, with the underlying Zod error as `cause` — so tier-1
-contract violations never reach the wire. Set `validateParams: false` to opt out.
+contract violations never reach the wire. Set `validateParams: false` to opt out. The error's `fieldErrors` groups the
+issue messages by field path in the server's `ValidationErrorData.fieldErrors` notation (`"address.street"`,
+`"lines[1].sku"`, `""` for the params object), and a constraint's explicit server message
+(`x-elarion-error-messages` in the schema) is the message of its Zod check.
 
 ## Client-event subscriptions
 

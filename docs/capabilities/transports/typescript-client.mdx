@@ -56,6 +56,20 @@ request DTOs flow through the exported schema into the client (see
 bounds `.gt()`/`.lt()`), `minItems`/`maxItems` become array `.min()`/`.max()`, integers get `.int()`,
 and the `uuid`/`email`/`uri` formats become `.uuid()`/`.email()`/`.url()`.
 
+An attribute's explicit message (`x-elarion-error-messages`, see
+[Error messages](/docs/concepts/validation#error-messages)) becomes the check's message argument, so the
+local failure reads like the server's:
+
+```ts
+code: z.string().max(20, "Code must be at most 20 characters.").regex(new RegExp("^[A-Z]{3}$"), "Code must be three capital letters."),
+mode: z.enum(["fast", "slow"], { message: "Pick fast or slow." }),
+```
+
+Checks take the plain-string message and schema constructors (`z.enum`, `z.literal`, `z.union`) take
+`{ message }` — the forms Zod v3 and v4 share. One difference remains on Zod v3: it applies a constructor
+message to `z.enum` but not to the `z.literal`/`z.union` emitted for a non-string `[AllowedValues]`, which keeps
+Zod's default text there. Constraints without an explicit message keep Zod's default text on both versions.
+
 ### Watch mode
 
 For a tight dev loop, pass `--watch` to regenerate whenever `rpc-schema.json` changes:
@@ -303,6 +317,21 @@ a round trip; batch items are validated the same way. Because the schemas are ge
 attributes the server enforces, a request that passes the pre-flight can only fail server-side on
 business rules (which come back as field-keyed validation errors using the same wire-named paths).
 Set `validateParams: false` to opt out when another layer owns input validation.
+
+`RpcParamsValidationError.fieldErrors` groups the Zod issue messages by field path in the server's
+[`fieldErrors` notation](/docs/concepts/validation#field-keyed-errors) — member names joined with `.`, array
+indexes as `[i]` (`"lines[1].sku"`), `""` for the params object itself — so one form helper marks fields for
+a local failure and for a server validation error alike. `cause` still carries the Zod error.
+
+```ts
+function fieldErrorsOf(error: unknown): Record<string, string[]> | undefined {
+  if (error instanceof RpcParamsValidationError) return error.fieldErrors
+  if (error instanceof RpcError && error.isInvalidParams) {
+    return (error.data as { fieldErrors?: Record<string, string[]> } | undefined)?.fieldErrors
+  }
+  return undefined
+}
+```
 
 ## Result validation
 
