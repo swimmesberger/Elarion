@@ -94,7 +94,11 @@ interface GeneratedClientModule {
   }
   RpcTransportError: new (status: number, statusText: string, body: string) => Error
   RpcProtocolError: new (message: string) => Error
-  RpcParamsValidationError: new (method: string, cause: unknown) => Error & { method: string; cause?: unknown }
+  RpcParamsValidationError: new (method: string, cause: unknown) => Error & {
+    method: string
+    cause?: unknown
+    fieldErrors: Record<string, string[]>
+  }
 }
 
 interface RpcApiForTests {
@@ -405,6 +409,68 @@ describe('JSON-RPC client generator', () => {
     expect(generated.typesSource).toContain('name: string')
     expect(generated.typesSource).toContain('age: number')
     expect(generated.typesSource).toContain('tags: string[]')
+  })
+
+  it('passes explicit constraint error messages to the matching Zod checks', () => {
+    const schema = {
+      methods: {
+        'orders.create': {
+          params: {
+            type: 'object',
+            properties: {
+              code: {
+                type: 'string',
+                minLength: 3,
+                maxLength: 20,
+                pattern: '^[A-Z]{3}$',
+                'x-elarion-error-messages': {
+                  maxLength: 'Code must be at most 20 characters.',
+                  pattern: 'Code must be three capital letters.',
+                },
+              },
+              email: {type: 'string', format: 'email', 'x-elarion-error-messages': {format: 'Enter a valid address.'}},
+              quantity: {
+                type: 'integer',
+                minimum: 1,
+                exclusiveMaximum: 10,
+                'x-elarion-error-messages': {minimum: 'At least one.', exclusiveMaximum: 'Fewer than "ten".'},
+              },
+              lines: {
+                type: 'array',
+                items: {type: 'string'},
+                minItems: 1,
+                'x-elarion-error-messages': {minItems: 'Add a line.'},
+              },
+              mode: {type: 'string', enum: ['fast', 'slow'], 'x-elarion-error-messages': {enum: 'Pick fast or slow.'}},
+              level: {type: 'integer', enum: [1, 2], 'x-elarion-error-messages': {enum: 'Pick 1 or 2.'}},
+              note: {
+                type: ['string', 'null'],
+                maxLength: 5,
+                'x-elarion-error-messages': {maxLength: 'Too long.'},
+              },
+            },
+            required: ['code', 'email', 'quantity', 'lines', 'mode', 'level'],
+          },
+          result: {type: 'integer'},
+        },
+      },
+    } satisfies RpcSchema
+
+    const generated = generateRpcClientFiles(schema)
+
+    // Only keywords with a message get the extra argument; the min-side bound here has none.
+    expect(generated.schemasSource).toContain(
+      'code: z.string().min(3).max(20, "Code must be at most 20 characters.")' +
+      '.regex(new RegExp("^[A-Z]{3}$"), "Code must be three capital letters."),')
+    expect(generated.schemasSource).toContain('email: z.string().email("Enter a valid address."),')
+    // Messages are JSON string literals, so quotes inside a message are escaped.
+    expect(generated.schemasSource).toContain(
+      'quantity: z.number().int().gte(1, "At least one.").lt(10, "Fewer than \\"ten\\"."),')
+    expect(generated.schemasSource).toContain('lines: z.array(z.string()).min(1, "Add a line."),')
+    expect(generated.schemasSource).toContain('mode: z.enum(["fast", "slow"], { message: "Pick fast or slow." }),')
+    expect(generated.schemasSource).toContain(
+      'level: z.union([z.literal(1), z.literal(2)], { message: "Pick 1 or 2." }),')
+    expect(generated.schemasSource).toContain('note: z.string().max(5, "Too long.").nullish().optional(),')
   })
 
   it('resolves local JSON pointer references inside a method schema', () => {
@@ -1402,6 +1468,47 @@ describe('JSON-RPC client generator', () => {
     await expect(unchecked.math.add({left: 'one', right: 2})).resolves.toBe(3)
     expect(fetchCalls).toBe(2)
   })
+
+  it('exposes params validation issues as field errors keyed like the server', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+    const rpc = clientModule.createRpcApi({url: 'https://example.test/rpc', fetch: async () => jsonResponse({})})
+
+    // Through the call path: the stub params schema throws a Zod-shaped error (an `issues` array).
+    await expect(rpc.user.get({id: 7})).rejects.toMatchObject({
+      name: 'RpcParamsValidationError',
+      fieldErrors: {id: ['Expected string id']},
+    })
+
+    // Zod issue paths become the server's ValidationErrorData.fieldErrors keys (MicrosoftRequestValidator):
+    // member names joined with ".", indexes as "[i]", "" for the params object itself; messages grouped per key.
+    const cause = {
+      issues: [
+        {path: ['code'], message: 'Code must be three capital letters.'},
+        {path: ['address', 'street'], message: 'Street is too long.'},
+        {path: ['deliveries', 1, 'street'], message: 'Street is too long.'},
+        {path: ['matrix', 0, 2], message: 'Too small.'},
+        {path: [], message: 'Expected object.'},
+        {path: ['code'], message: 'Code must be at most 20 characters.'},
+        {path: ['constructor'], message: 'Required.'},
+      ],
+    }
+    const error = new clientModule.RpcParamsValidationError('user.get', cause)
+
+    expect(error.cause).toBe(cause)
+    expect(error.fieldErrors).toEqual({
+      code: ['Code must be three capital letters.', 'Code must be at most 20 characters.'],
+      'address.street': ['Street is too long.'],
+      'deliveries[1].street': ['Street is too long.'],
+      'matrix[0][2]': ['Too small.'],
+      '': ['Expected object.'],
+      constructor: ['Required.'],
+    })
+    expect(Object.hasOwn(error.fieldErrors, 'constructor')).toBe(true)
+
+    // A cause without Zod issues still yields an (empty) field-error map.
+    expect(new clientModule.RpcParamsValidationError('user.get', new Error('boom')).fieldErrors).toEqual({})
+  })
 })
 
 interface SessionClientModule {
@@ -1675,7 +1782,7 @@ async function loadGeneratedClient(clientSource: string): Promise<GeneratedClien
     'function userGetParamsSchema() {',
     '  return {',
     '    parse(value) {',
-    "      if (typeof value !== 'object' || value === null || typeof value.id !== 'string') throw new Error('Expected string id')",
+    "      if (typeof value !== 'object' || value === null || typeof value.id !== 'string') throw Object.assign(new Error('Expected string id'), { issues: [{ path: ['id'], message: 'Expected string id' }] })",
     '      return value',
     '    }',
     '  }',

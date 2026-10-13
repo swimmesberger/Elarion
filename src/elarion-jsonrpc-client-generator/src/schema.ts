@@ -26,6 +26,13 @@ export interface JsonSchema {
   exclusiveMaximum?: number
   minItems?: number
   maxItems?: number
+  /**
+   * Explicit error messages of the DataAnnotations behind the constraint keywords, keyed by keyword (for example
+   * `{ pattern: 'Code must be three capital letters.' }`), emitted by the server exporter only for attributes
+   * that declare a message. The generator passes each one to the matching Zod check, so client-side
+   * pre-validation reports the server's text.
+   */
+  'x-elarion-error-messages'?: Record<string, string>
 }
 
 /**
