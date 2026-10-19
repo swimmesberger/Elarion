@@ -1,6 +1,6 @@
-using System.Collections.Concurrent;
 using System.Data;
 using System.Data.Common;
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -42,8 +42,10 @@ public sealed class EfCoreSettingsStore<TDbContext>(
     where TDbContext : DbContext {
     // The raw INSERT/UPDATE statements are provider- and schema-specific (delimited identifiers, resolved
     // column names), so they are built once per model and reused.
-    private static readonly ConcurrentDictionary<IModel, string> InsertSqlCache = new();
-    private static readonly ConcurrentDictionary<IModel, string> UpdateSqlCache = new();
+    // Weak-keyed on the model: an app that builds many models in one process (for example a test suite
+    // with one model per host) would otherwise keep every model, and its SQL, alive for the process lifetime.
+    private static readonly ConditionalWeakTable<IModel, string> InsertSqlCache = new();
+    private static readonly ConditionalWeakTable<IModel, string> UpdateSqlCache = new();
 
     /// <inheritdoc />
     public async ValueTask<SettingEntry?> GetAsync(SettingsScope scope, string key,

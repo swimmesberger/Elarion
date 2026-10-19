@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 
@@ -25,7 +25,9 @@ namespace Elarion.WebPush.EntityFrameworkCore;
 public sealed class EfCorePushSubscriptionStore<TDbContext>(TDbContext dbContext) : IPushSubscriptionStore
     where TDbContext : DbContext {
     // Provider- and schema-specific (delimited identifiers, resolved column names), so built once per model.
-    private static readonly ConcurrentDictionary<IModel, string> UpsertSqlCache = new();
+    // Weak-keyed on the model: an app that builds many models in one process (for example a test suite
+    // with one model per host) would otherwise keep every model, and its SQL, alive for the process lifetime.
+    private static readonly ConditionalWeakTable<IModel, string> UpsertSqlCache = new();
 
     /// <inheritdoc />
     public async ValueTask UpsertAsync(PushSubscription subscription, CancellationToken cancellationToken = default) {

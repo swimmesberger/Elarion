@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Elarion.Abstractions.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -31,7 +31,9 @@ namespace Elarion.Authorization.EntityFrameworkCore;
 internal sealed class EfCoreResourceGrantStore<TDbContext>(TDbContext dbContext) : IResourceGrantStore
     where TDbContext : DbContext {
     // Provider- and schema-specific (delimited identifiers, resolved column names), so built once per model.
-    private static readonly ConcurrentDictionary<IModel, string> GrantSqlCache = new();
+    // Weak-keyed on the model: an app that builds many models in one process (for example a test suite
+    // with one model per host) would otherwise keep every model, and its SQL, alive for the process lifetime.
+    private static readonly ConditionalWeakTable<IModel, string> GrantSqlCache = new();
 
     public async ValueTask GrantAsync(ResourceGrant grant, CancellationToken ct) {
         ArgumentNullException.ThrowIfNull(grant);

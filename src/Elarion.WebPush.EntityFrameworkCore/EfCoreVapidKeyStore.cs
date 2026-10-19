@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Elarion.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -38,7 +38,9 @@ public sealed class EfCoreVapidKeyStore<TDbContext> : IVapidKeyStore
     /// <summary>The root of the purpose string the private key is protected under.</summary>
     public const string PurposePrefix = "Elarion.WebPush.VapidKey";
 
-    private static readonly ConcurrentDictionary<IModel, string> InsertSqlCache = new();
+    // Weak-keyed on the model: an app that builds many models in one process (for example a test suite
+    // with one model per host) would otherwise keep every model, and its SQL, alive for the process lifetime.
+    private static readonly ConditionalWeakTable<IModel, string> InsertSqlCache = new();
 
     private readonly ISettingValueProtector _protector;
     private readonly IServiceScopeFactory _scopeFactory;
