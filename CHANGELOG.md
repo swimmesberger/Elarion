@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.19] - 2026-10-19
+
 ### Fixed
 - **Model-derived SQL caches no longer keep EF models alive.** The EF/PostgreSQL stores that build raw SQL from the EF
   model (actor snapshots, resource grants, blob content and staged uploads, role leases, device keys and pairing
@@ -2181,7 +2183,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.18...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.19...HEAD
+[0.2.19]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.19
 [0.2.18]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.18
 [0.2.17]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.17
 [0.2.16]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.16
