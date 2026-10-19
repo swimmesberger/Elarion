@@ -24,6 +24,8 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.AppHost"/>
     <PackageReference Include="Aspire.Hosting.PostgreSQL"/>
+    <!-- Transitive security pin; see Directory.Packages.props. -->
+    <PackageReference Include="MessagePack"/>
   </ItemGroup>
 
   <ItemGroup>

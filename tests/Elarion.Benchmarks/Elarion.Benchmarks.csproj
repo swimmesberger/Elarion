@@ -19,6 +19,8 @@
 
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet"/>
+    <!-- Transitive security pin; see Directory.Packages.props. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs"/>
     <!-- Cross-platform profiling (opt-in via the "profiler DT" CLI switch, macOS-friendly): auto-downloads
          the JetBrains dotTrace CLI on first run and emits a .dtt snapshot. The speedscope/flamegraph path
          (the "profiler EP" switch) needs no package; EventPipeProfiler ships in the core package. See Program.cs. -->
