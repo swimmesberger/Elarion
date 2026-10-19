@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Elarion.Abstractions.Coordination;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -32,7 +32,9 @@ public sealed class PostgreSqlRoleLease<TDbContext>(
     IInstanceAddressProvider? addressProvider = null) : IRoleLease
     where TDbContext : DbContext {
     // Provider- and schema-specific (delimited identifiers, resolved column names), so built once per model.
-    private static readonly ConcurrentDictionary<IModel, string> AcquireSqlCache = new();
+    // Weak-keyed on the model: an app that builds many models in one process (for example a test suite
+    // with one model per host) would otherwise keep every model, and its SQL, alive for the process lifetime.
+    private static readonly ConditionalWeakTable<IModel, string> AcquireSqlCache = new();
 
     private long _heldUntilTimestamp;
     private volatile string? _currentHolder;

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,9 +20,11 @@ public sealed class EfCoreDevicePairingCodeStore<TDbContext>(
     IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider) : IPairingCodeStore
     where TDbContext : DbContext {
-    private static readonly ConcurrentDictionary<IModel, string> InsertSqlCache = new();
-    private static readonly ConcurrentDictionary<IModel, string> SupersedeSqlCache = new();
-    private static readonly ConcurrentDictionary<IModel, string> ClaimSqlCache = new();
+    // Weak-keyed on the model: an app that builds many models in one process (for example a test suite
+    // with one model per host) would otherwise keep every model, and its SQL, alive for the process lifetime.
+    private static readonly ConditionalWeakTable<IModel, string> InsertSqlCache = new();
+    private static readonly ConditionalWeakTable<IModel, string> SupersedeSqlCache = new();
+    private static readonly ConditionalWeakTable<IModel, string> ClaimSqlCache = new();
 
     /// <inheritdoc />
     public async ValueTask<bool>

@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -31,7 +31,9 @@ public sealed class PostgreSqlActorSnapshotStore<TDbContext>(
     TimeProvider timeProvider) : IActorSnapshotStore
     where TDbContext : DbContext {
     // Provider- and schema-specific (delimited identifiers, resolved column names), so built once per model.
-    private static readonly ConcurrentDictionary<IModel, string> InsertSqlCache = new();
+    // Weak-keyed on the model: an app that builds many models in one process (for example a test suite
+    // with one model per host) would otherwise keep every model, and its SQL, alive for the process lifetime.
+    private static readonly ConditionalWeakTable<IModel, string> InsertSqlCache = new();
 
     /// <inheritdoc />
     public async ValueTask<ActorSnapshot?> ReadAsync(ActorSnapshotKey key,

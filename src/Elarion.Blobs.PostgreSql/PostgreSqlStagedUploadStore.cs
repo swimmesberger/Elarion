@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -198,7 +198,9 @@ public sealed class PostgreSqlStagedUploadStore<TDbContext>(
     // The append SQL is built from the EF model (not hard-coded identifiers) so the UseElarionStagedUploads
     // table/schema overrides and the snake-case toggle apply to the raw conditional-append path too. Built
     // once per model and reused.
-    private static readonly ConcurrentDictionary<IModel, string> AppendSqlCache = new();
+    // Weak-keyed on the model: an app that builds many models in one process (for example a test suite
+    // with one model per host) would otherwise keep every model, and its SQL, alive for the process lifetime.
+    private static readonly ConditionalWeakTable<IModel, string> AppendSqlCache = new();
 
     private static string BuildAppendSql(DbContext context) {
         var entityType = context.Model.FindEntityType(typeof(StagedUploadRow))

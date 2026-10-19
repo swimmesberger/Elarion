@@ -6,6 +6,10 @@
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.5.4"/>
     <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.5.4"/>
     <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.5.4"/>
+    <!-- Transitive security pins (GHSA-qhrr-8q5h-9q3h, GHSA-846f-f764-76mx): Aspire.Hosting 13.5.x pulls MessagePack 2.5.302 and
+         BenchmarkDotNet 0.15.x pulls System.Security.Cryptography.Pkcs 9.0.4. Samples/benchmarks only; drop once upstream catches up. -->
+    <PackageVersion Include="MessagePack" Version="2.5.307"/>
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13"/>
     <PackageVersion Include="AwesomeAssertions" Version="9.6.0"/>
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8"/>
     <PackageVersion Include="BenchmarkDotNet.Diagnostics.dotTrace" Version="0.15.8"/>
@@ -21,39 +25,39 @@
     <PackageVersion Include="Dapper" Version="2.1.89"/>
     <PackageVersion Include="Dapper.AOT" Version="1.1.0"/>
     <PackageVersion Include="Azure.Storage.Blobs" Version="12.29.2"/>
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.AspNetCore.DataProtection" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12"/>
-    <!-- Keep at or above Microsoft.AspNetCore.OpenApi's floor (10.0.12 requires [2.12.0, 3.0.0); GHSA-v5pm-xwqc-g5wc is fixed in 2.7.5).
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13"/>
+    <!-- Keep at or above Microsoft.AspNetCore.OpenApi's floor (10.0.13 requires [2.12.2, 3.0.0); GHSA-v5pm-xwqc-g5wc is fixed in 2.7.5).
          Stay on the 2.x line: Microsoft.AspNetCore.OpenApi's XML-comment source generator assigns
          IOpenApiMediaType.Example, which 3.x made read-only (CS0200). Bump only when AspNetCore.OpenApi ships built against 3.x. -->
     <PackageVersion Include="Microsoft.OpenApi" Version="2.12.2"/>
-    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12"/>
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13"/>
     <!-- Generator Roslyn floor: match the compiler shipped by the global.json SDK band (10.0.3xx = Roslyn 5.6).
          A newer Microsoft.CodeAnalysis.CSharp makes the bundled generators fail to load (CS9057) for consumers on an older SDK;
          raise it only together with the global.json SDK band. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.6.0"/>
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0"/>
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12"/>
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.13"/>
     <PackageVersion Include="Microsoft.Extensions.Caching.Hybrid" Version="10.10.0"/>
     <PackageVersion Include="Microsoft.Extensions.Caching.Postgres" Version="1.2.2"/>
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12"/>
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.13"/>
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5"/>
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.12"/>
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12"/>
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.13"/>
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13"/>
     <PackageVersion Include="Microsoft.Extensions.Resilience" Version="10.10.0"/>
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0"/>
-    <PackageVersion Include="Microsoft.Extensions.Validation" Version="10.0.12"/>
+    <PackageVersion Include="Microsoft.Extensions.Validation" Version="10.0.13"/>
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0"/>
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.401"/>
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2"/>

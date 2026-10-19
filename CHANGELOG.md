@@ -8,6 +8,21 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **Model-derived SQL caches no longer keep EF models alive.** The EF/PostgreSQL stores that build raw SQL from the EF
+  model (actor snapshots, resource grants, blob content and staged uploads, role leases, device keys and pairing
+  codes, idempotency claims, scheduler claims, settings, Web Push subscriptions and VAPID keys) cached it in static
+  dictionaries keyed strongly by `IModel`, so every model a process ever built stayed reachable. An application that
+  builds many models in one process — a test suite with one model per host — leaked each model with its whole
+  service graph until it ran out of memory. The caches are now `ConditionalWeakTable`s: an entry lives exactly as long
+  as its model, and the SQL is still built once per model.
+
+### Security
+- **.NET servicing packages moved to 10.0.13** (`Microsoft.AspNetCore.*`, `Microsoft.EntityFrameworkCore.*`,
+  `Microsoft.Extensions.*`, `Microsoft.Data.Sqlite`), which carries the fixed `System.Security.Cryptography.Xml`/`Pkcs`
+  (GHSA-r955-8q5j-3h83, GHSA-7hqp-7c5m-4vq6, GHSA-c399-9853-6jmj, GHSA-846f-f764-76mx, GHSA-2fmv-rv2c-59x7).
+  `Elarion.Settings.DataProtection` consumers get the patched assemblies transitively.
+
 ## [0.2.18] - 2026-10-13
 
 ### Added

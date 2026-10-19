@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Data.Common;
+using System.Runtime.CompilerServices;
 using Elarion.Abstractions.Idempotency;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -28,7 +28,9 @@ public sealed class EfCoreIdempotencyStore<TDbContext>(TDbContext dbContext, Tim
     private const string PostgresLockNotAvailable = "55P03";
 
     // Provider- and schema-specific (delimited identifiers, resolved column names), so built once per model.
-    private static readonly ConcurrentDictionary<IModel, string> ClaimSqlCache = new();
+    // Weak-keyed on the model: an app that builds many models in one process (for example a test suite
+    // with one model per host) would otherwise keep every model, and its SQL, alive for the process lifetime.
+    private static readonly ConditionalWeakTable<IModel, string> ClaimSqlCache = new();
 
     /// <inheritdoc />
     public async ValueTask<IdempotencyBeginResult> TryBeginAsync(

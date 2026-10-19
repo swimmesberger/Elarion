@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Data;
+using System.Runtime.CompilerServices;
 using Elarion.Blobs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -553,7 +553,9 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
     // The content SQL is built from the EF model (not hard-coded identifiers) so the UseElarionBlobStorage
     // table/column overrides and the snake-case toggle apply to the raw Npgsql content path too. Built once
     // per model and reused.
-    private static readonly ConcurrentDictionary<IModel, ContentSql> ContentSqlCache = new();
+    // Weak-keyed on the model: an app that builds many models in one process (for example a test suite
+    // with one model per host) would otherwise keep every model, and its SQL, alive for the process lifetime.
+    private static readonly ConditionalWeakTable<IModel, ContentSql> ContentSqlCache = new();
 
     internal sealed record ContentSql(string Select, string Upsert);
 

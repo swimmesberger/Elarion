@@ -44,4 +44,15 @@ public sealed class SqliteSettingsStoreFixture : IAsyncLifetime, ISettingsStoreF
             .UseSqlite(ConnectionString)
             .Options);
     }
+
+    /// <summary>
+    /// Creates a context over the shared database whose EF model is built fresh rather than reused from EF's
+    /// per-service-provider model cache, the way a host that keys its model per instance gets a distinct model.
+    /// </summary>
+    public SettingsIntegrationDbContext CreateContextWithOwnModel() {
+        return new SettingsIntegrationDbContext(new DbContextOptionsBuilder<SettingsIntegrationDbContext>()
+            .UseSqlite(ConnectionString)
+            .EnableServiceProviderCaching(false)
+            .Options);
+    }
 }
