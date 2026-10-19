@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.20] - 2026-10-19
+
 ### Added
 - **`UnpooledNpgsqlSession`** (`Elarion.Sql.PostgreSql`): `await UnpooledNpgsqlSession.OpenAsync(connectionString, ct)`
   opens one dedicated, unpooled connection over a private `NpgsqlDataSource` and disposes both together. Unlike
@@ -2199,7 +2201,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.19...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.20...HEAD
+[0.2.20]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.20
 [0.2.19]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.19
 [0.2.18]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.18
 [0.2.17]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.17
