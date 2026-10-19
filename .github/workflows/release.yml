@@ -37,7 +37,7 @@ jobs:
     steps:
       - name: Generate release app token
         id: app-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -50,7 +50,7 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Node
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: 24
 
@@ -90,22 +90,24 @@ jobs:
       - name: Prepare release commit
         run: node scripts/release.mjs prepare "${{ steps.resolve.outputs.version }}" "${{ steps.resolve.outputs.date }}"
 
+      # Commits go through the GitHub API (release.mjs commit) rather than `git push`, so GitHub signs
+      # them as the App and they show as Verified on main.
       - name: Commit and tag release
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git add -A
-          git commit -m "release: v${{ steps.resolve.outputs.version }} [skip ci]"
+          node scripts/release.mjs commit "release: v${{ steps.resolve.outputs.version }} [skip ci]"
           git tag -a "v${{ steps.resolve.outputs.version }}" -m "Elarion v${{ steps.resolve.outputs.version }}"
+          git push origin "refs/tags/v${{ steps.resolve.outputs.version }}"
 
       - name: Open next dev cycle
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           node scripts/release.mjs bump-prefix "${{ steps.resolve.outputs.next }}"
           git add -A
-          git commit -m "chore: set VersionPrefix to ${{ steps.resolve.outputs.next }} for next dev cycle [skip ci]"
-
-      - name: Push commits and tag
-        run: |
-          git push origin HEAD:main
-          git push origin "refs/tags/v${{ steps.resolve.outputs.version }}"
+          node scripts/release.mjs commit "chore: set VersionPrefix to ${{ steps.resolve.outputs.next }} for next dev cycle [skip ci]"
 
       - name: Extract release notes
         run: node scripts/release.mjs notes "${{ steps.resolve.outputs.version }}" > "$RUNNER_TEMP/notes.md"

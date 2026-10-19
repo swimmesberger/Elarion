@@ -34,7 +34,8 @@ The workflow ([`release.yml`](.github/workflows/release.yml)) then:
 
 - syncs the doc version literals to the release version and rolls the changelog
   `[Unreleased]` → `[<version>] - <date>` (via [`scripts/release.mjs`](scripts/release.mjs));
-- commits and tags `v<version>` on `main`;
+- commits to `main` through the GitHub API (so GitHub signs them and they show as **Verified**) and
+  tags `v<version>`;
 - bumps `VersionPrefix` to the next patch and commits it (so previews keep climbing);
 - creates a GitHub Release, which fires the `release: published` job in `publish.yml` to build, test,
   and push the stable NuGet + npm packages from the tag.

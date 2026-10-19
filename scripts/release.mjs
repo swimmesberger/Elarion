@@ -11,9 +11,13 @@
 //                              into a dated "[<version>]" release. [date] defaults to today.
 //   bump-prefix <version>      Set VersionPrefix only (used to open the next dev cycle).
 //   notes <version>            Print the changelog body for <version> to stdout (release notes).
+//   commit <message>           Commit the staged changes onto the remote branch through the GitHub API
+//                              (GITHUB_TOKEN, GITHUB_REPOSITORY; RELEASE_BRANCH defaults to main), then
+//                              move the local checkout onto that commit.
 //
 // Paths resolve from the repository root (this file's parent directory).
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -120,6 +124,58 @@ function printNotes(version) {
   process.stdout.write(`${lines.slice(start + 1, end).join('\n').trim()}\n`);
 }
 
+const git = (...args) => execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' });
+
+// A commit created through the createCommitOnBranch mutation with a GitHub App installation token is
+// signed by GitHub, so the release commits show as Verified; a commit made by `git` on the runner and
+// pushed is unsigned. expectedHeadOid also makes the mutation fail if the branch moved since checkout,
+// so a release never lands on top of a commit it did not prepare.
+async function commitViaApi(message) {
+  const token = process.env.GITHUB_TOKEN;
+  const repository = process.env.GITHUB_REPOSITORY;
+  const branch = process.env.RELEASE_BRANCH || 'main';
+  if (!token || !repository) fail('commit needs GITHUB_TOKEN and GITHUB_REPOSITORY');
+
+  const additions = [];
+  const deletions = [];
+  const entries = git('diff', '--cached', '--name-status', '--no-renames', '-z').split('\0').filter(Boolean);
+  for (let i = 0; i < entries.length; i += 2) {
+    const [status, path] = [entries[i], entries[i + 1]];
+    if (status === 'D') deletions.push({ path });
+    else additions.push({ path, contents: readFileSync(join(repoRoot, path)).toString('base64') });
+  }
+  if (additions.length + deletions.length === 0) fail('commit: nothing staged');
+
+  const [headline, ...body] = message.split('\n');
+  const response = await fetch(process.env.GITHUB_GRAPHQL_URL || 'https://api.github.com/graphql', {
+    method: 'POST',
+    headers: { authorization: `bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      query: `mutation ($input: CreateCommitOnBranchInput!) {
+        createCommitOnBranch(input: $input) { commit { oid } }
+      }`,
+      variables: {
+        input: {
+          branch: { repositoryNameWithOwner: repository, branchName: branch },
+          expectedHeadOid: git('rev-parse', 'HEAD').trim(),
+          message: { headline, body: body.join('\n').trim() },
+          fileChanges: { additions, deletions },
+        },
+      },
+    }),
+  });
+  const result = await response.json();
+  const oid = result.data?.createCommitOnBranch?.commit?.oid;
+  if (!response.ok || !oid) fail(`createCommitOnBranch failed: ${JSON.stringify(result.errors ?? result)}`);
+
+  git('fetch', '--quiet', 'origin', branch);
+  if (git('rev-parse', `${oid}^{tree}`).trim() !== git('write-tree').trim()) {
+    fail(`commit ${oid} does not match the staged tree`);
+  }
+  git('reset', '--quiet', '--hard', oid);
+  console.log(`committed ${oid} to ${branch}`);
+}
+
 const [command, version, dateArg] = process.argv.slice(2);
 
 switch (command) {
@@ -145,6 +201,11 @@ switch (command) {
     printNotes(version);
     break;
   }
+  case 'commit': {
+    if (!version) fail('usage: release.mjs commit <message>');
+    await commitViaApi(version);
+    break;
+  }
   default:
-    fail(`unknown command '${command ?? ''}'. Use prepare | bump-prefix | notes`);
+    fail(`unknown command '${command ?? ''}'. Use prepare | bump-prefix | notes | commit`);
 }
