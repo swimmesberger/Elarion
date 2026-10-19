@@ -214,3 +214,45 @@ The one legitimate use of InMemory is a **demo that must run without Docker** �
 [quickstart](/docs/getting-started/quickstart) uses it so you can try Elarion in five minutes. Anything that
 asserts database *behavior* uses a real database; the framework's own persistence tests are all
 Testcontainers-backed.
+
+### One database per test, and Npgsql's pool registry
+
+Giving every test (or every test host) its own database — a fresh `CREATE DATABASE … TEMPLATE …` per test is
+the fast way to isolate them, see
+[Speed up integration tests with Postgres](https://blog.wimmesberger.dev/posts/speed-up-integration-tests-with-postgres/) —
+runs into an Npgsql detail that is invisible in production:
+
+- **`new NpgsqlConnection(connectionString)` registers a data source for that exact string in Npgsql's static
+  pool manager, for the life of the process.** The constructor does it, before `Open`. There is no public API
+  to remove the entry again. `Pooling=false` does not opt out: the unpooled source is registered too.
+- **`NpgsqlConnection.ClearPool(new NpgsqlConnection(cs))` creates a pool just to clear it.** It reaches only
+  the registry's own source for that string, never the data source your application actually uses, and leaves
+  a new entry behind.
+- **Every data source keeps a metrics reporter in a static list until it is disposed**, so an undisposed
+  `NpgsqlDataSource.Create(…)` is never collected either.
+
+With one connection string per process none of this matters. With one database per test, every distinct
+connection string adds entries that are never freed, and a long suite grows without bound (one suite measured
+over 1,500 retained data sources four minutes in).
+
+For the work that genuinely needs its own server session — the admin connection that runs
+`CREATE`/`DROP DATABASE`, a session-level `pg_advisory_lock`, `LISTEN`, a setup statement that must run
+first and alone — use `UnpooledNpgsqlSession` from `Elarion.Sql.PostgreSql`. It builds a private,
+unpooled data source, opens one connection, and disposes both together, so the registry is never touched and
+disposal really ends the server session (its locks, listeners, and temporary tables go with it):
+
+```csharp
+await using (var admin = await UnpooledNpgsqlSession.OpenAsync(adminConnectionString, ct)) {
+    await using var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\" TEMPLATE app_template", admin.Connection);
+    await create.ExecuteNonQueryAsync(ct);
+}
+```
+
+The rest of the test's traffic goes through the data source the host registers (`AddElarionPostgreSql`,
+`AddNpgsqlDataSource`, `UseNpgsql`), and the host disposes it with its service provider. If idle pooled
+connections keep a test database from being dropped, clear **that** data source — `dataSource.Clear()` on the
+instance the host resolved — not a pool looked up by connection string. Opening an unpooled session costs a full
+connection handshake each time, so it is the wrong tool for the application's normal queries.
+
+The migration runner's connection-string constructor (`new PostgreSqlMigrationRunner(connectionString, …)`)
+already opens its dedicated session this way, so migrating one fresh database per test leaves nothing behind.

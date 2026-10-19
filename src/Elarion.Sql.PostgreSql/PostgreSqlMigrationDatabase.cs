@@ -27,11 +27,8 @@ internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
         long advisoryLockKey, ILogger? logger = null)
         : this(options, advisoryLockKey, logger) {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        // A genuinely dedicated physical connection: closing it always releases the session advisory
-        // lock server-side, so no error path can park a pooled connector that still holds the lock.
-        var builder = new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false };
-        _schema = ResolveSchema(builder.SearchPath);
-        _connectionString = builder.ConnectionString;
+        _schema = ResolveSchema(new NpgsqlConnectionStringBuilder(connectionString).SearchPath);
+        _connectionString = connectionString;
     }
 
     public PostgreSqlMigrationDatabase(NpgsqlDataSource dataSource, MigrationOptions options,
@@ -55,7 +52,7 @@ internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
     private int LockTimeoutSeconds => ToSeconds(_options.LockTimeout);
 
     public async Task<IMigrationSession> ConnectAsync(bool exclusive, CancellationToken cancellationToken) {
-        var connection = await OpenConnectionAsync(cancellationToken);
+        var (connection, lifetime) = await OpenConnectionAsync(cancellationToken);
         try {
             if (exclusive) {
                 await AcquireLockAsync(connection, cancellationToken);
@@ -63,12 +60,13 @@ internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
             }
         }
         catch {
-            await connection.DisposeAsync();
+            await lifetime.DisposeAsync();
             throw;
         }
 
         return new PostgreSqlMigrationSession(
             connection,
+            lifetime,
             _schema,
             _options.HistoryTableName,
             CommandTimeoutSeconds,
@@ -78,12 +76,23 @@ internal sealed class PostgreSqlMigrationDatabase : IMigrationDatabase {
             _logger);
     }
 
-    private async Task<NpgsqlConnection> OpenConnectionAsync(CancellationToken cancellationToken) {
-        if (_dataSource is not null) return await _dataSource.OpenConnectionAsync(cancellationToken);
+    /// <summary>
+    /// Opens the session's connection and returns what disposing ends it. From a borrowed data source that is the
+    /// pooled connection itself. From a connection string it is an <see cref="UnpooledNpgsqlSession"/>: a genuinely
+    /// dedicated physical connection, so closing it always releases the session advisory lock server-side and no
+    /// error path can park a pooled connector that still holds the lock. Unlike
+    /// <c>new NpgsqlConnection(connectionString)</c>, it also leaves no data source behind in Npgsql's static pool
+    /// registry, which matters to a test suite that migrates one fresh database per test.
+    /// </summary>
+    private async Task<(NpgsqlConnection Connection, IAsyncDisposable Lifetime)> OpenConnectionAsync(
+        CancellationToken cancellationToken) {
+        if (_dataSource is not null) {
+            var pooled = await _dataSource.OpenConnectionAsync(cancellationToken);
+            return (pooled, pooled);
+        }
 
-        var connection = new NpgsqlConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
-        return connection;
+        var session = await UnpooledNpgsqlSession.OpenAsync(_connectionString!, cancellationToken);
+        return (session.Connection, session);
     }
 
     private async Task AcquireLockAsync(NpgsqlConnection connection, CancellationToken cancellationToken) {

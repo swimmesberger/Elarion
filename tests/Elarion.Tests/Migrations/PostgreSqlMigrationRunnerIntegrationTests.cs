@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using Elarion.Migrations;
 using Elarion.Sql.PostgreSql;
+using Elarion.Tests.SqlMapping;
 using Npgsql;
 using Xunit;
 
@@ -302,6 +303,20 @@ public sealed class PostgreSqlMigrationRunnerIntegrationTests(PostgreSqlMigratio
         results.SelectMany(r => r).Should().HaveCount(3);
         (await ScalarAsync(connectionString, "SELECT count(*) FROM elarion_schema_history")).Should().Be(3L);
         (await ScalarAsync(connectionString, "SELECT count(*) FROM mig_customers")).Should().Be(0L);
+    }
+
+    [Fact]
+    public async Task Migrate_FromAConnectionString_LeavesNpgsqlsPoolRegistryUntouched() {
+        // A suite that migrates one fresh database per test would otherwise leak a registered data source per
+        // database for the life of the process; the runner's dedicated session is unpooled and self-owned.
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var marker = $"migrate-{Guid.CreateVersion7():N}";
+        var connectionString = NpgsqlPoolRegistry.Mark(await fixture.CreateDatabaseAsync(TestToken), marker);
+
+        await CreateRunner(connectionString, "Basic.").MigrateAsync(TestToken);
+        await CreateRunner(connectionString, "Basic.").ValidateAsync(TestToken);
+
+        NpgsqlPoolRegistry.Contains(marker).Should().BeFalse();
     }
 
     private static IMigrationRunner CreateRunner(
