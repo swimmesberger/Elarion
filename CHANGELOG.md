@@ -8,6 +8,22 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **`UnpooledNpgsqlSession`** (`Elarion.Sql.PostgreSql`): `await UnpooledNpgsqlSession.OpenAsync(connectionString, ct)`
+  opens one dedicated, unpooled connection over a private `NpgsqlDataSource` and disposes both together. Unlike
+  `new NpgsqlConnection(connectionString)`, which registers a data source per distinct connection string in Npgsql's
+  static pool manager for the life of the process (with `Pooling=false` too, and through
+  `ClearPool(new NpgsqlConnection(cs))`), it never touches that registry, and disposing it ends the server session
+  with its advisory locks and `LISTEN`s. Use it for session-scoped work and for anything against a per-test or
+  otherwise short-lived database; see *One database per test, and Npgsql's pool registry* in the persistence docs.
+
+### Fixed
+- **The migration runner's connection-string path no longer leaks into Npgsql's pool registry.**
+  `new PostgreSqlMigrationRunner(connectionString, …)` opened its dedicated session with
+  `new NpgsqlConnection(cs with Pooling=false)`, which registered a data source per database for the life of the
+  process, so a suite migrating one fresh database per test kept every one of them. It now opens the session through
+  `UnpooledNpgsqlSession`; closing it still ends the server session and releases the advisory lock.
+
 ## [0.2.19] - 2026-10-19
 
 ### Fixed

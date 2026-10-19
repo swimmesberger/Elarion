@@ -8,10 +8,13 @@ namespace Elarion.Sql.PostgreSql;
 /// <summary>
 /// A PostgreSQL migration session over one dedicated connection (ADR-0057). When it holds the
 /// session-level <c>pg_advisory_lock</c>, disposal releases it before closing the connection — though a
-/// broken connection releases it server-side anyway (session scope, no lock row to clean up).
+/// broken connection releases it server-side anyway (session scope, no lock row to clean up). Closing goes
+/// through the connection's lifetime owner: the pooled connection itself, or the
+/// <see cref="UnpooledNpgsqlSession"/> a connection-string database opened it through.
 /// </summary>
 internal sealed class PostgreSqlMigrationSession : IMigrationSession {
     private readonly NpgsqlConnection _connection;
+    private readonly IAsyncDisposable _lifetime;
     private readonly SchemaHistory _history;
     private readonly int _commandTimeoutSeconds;
     private readonly bool _holdsLock;
@@ -21,6 +24,7 @@ internal sealed class PostgreSqlMigrationSession : IMigrationSession {
 
     internal PostgreSqlMigrationSession(
         NpgsqlConnection connection,
+        IAsyncDisposable lifetime,
         string? schema,
         string historyTableName,
         int commandTimeoutSeconds,
@@ -29,6 +33,7 @@ internal sealed class PostgreSqlMigrationSession : IMigrationSession {
         int lockTimeoutSeconds,
         ILogger logger) {
         _connection = connection;
+        _lifetime = lifetime;
         _commandTimeoutSeconds = commandTimeoutSeconds;
         _holdsLock = holdsLock;
         _advisoryLockKey = advisoryLockKey;
@@ -85,7 +90,7 @@ internal sealed class PostgreSqlMigrationSession : IMigrationSession {
     public async ValueTask DisposeAsync() {
         if (_holdsLock) await ReleaseLockAsync();
 
-        await _connection.DisposeAsync();
+        await _lifetime.DisposeAsync();
     }
 
     private async Task ReleaseLockAsync() {
