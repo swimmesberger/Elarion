@@ -71,6 +71,8 @@ internal static partial class HttpEndpointEmission {
             chain.Add(
                 $".WithMetadata(new {ProducesMetadataFqn}(200, typeof({entry.ResponseTypeFqn}), new[] {{ \"application/json\" }}))");
         chain.Add(".ProducesElarionErrors()");
+        if (entry.IsAllowAnonymous)
+            chain.Add(".AllowAnonymous()");
         if (entry.ResponseIsFile)
             chain.Add($".WithMetadata({FileMarkerFqn})");
         if (entry.IsIdempotent)

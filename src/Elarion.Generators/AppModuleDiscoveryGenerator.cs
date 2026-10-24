@@ -857,12 +857,19 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         sb.AppendLine();
 
         // --- MapElarionEndpoints (module MapEndpoints + [ModuleEndpoints] contributors + generated [HttpEndpoint] mapping, all gated) ---
+        // Everything maps into one prefix-less route group that is returned, so the host attaches conventions to
+        // every Elarion-mapped endpoint at once (e.g. .RequireAuthorization()); module hooks receive the group as
+        // their IEndpointRouteBuilder, so they map exactly as onto the root builder.
         sb.AppendLine(
-            "    /// <summary>Calls MapEndpoints (module-declared and [ModuleEndpoints] contributors) and maps generated [HttpEndpoint] handlers on all enabled modules.</summary>");
-        sb.AppendLine("    public static void MapElarionEndpoints(");
+            "    /// <summary>Calls MapEndpoints (module-declared and [ModuleEndpoints] contributors) and maps generated [HttpEndpoint] handlers on all enabled modules, inside one prefix-less route group.</summary>");
+        sb.AppendLine(
+            "    /// <returns>The route group holding every mapped endpoint, so the host can add conventions to all of them (for example <c>.RequireAuthorization()</c>).</returns>");
+        sb.AppendLine("    public static global::Microsoft.AspNetCore.Routing.RouteGroupBuilder MapElarionEndpoints(");
         sb.AppendLine("        this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints,");
         sb.AppendLine("        global::Microsoft.Extensions.Configuration.IConfiguration configuration)");
         sb.AppendLine("    {");
+        sb.AppendLine(
+            $"        var {ElarionEndpointGroup} = global::Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions.MapGroup(endpoints, string.Empty);");
         foreach (var entry in entries)
             EmitModuleEndpointMapping(
                 sb,
@@ -871,8 +878,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
                 contributorsByModule.TryGetValue(entry.ModuleName, out var contributors) ? contributors : []);
 
         if (transport.UnmatchedHttp.Count > 0)
-            sb.AppendLine($"        {HttpMethodName(UnmatchedModuleName)}(endpoints);");
+            sb.AppendLine($"        {HttpMethodName(UnmatchedModuleName)}({ElarionEndpointGroup});");
 
+        sb.AppendLine($"        return {ElarionEndpointGroup};");
         sb.AppendLine("    }");
         sb.AppendLine();
 
@@ -1170,6 +1178,9 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         return transport.RpcByModule.TryGetValue(moduleName, out var methods) && McpMetadataEmission.AnyMcp(methods);
     }
 
+    // The local holding MapElarionEndpoints' returned route group; every module mapping targets it.
+    private const string ElarionEndpointGroup = "__elarionEndpoints";
+
     private static string HttpMethodName(string moduleName) {
         return $"Map{ModuleMethodNamePart(moduleName)}Http";
     }
@@ -1250,11 +1261,11 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
                 groupHooks.Add(contributor.TypeFqn);
 
         var useGroup = groupHooks.Count > 0;
-        var target = "endpoints";
+        var target = ElarionEndpointGroup;
         var statements = new List<string>();
         if (useGroup) {
             target = $"{ModuleMethodNamePart(entry.ModuleName)}Endpoints";
-            statements.Add($"var {target} = {groupHooks[0]}.ConfigureEndpointGroup(endpoints);");
+            statements.Add($"var {target} = {groupHooks[0]}.ConfigureEndpointGroup({ElarionEndpointGroup});");
             for (var i = 1; i < groupHooks.Count; i++)
                 statements.Add($"{target} = {groupHooks[i]}.ConfigureEndpointGroup({target});");
         }

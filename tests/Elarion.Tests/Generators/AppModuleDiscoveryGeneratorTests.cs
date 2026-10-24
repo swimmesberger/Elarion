@@ -33,10 +33,6 @@ public sealed class AppModuleDiscoveryGeneratorTests {
 
             }
 
-            namespace Microsoft.AspNetCore.Routing {
-                public interface IEndpointRouteBuilder;
-            }
-
             namespace Microsoft.Extensions.Configuration {
                 public interface IConfiguration {
                     string? this[string key] { get; set; }
@@ -111,7 +107,7 @@ public sealed class AppModuleDiscoveryGeneratorTests {
         generated.Should()
             .Contain("global::Sample.Modules.Core.CoreModule.ConfigureServices(services, configuration);");
         generated.Should().Contain("if (IsModuleEnabled(configuration, \"AiAgent\"))");
-        generated.Should().Contain("global::Sample.Modules.AiAgent.AiAgentModule.MapEndpoints(endpoints);");
+        generated.Should().Contain("global::Sample.Modules.AiAgent.AiAgentModule.MapEndpoints(__elarionEndpoints);");
         generated.Should().Contain("\"Core\" => true,");
         generated.Should().NotContain("Modules:Core:Enabled");
         generated.Should().Contain("return new string[] { \"Core\", \"AiAgent\" };");

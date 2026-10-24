@@ -278,7 +278,8 @@ internal static class ElarionManifest {
             EncodeBool(model.IsIdempotent),
             ElarionManifestCodec.EncodeBindingMembers(model.BindingMembers),
             // Appended (not inserted) so earlier field indices stay stable; count-gated decode below.
-            model.CustomizeEndpointTypeFqn);
+            model.CustomizeEndpointTypeFqn,
+            EncodeBool(model.IsAllowAnonymous));
     }
 
     public static string EncodeRpcMethod(RpcMethodEmission.Model model) {
@@ -448,8 +449,9 @@ internal static class ElarionManifest {
     public static bool TryDecodeHttpEndpoint(string value, out HttpEndpointEmission.Model? model) {
         model = null;
         // 12 fields = an assembly built before the CustomizeEndpoint hook existed; decode it with no hook (that
-        // compilation could not have declared one) instead of dropping its endpoints.
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count is not (12 or 13))
+        // compilation could not have declared one) instead of dropping its endpoints. 13 fields = built before the
+        // anonymous flag existed; its routes carry no IAllowAnonymous, as they did then.
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count is not (12 or 13 or 14))
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null || fields[3] is null ||
             fields[4] is null || fields[5] is null || fields[11] is null)
@@ -460,6 +462,10 @@ internal static class ElarionManifest {
             !TryDecodeBool(fields[8], out var responseIsEmpty) ||
             !TryDecodeBool(fields[10], out var isIdempotent) ||
             !ElarionManifestCodec.TryDecodeBindingMembers(fields[11]!, out var bindingMembers))
+            return false;
+
+        var isAllowAnonymous = false;
+        if (fields.Count == 14 && !TryDecodeBool(fields[13], out isAllowAnonymous))
             return false;
 
         model = new HttpEndpointEmission.Model(
@@ -475,7 +481,8 @@ internal static class ElarionManifest {
             fields[9],
             isIdempotent,
             bindingMembers,
-            fields.Count == 13 ? fields[12] : null);
+            fields.Count >= 13 ? fields[12] : null,
+            isAllowAnonymous);
         return true;
     }
 

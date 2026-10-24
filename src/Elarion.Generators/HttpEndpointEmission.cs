@@ -14,6 +14,7 @@ internal static partial class HttpEndpointEmission {
     public const string HttpEndpointAttributeMetadataName = "Elarion.Abstractions.HttpEndpointAttribute";
     private const string DescriptionAttributeMetadataName = "System.ComponentModel.DescriptionAttribute";
     private const string IdempotentAttributeFqn = "Elarion.Abstractions.Idempotency.IdempotentAttribute";
+    private const string AllowAnonymousAttributeFqn = "Elarion.Abstractions.Authorization.AllowAnonymousAttribute";
     private const string AsParametersAttributeFqn = "Microsoft.AspNetCore.Http.AsParametersAttribute";
     private const string BindingMetadataNamespace = "Microsoft.AspNetCore.Http.Metadata";
     private const string HttpNamespace = "Microsoft.AspNetCore.Http";
@@ -82,7 +83,11 @@ internal static partial class HttpEndpointEmission {
         string? Description,
         bool IsIdempotent,
         EquatableArray<BindingMember> BindingMembers,
-        string? CustomizeEndpointTypeFqn
+        string? CustomizeEndpointTypeFqn,
+        // [AllowAnonymous] on the handler (or a base type): the route carries ASP.NET's IAllowAnonymous so a host
+        // authorization convention (a FallbackPolicy, a group's RequireAuthorization) leaves it open, exactly as
+        // the handler pipeline does.
+        bool IsAllowAnonymous = false
     ) {
         /// <summary>
         /// Whether the response is the binary file payload (<c>Result&lt;ElarionFile&gt;</c>), mapped through the
@@ -196,7 +201,8 @@ internal static partial class HttpEndpointEmission {
             GetDescription(type, descriptionType),
             IsIdempotentHandler(type),
             bindingMembers,
-            DetectCustomizeEndpointHook(type, fmt, report));
+            DetectCustomizeEndpointHook(type, fmt, report),
+            IsAllowAnonymousHandler(type));
         return true;
     }
 
@@ -246,6 +252,18 @@ internal static partial class HttpEndpointEmission {
         foreach (var attr in type.GetAttributes())
             if (attr.AttributeClass?.ToDisplayString() == IdempotentAttributeFqn)
                 return true;
+
+        return false;
+    }
+
+    // [AllowAnonymous] is declared with Inherited = true and the handler pipeline reads it through
+    // GetCustomAttributes(inherit: true), so a base type's attribute opens the route too — the same walk the
+    // authorization decorator's attachment uses.
+    private static bool IsAllowAnonymousHandler(INamedTypeSymbol type) {
+        for (var current = type; current is not null; current = current.BaseType)
+            foreach (var attr in current.GetAttributes())
+                if (attr.AttributeClass?.ToDisplayString() == AllowAnonymousAttributeFqn)
+                    return true;
 
         return false;
     }
