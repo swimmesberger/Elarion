@@ -28,6 +28,25 @@ block is omitted for a method that declares none.
 }
 ```
 
+A method also says what a client may know **before** calling it, each member omitted when empty: `requires` — either
+`anonymous`, or `authenticated` with the `permissions` and `roles` the handler requires (all of them) and
+`serverChecks` for a policy, claim or resource requirement only the server can evaluate; `readOnly` for an `IQuery`
+request; and `tags`, the handler's [`[ClientTag]`](/docs/reference/attributes#clienttag) hints. They are computed at
+compile time from the same declarations the authorization decorator enforces (an `[ElarionAuthorizationDefaults]`
+in scope sets `authenticated`), and the generated client exposes them as
+[`rpcMethodInfo`](/docs/capabilities/transports/typescript-client#method-requirements-and-ui-gating). The schema
+ships with the client, so it shows every method's required permission names, the same vocabulary the `capabilities`
+block lists.
+
+```json
+"invoices.approve": {
+  "params": { "…": "…" },
+  "result": { "…": "…" },
+  "requires": { "authenticated": true, "permissions": ["invoices.approve"], "serverChecks": true },
+  "tags": { "timeout": "60s" }
+}
+```
+
 ### Requiredness
 
 One rule, in both directions ([ADR-0082](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0082-requiredness-comes-from-nullability-in-both-directions.md)):

@@ -308,6 +308,46 @@ the framework default from [`AppErrorMapper`](/docs/reference/result-and-errors)
 custom `IAppErrorTranslator<RpcError>` changes the wire codes, so keep the frontend aligned. A network or
 HTTP-level failure throws `RpcTransportError` and a malformed JSON-RPC envelope throws `RpcProtocolError`.
 
+An unexpected server error (an exception, `code: "internal"`) carries a support reference in `error.reference` —
+the server's configured [unexpected-error](/docs/concepts/results-and-errors#unexpected-errors) answer. Show it next
+to the message instead of matching the message text; it is `undefined` for every other error:
+
+```ts
+if (error instanceof RpcError && error.code === 'internal')
+  return showError(`${error.message} (reference ${error.reference ?? 'unavailable'})`)
+```
+
+## Method requirements and UI gating
+
+`rpcMethodInfo` holds, for every method, what the schema says before the method is called — exported from the
+handler's own declarations, so the UI never repeats them:
+
+| Field | From |
+| --- | --- |
+| `requires.anonymous` | `[AllowAnonymous]` |
+| `requires.authenticated` | any requirement, or an `[ElarionAuthorizationDefaults]` in scope |
+| `requires.permissions` / `requires.roles` | `[RequirePermission]` / `[RequireRole]` (all required) |
+| `requires.serverChecks` | `[RequirePolicy]`, `[RequireClaim]` or `[RequireResource]` — only the server can tell |
+| `readOnly` | the request is an `IQuery` |
+| `idempotent` | `[Idempotent]` |
+| `tags` | `[ClientTag(key, value)]` hints, e.g. `[ClientTag("timeout", "180s")]` |
+
+Pair it with `canCall` from `@swimmesberger/elarion-contributions` to grey out an action the current user cannot
+call, without naming the permission at the call site:
+
+```tsx
+import { canCall } from '@swimmesberger/elarion-contributions'
+import { rpcMethodInfo } from './generated/rpc-client'
+
+const decision = canCall(rpcMethodInfo['invoices.approve'], capabilities)   // the session capabilities
+<Button disabled={!decision.allowed}>Approve</Button>
+```
+
+`canCall` returns `{ allowed: false, reason, missing? }` for the first unmet requirement (`unauthenticated`,
+`permission`, `role`), or `{ allowed: true, serverChecks }`. Like a contribution's `when`, it is a UX projection:
+the server authorizes every call. The same map answers other per-method questions — `rpcMethodInfo[m].tags.timeout`
+for a slow operation's client timeout, `readOnly` for which actions a read-only session may still use.
+
 ## Params validation
 
 The client **pre-validates request params by default** through `rpcParamsSchemas`, before anything

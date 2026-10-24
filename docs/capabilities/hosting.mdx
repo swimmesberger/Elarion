@@ -79,6 +79,10 @@ handlers. The JSON-RPC adapter then serves only the operations flagged `HandlerT
 `MapElarionEndpoints` does the same gating for module `MapEndpoints`
 and generated `[HttpEndpoint]` routes — including hooks the host declares on behalf of a web-free module
 assembly with [`[ModuleEndpoints]`](/docs/concepts/modules#declaring-the-hooks-outside-the-module-moduleendpoints).
+It maps them all into one prefix-less route group and returns it, so `app.MapElarionEndpoints(cfg).RequireAuthorization()`
+guards those endpoints at once while `[AllowAnonymous]` handlers stay open — the JSON-RPC and MCP endpoints are
+mapped separately and take their own conventions (see
+[HTTP endpoints › Public handlers stay public](/docs/capabilities/transports/http-endpoints#public-handlers-stay-public)).
 To expose the same handlers over MCP (a thin adapter over the same
 handler bus, equally gated), pair `builder.Configuration.GetMcpMetadata()` with the same
 `ElarionBootstrapper.RegisterHandlers` registry via `AddElarionMcp` — see [MCP server](/docs/capabilities/transports/mcp).
@@ -121,7 +125,10 @@ for:
 - concrete platform capability providers,
 - middleware order,
 - health checks, telemetry exporters, and deployment integration,
-- JSON-RPC endpoint publication and transport-specific error mapping.
+- JSON-RPC endpoint publication and transport-specific error mapping,
+- the wording of the answer to unexpected exceptions, through
+  [`ConfigureElarionUnexpectedErrors`](/docs/concepts/results-and-errors#unexpected-errors) (every transport
+  already catches them and answers with a support reference).
 
 ## CSRF and cookie authentication
 

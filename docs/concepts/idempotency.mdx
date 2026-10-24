@@ -95,12 +95,15 @@ Two things follow from annotating:
 
 The decorator short-circuits with `AppError`s that map to the IETF `Idempotency-Key` header draft and Stripe:
 
-- **Missing key** (when `KeyRequired`) → `400`.
-- **Concurrent in-flight duplicate** → `409` (Conflict mode, the industry default) — the client retries shortly
-  and then replays. `WaitThenReplay` blocks on the key lock and replays instead — but the wait is still **bounded**
-  (a longer `lock_timeout` than the fast-fail path), so a stuck winner can never pin the duplicate's database
-  connection forever; on timeout the duplicate degrades to the same `409`.
-- **Same key, different request body** → `422` (fingerprint mismatch).
+- **Missing key** (when `KeyRequired`) → `400`, code `idempotency.key_required`.
+- **Concurrent in-flight duplicate** → `409`, code `idempotency.in_progress` (Conflict mode, the industry default) —
+  the client retries shortly and then replays. `WaitThenReplay` blocks on the key lock and replays instead — but the
+  wait is still **bounded** (a longer `lock_timeout` than the fast-fail path), so a stuck winner can never pin the
+  duplicate's database connection forever; on timeout the duplicate degrades to the same `409`.
+- **Same key, different request body** → `422`, code `idempotency.key_reused` (fingerprint mismatch).
+
+Each answer carries its specific code (declared on every `[Idempotent]` operation's error contract), so a client
+branches on the code instead of the message.
 - **Retried after completion** → the stored result is replayed, without re-running the handler.
 
 **Success-only by default.** A failed result rolls back the transaction — discarding the key — so the same key

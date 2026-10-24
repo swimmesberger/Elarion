@@ -126,6 +126,17 @@ var app = builder.Build();
 app.MapElarionEndpoints(app.Configuration);   // module routes, gated per module
 ```
 
+`MapElarionEndpoints` maps everything inside one prefix-less route group and returns it, so a host attaches a
+convention to every Elarion endpoint at once:
+
+```csharp
+// Deny by default: every route this maps requires a signed-in user unless its handler is [AllowAnonymous].
+app.MapElarionEndpoints(app.Configuration).RequireAuthorization();
+```
+
+The group holds module `MapEndpoints` hooks and generated `[HttpEndpoint]` routes. `MapElarionJsonRpc` and
+`MapElarionMcp` map their own endpoints; give them the same convention where the host wants it.
+
 The generated registration is a concrete, per-handler `RequestDelegate` whose binding code the generator
 emits at compile time (ADR-0071): no open generics, no reflection, and no dependency on ASP.NET Core's
 reflection-based `RequestDelegateFactory` or its Request Delegate Generator — RDG is itself a source
@@ -172,8 +183,9 @@ reflection off while the success legs work. A host that wants `CustomizeProblemD
 
 ### Per-module authorization and route conventions
 
-`MapElarionEndpoints` maps every enabled module's routes onto the same route builder, leaving authentication
-and authorization to the host's middleware and global policies. There are no per-module URL prefixes by
+`MapElarionEndpoints` maps every enabled module's routes into the same route group, leaving authentication
+and authorization to the host's middleware, global policies, and the conventions it adds to the returned group.
+There are no per-module URL prefixes by
 default — each `[HttpEndpoint("...")]` carries its own complete route template, so modules share a flat
 URL space and any module can declare a route under any path (the generator only guards against duplicate
 `verb + route` pairs).
@@ -197,10 +209,20 @@ module's routes keep their full templates and the flat URL space is preserved. A
 a URL segment can instead return `root.MapGroup("/billing")` — that prefixes *all* of its generated
 routes, the explicit trade for a module that wants its own path.
 
-This is the same seam as a module's own `MapEndpoints` hook: the host owns global middleware order, the
-module owns its group, and the generator never reads `[Authorize]`/`[AllowAnonymous]` from handlers. When a
-*single* endpoint needs its own conventions, declare a [`CustomizeEndpoint` hook](#per-endpoint-conventions-the-customizeendpoint-hook)
-on the handler instead of moving it off the generated path.
+This is the same seam as a module's own `MapEndpoints` hook: the host owns global middleware order and the
+module owns its group. When a *single* endpoint needs its own conventions, declare a
+[`CustomizeEndpoint` hook](#per-endpoint-conventions-the-customizeendpoint-hook) on the handler instead of moving
+it off the generated path.
+
+### Public handlers stay public
+
+The generator infers exactly one thing about ASP.NET authorization from a handler: a handler marked Elarion's
+`[AllowAnonymous]` (declared or inherited) gets `.AllowAnonymous()` on its route. A host `FallbackPolicy`, a
+`RequireAuthorization()` on the returned group, or a module group's policy therefore leaves it open, exactly as
+the handler pipeline does — no path-prefix exception list in `Program.cs`. Nothing else is inferred: a guarded
+handler's route carries no `RequireAuthorization()`, because which ASP.NET policy guards a route (and whether the
+host runs ASP.NET authorization at all) is the host's decision; the handler's `[Require*]` attributes are enforced
+by the handler pipeline on every transport regardless.
 
 ### Per-endpoint conventions: the CustomizeEndpoint hook
 
@@ -375,6 +397,12 @@ branches on the same string as over JSON-RPC — see [OpenAPI › Typed errors](
 Binding-tier failures use the same contract before the handler runs: an unparseable route/query/header/form
 value or a missing required member is a `400` `ValidationProblem` (`code: "validation"`) keyed by the wire name,
 and a request body with a non-JSON content type is a bare `415`.
+
+An exception that escapes the handler pipeline — from the handler or from any decorator — is caught by the
+generated endpoint itself and answered as a `500` ProblemDetails with `code: "internal"`, the configured message
+as `detail`, and a support `reference`, the same answer JSON-RPC and MCP give (see
+[Unexpected errors](/docs/concepts/results-and-errors#unexpected-errors)). It is logged with that reference and
+does not reach the host's exception-handling middleware; a request the client aborted is not answered.
 
 ## HTTP or JSON-RPC?
 

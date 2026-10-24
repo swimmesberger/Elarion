@@ -8,6 +8,60 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **One answer for unexpected exceptions on every transport** (ADR-0086). `ConfigureElarionUnexpectedErrors(o => …)`
+  sets the message and the support reference that JSON-RPC, MCP and generated `[HttpEndpoint]` routes answer for an
+  exception that escaped the handler pipeline; the defaults are `Internal error` and the current trace id. Each
+  transport catches outside every decorator, so an exception from the authorization, validation, audit or
+  observability decorator gets the same answer, and logs it with the reference. The reference travels in its own
+  field — `error.data.reference` (`RpcErrorData.Reference`) on JSON-RPC, the tool result's structured content
+  `{ code, reference }` on MCP (with `ElarionMcpOptions.IncludeErrorDetails`, the default), the `reference`
+  ProblemDetails member on HTTP — and the generated TypeScript `RpcError` exposes it as `reference`.
+  `UnexpectedErrorOptions.LeaveToHost` hands chosen exceptions on generated HTTP routes to the host's exception
+  handling instead (the developer exception page, an `IExceptionHandler` mapping one to its own status).
+- **Per-method requirements, read-only flags and client tags in the RPC schema** (ADR-0085). Each method exports
+  `requires` (`anonymous`, or `authenticated` with the required `permissions` and `roles`, and `serverChecks` for
+  policy, claim and resource requirements), `readOnly` for an `IQuery` request, and `tags` from the new
+  `[ClientTag(key, value)]`. They are computed at compile time from the handler's declarations, including the
+  authentication an `[ElarionAuthorizationDefaults]` in scope requires, and carried on `HandlerRoute.Client`
+  (`HandlerClientMetadata`). The TypeScript generator emits `rpcMethodInfo`, and
+  `@swimmesberger/elarion-contributions` adds `canCall(info, capabilities)` for gating actions without repeating
+  permission lists.
+- **`AuthorizationContext.HandlerType`** and `GetHandlerAttribute<T>()`: global authorization rules and named policies
+  see the concrete handler being authorized (`null` on the client-event subscription path), so a rule can key off a
+  handler marker. Carried on `AuthorizationRequirements.HandlerType`.
+- **`SortMap<T>.Validate(sort)`** answers an unknown sort key with a field-keyed validation error
+  (`paging.sort_key_unknown`, `PagingErrorCodes.SortKeyUnknown`) instead of the silent fallback, and
+  **`SortMap<T>.Keys`** lists every allowed key with the direction a bare key applies. The pagination docs now spell
+  out `key` / `+key` / `-key`: a bare key means the key's declared direction.
+- **`Page<T>.Map(selector)`** and the batched **`Page<T>.MapAsync(selector, ct)`** project a page's items while
+  keeping its cursors, flags and total.
+
+### Changed
+- **`MapElarionEndpoints` returns a `RouteGroupBuilder`.** Every module and `[HttpEndpoint]` route is mapped inside
+  one prefix-less group, so `app.MapElarionEndpoints(cfg).RequireAuthorization()` guards all Elarion endpoints at once.
+  Module `MapEndpoints`/`ConfigureEndpointGroup` hooks receive that group.
+- **Generated routes of `[AllowAnonymous]` handlers carry `.AllowAnonymous()`** (declared or inherited), so a host
+  `FallbackPolicy` or a group-wide `RequireAuthorization()` leaves them open, as the handler pipeline does. No
+  authorization metadata is inferred for guarded handlers.
+- **Generated `[HttpEndpoint]` routes catch unexpected exceptions** and answer the configured `500` ProblemDetails
+  (`code: "internal"`, `reference`) instead of letting them reach the host's exception-handling middleware.
+- **Exported request patterns are anchored.** `[RegularExpression]` matches the whole value on the server, so an
+  unanchored pattern exports as `^(?:…)$` in request schemas (patterns anchored at both ends stay byte-identical), and
+  the generated Zod client rejects what the server rejects. **`[Required]` on a request string is exported as
+  not-blank** — a lookahead on the same `pattern` — so it is the way to say "not blank" without a custom attribute.
+  Result and event schemas keep the pattern as declared and get no not-blank lookahead: the client parses results, and
+  a stored value from before a constraint must not fail a read. Two edges remain: `[RegularExpression]` accepts an
+  empty string on the server while the anchored pattern rejects it, and a top-level alternation whose first branch
+  matches a prefix (`a|ab` on `"ab"`) fails on the server but passes the anchored pattern. Regenerate schemas and
+  clients.
+- The JSON-RPC dispatcher no longer includes the exception message in its internal-error answer in `DEBUG` builds.
+
+### Fixed
+- **`[Idempotent]` answers carry their declared codes.** A missing key, a key in progress and a reused key answered
+  with the generic `validation`, `conflict` and `business_rule` codes although every idempotent operation declares
+  `idempotency.key_required`, `idempotency.in_progress` and `idempotency.key_reused`.
+
 ## [0.2.21] - 2026-10-24
 
 ### Added

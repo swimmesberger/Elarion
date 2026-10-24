@@ -52,6 +52,7 @@ This package ships the *machinery* with fixed semantics; your application owns t
 | `ContributionProvider` / `useContributions` / `<ExtensionSlot context=…>` (React) | Route composition and module discovery (e.g. `import.meta.glob`)                            |
 | `provideContributions` / `injectContributions` (Angular)                          | Slot rendering — an `@for` block, or a small `*extensionSlot` directive you own (see below) |
 | `redirectUnless` route guard (`/tanstack-router`)                                 | Everything else routing — the router's own API                                              |
+| `canCall` (action gating from the generated `rpcMethodInfo`)                       | Which actions you grey out or hide                                                          |
 
 ## Quick start
 
@@ -218,6 +219,10 @@ export class ExtensionSlotDirective<TItem> {
   registry — which is exactly what the stores below automate, leaving this function pure.
 - **UX projection, never security.** A hidden contribution is not a secured operation — the backend
   handler's own gates are the enforcement on every call.
+- **`canCall(method, capabilities)`** gates an action by an RPC method's exported requirements (an entry of the
+  generated `rpcMethodInfo`): `anonymous` always passes; otherwise a signed-out caller (from `capabilities.user` or
+  the `authenticated` option) is refused, then every permission and role must be held. It names the first unmet
+  requirement and flags `serverChecks` the client cannot evaluate.
 
 ## Capabilities that change at runtime
 

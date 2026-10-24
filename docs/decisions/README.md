@@ -105,3 +105,5 @@ designs that are not yet implemented.
 - [ADR-0082: Requiredness comes from nullability, in both directions — Proposed](0082-requiredness-comes-from-nullability-in-both-directions.md)
 - [ADR-0083: The installable-app shell is a framework npm package — safe caching rules built in, the privacy choice left to the app — Proposed](0083-installable-app-shell.md)
 - [ADR-0084: Authenticating-proxy identity is an optional package on IdentityModel's ConfigurationManager — Proposed](0084-authenticating-proxy-identity.md)
+- [ADR-0085: Handler declarations are projected to clients and hosts, not copied — Proposed](0085-handler-declarations-are-projected-not-copied.md)
+- [ADR-0086: One framework-owned answer for unexpected exceptions, on every transport — Proposed](0086-one-answer-for-unexpected-errors.md)

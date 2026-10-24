@@ -237,6 +237,26 @@ builder.Services.ConfigureElarionJson(o => {
 
 See [Serialization](/docs/capabilities/serialization).
 
+## Unexpected errors (options, not config)
+
+`ConfigureElarionUnexpectedErrors(o => …)` (from `Elarion.Abstractions`) sets the answer JSON-RPC, MCP and generated
+`[HttpEndpoint]` routes give for an exception that escaped the handler pipeline. Calls accumulate; a later call
+overrides only the hooks it sets. Both hooks receive an `UnexpectedErrorContext` (`Exception`, `Transport`,
+`Operation`, the call's scoped `Services`); a hook that throws falls back to the default.
+
+| Option | Default |
+| --- | --- |
+| `Message` | `"Internal error"` (`UnexpectedErrorOptions.DefaultMessage`) |
+| `Reference` | the current trace id (`Activity.Current.TraceId`), or a fresh id when no trace is active; return `null` to send none |
+| `LeaveToHost` | answer every exception. Generated HTTP routes only: `true` lets the exception reach the host's exception handling (the developer exception page, an `IExceptionHandler`); JSON-RPC and MCP always answer |
+
+```csharp
+builder.Services.ConfigureElarionUnexpectedErrors(o =>
+    o.Message = _ => "Something went wrong. Please contact support and quote the reference.");
+```
+
+See [Unexpected errors](/docs/concepts/results-and-errors#unexpected-errors).
+
 ## Request validation (options, not config)
 
 `AddElarionValidation(configure => …)` (from `Elarion.Validation`) registers the default

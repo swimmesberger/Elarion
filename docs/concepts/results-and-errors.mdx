@@ -111,6 +111,49 @@ error in one host and an HTTP `404` in another. For the complete, authoritative 
 JSON-RPC codes and the HTTP status mapping — see the
 [Result & error model reference](/docs/reference/result-and-errors).
 
+## Unexpected errors
+
+An exception is not a `Result`: it is a bug or an outage, and the caller gets one framework-owned answer for it.
+Every transport — JSON-RPC, MCP, and generated `[HttpEndpoint]` routes — catches an exception that escaped the
+handler pipeline **outside every decorator**, so a throw from the authorization, validation, audit or observability
+decorator is answered exactly like a throw from the handler. The answer carries the stable code `internal`, a
+message, and a **reference** the user can quote to support:
+
+| Transport | Wire shape |
+| --- | --- |
+| JSON-RPC | `{"code": -32603, "message": "Internal error", "data": {"code": "internal", "reference": "4bf92f3577b34da6a3ce929d0e0e4736"}}` |
+| MCP | an error tool result with the message, and `{"code": "internal", "reference": "…"}` as structured content (with `IncludeErrorDetails`, the default) |
+| HTTP | `500` ProblemDetails with the message as `detail`, `"code": "internal"` and `"reference": "…"` |
+
+The reference is never part of the message, and the transport logs the exception at error level together with it,
+so support finds the log line (and the trace) from what the user reports. By default the message is
+`Internal error` and the reference is the current trace id; configure both once for every transport:
+
+```csharp
+builder.Services.ConfigureElarionUnexpectedErrors(o => {
+    // Shown to the user; never the exception text unless you choose to expose it.
+    o.Message = context => "Something went wrong. Please contact support and quote the reference.";
+    // The default is Activity.Current's trace id (a fresh id when no trace is active); return null to send none.
+    o.Reference = context => Activity.Current?.TraceId.ToHexString();
+});
+```
+
+Each hook receives an `UnexpectedErrorContext` — the `Exception`, the `Transport` (`jsonrpc`, `mcp`, `http`), the
+`Operation` being served, and the call's scoped `Services`, so a hook can resolve a localizer. A hook that throws
+falls back to the default for its part: the error path always answers. No application decorator, exception
+handler or pipeline-order test is needed for this. Clients branch on `code: "internal"` and show `reference`; the
+generated TypeScript `RpcError` exposes it as `error.reference`.
+
+Generated HTTP routes can hand an exception to the host instead — the developer exception page in Development, or
+an `IExceptionHandler` that maps an exception type to its own status:
+
+```csharp
+builder.Services.ConfigureElarionUnexpectedErrors(o =>
+    o.LeaveToHost = context => builder.Environment.IsDevelopment() || context.Exception is DbUpdateConcurrencyException);
+```
+
+JSON-RPC and MCP always answer: a batch entry or a tool call has no host handler to fall back to.
+
 ## Results in pipelines
 
 Decorators can inspect a `Result<T>` through the non-generic `IResultLike` interface — for example a
