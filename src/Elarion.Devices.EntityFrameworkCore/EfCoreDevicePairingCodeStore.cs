@@ -26,6 +26,13 @@ public sealed class EfCoreDevicePairingCodeStore<TDbContext>(
     private static readonly ConditionalWeakTable<IModel, string> SupersedeSqlCache = new();
     private static readonly ConditionalWeakTable<IModel, string> ClaimSqlCache = new();
 
+    // The documented advisory key text (Elarion.Abstractions.Coordination.AdvisoryLockKey, scope
+    // "elarion.devices.pairing"), spelled out because this package does not depend on Elarion.Abstractions; a test
+    // pins the two together.
+    internal static string PairingLockKey(string deviceId) {
+        return "elarion.devices.pairing:" + deviceId;
+    }
+
     /// <inheritdoc />
     public async ValueTask<bool>
         TryReplaceAsync(PairingCodeEntry entry, CancellationToken cancellationToken = default) {
@@ -41,6 +48,15 @@ public sealed class EfCoreDevicePairingCodeStore<TDbContext>(
         // Serialize reissues for one device across nodes. The pairing-code table deliberately cannot
         // make DeviceId unique (the new hash must be inserted before old codes are removed to preserve
         // collision safety), so this transaction-scoped PostgreSQL lock is the per-device fence.
+        await dbContext.Database.ExecuteSqlRawAsync(
+                "SELECT pg_advisory_xact_lock(hashtextextended({0}, 0))",
+                [PairingLockKey(entry.DeviceId)],
+                cancellationToken)
+            .ConfigureAwait(false);
+        // Rolling-upgrade bridge (ADR-0087): nodes of 0.2.21 and earlier lock the bare device id. Taking that key
+        // too, always after the scoped one, keeps old and new nodes serialized while both run; no old node waits on
+        // the scoped key, so the fixed order cannot deadlock. Remove once 0.2.21 is no longer a supported upgrade
+        // source.
         await dbContext.Database.ExecuteSqlRawAsync(
                 "SELECT pg_advisory_xact_lock(hashtextextended({0}, 0))", [entry.DeviceId], cancellationToken)
             .ConfigureAwait(false);

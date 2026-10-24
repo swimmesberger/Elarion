@@ -11,6 +11,7 @@ being coordinated:
 | Run one recurring occurrence across the cluster | [Scheduler claim](/docs/capabilities/scheduling/multi-node) | Job + due time |
 | Deliver one integration consumer invocation at a time | [Outbox delivery lease](/docs/capabilities/events/backends) | Message + consumer |
 | Work through your own queue table, one worker per row | [Leased work rows](#leased-work-rows) | Row id + lease token |
+| Serialize writers of one row or key inside a transaction | [Row and advisory locks](#row-and-advisory-locks) | Entity key, or scope + key |
 | Make exactly one instance hold a long-lived application role | **Role lease** | Role name |
 
 A role lease answers a coarse question such as “which instance is the maintenance coordinator?” It
@@ -328,3 +329,65 @@ accepts one.
 
 The invariants and the extraction history are recorded in
 [ADR-0073](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0073-leased-work-rows.md).
+
+## Row and advisory locks
+
+Most concurrency is the database's job — constraints, optimistic concurrency, `ON CONFLICT`. Some rules are not
+expressible as a constraint: "periods of one unit never overlap" across a whole set, a read-then-write that must not
+interleave with another writer of the same aggregate. For those, `Elarion.EntityFrameworkCore.UnitOfWork` adds two
+**transaction-scoped** PostgreSQL locks on `DbContext`, held until the current transaction (a command's pipeline
+transaction, or one you opened) commits or rolls back:
+
+```csharp
+using Elarion.EntityFrameworkCore.UnitOfWork;
+
+// Lock one row; table and key column come from the EF model. False when no visible row has that key.
+if (!await db.LockRowAsync<LeaseUnit>(command.UnitId, RowLockMode.NoKeyUpdate, ct))
+    return AppError.NotFound("No such unit.");
+
+// No row to lock (the account may not exist yet): lock a key instead, or try without waiting.
+await db.AdvisoryLockAsync("billing-account", command.AccountNumber, ct);
+var period = command.Period.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+if (!await db.TryAdvisoryLockAsync("statement-run", period, ct))
+    return AppError.Conflict("A statement run for this period is already in progress.");
+```
+
+`LockRowAsync` looks the row up through the entity's own set first, so its query filters (tenant scoping, soft
+delete) and a hierarchy's discriminator apply: a row the context cannot see answers `false` and is never locked, so an
+id from a request cannot probe or stall another tenant's row. A strongly typed key with a value converter is converted
+the way EF converts it; an id of another type throws `ArgumentException`.
+
+| `RowLockMode` | SQL | Choose it when |
+| --- | --- | --- |
+| `Update` (default) | `FOR UPDATE` | a concurrent insert of a row *referencing* this one (a foreign key) must wait too — deleting a role against a concurrent assignment of it |
+| `NoKeyUpdate` | `FOR NO KEY UPDATE` | only writers of the row itself must be serialized; inserts referencing it proceed |
+| `Share` | `FOR SHARE` | readers may share; writers wait |
+| `KeyShare` | `FOR KEY SHARE` | only a change of the row's key or its deletion waits |
+
+Both refuse to run **outside a transaction** (PostgreSQL would release the lock at the end of its own statement) and
+on any provider other than PostgreSQL, so a lock never silently protects nothing. An ambient `TransactionScope` counts
+as a transaction because the connection enlists in it; a connection string with `Enlist=false` opts out of that, so
+lock inside an EF or pipeline transaction on such a connection. Tests that take a lock run against
+PostgreSQL ([Testcontainers](/docs/concepts/persistence-and-transactions#testing-persistence)), never EF InMemory.
+
+### One advisory key scheme
+
+A database has one advisory-lock space. Every advisory lock taken through Elarion locks
+`hashtextextended('scope:key', 0)` — `AdvisoryLockKey.Text(scope, key)` builds the text, the same function the
+framework uses — so two `(scope, key)` pairs only meet when their hashes collide. A scope names what is serialized
+(`billing-account`) and must not contain `:`. Scopes starting with `elarion.` are reserved; the framework locks:
+
+| Scope | Key | Taken by |
+| --- | --- | --- |
+| `elarion.scheduler.job` | the job name | the multi-node scheduler's window claim |
+| `elarion.devices.pairing` | the device id | reissuing a device's pairing code |
+
+The migration runner's session-level lock uses its own fixed key (`PostgreSqlMigrationRunner.DefaultAdvisoryLockKey`),
+not a hashed text. A host on the EF-free SQL tier builds the same text with `AdvisoryLockKey.Text` and runs
+`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))` itself.
+
+<Callout type="info">
+A lock is per transaction, not per node or per process: it serializes the transactions that ask for it on the one
+PostgreSQL every instance shares, and it ends with the transaction. For "exactly one instance does this for a long
+time", use a role lease; for "one worker per queue row", use leased work rows.
+</Callout>

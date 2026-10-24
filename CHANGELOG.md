@@ -36,6 +36,12 @@ minor releases may include breaking changes.
   out `key` / `+key` / `-key`: a bare key means the key's declared direction.
 - **`Page<T>.Map(selector)`** and the batched **`Page<T>.MapAsync(selector, ct)`** project a page's items while
   keeping its cursors, flags and total.
+- **Transaction-scoped row and advisory locks** (`Elarion.EntityFrameworkCore.UnitOfWork`, ADR-0087):
+  `db.LockRowAsync<TEntity>(id, RowLockMode)` locks one row (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`,
+  `FOR KEY SHARE`; table and key column from the EF model), and `db.AdvisoryLockAsync(scope, key)` /
+  `TryAdvisoryLockAsync` take `pg_advisory_xact_lock` on one documented key scheme,
+  `hashtextextended('scope:key', 0)` (`AdvisoryLockKey`, with the `elarion.` scopes reserved). Both refuse to run
+  outside a transaction and on any provider other than PostgreSQL.
 
 ### Changed
 - **`MapElarionEndpoints` returns a `RouteGroupBuilder`.** Every module and `[HttpEndpoint]` route is mapped inside
@@ -56,6 +62,10 @@ minor releases may include breaking changes.
   matches a prefix (`a|ab` on `"ab"`) fails on the server but passes the anchored pattern. Regenerate schemas and
   clients.
 - The JSON-RPC dispatcher no longer includes the exception message in its internal-error answer in `DEBUG` builds.
+- **The scheduler's and device pairing's advisory locks use reserved scopes.** They locked the bare job name and
+  device id, which an application key could share; they now lock `elarion.scheduler.job:<job>` and
+  `elarion.devices.pairing:<device>`. For this release they also take the old key after the new one, so a rolling
+  upgrade keeps old and new nodes serialized (see ADR-0087).
 
 ### Fixed
 - **`[Idempotent]` answers carry their declared codes.** A missing key, a key in progress and a reused key answered

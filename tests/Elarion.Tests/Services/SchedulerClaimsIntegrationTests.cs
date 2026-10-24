@@ -106,6 +106,41 @@ public sealed class SchedulerClaimsIntegrationTests(PostgreSqlSchedulerClaimsFix
     }
 
     [Fact]
+    public async Task WindowClaim_WaitsForAnOlderNodeHoldingTheBareJobKey() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        using var oldNode = fixture.CreateNode();
+        using var newNode = fixture.CreateNode();
+        var jobName = UniqueJob();
+
+        // An older node's window claim locks the bare job name (ADR-0087 rolling-upgrade bridge).
+        await using var scope = oldNode.Provider.CreateAsyncScope();
+        var oldContext = scope.ServiceProvider.GetRequiredService<SchedulerClaimsDbContext>();
+        await using var held = await oldContext.Database.BeginTransactionAsync(Ct);
+        await oldContext.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended({0}, 0))", [jobName], Ct);
+
+        var claim = newNode.Coordinator.TryClaimAsync(
+            new ScheduledOccurrence
+                { JobName = jobName, DueTimeUtc = DateTimeOffset.UtcNow, DedupeWindow = TimeSpan.FromMinutes(5) },
+            Ct).AsTask();
+        while (!await HasWaitingAdvisoryLockAsync(oldContext)) {
+            claim.IsCompleted.Should().BeFalse("the new node must queue behind the older node's key");
+            await Task.Delay(20, Ct);
+        }
+
+        claim.IsCompleted.Should().BeFalse();
+        await held.CommitAsync(Ct);
+        (await claim).Should().BeTrue();
+    }
+
+    private static async Task<bool> HasWaitingAdvisoryLockAsync(DbContext context) {
+        var waiting = await context.Database
+            .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_locks WHERE locktype = 'advisory' AND NOT granted")
+            .ToListAsync(Ct);
+        return waiting is [> 0];
+    }
+
+    [Fact]
     public async Task TwoSchedulerNodes_RecurringCronJob_ExecutesEachOccurrenceExactlyOnce() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var jobName = UniqueJob();

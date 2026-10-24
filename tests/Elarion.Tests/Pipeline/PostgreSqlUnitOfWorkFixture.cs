@@ -50,12 +50,29 @@ public sealed class PostgreSqlUnitOfWorkFixture : IAsyncLifetime {
 public sealed class UnitOfWorkDbContext(DbContextOptions<UnitOfWorkDbContext> options) : DbContext(options) {
     public DbSet<WidgetRow> Widgets => Set<WidgetRow>();
 
+    public DbSet<ScopedWidgetRow> ScopedWidgets => Set<ScopedWidgetRow>();
+
+    public DbSet<CodedWidgetRow> CodedWidgets => Set<CodedWidgetRow>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.Entity<WidgetRow>(builder => {
             builder.ToTable("widgets");
             builder.HasKey(row => row.Id);
             builder.Property(row => row.Id).HasColumnName("id");
             builder.Property(row => row.Name).HasColumnName("name");
+        });
+        // A query-filtered entity (like a tenant-scoped one): only tenant "visible" rows exist for this context.
+        modelBuilder.Entity<ScopedWidgetRow>(builder => {
+            builder.ToTable("scoped_widgets", "locks");
+            builder.HasKey(row => row.Id);
+            builder.Property(row => row.Id).HasColumnName("widget_id");
+            builder.HasQueryFilter(row => row.Tenant == "visible");
+        });
+        // A strongly typed key stored through a value converter.
+        modelBuilder.Entity<CodedWidgetRow>(builder => {
+            builder.ToTable("coded_widgets");
+            builder.HasKey(row => row.Code);
+            builder.Property(row => row.Code).HasConversion(code => code.Value, value => new WidgetCode(value));
         });
     }
 }
@@ -65,4 +82,19 @@ public sealed class WidgetRow {
     public required string Id { get; init; }
 
     public required string Name { get; init; }
+}
+
+/// <summary>A row behind a query filter, standing in for tenant-scoped or soft-deleted data.</summary>
+public sealed class ScopedWidgetRow {
+    public required string Id { get; init; }
+
+    public required string Tenant { get; init; }
+}
+
+/// <summary>A strongly typed id stored as text.</summary>
+public readonly record struct WidgetCode(string Value);
+
+/// <summary>A row keyed by a converted, strongly typed id.</summary>
+public sealed class CodedWidgetRow {
+    public required WidgetCode Code { get; init; }
 }

@@ -114,6 +114,7 @@ services.AddElarionUnitOfWork<AppDbContext>();
 | **Domain events** (`IDomainEventBus`) | dispatched inline in your scope | Yes — runs inside your transaction |
 | **Integration events** (in-memory) | buffered, flushed by EF interceptors **after commit**, discarded on rollback | Commit-gated (see below) |
 | **Outbox delivery** (`OutboxDeliveryService`) | runs on its own scope **after** commit | No — by design, post-commit |
+| **Row and advisory locks** (`LockRowAsync`, `AdvisoryLockAsync`) | `FOR UPDATE`/`pg_advisory_xact_lock` on the injected context; refused outside a transaction | Yes — held until your transaction ends ([Coordination](/docs/capabilities/coordination#row-and-advisory-locks)) |
 
 The blob store opens its *own* transaction only when you have not started one, so a
 standalone `SaveAsync` is still atomic. Deleting a blob removes its content row in the
