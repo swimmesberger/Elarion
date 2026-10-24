@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
@@ -37,31 +36,12 @@ internal sealed class DevelopmentIdentityHandler(
             return Task.FromResult(AuthenticateResult.NoResult());
         }
         var user = Resolve(development, switchedTo);
-        var names = options.Claims;
         // A present roles/groups switch replaces the resolved user's values for this request; absent, they stay.
         var groups = SwitchedList(development.GroupsHeader, development.GroupsCookie) ?? user.Groups;
         var roles = SwitchedList(development.RolesHeader, development.RolesCookie) ?? user.Roles;
-
-        var claims = new List<Claim> {
-            new(ExternalIdentity.IssuerClaim, ProxyIdentityDefaults.DevelopmentIssuer),
-            new(names.Subject, user.Subject),
-        };
-        if (!string.IsNullOrEmpty(names.Email)) {
-            claims.Add(new Claim(names.Email, user.Email));
-            if (!string.IsNullOrEmpty(names.EmailVerified)) {
-                claims.Add(new Claim(names.EmailVerified, "true", ClaimValueTypes.Boolean));
-            }
-        }
-        if (!string.IsNullOrEmpty(names.Name) && !string.IsNullOrWhiteSpace(user.Name)) {
-            claims.Add(new Claim(names.Name, user.Name));
-        }
-        AddAll(claims, names.Groups, groups);
-        AddAll(claims, names.Roles, roles);
-
-        var nameType = string.IsNullOrEmpty(names.Name) ? names.Subject : names.Name;
-        var roleType = string.IsNullOrEmpty(names.Roles) ? ClaimTypes.Role : names.Roles;
-        var identity = new ClaimsIdentity(claims, ProxyIdentityDefaults.DevelopmentScheme, nameType, roleType);
-        var principal = new ClaimsPrincipal(identity);
+        var principal = StandInPrincipal.Create(
+            options, ProxyIdentityDefaults.DevelopmentScheme, ProxyIdentityDefaults.DevelopmentIssuer,
+            user.Subject, user.Email, user.Name, groups, roles);
         // Kept beside the principal, so it survives an application replacing HttpContext.User (IExternalIdentityFeature).
         ExternalIdentityFeature.Capture(Context, principal, options);
         var ticket = new AuthenticationTicket(principal, ProxyIdentityDefaults.DevelopmentScheme);
@@ -121,12 +101,5 @@ internal sealed class DevelopmentIdentityHandler(
     private static string? Accept(string raw, bool emptyIsValue) {
         var value = raw.Trim();
         return value.Length <= MaxSwitchLength && (emptyIsValue || value.Length > 0) ? value : null;
-    }
-
-    private static void AddAll(List<Claim> claims, string? claimType, IEnumerable<string> values) {
-        if (string.IsNullOrEmpty(claimType)) {
-            return;
-        }
-        claims.AddRange(values.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => new Claim(claimType, value.Trim())));
     }
 }

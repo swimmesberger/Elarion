@@ -15,14 +15,16 @@ namespace Elarion.AspNetCore.ProxyIdentity;
 /// </para>
 /// <para>
 /// <c>AddElarionProxyIdentity</c> validates these options when it is called and throws when they are incomplete, and
-/// it refuses <see cref="Enabled"/> = <see langword="false"/> outside the Development environment.
+/// it refuses <see cref="Enabled"/> = <see langword="false"/> outside the Development environment unless
+/// <see cref="Fixed"/> is explicitly enabled.
 /// </para>
 /// </remarks>
 public sealed class ProxyIdentityOptions {
     /// <summary>
     /// Whether proxy tokens are validated. <see langword="false"/> selects the Development stand-in identity
     /// (<see cref="Development"/>), which is refused outside the Development environment: a deployment that forgot its
-    /// proxy configuration must not start as "everybody is the development user". Defaults to <see langword="false"/>.
+    /// proxy configuration must not start as "everybody is the development user". The one exception is an explicitly
+    /// enabled <see cref="Fixed"/> identity. Defaults to <see langword="false"/>.
     /// </summary>
     public bool Enabled { get; set; }
 
@@ -118,8 +120,18 @@ public sealed class ProxyIdentityOptions {
     /// </summary>
     public TimeSpan LastKnownGoodLifetime { get; set; } = TimeSpan.Zero;
 
-    /// <summary>The Development stand-in identity used while <see cref="Enabled"/> is <see langword="false"/>.</summary>
+    /// <summary>
+    /// The Development stand-in identity used while <see cref="Enabled"/> is <see langword="false"/> and
+    /// <see cref="Fixed"/> is not enabled.
+    /// </summary>
     public ProxyDevelopmentIdentityOptions Development { get; set; } = new();
+
+    /// <summary>
+    /// A fixed identity every request is signed in as, in any environment, for a deployment without an authenticating
+    /// proxy (an instance reachable only on a trusted network). Off by default; enabling it requires
+    /// <see cref="Enabled"/> = <see langword="false"/>.
+    /// </summary>
+    public ProxyFixedIdentityOptions Fixed { get; set; } = new();
 
     /// <summary>The configured audiences with comma-separated entries split, trimmed and de-duplicated.</summary>
     internal IReadOnlyList<string> EffectiveAudiences() {
@@ -250,6 +262,48 @@ public sealed class ProxyDevelopmentIdentityOptions {
     /// <see cref="RolesCookie"/>, a list of no entries (<c>,</c>) means no groups.
     /// </summary>
     public string? GroupsCookie { get; set; } = ProxyIdentityDefaults.DevelopmentGroupsCookie;
+}
+
+/// <summary>
+/// A fixed identity (<see cref="ProxyIdentityOptions.Fixed"/>): while <see cref="Enabled"/>, every request is signed in
+/// as this one user with the claim shape a proxy token carries, under the issuer
+/// <see cref="ProxyIdentityDefaults.FixedIssuer"/>. It is the explicit opt-out of authentication for a deployment that
+/// trusts everyone who can reach it: anybody who reaches the instance acts as this user.
+/// </summary>
+/// <remarks>
+/// Unlike the Development stand-in it is allowed in every environment, and it has no switches: no header or cookie
+/// changes the user, its roles or its groups, so a visitor cannot raise their own privileges. Nobody can be signed out
+/// either; there is no proxy session to end.
+/// </remarks>
+/// <example>
+/// <code>
+/// ProxyIdentity__Fixed__Enabled=true
+/// ProxyIdentity__Fixed__Subject=household
+/// ProxyIdentity__Fixed__Name=Household
+/// ProxyIdentity__Fixed__Roles__0=admin
+/// </code>
+/// </example>
+public sealed class ProxyFixedIdentityOptions {
+    /// <summary>
+    /// Whether every request is signed in as this identity. Requires <see cref="ProxyIdentityOptions.Enabled"/> =
+    /// <see langword="false"/>. Defaults to <see langword="false"/>.
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>The subject; required when <see cref="Enabled"/>. It is the stable key the application stores data under.</summary>
+    public string Subject { get; set; } = "";
+
+    /// <summary>The e-mail address, or null/empty for none.</summary>
+    public string? Email { get; set; }
+
+    /// <summary>The display name, or null.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>The groups.</summary>
+    public IList<string> Groups { get; set; } = [];
+
+    /// <summary>The roles.</summary>
+    public IList<string> Roles { get; set; } = [];
 }
 
 /// <summary>A named Development stand-in user (<see cref="ProxyDevelopmentIdentityOptions.Users"/>).</summary>
