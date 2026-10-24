@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.21] - 2026-10-24
+
 ### Added
 - **Fixed identity for deployments without an authenticating proxy** (`Elarion.AspNetCore.ProxyIdentity`):
   `ProxyIdentity:Fixed:Enabled=true` with a `Fixed:Subject` (plus optional `Email`, `Name`, `Groups`, `Roles`) signs
@@ -2210,7 +2212,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.20...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.21...HEAD
+[0.2.21]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.21
 [0.2.20]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.20
 [0.2.19]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.19
 [0.2.18]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.18
