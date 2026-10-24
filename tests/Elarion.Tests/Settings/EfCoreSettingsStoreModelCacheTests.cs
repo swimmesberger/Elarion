@@ -19,12 +19,19 @@ public sealed class EfCoreSettingsStoreModelCacheTests(SqliteSettingsStoreFixtur
     public async Task CachedSql_DoesNotKeepTheModelAlive() {
         var model = await WriteThroughOwnModelAsync();
 
-        for (var attempt = 0; attempt < 10 && model.IsAlive; attempt++) {
+        // A leaking static cache roots the model forever, but work the disposed context left behind (a thread-pool item
+        // still finishing, a scan of its internal caches) can root it for a moment on a busy machine; collecting once
+        // more after a short pause tells the two apart without making the test slow when it passes.
+        for (var attempt = 0; attempt < 50 && model.IsAlive; attempt++) {
             GC.Collect();
             GC.WaitForPendingFinalizers();
+            GC.Collect();
+            if (model.IsAlive) {
+                await Task.Delay(TimeSpan.FromMilliseconds(20), TestContext.Current.CancellationToken);
+            }
         }
 
-        model.IsAlive.Should().BeFalse();
+        model.IsAlive.Should().BeFalse("only a static cache keeps a disposed context's model alive for a whole second");
     }
 
     // Separate, non-inlined frame so no local in the test method roots the context or its model.
