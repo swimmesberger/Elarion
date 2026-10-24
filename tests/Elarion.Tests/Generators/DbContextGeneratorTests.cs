@@ -748,6 +748,60 @@ public sealed class DbContextGeneratorTests {
                  """;
     }
 
+    [Fact]
+    public void GenerateDbSets_KeepsMassNounsUnpluralized() {
+        var source =
+            CreateSource(
+                """
+                namespace Sample.Domain {
+                    public sealed class ImageMetadata {
+                    }
+
+                    public sealed class UserData {
+                    }
+
+                    public sealed class Category {
+                    }
+                }
+
+                namespace Sample.Infrastructure {
+                    [Elarion.EntityFrameworkCore.GenerateDbSets]
+                    public sealed partial class AppDbContext : Microsoft.EntityFrameworkCore.DbContext {
+                    }
+
+                    [Elarion.EntityFrameworkCore.EntityConfiguration]
+                    public sealed class ImageMetadataConfiguration
+                        : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sample.Domain.ImageMetadata> {
+                        public void Configure(Microsoft.EntityFrameworkCore.EntityTypeBuilder<Sample.Domain.ImageMetadata> builder) {
+                        }
+                    }
+
+                    [Elarion.EntityFrameworkCore.EntityConfiguration]
+                    public sealed class UserDataConfiguration
+                        : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sample.Domain.UserData> {
+                        public void Configure(Microsoft.EntityFrameworkCore.EntityTypeBuilder<Sample.Domain.UserData> builder) {
+                        }
+                    }
+
+                    [Elarion.EntityFrameworkCore.EntityConfiguration]
+                    public sealed class CategoryConfiguration
+                        : Microsoft.EntityFrameworkCore.IEntityTypeConfiguration<Sample.Domain.Category> {
+                        public void Configure(Microsoft.EntityFrameworkCore.EntityTypeBuilder<Sample.Domain.Category> builder) {
+                        }
+                    }
+                }
+                """);
+
+        var dbContextSource = GetGeneratedSource(Generate(source), "AppDbContext.DbSets.g.cs");
+
+        dbContextSource.Should().Contain(
+            "public DbSet<global::Sample.Domain.ImageMetadata> ImageMetadata => Set<global::Sample.Domain.ImageMetadata>();");
+        dbContextSource.Should().Contain(
+            "public DbSet<global::Sample.Domain.UserData> UserData => Set<global::Sample.Domain.UserData>();");
+        dbContextSource.Should().Contain(
+            "public DbSet<global::Sample.Domain.Category> Categories => Set<global::Sample.Domain.Category>();");
+    }
+
     private static GeneratorDriverRunResult Generate(string source) {
         var result = GenerateAllowingDiagnostics(source);
 
