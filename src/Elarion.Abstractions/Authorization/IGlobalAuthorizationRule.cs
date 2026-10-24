@@ -29,6 +29,12 @@ namespace Elarion.Abstractions.Authorization;
 /// <see langword="null"/> explicitly when subscribes should be treated differently from commands.
 /// </para>
 /// <para>
+/// <see cref="AuthorizationContext.HandlerType"/> names the concrete handler being authorized (also
+/// <see langword="null"/> on the subscription path), so a rule can key off the handler's own markers through
+/// <see cref="AuthorizationContext.GetHandlerAttribute{TAttribute}"/> — for example a rule that refuses every write
+/// that does not declare itself allowed in some session mode, failing closed on an undeclared one.
+/// </para>
+/// <para>
 /// <b>A rule only runs where the authorization decorator is attached.</b> The decorator is attached at compile
 /// time by the handler-registration generator, and only for handlers that carry a <c>[Require*]</c> attribute or
 /// that are in scope of <c>[ElarionAuthorizationDefaults]</c>. A host that wants broad coverage therefore pairs
