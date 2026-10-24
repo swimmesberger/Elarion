@@ -2,7 +2,7 @@ import {generateEventsClientSource} from './events-client-source.js'
 import {jsonSchemaToTypeScript} from './json-schema-to-ts.js'
 import {jsonSchemaToZod} from './json-schema-to-zod.js'
 import {collectFilePaths, stripNullable, type SchemaContext} from './json-schema.js'
-import {generateRpcClientSource} from './rpc-client-source.js'
+import {generateRpcClientSource, type RpcMethodInfoLiteral} from './rpc-client-source.js'
 import {generateSessionClientSource} from './session-client-source.js'
 import {generateStartAdapterSource} from './start-adapter-source.js'
 import type {GeneratedRpcClientFiles, GenerateRpcClientOptions, JsonSchema, RpcSchema} from './schema.js'
@@ -174,6 +174,25 @@ export function generateRpcClientFiles(
 
   const idempotentMethods = methods.filter((method) => schema.methods[method].idempotent === true)
 
+  // Every method's client-visible facts, normalized so a consumer never has to tell "absent" from "false".
+  const methodInfo: Record<string, RpcMethodInfoLiteral> = {}
+  for (const method of methods) {
+    const definition = schema.methods[method]
+    const requires = definition.requires ?? {}
+    methodInfo[method] = {
+      readOnly: definition.readOnly === true,
+      idempotent: definition.idempotent === true,
+      requires: {
+        anonymous: requires.anonymous === true,
+        authenticated: requires.authenticated === true,
+        permissions: [...(requires.permissions ?? [])].sort(),
+        roles: [...(requires.roles ?? [])].sort(),
+        serverChecks: requires.serverChecks === true,
+      },
+      tags: Object.fromEntries(Object.entries(definition.tags ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+    }
+  }
+
   // Where each method carries file payloads (x-elarion-file nodes), so the client can convert between
   // native File values and the base64 wire envelope. Methods without files are omitted entirely.
   const paramsFilePaths: Record<string, string[][]> = {}
@@ -204,6 +223,7 @@ export function generateRpcClientFiles(
     schemasFileName,
     methods,
     idempotentMethods,
+    methodInfo,
     errorCodesByMethod,
     paramsFilePaths,
     resultFilePaths,

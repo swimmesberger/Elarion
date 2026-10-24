@@ -50,9 +50,10 @@ public sealed class JsonRpcDispatcher {
         string methodName,
         HandlerTransports transports = HandlerTransports.All,
         bool idempotent = false,
-        IReadOnlyList<ErrorContract>? errors = null)
+        IReadOnlyList<ErrorContract>? errors = null,
+        HandlerClientMetadata? client = null)
         where TRequest : class {
-        _registry.Map<TRequest, TResponse>(methodName, transports, idempotent, errors);
+        _registry.Map<TRequest, TResponse>(methodName, transports, idempotent, errors, client);
         return this;
     }
 
@@ -62,9 +63,10 @@ public sealed class JsonRpcDispatcher {
         Func<TRequest, IServiceProvider, CancellationToken, ValueTask<Result<TResponse>>> handler,
         HandlerTransports transports = HandlerTransports.All,
         bool idempotent = false,
-        IReadOnlyList<ErrorContract>? errors = null)
+        IReadOnlyList<ErrorContract>? errors = null,
+        HandlerClientMetadata? client = null)
         where TRequest : class {
-        _registry.MapDelegate(methodName, handler, transports, idempotent, errors);
+        _registry.MapDelegate(methodName, handler, transports, idempotent, errors, client);
         return this;
     }
 
@@ -266,6 +268,16 @@ public sealed class JsonRpcDispatcher {
             .OrderBy(static route => route.Name, StringComparer.Ordinal)
             .Select(static route => (route.Name, route.RequestType, route.ResponseType, route.Idempotent,
                 route.Errors ?? (IReadOnlyList<ErrorContract>)[]))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Returns every JSON-RPC-exposed route in ordinal name order — the same routes the dispatcher serves, with their
+    /// full metadata. Used by schema export.
+    /// </summary>
+    public IReadOnlyList<HandlerRoute> GetRegisteredRoutes() {
+        return _registry.RoutesFor(HandlerTransports.JsonRpc)
+            .OrderBy(static route => route.Name, StringComparer.Ordinal)
             .ToList();
     }
 

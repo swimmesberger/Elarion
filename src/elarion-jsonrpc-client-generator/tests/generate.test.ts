@@ -831,6 +831,47 @@ describe('JSON-RPC client generator', () => {
       .rejects.toMatchObject({code: 'not_found', reference: undefined})
   })
 
+  it('emits normalized per-method requirements, read-only flags and tags as rpcMethodInfo', async () => {
+    const schema = rpcClientTestSchema()
+    schema.methods['math.add'].readOnly = true
+    schema.methods['math.add'].idempotent = true
+    schema.methods['math.add'].tags = {viewAs: 'refused', timeout: '180s'}
+    schema.methods['math.add'].requires = {
+      authenticated: true,
+      permissions: ['math.write', 'math.import'],
+      roles: ['Clerk'],
+      serverChecks: true,
+    }
+    schema.methods['user.get'].requires = {anonymous: true}
+    const generated = generateRpcClientFiles(schema)
+    const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as {
+      rpcMethodInfo: Record<string, unknown>
+    }
+
+    expect(clientModule.rpcMethodInfo).toEqual({
+      'math.add': {
+        readOnly: true,
+        idempotent: true,
+        requires: {
+          anonymous: false,
+          authenticated: true,
+          permissions: ['math.import', 'math.write'],
+          roles: ['Clerk'],
+          serverChecks: true,
+        },
+        tags: {timeout: '180s', viewAs: 'refused'},
+      },
+      'user.get': {
+        readOnly: false,
+        idempotent: false,
+        requires: {anonymous: true, authenticated: false, permissions: [], roles: [], serverChecks: false},
+        tags: {},
+      },
+    })
+    // Deterministic key order in the emitted literal, so regenerating an unchanged schema is a no-op.
+    expect(generated.clientSource).toContain('"tags":{"timeout":"180s","viewAs":"refused"}')
+  })
+
   it('propagates a transform result of null instead of falling back to the raw value', async () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     const clientModule = await loadGeneratedClient(generated.clientSource)

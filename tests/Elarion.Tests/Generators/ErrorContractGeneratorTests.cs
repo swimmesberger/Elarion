@@ -361,7 +361,8 @@ public sealed class ErrorContractGeneratorTests {
             var fields = Decode(value.Substring(0, value.LastIndexOf("\")]", StringComparison.Ordinal)));
             if (fields[0] != operation) continue;
 
-            var errors = Decode(fields[^1]!);
+            // The error contract is field 12; later fields were appended after it (client metadata).
+            var errors = Decode(fields[12]!);
             var result = new List<string>();
             for (var i = 0; i < errors.Count; i += 3)
                 result.Add($"{errors[i]}:{errors[i + 1]}:{errors[i + 2]}");

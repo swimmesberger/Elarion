@@ -296,7 +296,9 @@ internal static class ElarionManifest {
             EncodeBool(model.IsNameInferred),
             EncodeBool(model.IsIdempotent),
             EncodeBool(model.OnConnection),
-            ElarionManifestCodec.EncodeErrors(model.Errors));
+            ElarionManifestCodec.EncodeErrors(model.Errors),
+            // Appended (not inserted) so earlier field indices stay stable; count-gated decode below.
+            model.Client is null ? null : ElarionManifestCodec.EncodeClientMetadata(model.Client));
     }
 
     public static string EncodeResourceFilter(ResourceFilter filter) {
@@ -488,7 +490,8 @@ internal static class ElarionManifest {
 
     public static bool TryDecodeRpcMethod(string value, out RpcMethodEmission.Model? model) {
         model = null;
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 13)
+        // 13 fields = an assembly built before client metadata existed; its operations export no requirements.
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count is not (13 or 14))
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null || fields[3] is null ||
             fields[8] is null || fields[9] is null || fields[10] is null || fields[12] is null)
@@ -501,6 +504,11 @@ internal static class ElarionManifest {
             !TryDecodeBool(fields[10], out var isIdempotent) ||
             !TryDecodeBool(fields[11], out var onConnection) ||
             !ElarionManifestCodec.TryDecodeErrors(fields[12]!, out var errors))
+            return false;
+
+        RpcMethodEmission.ClientMetadata? client = null;
+        if (fields.Count == 14 && fields[13] is { } encodedClient &&
+            !ElarionManifestCodec.TryDecodeClientMetadata(encodedClient, out client))
             return false;
 
         model = new RpcMethodEmission.Model(
@@ -516,7 +524,8 @@ internal static class ElarionManifest {
             parameters.ToEquatableArray(),
             isNameInferred,
             isIdempotent,
-            errors.ToEquatableArray());
+            errors.ToEquatableArray(),
+            Client: client);
         return true;
     }
 
@@ -650,6 +659,52 @@ internal static class ElarionManifestCodec {
         }
 
         errors = result;
+        return true;
+    }
+
+    /// <summary>
+    /// Encodes an operation's client metadata as one nested blob: the three flags, then the permissions, roles and
+    /// flattened key/value tags as nested blobs of their own.
+    /// </summary>
+    public static string EncodeClientMetadata(RpcMethodEmission.ClientMetadata client) {
+        var tags = new string?[client.Tags.Count * 2];
+        for (var i = 0; i < client.Tags.Count; i++) {
+            tags[i * 2] = client.Tags[i].Key;
+            tags[i * 2 + 1] = client.Tags[i].Value;
+        }
+
+        return EncodeFields(
+            client.AllowAnonymous ? "1" : "0",
+            client.RequiresAuthentication ? "1" : "0",
+            client.HasServerChecks ? "1" : "0",
+            EncodeFields(client.Permissions.ToArray()),
+            EncodeFields(client.Roles.ToArray()),
+            EncodeFields(tags));
+    }
+
+    public static bool TryDecodeClientMetadata(string value, out RpcMethodEmission.ClientMetadata? client) {
+        client = null;
+        if (!TryDecodeFields(value, out var fields) || fields.Count != 6 ||
+            fields[3] is null || fields[4] is null || fields[5] is null ||
+            !TryDecodeFields(fields[3]!, out var permissions) || permissions.Any(static p => p is null) ||
+            !TryDecodeFields(fields[4]!, out var roles) || roles.Any(static r => r is null) ||
+            !TryDecodeFields(fields[5]!, out var tags) || tags.Count % 2 != 0 || tags.Any(static t => t is null))
+            return false;
+
+        if (fields[0] is not ("0" or "1") || fields[1] is not ("0" or "1") || fields[2] is not ("0" or "1"))
+            return false;
+
+        var decodedTags = new List<RpcMethodEmission.ClientTag>(tags.Count / 2);
+        for (var i = 0; i < tags.Count; i += 2)
+            decodedTags.Add(new RpcMethodEmission.ClientTag(tags[i]!, tags[i + 1]!));
+
+        client = new RpcMethodEmission.ClientMetadata(
+            fields[0] == "1",
+            fields[1] == "1",
+            permissions.Select(static p => p!).ToEquatableArray(),
+            roles.Select(static r => r!).ToEquatableArray(),
+            fields[2] == "1",
+            decodedTags.ToEquatableArray());
         return true;
     }
 

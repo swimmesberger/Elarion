@@ -272,6 +272,148 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_RegistersClientMetadataThroughTheManifest() {
+        // What a client may know before calling — evaluable requirements, a server-only flag and [ClientTag] hints —
+        // is read off the handler (base types included), with the authentication a module's
+        // [ElarionAuthorizationDefaults] requires merged in, and survives the manifest round-trip.
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Ledger {
+                [AppModule("Ledger", Kind = AppModuleKind.Core)]
+                [ElarionAuthorizationDefaults]
+                public static class LedgerModule { }
+
+                public sealed record Command;
+                public sealed record Response(bool Ok);
+
+                [ClientTag("timeout", "30s")]
+                public abstract class SlowHandler : IHandler<Command, Result<Response>> {
+                    public ValueTask<Result<Response>> HandleAsync(Command request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(true));
+                }
+
+                [Handler("ledger.import")]
+                [RequirePermission("ledger", "write")]
+                [RequirePermission("ledger", "import")]
+                [RequirePolicy("BusinessHours")]
+                [ClientTag("timeout", "180s")]
+                [ClientTag("viewAs", "refused")]
+                public sealed class ImportLedger : SlowHandler;
+
+                [Handler("ledger.status")]
+                [AllowAnonymous]
+                [ClientTag("cache", "short")]
+                public sealed class LedgerStatus : IHandler<LedgerStatus.Query, Result<Response>> {
+                    public sealed record Query;
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(true));
+                }
+
+                [Handler("ledger.summary")]
+                public sealed class LedgerSummary : IHandler<LedgerSummary.Query, Result<Response>> {
+                    public sealed record Query;
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(true));
+                }
+            }
+
+            namespace Sample.Open {
+                [AppModule("Open", Kind = AppModuleKind.Core)]
+                public static class OpenModule { }
+
+                [Handler("open.ping")]
+                public sealed class Ping : IHandler<Ping.Query, Result<Ping.Response>> {
+                    public sealed record Query;
+                    public sealed record Response(bool Ok);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(true));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out var compilationWithGenerated);
+
+        const string metadata = "new global::Elarion.Abstractions.Dispatch.HandlerClientMetadata";
+        // Permissions and roles sorted; the derived handler's tag overrides the base's; a policy is server-only.
+        generated.Should().Contain(
+            $"\"ledger.import\", global::Elarion.Abstractions.HandlerTransports.All, errors: ");
+        generated.Should().Contain(
+            $"client: {metadata} {{ RequiresAuthentication = true, Permissions = new string[] {{ \"ledger.import\", \"ledger.write\" }}, HasServerChecks = true, Tags = new global::System.Collections.Generic.Dictionary<string, string> {{ [\"timeout\"] = \"180s\", [\"viewAs\"] = \"refused\" }} }});");
+        // [AllowAnonymous] wins over the module default and drops every requirement; tags stay.
+        generated.Should().Contain(
+            $"client: {metadata} {{ AllowAnonymous = true, Tags = new global::System.Collections.Generic.Dictionary<string, string> {{ [\"cache\"] = \"short\" }} }});");
+        // No declaration of its own: the module's [ElarionAuthorizationDefaults] still requires a signed-in caller.
+        generated.Should().Contain($"\"ledger.summary\"");
+        generated.Should().Contain($"client: {metadata} {{ RequiresAuthentication = true }});");
+        // Nothing to say about an unguarded handler outside any default: the registration is unchanged.
+        generated.Should().Contain(
+            "(\"open.ping\", global::Elarion.Abstractions.HandlerTransports.All, errors: global::System.Array.Empty<global::Elarion.Abstractions.ErrorContract>());");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_RegistersClientMetadataForHostCompilationHandlers() {
+        // The single-project layout resolves the assembly's [ElarionAuthorizationDefaults] from the current
+        // compilation, the same way the registration generator attaches the authorization decorator.
+        const string hostSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Modules;
+            using Elarion.AspNetCore;
+
+            [assembly: GenerateModuleBootstrapper]
+            [assembly: ElarionAuthorizationDefaults]
+
+            namespace Host.App {
+                [AppModule("App", Kind = AppModuleKind.Core)]
+                public static class AppModule { }
+
+                [Handler("things.list")]
+                [RequireRole("Clerk")]
+                public sealed class ListThings : IHandler<ListThings.Query, Result<ListThings.Response>> {
+                    public sealed record Query : IQuery;
+                    public sealed record Response(int Count);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(0));
+                }
+
+                [Handler("things.count")]
+                public sealed class CountThings : IHandler<CountThings.Query, Result<CountThings.Response>> {
+                    public sealed record Query : IQuery;
+                    public sealed record Response(int Count);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(0));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(hostSource, [], out var compilationWithGenerated);
+
+        const string metadata = "new global::Elarion.Abstractions.Dispatch.HandlerClientMetadata";
+        generated.Should().Contain("(\"things.list\", global::Elarion.Abstractions.HandlerTransports.All, errors: ");
+        generated.Should().Contain(
+            $"client: {metadata} {{ RequiresAuthentication = true, Roles = new string[] {{ \"Clerk\" }} }});");
+        generated.Should().Contain(
+            $"(\"things.count\", global::Elarion.Abstractions.HandlerTransports.All, errors: global::System.Array.Empty<global::Elarion.Abstractions.ErrorContract>(), client: {metadata} {{ RequiresAuthentication = true }});");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Bootstrapper_MapElarionEndpointsReturnsOneRouteGroupForEveryMappedEndpoint() {
         var generated = RunGenerator(out _);
 

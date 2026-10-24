@@ -1,3 +1,17 @@
+/** The normalized client-visible facts of one method, emitted verbatim into `rpcMethodInfo`. */
+export interface RpcMethodInfoLiteral {
+  readOnly: boolean
+  idempotent: boolean
+  requires: {
+    anonymous: boolean
+    authenticated: boolean
+    permissions: string[]
+    roles: string[]
+    serverChecks: boolean
+  }
+  tags: Record<string, string>
+}
+
 interface GenerateRpcClientSourceOptions {
   generatedBy: string
   sourceLabel: string
@@ -5,6 +19,8 @@ interface GenerateRpcClientSourceOptions {
   schemasFileName: string
   methods: readonly string[]
   idempotentMethods: readonly string[]
+  /** Every method's normalized requirements, read-only flag and tags. */
+  methodInfo: Readonly<Record<string, RpcMethodInfoLiteral>>
   /** The declared error codes per method (ADR-0080); methods without declared errors are omitted. */
   errorCodesByMethod: Readonly<Record<string, readonly string[]>>
   /** Property paths of file payloads per method ('*' = array items, [] = the value itself); omitted methods carry none. */
@@ -141,6 +157,39 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     '',
     ...generateMethodNameLines(options.methods),
     `const rpcIdempotentMethods: ReadonlySet<RpcMethod> = new Set(${JSON.stringify(options.idempotentMethods)})`,
+    '',
+    '/**',
+    ' * What a caller needs, as far as a client can tell: `anonymous` (any caller), or `authenticated` with every',
+    ' * permission and role listed. `serverChecks` marks requirements only the server evaluates (a policy, claim or',
+    ' * resource check), so an allowed-looking call may still be refused.',
+    ' */',
+    'export interface RpcMethodRequirements {',
+    '  readonly anonymous: boolean',
+    '  readonly authenticated: boolean',
+    '  readonly permissions: readonly string[]',
+    '  readonly roles: readonly string[]',
+    '  readonly serverChecks: boolean',
+    '}',
+    '',
+    '/** What the schema says about a method before it is called. */',
+    'export interface RpcMethodInfo {',
+    '  /** The request is a query: the operation only reads. */',
+    '  readonly readOnly: boolean',
+    '  /** The operation is [Idempotent]: the client attaches an idempotency key by default. */',
+    '  readonly idempotent: boolean',
+    '  readonly requires: RpcMethodRequirements',
+    '  /** The handler\'s [ClientTag] hints (for example a timeout) by key. */',
+    '  readonly tags: Readonly<Record<string, string>>',
+    '}',
+    '',
+    '/**',
+    ' * Every method\'s requirements, read-only flag and tags, from the server\'s handler declarations — the input of',
+    ' * UI gating (for example canCall from @swimmesberger/elarion-contributions). A UX projection, never security:',
+    ' * the server authorizes every call.',
+    ' */',
+    'export const rpcMethodInfo: { readonly [M in RpcMethod]: RpcMethodInfo } = {',
+    ...options.methods.map((method) => `  ${JSON.stringify(method)}: ${JSON.stringify(options.methodInfo[method])},`),
+    '}',
     '',
     `const rpcErrorCodes: Partial<Record<RpcMethod, readonly string[]>> = ${JSON.stringify(options.errorCodesByMethod)}`,
     '',
