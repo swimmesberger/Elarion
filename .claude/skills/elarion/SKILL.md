@@ -107,6 +107,10 @@ app.MapElarionEndpoints(app.Configuration);                         // all [Http
 app.MapElarionJsonRpc();
 ```
 
+`MapElarionEndpoints` returns the route group it mapped into, so `.RequireAuthorization()` on it guards every
+Elarion route at once; routes of `[AllowAnonymous]` handlers carry `.AllowAnonymous()` and stay open — no
+path-prefix exception lists.
+
 ## Custom endpoints — the escape hatch
 
 For routes `[HttpEndpoint]` can't express (streaming, SSE, file download, third-party webhooks),
@@ -336,7 +340,15 @@ deploy only on a path change with no dialog open or field focused, never on a fo
 - **Authorization sits on the handler.** `[RequirePermission("resource", "verb")]`,
   `[RequireRole]`, `[RequirePolicy]`, `[FeatureGate]` — class-level, enforced identically on every
   transport. ASP.NET `[Authorize]`/policies are host-level extras (middleware or
-  `ConfigureEndpointGroup`), never the business gate.
+  `ConfigureEndpointGroup`), never the business gate. A cross-cutting rule that keys off a handler marker is an
+  `IGlobalAuthorizationRule` reading `context.GetHandlerAttribute<T>()`, not an app decorator.
+- **The UI reads requirements from the contract.** The schema exports each method's `requires`, `readOnly` and
+  `[ClientTag]` hints; gate actions with `canCall(rpcMethodInfo[method], capabilities)` instead of repeating
+  permission names at call sites.
+- **Unexpected exceptions are the framework's.** Every transport catches them outside all decorators and answers
+  `code: "internal"` with a support `reference`; word it with `ConfigureElarionUnexpectedErrors`, never with an
+  exception decorator or `IExceptionHandler`. "Not blank" is `[Required]` on the string (exported as a not-blank
+  pattern), not a custom attribute.
 - **Inject the concrete `DbContext`.** No repository layer, no `IAppDbContext`. Entities pair an
   `IEntityTypeConfiguration<T>` marked `[EntityConfiguration]` with `[GenerateDbSets]` on the
   DbContext. Commands already run in a framework transaction — don't open your own.
