@@ -80,6 +80,7 @@ public sealed class IdempotencyDecoratorTests {
 
         result.IsSuccess.Should().BeFalse();
         result.Error.Kind.Should().Be(ErrorKind.Conflict);
+        result.Error.Code.Should().Be(ErrorCodes.IdempotencyInProgress);
         inner.Invocations.Should().Be(0);
         uow.Scope!.Rollbacks.Should().Be(1);
     }
@@ -93,6 +94,7 @@ public sealed class IdempotencyDecoratorTests {
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
         result.Error.Kind.Should().Be(ErrorKind.BusinessRule);
+        result.Error.Code.Should().Be(ErrorCodes.IdempotencyKeyReused);
     }
 
     [Fact]
@@ -122,6 +124,8 @@ public sealed class IdempotencyDecoratorTests {
             .HandleAsync(new TestCommand(1), TestContext.Current.CancellationToken);
 
         result.Error.Kind.Should().Be(ErrorKind.Validation);
+        // The specific code, so a client branches on it instead of matching the sentence.
+        result.Error.Code.Should().Be(ErrorCodes.IdempotencyKeyRequired);
         inner.Invocations.Should().Be(0);
         store.CompleteCount.Should().Be(0);
     }

@@ -59,7 +59,8 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
         var key = ResolveKey(request);
         if (string.IsNullOrEmpty(key))
             return policy.KeyRequired
-                ? TResponse.Failure(AppError.Validation("An idempotency key is required for this operation."))
+                ? TResponse.Failure(AppError.Validation("An idempotency key is required for this operation.",
+                    ErrorCodes.IdempotencyKeyRequired))
                 : await inner.HandleAsync(request, ct).ConfigureAwait(false);
 
         if (policy.Scope == IdempotencyScope.CurrentUser && currentUser is not { IsAuthenticated: true })
@@ -99,12 +100,14 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
                 RecordOutcome("conflict");
                 await scope.RollbackAsync(ct).ConfigureAwait(false);
                 return TResponse.Failure(
-                    AppError.Conflict("A request with this idempotency key is already being processed."));
+                    AppError.Conflict("A request with this idempotency key is already being processed.",
+                        ErrorCodes.IdempotencyInProgress));
             case IdempotencyBeginStatus.FingerprintMismatch:
                 RecordOutcome("fingerprint_mismatch");
                 await scope.RollbackAsync(ct).ConfigureAwait(false);
                 return TResponse.Failure(
-                    AppError.BusinessRule("This idempotency key was already used with a different request."));
+                    AppError.BusinessRule("This idempotency key was already used with a different request.",
+                        ErrorCodes.IdempotencyKeyReused));
         }
 
         // Began — run the handler inside the claimed transaction.
