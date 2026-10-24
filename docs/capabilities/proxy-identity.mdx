@@ -15,7 +15,8 @@ The optional **`Elarion.AspNetCore.ProxyIdentity`** package is that adapter:
   `ConfigurationManager` — no hand-rolled key cache;
 - keeps the token's claim names (`MapInboundClaims = false`) and maps [`ICurrentUser`](/docs/capabilities/current-user)
   to them;
-- **refuses to start** outside Development when it is disabled or half-configured;
+- **refuses to start** outside Development when it is disabled or half-configured, unless you explicitly sign
+  everyone in as one [fixed identity](#fixed-identity-without-a-proxy);
 - gives Development a **stand-in identity** with user, roles and groups switches, so the app runs locally without the
   proxy;
 - exposes an `ExternalIdentity` record (issuer, subject, e-mail with a trust decision, name, groups, roles) and an
@@ -69,7 +70,7 @@ audience validation is off or the Development stand-in is active.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `Enabled` | `false` | Validate proxy tokens. `false` selects the Development stand-in and is refused outside Development. |
+| `Enabled` | `false` | Validate proxy tokens. `false` selects the Development stand-in and is refused outside Development, unless `Fixed:Enabled` is set. |
 | `Issuer` | — | The exact `iss` of the proxy's tokens. Required when enabled. |
 | `JwksUrl` | — | A bare JSON Web Key Set. Mutually exclusive with `MetadataAddress`. |
 | `MetadataAddress` | — | An OpenID Connect discovery document. With neither set, `{Issuer}/.well-known/openid-configuration` is used. |
@@ -91,6 +92,7 @@ audience validation is off or the Development stand-in is active.
 | `RefreshInterval` | `00:01:00` | Minimum time between refreshes triggered by an unknown key id (library minimum: 1 second). |
 | `LastKnownGoodLifetime` | `00:00:00` (off) | IdentityModel's last-known-good grace for a configuration a refresh replaced (see below). |
 | `Development:*` | see below | The stand-in identity. |
+| `Fixed:*` | off | One identity every request is signed in as, in any environment ([below](#fixed-identity-without-a-proxy)). |
 
 Set any value from code with the `configure` callback, which runs after binding and before validation:
 
@@ -204,7 +206,8 @@ configure it with `services.AddHttpClient(ProxyIdentityDefaults.HttpClientName)`
 ## Startup refusal
 
 Outside the Development environment, `Enabled: false` throws at startup — a deployment that lost its proxy
-configuration must not come up as "everybody is the development user". An enabled configuration is refused when the
+configuration must not come up as "everybody is the development user". The only way past it is the explicit
+[fixed identity](#fixed-identity-without-a-proxy). An enabled configuration is refused when the
 issuer, the audience (without `AllowAnyAudience`), the token location or the subject claim is missing, when both
 `JwksUrl` and `MetadataAddress` are set, when a key URL is not https (unless `RequireHttpsMetadata` is off), or when a
 refresh interval is below the library minimum.
@@ -300,8 +303,45 @@ The **groups switch** — `X-Elarion-Dev-Groups` header, `elarion-dev-groups` co
 `ExternalIdentity.Groups`, so an application that maps identity-provider groups to its own permissions can be tested
 too. Set `Development:RolesHeader`/`RolesCookie` or `GroupsHeader`/`GroupsCookie` to empty to turn a switch off.
 
-Like the user switch, these exist only where the stand-in does: with `Enabled: false`, which is refused outside
-Development. When proxy tokens are validated, no switch is read, in any environment.
+Like the user switch, these exist only where the stand-in does: with `Enabled: false` and no fixed identity, which is
+refused outside Development. When proxy tokens are validated or the fixed identity is on, no switch is read, in any
+environment.
+
+## Fixed identity without a proxy
+
+Some deployments have no authenticating proxy on purpose: an instance reachable only on a home or office network, or
+behind a VPN, where everyone who can reach it is trusted. `Fixed` signs **every request in as one configured user**, in
+any environment:
+
+```json
+{
+  "ProxyIdentity": {
+    "Fixed": {
+      "Enabled": true,
+      "Subject": "household",
+      "Name": "Household",
+      "Roles": ["admin"]
+    }
+  }
+}
+```
+
+Requests carry the same claim shape as a proxy token, under the issuer `urn:elarion:proxy-identity:fixed`
+(`ProxyIdentityDefaults.FixedIssuer`, `ExternalIdentity.IsFixedIdentity`), so the application reads `ICurrentUser` and
+`ExternalIdentity` exactly as it does behind a proxy, and enabling a proxy later is a configuration change. `Subject` is
+required; it is the key the application stores that user's data under, so keep it stable. `Email`, `Name`, `Groups`
+and `Roles` are optional.
+
+Unlike the Development stand-in, the fixed identity has **no switches**: no header or cookie changes the user, its
+roles or its groups, so a visitor cannot give themselves `admin`. Nobody can sign out either. A proxy token on the
+request is ignored. `Fixed:Enabled` together with `Enabled: true` is refused at startup, and the app logs a warning on
+every start that it runs unauthenticated.
+
+<Callout type="warn">
+Anybody who can reach the instance acts as the fixed user, with its roles. Use it only where the network itself is the
+access control, and give the user only the roles everyone may have. Keep `UseElarionCrossOriginProtection`
+installed: an always-signed-in user is an ambient credential too.
+</Callout>
 
 ## Reading the identity
 
@@ -393,10 +433,10 @@ builder.Services.AddElarionSession(builder.Configuration.GetClientCapabilityMani
 builder.Services.AddElarionProxyIdentitySessionSection();
 ```
 
-It carries `email`, `name`, `logoutUrl` and `isDevelopmentIdentity` for whoever the proxy signed in, read from the
-request, so they survive an application [replacing the principal](#replacing-the-principal). `logoutUrl` is omitted for
-the Development stand-in, which has no proxy session to end. While the stand-in is
-configured (`Enabled: false`) it also names the cookies a development switcher sets — `developmentUserCookie`,
+It carries `email`, `name`, `logoutUrl`, `isDevelopmentIdentity` and `isFixedIdentity` for whoever the proxy signed in,
+read from the request, so they survive an application [replacing the principal](#replacing-the-principal). `logoutUrl`
+is omitted for the Development stand-in and the [fixed identity](#fixed-identity-without-a-proxy), which have no proxy
+session to end. While the stand-in is configured (`Enabled: false`, no fixed identity) it also names the cookies a development switcher sets — `developmentUserCookie`,
 `developmentRolesCookie` and `developmentGroupsCookie`, each omitted when that switch is turned off. Alongside the user
 switch cookie it carries `developmentSignedOutUser`, the reserved value (`-`) that signs nobody in, so a switcher reads it
 instead of hard-coding it; it is omitted exactly where `developmentUserCookie` is. Those names are

@@ -21,12 +21,18 @@ public sealed record ProxyIdentitySection {
 
     /// <summary>
     /// Where the browser signs out of the proxy (<see cref="ProxyIdentityOptions.LogoutUrl"/>), or null. Omitted for the
-    /// Development stand-in, which has no proxy session to end.
+    /// Development stand-in and the fixed identity, which have no proxy session to end.
     /// </summary>
     public string? LogoutUrl { get; init; }
 
     /// <summary>Whether this is the Development stand-in identity.</summary>
     public bool IsDevelopmentIdentity { get; init; }
+
+    /// <summary>
+    /// Whether this is the fixed identity (<see cref="ProxyIdentityOptions.Fixed"/>): everyone is signed in as the same
+    /// user, so a frontend can leave out sign-out and account switching.
+    /// </summary>
+    public bool IsFixedIdentity { get; init; }
 
     /// <summary>
     /// The cookie a development user switcher sets (<see cref="ProxyDevelopmentIdentityOptions.UserCookie"/>); present
@@ -84,8 +90,9 @@ internal sealed class ProxyIdentitySessionContributor(
         var proxy = options.Value;
         var identity = (httpContextAccessor.HttpContext is { } context ? ExternalIdentity.TryRead(context, proxy) : null)
             ?? ExternalIdentity.TryRead(user, proxy);
-        // The switches exist exactly where the stand-in does: with Enabled false, which is refused outside Development.
-        var development = proxy.Enabled ? null : proxy.Development;
+        // The switches exist exactly where the stand-in does: with Enabled false and no fixed identity, which is refused
+        // outside Development.
+        var development = proxy.Enabled || proxy.Fixed.Enabled ? null : proxy.Development;
         if (identity is null && development is null) {
             return ValueTask.FromResult<object?>(null);
         }
@@ -93,10 +100,12 @@ internal sealed class ProxyIdentitySessionContributor(
         return ValueTask.FromResult<object?>(new ProxyIdentitySection {
             Email = identity?.Email,
             Name = identity?.Name,
-            LogoutUrl = identity is null || identity.IsDevelopmentIdentity || string.IsNullOrWhiteSpace(proxy.LogoutUrl)
+            LogoutUrl = identity is null || identity.IsDevelopmentIdentity || identity.IsFixedIdentity
+                || string.IsNullOrWhiteSpace(proxy.LogoutUrl)
                 ? null
                 : proxy.LogoutUrl,
             IsDevelopmentIdentity = identity?.IsDevelopmentIdentity ?? false,
+            IsFixedIdentity = identity?.IsFixedIdentity ?? false,
             DevelopmentUserCookie = userCookie,
             DevelopmentRolesCookie = NullIfEmpty(development?.RolesCookie),
             DevelopmentGroupsCookie = NullIfEmpty(development?.GroupsCookie),

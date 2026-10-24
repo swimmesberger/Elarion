@@ -8,6 +8,15 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Fixed identity for deployments without an authenticating proxy** (`Elarion.AspNetCore.ProxyIdentity`):
+  `ProxyIdentity:Fixed:Enabled=true` with a `Fixed:Subject` (plus optional `Email`, `Name`, `Groups`, `Roles`) signs
+  every request in as that one user, in any environment, for an instance whose network is its access control. Unlike
+  the Development stand-in it has no user, roles or groups switches, so a visitor cannot change who they are or raise
+  their roles. It uses its own issuer (`ProxyIdentityDefaults.FixedIssuer`, `ExternalIdentity.IsFixedIdentity`) and
+  scheme (`ProxyIdentityDefaults.FixedScheme`), is refused together with `Enabled: true`, logs a warning at startup, and
+  the `proxyIdentity` session section reports it as `isFixedIdentity` without a logout URL or switch cookies.
+
 ## [0.2.20] - 2026-10-19
 
 ### Added

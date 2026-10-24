@@ -41,6 +41,11 @@ Ship the adapter as a new optional package, `Elarion.AspNetCore.ProxyIdentity`:
 - A Development-only stand-in scheme emits the same claim shape with a distinct issuer and switches users by header or
   cookie; the reserved switch value `-` signs nobody in, so the signed-out state is reachable without the proxy. An
   optional `proxyIdentity` session-snapshot section carries the address, the logout URL and the stand-in flag.
+- An explicit **fixed identity** (`ProxyIdentity:Fixed`) signs every request in as one configured user in any
+  environment, for a deployment whose network is its access control (a home or office instance, a VPN). It has its own
+  issuer (`urn:elarion:proxy-identity:fixed`) and **no switches**, contradicts `Enabled: true` at startup, and warns on
+  every start. The startup refusal guards against a *forgotten* proxy configuration; a named, separately enabled mode
+  is a decision, not an accident, so it does not weaken that guard.
 - The accepted identity is captured into `HttpContext.Features` (`IExternalIdentityFeature`) by the token validation
   and the stand-in, so an application that replaces the principal after authentication (a local account, or an
   anonymous principal for a person without one) still reads who the proxy signed in
@@ -72,5 +77,11 @@ Ship the adapter as a new optional package, `Elarion.AspNetCore.ProxyIdentity`:
   The one refused request per rotation is the cheaper trade-off.
 - **Trusting a plain identity header** (`X-Forwarded-Email`). Anything that reaches the app without the proxy can set
   it; validating the signed token is the point.
+- **Allowing the Development stand-in outside Development** (an "allow in production" flag) for proxy-less
+  deployments. Its user, roles and groups switches are read from request headers and cookies, so every visitor could
+  make themselves `admin`; the fixed identity has none.
+- **Leaving proxy-less deployments to the application** (its own authentication handler instead of
+  `AddElarionProxyIdentity`). Every such application loses the session section and `ExternalIdentity`, and has to
+  rebuild the claim shape to move behind a proxy later.
 - **Putting the adapter in `Elarion.AspNetCore`.** It pulls in JwtBearer and is relevant only to proxied deployments;
   opt-in siblings keep the host package lean.

@@ -14,6 +14,12 @@ public static class ProxyIdentityDefaults {
     /// <summary>The <c>iss</c> claim of every Development stand-in identity, so it can never be mistaken for a real one.</summary>
     public const string DevelopmentIssuer = "urn:elarion:proxy-identity:development";
 
+    /// <summary>The scheme that signs every request in as the fixed identity (<see cref="ProxyIdentityOptions.Fixed"/>).</summary>
+    public const string FixedScheme = "ProxyIdentityFixed";
+
+    /// <summary>The <c>iss</c> claim of the fixed identity, so it can never be mistaken for a proxy-signed one.</summary>
+    public const string FixedIssuer = "urn:elarion:proxy-identity:fixed";
+
     /// <summary>
     /// The named <see cref="System.Net.Http.HttpClient"/> the signing keys and discovery document are fetched with.
     /// Configure it with <c>services.AddHttpClient(ProxyIdentityDefaults.HttpClientName)</c> to add a proxy, a

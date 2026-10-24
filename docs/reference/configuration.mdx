@@ -134,7 +134,7 @@ See [Schema generation](/docs/capabilities/transports/schema-generation).
 
 `AddElarionProxyIdentity(configuration, environment)` binds the `ProxyIdentity` section (package
 `Elarion.AspNetCore.ProxyIdentity`). Outside Development it refuses to start unless `Enabled` is `true` and the
-section is complete.
+section is complete, or `Fixed:Enabled` is `true` with a `Fixed:Subject`.
 
 | Key | Default |
 | --- | --- |
@@ -155,6 +155,8 @@ section is complete.
 | `ProxyIdentity:Development:*` | `developer` / `developer@example.com`, switch header `X-Elarion-Dev-User`, cookie `elarion-dev-user` |
 | `ProxyIdentity:Development:{RolesHeader,RolesCookie}` | `X-Elarion-Dev-Roles`, `elarion-dev-roles` |
 | `ProxyIdentity:Development:{GroupsHeader,GroupsCookie}` | `X-Elarion-Dev-Groups`, `elarion-dev-groups` |
+| `ProxyIdentity:Fixed:Enabled` | `false` (requires `Enabled: false`; allowed in every environment) |
+| `ProxyIdentity:Fixed:{Subject,Email,Name,Groups,Roles}` | — (`Subject` required when enabled) |
 
 The user switch value `-` (`ProxyIdentityDefaults.DevelopmentSignedOutUser`) signs nobody in for the request; it is
 reserved, so no stand-in user (`Development:Subject`/`Email`, `Development:Users:*:Subject`/`Email`) may use it.

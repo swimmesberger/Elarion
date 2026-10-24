@@ -22,17 +22,22 @@ public static class ProxyIdentityServiceCollectionExtensions {
     /// <summary>
     /// Registers the proxy identity as the default authentication scheme: a JwtBearer scheme
     /// (<see cref="ProxyIdentityDefaults.AuthenticationScheme"/>) that reads the token only from the configured header or
-    /// cookie, or — while <see cref="ProxyIdentityOptions.Enabled"/> is false in Development — the stand-in scheme
-    /// (<see cref="ProxyIdentityDefaults.DevelopmentScheme"/>). It also maps <c>ICurrentUser</c> to the configured claim
-    /// names (subject, e-mail, roles) and logs once at startup what this instance accepts.
+    /// cookie; or, while <see cref="ProxyIdentityOptions.Enabled"/> is false, the fixed-identity scheme
+    /// (<see cref="ProxyIdentityDefaults.FixedScheme"/>) when <see cref="ProxyIdentityOptions.Fixed"/> is enabled, else —
+    /// in Development only — the stand-in scheme (<see cref="ProxyIdentityDefaults.DevelopmentScheme"/>). It also maps
+    /// <c>ICurrentUser</c> to the configured claim names (subject, e-mail, roles) and logs once at startup what this
+    /// instance accepts.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The configuration; options bind from <see cref="ProxyIdentityDefaults.SectionName"/>.</param>
-    /// <param name="environment">The host environment; the stand-in identity is allowed only in Development.</param>
+    /// <param name="environment">
+    /// The host environment; the stand-in identity is allowed only in Development, the fixed identity everywhere.
+    /// </param>
     /// <param name="configure">Optional changes applied after binding, before validation.</param>
     /// <returns>The authentication builder, so the host can add further, explicitly named schemes.</returns>
     /// <exception cref="InvalidOperationException">
-    /// The options are incomplete or contradictory, or the integration is disabled outside Development.
+    /// The options are incomplete or contradictory, or the integration is disabled outside Development without a fixed
+    /// identity.
     /// </exception>
     /// <remarks>
     /// <c>ICurrentUser</c> registration is first-wins: call this before any other <c>AddElarionCurrentUser</c> so the
@@ -84,6 +89,10 @@ public static class ProxyIdentityServiceCollectionExtensions {
             }
         });
 
+        if (options.Fixed.Enabled) {
+            return services.AddAuthentication(ProxyIdentityDefaults.FixedScheme)
+                .AddScheme<AuthenticationSchemeOptions, FixedIdentityHandler>(ProxyIdentityDefaults.FixedScheme, null);
+        }
         if (!options.Enabled) {
             return services.AddAuthentication(ProxyIdentityDefaults.DevelopmentScheme)
                 .AddScheme<AuthenticationSchemeOptions, DevelopmentIdentityHandler>(ProxyIdentityDefaults.DevelopmentScheme, null);
@@ -157,11 +166,25 @@ public static class ProxyIdentityServiceCollectionExtensions {
     /// <summary>The reason <paramref name="options"/> cannot run in <paramref name="environment"/>, or null when it can.</summary>
     internal static string? Validate(ProxyIdentityOptions options, IHostEnvironment environment) {
         const string section = ProxyIdentityDefaults.SectionName;
+        if (options.Fixed.Enabled) {
+            if (options.Enabled) {
+                return $"{section}:Enabled and {section}:Fixed:Enabled are both true; validate proxy tokens or sign "
+                    + "everyone in as the fixed identity, not both.";
+            }
+            if (string.IsNullOrWhiteSpace(options.Claims.Subject)) {
+                return $"{section}:Claims:Subject is empty.";
+            }
+            return string.IsNullOrWhiteSpace(options.Fixed.Subject)
+                ? $"{section}:Fixed:Subject must not be empty: it is the key the application stores the fixed user's data under."
+                : null;
+        }
         if (!options.Enabled) {
             if (!environment.IsDevelopment()) {
                 return $"{section}:Enabled is false in the '{environment.EnvironmentName}' environment. Configure the "
                     + $"authenticating proxy ({section}:Issuer, a key source and {section}:Audiences) and set "
-                    + $"{section}:Enabled=true, or run in Development to use the stand-in identity.";
+                    + $"{section}:Enabled=true, run in Development to use the stand-in identity, or, for an instance "
+                    + $"reachable only by people you trust, set {section}:Fixed:Enabled=true and {section}:Fixed:Subject "
+                    + "to sign everyone in as one fixed identity.";
             }
             var development = options.Development;
             if (string.IsNullOrWhiteSpace(development.Subject) || string.IsNullOrWhiteSpace(development.Email)) {

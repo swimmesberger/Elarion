@@ -9,6 +9,13 @@ internal sealed class ProxyIdentityStartupLog(IOptions<ProxyIdentityOptions> opt
     : IHostedService {
     public Task StartAsync(CancellationToken cancellationToken) {
         var proxy = options.Value;
+        if (proxy.Fixed.Enabled) {
+            logger.LogWarning(
+                "Proxy identity is OFF: every request is signed in as the fixed identity {Subject} with roles [{Roles}], "
+                + "unauthenticated. Anybody who can reach this instance acts as that user.",
+                proxy.Fixed.Subject, string.Join(", ", proxy.Fixed.Roles));
+            return Task.CompletedTask;
+        }
         if (!proxy.Enabled) {
             logger.LogWarning(
                 "Proxy identity is OFF: every request runs as the Development stand-in {Email} (switch with the {Header} "

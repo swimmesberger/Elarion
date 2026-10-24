@@ -48,6 +48,9 @@ public sealed record ExternalIdentity {
     /// <summary>Whether this is the Development stand-in identity rather than a token the proxy signed.</summary>
     public bool IsDevelopmentIdentity => Issuer == ProxyIdentityDefaults.DevelopmentIssuer;
 
+    /// <summary>Whether this is the fixed identity (<see cref="ProxyIdentityOptions.Fixed"/>) rather than a token the proxy signed.</summary>
+    public bool IsFixedIdentity => Issuer == ProxyIdentityDefaults.FixedIssuer;
+
     /// <summary>
     /// Reads who the proxy (or the Development stand-in) signed in for this request: the identity captured when the
     /// token was accepted (<see cref="IExternalIdentityFeature"/>), else the one <see cref="HttpContext.User"/> carries,

@@ -81,6 +81,42 @@ public sealed class ProxyIdentityConfigurationTests {
         scheme!.Name.Should().Be(ProxyIdentityDefaults.DevelopmentScheme);
     }
 
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    public async Task FixedIdentity_IsAcceptedInEveryEnvironment_AndBecomesTheDefault(string environment) {
+        await using var provider = Register(new Dictionary<string, string?> {
+            ["ProxyIdentity:Fixed:Enabled"] = "true",
+            ["ProxyIdentity:Fixed:Subject"] = "household",
+        }, environment);
+
+        var scheme = await provider.GetRequiredService<IAuthenticationSchemeProvider>().GetDefaultAuthenticateSchemeAsync();
+        scheme!.Name.Should().Be(ProxyIdentityDefaults.FixedScheme);
+    }
+
+    [Fact]
+    public void FixedIdentity_TogetherWithProxyTokens_IsRefused() {
+        var settings = ProxyIdentityTestHost.JwksSettings();
+        settings["ProxyIdentity:Fixed:Enabled"] = "true";
+        settings["ProxyIdentity:Fixed:Subject"] = "household";
+
+        var act = () => Register(settings, Environments.Production);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*Enabled and ProxyIdentity:Fixed:Enabled are both true*");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(" ")]
+    public void FixedIdentity_WithoutASubject_IsRefused(string? subject) {
+        var act = () => Register(new Dictionary<string, string?> {
+            ["ProxyIdentity:Fixed:Enabled"] = "true",
+            ["ProxyIdentity:Fixed:Subject"] = subject,
+        }, Environments.Production);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*Fixed:Subject must not be empty*");
+    }
+
     [Fact]
     public void Unconfigured_RefusesOutsideDevelopment() {
         var act = () => Register(new Dictionary<string, string?>(), "Staging");
