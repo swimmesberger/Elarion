@@ -234,9 +234,10 @@ Every Elarion failure over HTTP is an RFC 7807 ProblemDetails that carries the e
 ([ADR-0080](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md))
 — the same string a JSON-RPC client branches on (`not_found`, `validation`, `seat.taken`, …) — plus a `data` member
 when the error carries a typed payload. Validation failures, binding-tier ones included, use `code: "validation"`
-and keep their field messages in the standard `errors` map. `AddElarionOpenApi()` declares `code` and `data` on the
-document's ProblemDetails schemas, so the generated `error` type has them and a client branches on the code
-directly instead of parsing `detail`:
+and keep their field messages in the standard `errors` map. An unexpected exception answers `500` with
+`code: "internal"` and a support `reference` ([Unexpected errors](/docs/concepts/results-and-errors#unexpected-errors)).
+`AddElarionOpenApi()` declares `code`, `data` and `reference` on the document's ProblemDetails schemas, so the
+generated `error` type has them and a client branches on the code directly instead of parsing `detail`:
 
 ```ts
 const { data, error } = await sdk.invitations.getInvitationByToken({ path: { token } });

@@ -187,11 +187,21 @@ internal static partial class HttpEndpointEmission {
         else
             AppendBodyBinding(sb, entry, indent, index);
 
+        // The endpoint's outermost catch: it wraps handler resolution and every decorator, so an unexpected
+        // exception gets the configured UnexpectedErrorOptions answer like the JSON-RPC and MCP transports.
+        sb.AppendLine($"{indent}global::Microsoft.AspNetCore.Http.IResult __result;");
+        sb.AppendLine($"{indent}try {{");
         sb.AppendLine(
-            $"{indent}var __handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions");
-        sb.AppendLine($"{indent}    .GetRequiredService<{HandlerIfaceFqn(entry)}>(__context.RequestServices);");
-        sb.AppendLine($"{indent}var __result = global::Elarion.AspNetCore.ElarionHttpResults.{resultCall}(");
-        sb.AppendLine($"{indent}    await __handler.HandleAsync(__request, __context.RequestAborted));");
+            $"{indent}    var __handler = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions");
+        sb.AppendLine($"{indent}        .GetRequiredService<{HandlerIfaceFqn(entry)}>(__context.RequestServices);");
+        sb.AppendLine($"{indent}    __result = global::Elarion.AspNetCore.ElarionHttpResults.{resultCall}(");
+        sb.AppendLine($"{indent}        await __handler.HandleAsync(__request, __context.RequestAborted));");
+        sb.AppendLine($"{indent}}}");
+        sb.AppendLine(
+            $"{indent}catch (global::System.Exception __exception) when (global::Elarion.AspNetCore.ElarionHttpResults.IsUnexpected(__context, __exception)) {{");
+        sb.AppendLine(
+            $"{indent}    __result = global::Elarion.AspNetCore.ElarionHttpResults.ToUnexpectedProblem(__context, __exception, {Literal(entry.EndpointName)});");
+        sb.AppendLine($"{indent}}}");
         sb.AppendLine($"{indent}await __result.ExecuteAsync(__context);");
     }
 

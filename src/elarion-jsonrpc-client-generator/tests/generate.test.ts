@@ -814,6 +814,23 @@ describe('JSON-RPC client generator', () => {
       .rejects.toMatchObject({code: 'business_rule', rpcCode: -32004})
   })
 
+  it('exposes the support reference of an unexpected error, and none for other errors', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+    const respond = (error: unknown) => clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async () => jsonResponse({jsonrpc: '2.0', id: 'r', error}),
+      idGenerator: () => 'r',
+    })
+
+    await expect(respond({code: -32603, message: 'Internal error', data: {code: 'internal', reference: 'abc123'}})
+      .call('math.add', {left: 1, right: 2}))
+      .rejects.toMatchObject({code: 'internal', isInternalError: true, reference: 'abc123', message: 'Internal error'})
+    await expect(respond({code: -32001, message: 'missing', data: {code: 'not_found'}})
+      .call('math.add', {left: 1, right: 2}))
+      .rejects.toMatchObject({code: 'not_found', reference: undefined})
+  })
+
   it('propagates a transform result of null instead of falling back to the raw value', async () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     const clientModule = await loadGeneratedClient(generated.clientSource)

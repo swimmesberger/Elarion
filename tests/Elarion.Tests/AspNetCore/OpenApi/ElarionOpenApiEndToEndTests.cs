@@ -220,6 +220,7 @@ public sealed partial class ElarionOpenApiEndToEndTests {
                     .GetProperty("properties");
                 properties.GetProperty("code").GetProperty("type").GetString().Should().Be("string");
                 properties.TryGetProperty("data", out _).Should().BeTrue();
+                properties.GetProperty("reference").GetProperty("type").GetString().Should().Be("string");
                 properties.TryGetProperty("title", out _).Should().BeTrue();
             }
 

@@ -153,6 +153,13 @@ public sealed class ModuleBootstrapperTransportTests {
         generated.Should().Contain(".WithTags(\"Shipping\")");
         // No handler here is [Idempotent], so no idempotency marker is emitted.
         generated.Should().NotContain("ElarionIdempotentEndpointMetadata");
+
+        // Each delegate's outermost catch wraps handler resolution and the whole pipeline, answering an unexpected
+        // exception with the configured UnexpectedErrorOptions problem (an aborted request is not caught).
+        generated.Should().Contain(
+            "catch (global::System.Exception __exception) when (global::Elarion.AspNetCore.ElarionHttpResults.IsUnexpected(__context, __exception)) {");
+        generated.Should().Contain(
+            "__result = global::Elarion.AspNetCore.ElarionHttpResults.ToUnexpectedProblem(__context, __exception, \"Sample.Billing.GetInvoice\");");
     }
 
     [Fact]

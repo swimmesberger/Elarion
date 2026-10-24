@@ -177,7 +177,14 @@ public sealed class JsonRpcDispatcher {
             return JsonRpcResponse.FromError(request, RpcError.InvalidParams("Invalid params: could not deserialize"));
         }
         catch (Exception ex) {
-            _logger?.LogError(ex, "Unhandled exception dispatching JSON-RPC method {Method}", request.Method);
+            // The outermost catch for this transport: it sits outside every handler decorator, so an exception from
+            // the authorization, validation or audit decorator gets the same configured answer as the handler's own.
+            var unexpected = UnexpectedErrorOptions.Describe(new UnexpectedErrorContext {
+                Exception = ex, Transport = UnexpectedErrorTransports.JsonRpc, Operation = method,
+                Services = scopeProvider
+            });
+            _logger?.LogError(ex, "Unhandled exception dispatching JSON-RPC method {Method} (reference {ErrorReference})",
+                request.Method, unexpected.Reference);
             activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
                 { "exception.type", ex.GetType().FullName },
                 { "exception.message", ex.Message }
@@ -186,16 +193,12 @@ public sealed class JsonRpcDispatcher {
                 activity.SetTag("rpc.response.status_code", "-32603");
                 activity.SetTag("error.type", "-32603");
                 activity.SetTag("jsonrpc.error.phase", "dispatch");
+                activity.SetTag("elarion.error.reference", unexpected.Reference);
                 activity.SetStatus(ActivityStatusCode.Error, ex.Message);
             }
 
             JsonRpcTelemetry.RecordRequest(method, "-32603", Stopwatch.GetElapsedTime(startTimestamp));
-#if DEBUG
-            // In DEBUG builds, include the actual exception message for easier debugging
-            return JsonRpcResponse.FromError(request, RpcError.InternalError($"Internal error: {ex.Message}"));
-#else
-            return JsonRpcResponse.FromError(request, RpcError.InternalError("Internal error"));
-#endif
+            return JsonRpcResponse.FromError(request, RpcError.Unexpected(unexpected));
         }
     }
 
