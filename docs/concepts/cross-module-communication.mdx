@@ -197,6 +197,14 @@ internal sealed class CustomerLookup(ISalesApi api) : ICustomerLookup {
   mapping onto `google.rpc.Code`. **Prefer `Result`; only drop it when a concrete need calls for it.**
 </Callout>
 
+## Data owned across modules
+
+Some data belongs to records of other modules — notes or files attached to a property, a contact, a request — and
+points at them by an id without a foreign key. The owning module must not ask every deleting module to clean it up,
+and the deleting module must not know it exists. Mark the record entity `[PublishLifecycleEvents]` and let the
+data's module consume `EntitiesDeleted<TEntity>` in the deleting unit of work (database cascades included); see
+[Reacting to deletions](/docs/capabilities/events/lifecycle-events).
+
 ## Why not just call the handler (`IHandlerSender`/`IHandler`)?
 
 A typed in-process call to another module's handler ([by type](/docs/concepts/handlers#calling-a-handler-from-other-code))
