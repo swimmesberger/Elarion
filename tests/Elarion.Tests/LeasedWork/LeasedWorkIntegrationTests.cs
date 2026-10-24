@@ -1,6 +1,8 @@
 using AwesomeAssertions;
 using Elarion.EntityFrameworkCore.LeasedWork;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Xunit;
 
 namespace Elarion.Tests.LeasedWork;
@@ -275,6 +277,271 @@ public sealed class LeasedWorkIntegrationTests(PostgreSqlLeasedWorkFixture fixtu
         (await worker.Deliveries.ClaimPendingAsync(Claim(source, Guid.CreateVersion7(), T0.AddHours(1)), Ct))
             .Should().BeEmpty();
         (await ReadAsync(ids[0])).State.Should().Be(TestDeliveryStates.Withdrawn);
+    }
+
+    [Fact]
+    public async Task ExhaustedRows_AreGivenUpAtClaim_NotReturned_AndReported() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var (source, ids) = await SeedAsync(2);
+        await using (var seed = fixture.CreateContext()) {
+            // The first row's previous workers all died mid-call: this claim counts its last allowed attempt + 1.
+            await seed.Deliveries.Where(delivery => delivery.Id == ids[0])
+                .ExecuteUpdateAsync(setters => setters.SetProperty(delivery => delivery.Attempts, MaxAttempts), Ct);
+        }
+
+        await using var context = fixture.CreateContext();
+        var reported = new List<TestDelivery>();
+        var claim = Claim(source, Guid.CreateVersion7(), T0) with {
+            Eligible = delivery => delivery.Source == source && delivery.CompletedAtUtc == null,
+            Exhausted = delivery => delivery.Attempts > MaxAttempts,
+            GiveUp = setters => setters
+                .SetProperty(delivery => delivery.State, TestDeliveryStates.Withdrawn)
+                .SetProperty(delivery => delivery.CompletedAtUtc, T0)
+                .SetProperty(delivery => delivery.Error, "attempts exhausted"),
+            OnGivenUp = (delivery, _) => {
+                reported.Add(delivery);
+                return ValueTask.CompletedTask;
+            }
+        };
+
+        var claimed = await context.Deliveries.ClaimPendingAsync(claim, Ct);
+
+        claimed.Select(delivery => delivery.Id).Should().Equal(ids[1]);
+        reported.Should().ContainSingle().Which.Attempts.Should().Be(MaxAttempts + 1);
+        var givenUp = await ReadAsync(ids[0]);
+        givenUp.State.Should().Be(TestDeliveryStates.Withdrawn);
+        givenUp.Error.Should().Be("attempts exhausted");
+        givenUp.LockId.Should().BeNull();
+        givenUp.LockedUntilUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Exhausted_WithoutGiveUp_IsRejected() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var context = fixture.CreateContext();
+        var claim = Claim("none", Guid.CreateVersion7(), T0) with { Exhausted = delivery => delivery.Attempts > 3 };
+
+        var act = async () => await context.Deliveries.ClaimPendingAsync(claim, Ct);
+
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage("*GiveUp*");
+    }
+
+    [Fact]
+    public async Task ProjectedClaim_ReturnsTheProjectionOfTheWonRowsInQueueOrder() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var (source, ids) = await SeedAsync(3);
+        await using var context = fixture.CreateContext();
+
+        var claimed = await context.Deliveries.ClaimPendingAsync(
+            Claim(source, Guid.CreateVersion7(), T0, batchSize: 2),
+            delivery => new { delivery.Id, delivery.Attempts, Label = delivery.Source + "/" + delivery.State },
+            Ct);
+
+        claimed.Select(row => row.Id).Should().Equal(ids[0], ids[1]);
+        claimed.Should().AllSatisfy(row => {
+            row.Attempts.Should().Be(1);
+            row.Label.Should().Be($"{source}/{TestDeliveryStates.Queued}");
+        });
+    }
+
+    [Fact]
+    public async Task GuardedFinalize_AppliesOnlyWhileTheRowIsStillEligible() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var (source, ids) = await SeedAsync(2);
+        await using var context = fixture.CreateContext();
+        var lockId = Guid.CreateVersion7();
+        await context.Deliveries.ClaimPendingAsync(Claim(source, lockId, T0), Ct);
+        // A producer withdraws the second row while the worker holds no lock on it.
+        await context.Deliveries.Where(delivery => delivery.Id == ids[1])
+            .ExecuteUpdateAsync(setters => setters.SetProperty(delivery => delivery.State, TestDeliveryStates.Withdrawn), Ct);
+        var finalize = new LeasedWorkFinalize<TestDelivery> {
+            Update = MarkSent(T0),
+            StillEligible = delivery => delivery.State == TestDeliveryStates.Queued
+        };
+
+        (await context.Deliveries.FinalizeClaimAsync(ids[0], lockId, finalize, Ct))
+            .Should().Be(LeasedWorkFinalizeOutcome.Finalized);
+        (await context.Deliveries.FinalizeClaimAsync(ids[1], lockId, finalize, Ct))
+            .Should().Be(LeasedWorkFinalizeOutcome.Ineligible);
+        (await context.Deliveries.FinalizeClaimAsync(ids[1], lockId, finalize, Ct))
+            .Should().Be(LeasedWorkFinalizeOutcome.ClaimLost);
+
+        (await ReadAsync(ids[0])).State.Should().Be(TestDeliveryStates.Sent);
+        var withdrawn = await ReadAsync(ids[1]);
+        withdrawn.State.Should().Be(TestDeliveryStates.Withdrawn);
+        withdrawn.CompletedAtUtc.Should().BeNull();
+        withdrawn.LockId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReleaseClaims_GivesABatchBack_UndoingTheClaimsBookkeeping_AndLeavesLostClaimsAlone() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var (source, ids) = await SeedAsync(3);
+        await using var context = fixture.CreateContext();
+        var lockId = Guid.CreateVersion7();
+        await context.Deliveries.ClaimPendingAsync(Claim(source, lockId, T0), Ct);
+        (await context.Deliveries.FinalizeClaimAsync(ids[0], lockId, MarkSent(T0), null, Ct)).Should().BeTrue();
+
+        // Shutdown mid-batch: hand the unfinished rows back without burning the attempt the claim counted.
+        var released = await context.Deliveries.ReleaseClaimsAsync(
+            ids, lockId, setters => setters.SetProperty(delivery => delivery.Attempts, delivery => delivery.Attempts - 1),
+            Ct);
+
+        released.Should().Be(2);
+        (await ReadAsync(ids[0])).Attempts.Should().Be(1, "the finalized row is no longer this worker's");
+        foreach (var id in ids.Skip(1)) {
+            var row = await ReadAsync(id);
+            row.Attempts.Should().Be(0);
+            row.LockId.Should().BeNull();
+        }
+
+        (await context.Deliveries.ClaimPendingAsync(Claim(source, Guid.CreateVersion7(), T0), Ct))
+            .Select(delivery => delivery.Id).Should().Equal(ids[1], ids[2]);
+    }
+
+    [Fact]
+    public async Task Exhausted_WithoutOnGivenUp_GivesUpWithoutReporting() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var (source, ids) = await SeedAsync(2);
+        await SetAttemptsAsync(ids[0], MaxAttempts);
+        await using var context = fixture.CreateContext();
+
+        var claimed = await context.Deliveries.ClaimPendingAsync(ExhaustingClaim(source, onGivenUp: null), Ct);
+
+        claimed.Select(delivery => delivery.Id).Should().Equal(ids[1]);
+        var givenUp = await ReadAsync(ids[0]);
+        givenUp.State.Should().Be(TestDeliveryStates.Withdrawn);
+        givenUp.LockId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GiveUp_RacingAWriterThatResetsTheRow_ReportsOnlyWhatItGaveUp_AndReturnsTheRest() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var (source, ids) = await SeedAsync(2);
+        await SetAttemptsAsync(ids[0], MaxAttempts);
+        await SetAttemptsAsync(ids[1], MaxAttempts);
+        // Right before the give-up statement, another writer resets the first row's attempts: it is no longer exhausted.
+        var race = new BeforeGiveUp(() => SetAttemptsAsync(ids[0], 0));
+        await using var context = fixture.CreateContext(race);
+        var reported = new List<Guid>();
+
+        var claimed = await context.Deliveries.ClaimPendingAsync(
+            ExhaustingClaim(source, (delivery, _) => {
+                reported.Add(delivery.Id);
+                return ValueTask.CompletedTask;
+            }),
+            Ct);
+
+        race.Ran.Should().BeTrue();
+        reported.Should().Equal(ids[1]);
+        claimed.Select(delivery => delivery.Id).Should().Equal(ids[0]);
+        (await ReadAsync(ids[0])).State.Should().Be(TestDeliveryStates.Queued);
+        (await ReadAsync(ids[1])).State.Should().Be(TestDeliveryStates.Withdrawn);
+    }
+
+    [Fact]
+    public async Task ThrowingOnGivenUp_ReportsEveryRow_ReleasesTheWonRows_AndThrows() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var (source, ids) = await SeedAsync(3);
+        await SetAttemptsAsync(ids[0], MaxAttempts);
+        await SetAttemptsAsync(ids[1], MaxAttempts);
+        await using var context = fixture.CreateContext();
+        var calls = 0;
+
+        var act = async () => await context.Deliveries.ClaimPendingAsync(
+            ExhaustingClaim(source, (_, _) => {
+                calls++;
+                throw new InvalidOperationException("log sink down");
+            }),
+            Ct);
+
+        var thrown = await act.Should().ThrowAsync<AggregateException>();
+        thrown.Which.InnerExceptions.Should().HaveCount(2);
+        calls.Should().Be(2);
+        var won = await ReadAsync(ids[2]);
+        won.LockId.Should().BeNull("the won row is released, not stranded until its lease lapses");
+        won.Attempts.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GuardedFinalize_HonorsVisibleAfterWhenFinalized_ButReleasesAnIneligibleRowAtOnce() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var (source, ids) = await SeedAsync(2);
+        await using var context = fixture.CreateContext();
+        var lockId = Guid.CreateVersion7();
+        await context.Deliveries.ClaimPendingAsync(Claim(source, lockId, T0), Ct);
+        await context.Deliveries.Where(delivery => delivery.Id == ids[1])
+            .ExecuteUpdateAsync(setters => setters.SetProperty(delivery => delivery.State, TestDeliveryStates.Withdrawn), Ct);
+        var retryLater = new LeasedWorkFinalize<TestDelivery> {
+            Update = setters => setters.SetProperty(delivery => delivery.Error, "timeout"),
+            VisibleAfterUtc = T0 + Ladder[1],
+            StillEligible = delivery => delivery.State == TestDeliveryStates.Queued
+        };
+
+        (await context.Deliveries.FinalizeClaimAsync(ids[0], lockId, retryLater, Ct))
+            .Should().Be(LeasedWorkFinalizeOutcome.Finalized);
+        (await context.Deliveries.FinalizeClaimAsync(ids[1], lockId, retryLater, Ct))
+            .Should().Be(LeasedWorkFinalizeOutcome.Ineligible);
+
+        (await ReadAsync(ids[0])).LockedUntilUtc.Should().Be(T0 + Ladder[1]);
+        var ineligible = await ReadAsync(ids[1]);
+        ineligible.LockedUntilUtc.Should().BeNull();
+        ineligible.Error.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ProjectedClaim_ReadsANavigationInTheClaimsQuery() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var (source, ids) = await SeedAsync(2);
+        var endpointId = Guid.CreateVersion7();
+        await using (var seed = fixture.CreateContext()) {
+            seed.Endpoints.Add(new TestEndpoint { Id = endpointId, Url = "https://example.test/hook" });
+            await seed.SaveChangesAsync(Ct);
+            await seed.Deliveries.Where(delivery => delivery.Id == ids[0])
+                .ExecuteUpdateAsync(setters => setters.SetProperty(delivery => delivery.EndpointId, endpointId), Ct);
+        }
+
+        await using var context = fixture.CreateContext();
+        var claimed = await context.Deliveries.ClaimPendingAsync(
+            Claim(source, Guid.CreateVersion7(), T0),
+            delivery => new { delivery.Id, Url = delivery.Endpoint == null ? null : delivery.Endpoint.Url },
+            Ct);
+
+        claimed.Select(row => (row.Id, row.Url)).Should().Equal((ids[0], "https://example.test/hook"), (ids[1], null));
+    }
+
+    private LeasedWorkClaim<TestDelivery> ExhaustingClaim(
+        string source, Func<TestDelivery, CancellationToken, ValueTask>? onGivenUp) =>
+        Claim(source, Guid.CreateVersion7(), T0) with {
+            Eligible = delivery => delivery.Source == source && delivery.CompletedAtUtc == null,
+            Exhausted = delivery => delivery.Attempts > MaxAttempts,
+            GiveUp = setters => setters
+                .SetProperty(delivery => delivery.State, TestDeliveryStates.Withdrawn)
+                .SetProperty(delivery => delivery.CompletedAtUtc, T0),
+            OnGivenUp = onGivenUp
+        };
+
+    private async Task SetAttemptsAsync(Guid id, int attempts) {
+        await using var context = fixture.CreateContext();
+        await context.Deliveries.Where(delivery => delivery.Id == id)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(delivery => delivery.Attempts, attempts), Ct);
+    }
+
+    // Runs a concurrent write once, right before the claim's give-up statement (the UPDATE that sets the state).
+    private sealed class BeforeGiveUp(Func<Task> write) : DbCommandInterceptor {
+        public bool Ran { get; private set; }
+
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result,
+            CancellationToken cancellationToken = default) {
+            if (!Ran && command.CommandText.StartsWith("UPDATE", StringComparison.Ordinal) &&
+                command.CommandText.Contains("\"State\"", StringComparison.Ordinal)) {
+                Ran = true;
+                await write();
+            }
+
+            return result;
+        }
     }
 
     private static Action<Microsoft.EntityFrameworkCore.Query.UpdateSettersBuilder<TestDelivery>> MarkSent(

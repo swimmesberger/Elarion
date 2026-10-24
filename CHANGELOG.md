@@ -36,6 +36,12 @@ minor releases may include breaking changes.
   out `key` / `+key` / `-key`: a bare key means the key's declared direction.
 - **`Page<T>.Map(selector)`** and the batched **`Page<T>.MapAsync(selector, ct)`** project a page's items while
   keeping its cursors, flags and total.
+- **Leased work rows: give-up, guarded finalize, batch release and projection** (`Elarion.EntityFrameworkCore.LeasedWork`).
+  `LeasedWorkClaim.Exhausted` with `GiveUp` and `OnGivenUp` finalizes rows that have used up their attempts at claim
+  time instead of returning them; `FinalizeClaimAsync(id, lockId, LeasedWorkFinalize<TRow>, ct)` applies its setters
+  only while `StillEligible` holds and returns `Finalized`, `Ineligible` or `ClaimLost`; `ReleaseClaimsAsync(ids,
+  lockId, update, ct)` gives a batch back in one statement with setters that undo the claim's bookkeeping; and
+  `ClaimPendingAsync(claim, select, ct)` returns the won rows projected in the same query.
 - **Transaction-scoped row and advisory locks** (`Elarion.EntityFrameworkCore.UnitOfWork`, ADR-0087):
   `db.LockRowAsync<TEntity>(id, RowLockMode)` locks one row (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`,
   `FOR KEY SHARE`; table and key column from the EF model), and `db.AdvisoryLockAsync(scope, key)` /
@@ -62,6 +68,11 @@ minor releases may include breaking changes.
   matches a prefix (`a|ab` on `"ab"`) fails on the server but passes the anchored pattern. Regenerate schemas and
   clients.
 - The JSON-RPC dispatcher no longer includes the exception message in its internal-error answer in `DEBUG` builds.
+- **`[GenerateDbSets]` keeps mass nouns singular.** An entity ending in `Data`, `Metadata`, `Information`, `Info`,
+  `Equipment` or `Feedback` (`ImageMetadata`) gets a `DbSet` of the same name instead of `ImageMetadatas`; rename usages
+  of the old property. **EF derives the conventional table name from the `DbSet`**, so such an entity without an explicit
+  `ToTable` now maps to `ImageMetadata` instead of `ImageMetadatas` (a snake-case naming convention follows:
+  `image_metadata`). Add a migration renaming the table, or keep the old name with `ToTable("ImageMetadatas")`.
 - **The scheduler's and device pairing's advisory locks use reserved scopes.** They locked the bare job name and
   device id, which an application key could share; they now lock `elarion.scheduler.job:<job>` and
   `elarion.devices.pairing:<device>`. For this release they also take the old key after the new one, so a rolling

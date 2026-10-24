@@ -1,5 +1,6 @@
 using Elarion.EntityFrameworkCore.LeasedWork;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -40,9 +41,10 @@ public sealed class PostgreSqlLeasedWorkFixture : IAsyncLifetime {
         if (_container is not null) await _container.DisposeAsync();
     }
 
-    public LeasedWorkIntegrationDbContext CreateContext() {
+    public LeasedWorkIntegrationDbContext CreateContext(params IInterceptor[] interceptors) {
         return new LeasedWorkIntegrationDbContext(new DbContextOptionsBuilder<LeasedWorkIntegrationDbContext>()
             .UseNpgsql(ConnectionString)
+            .AddInterceptors(interceptors)
             .Options);
     }
 }
@@ -72,6 +74,17 @@ public sealed class TestDelivery : ILeasedWorkRow {
     public Guid? LockId { get; set; }
 
     public DateTimeOffset? LockedUntilUtc { get; set; }
+
+    public Guid? EndpointId { get; set; }
+
+    public TestEndpoint? Endpoint { get; set; }
+}
+
+/// <summary>The delivery's target, reached through a navigation by a projected claim.</summary>
+public sealed class TestEndpoint {
+    public required Guid Id { get; init; }
+
+    public required string Url { get; init; }
 }
 
 public static class TestDeliveryStates {
@@ -85,6 +98,8 @@ public sealed class LeasedWorkIntegrationDbContext(DbContextOptions<LeasedWorkIn
     : DbContext(options) {
     public DbSet<TestDelivery> Deliveries => Set<TestDelivery>();
 
+    public DbSet<TestEndpoint> Endpoints => Set<TestEndpoint>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.Entity<TestDelivery>(entity => {
             entity.ToTable("TestDeliveries");
@@ -94,6 +109,11 @@ public sealed class LeasedWorkIntegrationDbContext(DbContextOptions<LeasedWorkIn
                 delivery => new { delivery.Source, delivery.CreatedAtUtc, delivery.Id },
                 "\"CompletedAtUtc\" IS NULL",
                 snakeCase: false);
+            entity.HasOne(delivery => delivery.Endpoint).WithMany().HasForeignKey(delivery => delivery.EndpointId);
+        });
+        modelBuilder.Entity<TestEndpoint>(entity => {
+            entity.ToTable("TestEndpoints");
+            entity.Property(endpoint => endpoint.Id).ValueGeneratedNever();
         });
     }
 }

@@ -327,6 +327,67 @@ Delivery stays **at least once**: a worker that crashes after the remote side ac
 finalize leaves the row to be retried. Give the remote side the row `Id` as its idempotency key where it
 accepts one.
 
+### Giving up, guarding the outcome, and shutting down
+
+Four needs recur in every worker; the primitive answers each so the skeleton is not rewritten per queue:
+
+- **Give up an exhausted row at claim.** `Exhausted` names rows that have used up their attempts — evaluated right
+  after the stamp, on the values `OnClaim` wrote, so `d => d.Attempts > MaxAttempts` also catches a row whose every
+  previous worker died mid-call. Such a row is not returned: it is finalized at once with `GiveUp` (which must take
+  it out of `Eligible`) and reported to `OnGivenUp` for logging. Without it, an exhausted row just sits in the table.
+  Every given-up row is reported, even after a callback threw; a failed report fails the claim, and the won rows are
+  released first instead of staying stamped until their lease lapses. A claim can therefore come back empty while
+  work remains — every candidate given up or taken by another worker — so an empty claim is not "queue drained".
+- **Write the outcome only while it still applies.** Work done without a lock can race a concurrent writer. A
+  `LeasedWorkFinalize<TRow>` with `StillEligible` applies the setters only while the row still meets that condition;
+  otherwise the claim is ended without them. The outcome says which happened (`Finalized`, `Ineligible`, `ClaimLost`).
+  `Ineligible` clears the lease at once and ignores `VisibleAfterUtc`: that backoff belonged to the discarded result,
+  and the concurrent writer's values decide through `Eligible` whether the row is still work.
+- **Give a batch back on shutdown.** `ReleaseClaimsAsync(ids, lockId, update, ct)` ends the claims on the unfinished
+  rows in one statement and lets the update take back the attempt the claim counted — it was never made.
+- **Read related data with the claim.** `ClaimPendingAsync(claim, select, ct)` projects the won rows in the same
+  query (`m => new { m.Id, m.Attempts, m.Attachment.BlobId }`) instead of a second query per batch.
+
+```csharp
+var claimed = await db.ImageMetadata.ClaimPendingAsync(new LeasedWorkClaim<ImageMetadata> {
+    LockId = lockId, NowUtc = now, LeaseUntilUtc = now + Lease, BatchSize = 20,
+    Eligible = m => m.State == ReadState.Pending,
+    OrderBy = rows => rows.OrderBy(m => m.UploadedAt),
+    OnClaim = s => s.SetProperty(m => m.Attempts, m => m.Attempts + 1),
+    Exhausted = m => m.Attempts > MaxAttempts,
+    GiveUp = s => s.SetProperty(m => m.State, ReadState.Done).SetProperty(m => m.Error, "attemptsExhausted"),
+    OnGivenUp = (m, _) => { logger.LogWarning("Metadata of {Id} given up.", m.Id); return ValueTask.CompletedTask; },
+}, m => new { m.Id, m.Attempts, m.Attachment.BlobId }, ct);
+
+var finished = 0;
+try {
+    foreach (var row in claimed) {
+        var read = await ReadAsync(row.BlobId, ct);
+        // Only while still pending: a newer upload meanwhile wrote its own values and marked the row done.
+        await db.ImageMetadata.FinalizeClaimAsync(row.Id, lockId, new LeasedWorkFinalize<ImageMetadata> {
+            Update = s => s.SetProperty(m => m.Width, read.Width).SetProperty(m => m.State, ReadState.Done),
+            StillEligible = m => m.State == ReadState.Pending,
+        }, ct);
+        finished++;
+    }
+}
+catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+    // The pass's token is cancelled: give the rest back on a fresh one, attempt uncounted.
+    await db.ImageMetadata.ReleaseClaimsAsync(claimed.Skip(finished).Select(r => r.Id), lockId,
+        s => s.SetProperty(m => m.Attempts, m => m.Attempts - 1), CancellationToken.None);
+    throw;
+}
+```
+
+### Testing a worker
+
+The claim and every finalize are `ExecuteUpdate` statements, which EF InMemory cannot run — and InMemory would hide
+the concurrency the primitive exists for anyway. Test a worker against PostgreSQL with a Testcontainers fixture, the
+way Elarion tests the primitive itself: create the schema once per fixture, give every test its own rows (a per-test
+marker column in `Eligible`, like a source or tenant id, keeps tests in one table apart), and pass `NowUtc`
+explicitly so lease expiry and backoff are exact without waiting. Two workers racing for one batch are two contexts
+on the same fixture.
+
 The invariants and the extraction history are recorded in
 [ADR-0073](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0073-leased-work-rows.md).
 
