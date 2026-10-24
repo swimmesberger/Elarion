@@ -85,4 +85,25 @@ public sealed class ResourceFilterAttribute<TEntity> : Attribute
     /// <see cref="System.Guid"/>, <see cref="string"/>, <see cref="int"/>, or <see cref="long"/>.
     /// </summary>
     public string IdProperty { get; init; } = "Id";
+
+    /// <summary>
+    /// A permission whose holders see every row <b>of their scope</b> — the "holds <c>contacts.manage</c>, sees all"
+    /// rule: for such a caller the grant rules (<see cref="OwnerProperty"/>, <see cref="Shared"/>) are lifted, while the
+    /// <see cref="TenantProperty"/> scope still applies (and still fails closed without a tenant claim). Only a filter
+    /// without a tenant rule becomes unrestricted (<see langword="null"/>). Matched against the caller's
+    /// <see cref="PermissionClaimType"/> claims (a permission is <c>"{resource}.{verb}"</c>, as
+    /// <c>[RequirePermission]</c> spells it). <see langword="null"/> grants no bypass.
+    /// </summary>
+    /// <remarks>
+    /// The bypass shapes this filter only. The default <c>[RequireResource]</c> point check reads the grants table and
+    /// knows neither the owner column nor this permission; see the resource-authorization docs for keeping the two
+    /// in step.
+    /// </remarks>
+    public string? BypassPermission { get; init; }
+
+    /// <summary>
+    /// The claim type <see cref="BypassPermission"/> is read from. Defaults to <c>"permission"</c>, the default of
+    /// <see cref="AuthorizationOptions.PermissionClaimType"/>; set the same value when the host changes it.
+    /// </summary>
+    public string PermissionClaimType { get; init; } = "permission";
 }

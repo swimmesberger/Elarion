@@ -93,7 +93,7 @@ public sealed class StreamHandlerRegistrationGenerator : IIncrementalGenerator {
                         classDeclaration, type, request,
                         EnumerateRequireResources(type), diagnostics)
                     .Select(static binding => new ResourceBinding(binding.ResourceTypeFqn, binding.Operation,
-                        binding.IdPath, binding.ResourceTypeName))
+                        binding.IdPath, binding.ResourceTypeName, binding.DenyAsNotFound))
                     .ToImmutableArray().ToEquatableArray();
             result.Add(new StreamInfo(
                 type.ToDisplayString(format), type.Name, type.ContainingNamespace.ToDisplayString(),
@@ -465,7 +465,7 @@ public sealed class StreamHandlerRegistrationGenerator : IIncrementalGenerator {
                 $"        handler = new global::Elarion.Pipeline.StreamAuthorizationDecorator<{handler.RequestFqn}, {handler.ItemFqn}>(handler, __metadata, sp.GetRequiredService<global::Elarion.Abstractions.Authorization.IAuthorizer>(), {handler.RequireAuthenticatedByDefault.ToString().ToLowerInvariant()}, new global::Elarion.Abstractions.Authorization.ResourceRequirementBinding<{handler.RequestFqn}>[] {{");
             foreach (var resource in handler.Resources)
                 sb.AppendLine(
-                    $"            new(typeof({resource.ResourceTypeFqn}), new global::Elarion.Abstractions.Authorization.ResourceOperation({HandlerRegistrationGenerator.FormatStringLiteral(resource.Operation)}), static request => request.{resource.IdPath}, {(resource.ResourceTypeName is null ? "null" : HandlerRegistrationGenerator.FormatStringLiteral(resource.ResourceTypeName))}),");
+                    $"            new(typeof({resource.ResourceTypeFqn}), new global::Elarion.Abstractions.Authorization.ResourceOperation({HandlerRegistrationGenerator.FormatStringLiteral(resource.Operation)}), static request => request.{resource.IdPath}, {(resource.ResourceTypeName is null ? "null" : HandlerRegistrationGenerator.FormatStringLiteral(resource.ResourceTypeName))}{(resource.DenyAsNotFound ? $", {HandlerRegistrationGenerator.ResourceDenialNotFoundFqn}" : string.Empty)}),");
             sb.AppendLine("        });");
             sb.AppendLine(
                 "        steps?.Add(new(typeof(global::Elarion.Pipeline.StreamAuthorizationDecorator<,>), false));");
@@ -554,5 +554,7 @@ public sealed class StreamHandlerRegistrationGenerator : IIncrementalGenerator {
         string ResourceTypeFqn,
         string Operation,
         string IdPath,
-        string? ResourceTypeName);
+        string? ResourceTypeName,
+        bool DenyAsNotFound = false
+    );
 }

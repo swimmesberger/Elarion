@@ -141,6 +141,42 @@ public sealed class ResourceGrantSharingIntegrationTests(ResourceGrantSharingFix
         outsiderAllowed.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task NotesOfSharedContacts_AreFilteredInSqlThroughTheirOwnersVisibility() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+
+        var services = new ServiceCollection();
+        services.AddDbContext<ContactsDbContext>(options => options.UseNpgsql(fixture.ConnectionString));
+        services.AddElarionResourceAuthorization<ContactsDbContext>();
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ContactsDbContext>();
+        var grantStore = scope.ServiceProvider.GetRequiredService<IResourceGrantStore>();
+        var access = new ContactAccess(scope.ServiceProvider.GetRequiredService<IResourceGrantSource>());
+
+        var shared = await SeedContactAsync(db, OwnerB, "Shared via role", ct);
+        var hidden = await SeedContactAsync(db, OwnerB, "Not shared", ct);
+        await grantStore.GrantAsync(
+            new ResourceGrant("Contact", shared.ToString(), ResourcePrincipal.Role("Verwaltung"),
+                ResourceOperation.Read), ct);
+        var visibleNote = new ContactNote { Id = Guid.NewGuid(), ContactId = shared, Text = "visible" };
+        db.ContactNotes.AddRange(visibleNote,
+            new ContactNote { Id = Guid.NewGuid(), ContactId = hidden, Text = "hidden" });
+        await db.SaveChangesAsync(ct);
+        var caller = new FakeCurrentUser {
+            IsAuthenticated = true, UserId = Guid.NewGuid().ToString(), Roles = ["Verwaltung"]
+        };
+
+        var query = db.ContactNotes
+            .Where(note => note.ContactId == shared || note.ContactId == hidden)
+            .WhereAuthorizedVia(note => note.ContactId, db.Contacts, contact => contact.Id, access, caller);
+
+        // The owner's filter (with its grants EXISTS) runs as a subquery of the one statement.
+        query.ToQueryString().Should().Contain("EXISTS").And.Contain(" IN (");
+        (await query.Select(note => note.Id).ToListAsync(ct)).Should().Equal(visibleNote.Id);
+    }
+
     private static async Task<Guid> SeedContactAsync(ContactsDbContext db, Guid ownerId, string name,
         CancellationToken ct) {
         var contact = new Contact { Id = Guid.NewGuid(), OwnerId = ownerId, Name = name };
@@ -159,14 +195,29 @@ public sealed class Contact {
     public string Name { get; set; } = "";
 }
 
+/// <summary>A note pointing at its contact by id (a soft reference), visible exactly when the contact is.</summary>
+public sealed class ContactNote {
+    public Guid Id { get; set; }
+
+    public Guid ContactId { get; set; }
+
+    public string Text { get; set; } = "";
+}
+
 /// <summary>Integration context mapping <see cref="Contact"/> and the Elarion resource-grants table.</summary>
 public sealed class ContactsDbContext(DbContextOptions<ContactsDbContext> options) : DbContext(options) {
     public DbSet<Contact> Contacts => Set<Contact>();
+
+    public DbSet<ContactNote> ContactNotes => Set<ContactNote>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder) {
         modelBuilder.Entity<Contact>(builder => {
             builder.ToTable("contacts");
             builder.HasKey(contact => contact.Id);
+        });
+        modelBuilder.Entity<ContactNote>(builder => {
+            builder.ToTable("contact_notes");
+            builder.HasKey(note => note.Id);
         });
         modelBuilder.ApplyElarionResourceGrants();
     }

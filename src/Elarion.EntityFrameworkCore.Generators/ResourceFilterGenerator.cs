@@ -113,6 +113,8 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
         var shared = false;
         string? resourceTypeName = null;
         var idProperty = "Id";
+        string? bypassPermission = null;
+        var permissionClaimType = "permission";
         foreach (var argument in ctx.Attributes[0].NamedArguments)
             switch (argument.Key) {
                 case "OwnerProperty":
@@ -133,6 +135,15 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
                     break;
                 case "IdProperty":
                     if (argument.Value.Value is string id && id.Length > 0) idProperty = id;
+
+                    break;
+                case "BypassPermission":
+                    if (argument.Value.Value is string bypass && bypass.Length > 0) bypassPermission = bypass;
+
+                    break;
+                case "PermissionClaimType":
+                    if (argument.Value.Value is string permissionClaim && permissionClaim.Length > 0)
+                        permissionClaimType = permissionClaim;
 
                     break;
             }
@@ -180,7 +191,9 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
             resourceTypeName ?? string.Empty,
             idProperty,
             idParseKind ?? string.Empty,
-            diagnostics.ToImmutable());
+            diagnostics.ToImmutable(),
+            bypassPermission,
+            permissionClaimType);
     }
 
     private static void AddPropertyRule(
@@ -305,19 +318,18 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
         sb.AppendLine("        }");
         sb.AppendLine();
 
-        var scopeTerms = new List<string>();
+        var scopeTerms = EmitScopeRules(sb, target);
+        EmitBypass(sb, target, scopeTerms);
+
         var grantTerms = new List<string>();
         for (var i = 0; i < target.Rules.Length; i++) {
             var rule = target.Rules[i];
+            if (rule.Kind == RuleKindScope) continue;
+
             var keyVar = $"__key{i}";
             EmitKeyResolution(sb, rule, keyVar);
             sb.AppendLine();
-
-            var term = $"__e.{rule.PropertyName} == {keyVar}";
-            if (rule.Kind == RuleKindScope)
-                scopeTerms.Add(term);
-            else
-                grantTerms.Add(term);
+            grantTerms.Add($"__e.{rule.PropertyName} == {keyVar}");
         }
 
         sb.AppendLine($"        return __e => {ComposeBody(scopeTerms, grantTerms)};");
@@ -336,18 +348,16 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
         sb.AppendLine("        }");
         sb.AppendLine();
 
-        var scopeTerms = new List<string>();
+        var scopeTerms = EmitScopeRules(sb, target);
+        EmitBypass(sb, target, scopeTerms);
+
         var grantTerms = new List<string>();
         for (var i = 0; i < target.Rules.Length; i++) {
             var rule = target.Rules[i];
             var keyVar = $"__key{i}";
-            if (rule.Kind == RuleKindScope) {
-                // A scope that cannot be resolved means no access at all (AND), so fail closed.
-                EmitKeyResolution(sb, rule, keyVar);
-                sb.AppendLine();
-                scopeTerms.Add($"__e.{rule.PropertyName} == {keyVar}");
-            }
-            else if (rule.ParseKind == "string") {
+            if (rule.Kind == RuleKindScope) continue;
+
+            if (rule.ParseKind == "string") {
                 sb.AppendLine($"        var {keyVar} = user.UserId;");
                 sb.AppendLine();
                 grantTerms.Add($"__e.{rule.PropertyName} == {keyVar}");
@@ -372,7 +382,7 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
             ? $"__e.{target.IdProperty}"
             : $"__e.{target.IdProperty}.ToString()";
         grantTerms.Add(
-            $"global::System.Linq.Queryable.Any(__grantsQuery, __g => __g.ResourceType == \"{Escape(target.ResourceTypeName)}\""
+            $"global::System.Linq.Queryable.Any(__grantsQuery, __g => __g.ResourceType == {Literal(target.ResourceTypeName)}"
             + $" && __g.ResourceId == {idExpression}"
             + " && __g.Operation == __op"
             + " && ((__g.PrincipalKind == \"user\" && __g.PrincipalId == __uid)"
@@ -380,6 +390,38 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
 
         sb.AppendLine($"        return __e => {ComposeBody(scopeTerms, grantTerms)};");
         sb.AppendLine("    }");
+    }
+
+    // Resolves every scope (tenant) rule first: a scope that cannot be resolved means no access at all (AND), so it
+    // fails closed — for a bypass holder too.
+    private static List<string> EmitScopeRules(StringBuilder sb, ResourceFilterTarget target) {
+        var scopeTerms = new List<string>();
+        for (var i = 0; i < target.Rules.Length; i++) {
+            var rule = target.Rules[i];
+            if (rule.Kind != RuleKindScope) continue;
+
+            var keyVar = $"__key{i}";
+            EmitKeyResolution(sb, rule, keyVar);
+            sb.AppendLine();
+            scopeTerms.Add($"__e.{rule.PropertyName} == {keyVar}");
+        }
+
+        return scopeTerms;
+    }
+
+    // A caller holding the bypass permission skips the grant rules, never the scope: they see every row of their own
+    // tenant (no restriction at all — null — only when the filter has no scope rule).
+    private static void EmitBypass(StringBuilder sb, ResourceFilterTarget target, List<string> scopeTerms) {
+        if (target.BypassPermission is null) return;
+
+        sb.AppendLine(
+            $"        if (user.HasClaim({Literal(target.PermissionClaimType)}, {Literal(target.BypassPermission)}))");
+        sb.AppendLine("        {");
+        sb.AppendLine(scopeTerms.Count == 0
+            ? "            return null;"
+            : $"            return __e => {string.Join(" && ", scopeTerms)};");
+        sb.AppendLine("        }");
+        sb.AppendLine();
     }
 
     private static string ComposeBody(List<string> scopeTerms, List<string> grantTerms) {
@@ -394,7 +436,7 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
     private static void EmitKeyResolution(StringBuilder sb, RuleModel rule, string keyVar) {
         var source = rule.ClaimType is null
             ? "user.UserId"
-            : $"global::System.Linq.Enumerable.FirstOrDefault(user.GetClaimValues(\"{Escape(rule.ClaimType)}\"))";
+            : $"global::System.Linq.Enumerable.FirstOrDefault(user.GetClaimValues({Literal(rule.ClaimType)}))";
 
         if (rule.ParseKind == "string") {
             sb.AppendLine($"        var {keyVar} = {source};");
@@ -423,8 +465,9 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
         };
     }
 
-    private static string Escape(string value) {
-        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    // A C# string literal, quotes included, with every character that needs it escaped.
+    private static string Literal(string value) {
+        return SymbolDisplay.FormatLiteral(value, quote: true);
     }
 
     private const string RuleKindScope = "scope";
@@ -444,7 +487,9 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
         string ResourceTypeName,
         string IdProperty,
         string IdParseKind,
-        EquatableArray<DiagnosticModel> Diagnostics);
+        EquatableArray<DiagnosticModel> Diagnostics,
+        string? BypassPermission,
+        string PermissionClaimType);
 
     private sealed record DiagnosticModel(
         DiagnosticDescriptor Descriptor,

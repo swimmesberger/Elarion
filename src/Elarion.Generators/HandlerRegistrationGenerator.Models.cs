@@ -134,7 +134,9 @@ public sealed partial class HandlerRegistrationGenerator {
         string ResourceTypeFqn,
         string Operation,
         string IdPath,
-        string? ResourceTypeName
+        string? ResourceTypeName,
+        // [RequireResource(DenyAs = ResourceDenial.NotFound)]: a denial answers like a missing resource.
+        bool DenyAsNotFound = false
     );
 
     internal sealed record DecoratorInfo(

@@ -88,8 +88,16 @@ public sealed class ClaimsAuthorizer(
                 resourceRequirement.ResourceTypeName,
                 resourceRequirement.Operation,
                 resourceRequirement.ResourceId);
-            if (!await resourceAuthorizer.AuthorizeResourceAsync(context, ct).ConfigureAwait(false))
+            if (await resourceAuthorizer.AuthorizeResourceAsync(context, ct).ConfigureAwait(false)) continue;
+
+            if (resourceRequirement.DenyAs != ResourceDenial.NotFound)
                 return Forbidden("resource", resourceRequirement.ResourceTypeName);
+
+            // A hidden record answers like a missing one, so the caller cannot probe which ids exist.
+            logger.LogDebug(
+                "Authorization denied: unmet resource requirement '{Requirement}', answered as not found.",
+                resourceRequirement.ResourceTypeName);
+            return AppError.NotFound(options.ResourceNotFoundMessage);
         }
 
         return null;

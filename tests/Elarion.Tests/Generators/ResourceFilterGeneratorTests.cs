@@ -320,6 +320,115 @@ public sealed class ResourceFilterGeneratorTests {
     }
 
     [Fact]
+    public void ResourceFilter_BypassPermission_LiftsTheFilterForItsHolders() {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class Contact {
+                    public System.Guid Id { get; set; }
+                    public System.Guid OwnerId { get; set; }
+                }
+
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(
+                    OwnerProperty = "OwnerId", BypassPermission = "contacts.manage", PermissionClaimType = "perm")]
+                public sealed partial class ContactAccess { }
+            }
+            """);
+
+        NoErrors(result);
+        var source = GetGeneratedSource(result, "Sample_Domain_ContactAccess.ResourceFilter.g.cs");
+
+        // After the authentication check, before any rule: a holder gets no restriction at all.
+        source.Should().Contain("if (user.HasClaim(\"perm\", \"contacts.manage\"))");
+        source.IndexOf("HasClaim", StringComparison.Ordinal)
+            .Should().BeGreaterThan(source.IndexOf("IsAuthenticated", StringComparison.Ordinal))
+            .And.BeLessThan(source.IndexOf("TryParse", StringComparison.Ordinal));
+        source.Should().Contain("            return null;");
+    }
+
+    [Fact]
+    public void ResourceFilter_BypassPermission_KeepsTheTenantScope() {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class Contact {
+                    public System.Guid Id { get; set; }
+                    public System.Guid OwnerId { get; set; }
+                    public System.Guid TenantId { get; set; }
+                }
+
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(
+                    OwnerProperty = "OwnerId", TenantProperty = "TenantId", BypassPermission = "contacts.manage")]
+                public sealed partial class ContactAccess { }
+            }
+            """);
+
+        NoErrors(result);
+        var source = GetGeneratedSource(result, "Sample_Domain_ContactAccess.ResourceFilter.g.cs");
+
+        // The tenant resolves first and fails closed; the bypass then lifts only the owner grant.
+        source.IndexOf("GetClaimValues(\"tenant\")", StringComparison.Ordinal)
+            .Should().BeLessThan(source.IndexOf("HasClaim", StringComparison.Ordinal));
+        source.Should().Contain(
+            """
+                    if (user.HasClaim("permission", "contacts.manage"))
+                    {
+                        return __e => __e.TenantId == __key1;
+                    }
+            """);
+        source.Should().NotContain("return null;");
+    }
+
+    [Fact]
+    public void ResourceFilter_BypassPermission_AtRuntime_SeesEveryRowOfItsTenantOnly() {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class Contact {
+                    public System.Guid Id { get; set; }
+                    public System.Guid OwnerId { get; set; }
+                    public System.Guid TenantId { get; set; }
+                }
+
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(
+                    OwnerProperty = "OwnerId", TenantProperty = "TenantId", BypassPermission = "contacts.manage")]
+                public sealed partial class ContactAccess { }
+            }
+            """);
+        NoErrors(result);
+        var entity =
+            """
+            namespace Sample.Domain {
+                public sealed class Contact {
+                    public System.Guid Id { get; set; }
+                    public System.Guid OwnerId { get; set; }
+                    public System.Guid TenantId { get; set; }
+                }
+            }
+            """;
+        var assembly = LoadCompiled(entity, GetGeneratedSource(result, "Sample_Domain_ContactAccess.ResourceFilter.g.cs"));
+        var contactType = assembly.GetType("Sample.Domain.Contact")!;
+        var authorizer = assembly.GetType("Sample.Domain.ContactAccess")!.GetProperty("Specification")!.GetValue(null)!;
+        var tenant = Guid.CreateVersion7();
+        var otherTenant = Guid.CreateVersion7();
+        var admin = new ClaimsUser(Guid.CreateVersion7().ToString(), ("tenant", tenant.ToString()), ("permission", "contacts.manage"));
+
+        object Contact(Guid tenantId) {
+            var contact = Activator.CreateInstance(contactType)!;
+            contactType.GetProperty("OwnerId")!.SetValue(contact, Guid.CreateVersion7());
+            contactType.GetProperty("TenantId")!.SetValue(contact, tenantId);
+            return contact;
+        }
+
+        var filter = (System.Linq.Expressions.LambdaExpression)authorizer.GetType().GetMethod("GetFilter")!
+            .Invoke(authorizer, [admin, Elarion.Abstractions.Authorization.ResourceOperation.Read])!;
+        var visible = filter.Compile();
+
+        ((bool)visible.DynamicInvoke(Contact(tenant))!).Should().BeTrue("the bypass lifts the owner grant");
+        ((bool)visible.DynamicInvoke(Contact(otherTenant))!).Should().BeFalse("the bypass never crosses the tenant");
+    }
+
+    [Fact]
     public void ResourceFilter_GeneratedSource_CompilesAgainstRuntime() {
         var result = Generate(
             """
@@ -362,7 +471,8 @@ public sealed class ResourceFilterGeneratorTests {
                     public System.Guid OwnerId { get; set; }
                 }
 
-                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(
+                    OwnerProperty = "OwnerId", BypassPermission = "contacts.manage")]
                 public sealed partial class ContactAccess { }
             }
             """;
@@ -407,6 +517,36 @@ public sealed class ResourceFilterGeneratorTests {
         return compilation.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
+    }
+
+    private static System.Reflection.Assembly LoadCompiled(params string[] sources) {
+        var compilation = CSharpCompilation.Create(
+            $"ResourceFilterRuntime{Guid.CreateVersion7():N}",
+            sources.Select(s => CSharpSyntaxTree.ParseText(s, new CSharpParseOptions(LanguageVersion.Preview))),
+            RuntimeReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        using var stream = new MemoryStream();
+        compilation.Emit(stream, cancellationToken: TestContext.Current.CancellationToken).Success.Should().BeTrue();
+        return System.Reflection.Assembly.Load(stream.ToArray());
+    }
+
+    private sealed class ClaimsUser(string userId, params (string Type, string Value)[] claims)
+        : Elarion.Abstractions.Identity.ICurrentUser {
+        public string UserId => userId;
+
+        public string? Email => null;
+
+        public IReadOnlyList<string> Roles => [];
+
+        public bool IsAuthenticated => true;
+
+        public bool IsInRole(string role) => false;
+
+        public bool HasClaim(string type, string value) => claims.Contains((type, value));
+
+        public IEnumerable<string> GetClaimValues(string type) =>
+            claims.Where(claim => claim.Type == type).Select(claim => claim.Value);
     }
 
     private static void NoErrors(GeneratorDriverRunResult result) {

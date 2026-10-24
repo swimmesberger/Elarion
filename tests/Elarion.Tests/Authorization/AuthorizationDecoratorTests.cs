@@ -81,6 +81,31 @@ public sealed class AuthorizationDecoratorTests {
     }
 
     [Fact]
+    public async Task RequireResource_DenyAsNotFound_AnswersLikeAMissingResource() {
+        var inner = new StubInnerHandler<GuardedCommand, Result<string>>(Result<string>.Success("ok"));
+        var authorizer = new ClaimsAuthorizer(
+            new FakeCurrentUser { IsAuthenticated = true }, [], new StubResourceAuthorizer(false),
+            new AuthorizationOptions(), NullLogger<ClaimsAuthorizer>.Instance);
+        var decorator = new AuthorizationDecorator<GuardedCommand, Result<string>>(
+            inner,
+            new HandlerMetadata(typeof(NoAttributesHandler), typeof(GuardedCommand), typeof(Result<string>)),
+            authorizer,
+            false,
+            [
+                new ResourceRequirementBinding<GuardedCommand>(
+                    typeof(Contact), ResourceOperation.Read, static command => command.Id,
+                    denyAs: ResourceDenial.NotFound)
+            ]);
+
+        var result = await decorator.HandleAsync(new GuardedCommand(3), TestContext.Current.CancellationToken);
+
+        result.Error.Kind.Should().Be(ErrorKind.NotFound);
+        result.Error.Code.Should().Be(ErrorCodes.NotFound);
+        result.Error.Message.Should().Be(new AuthorizationOptions().ResourceNotFoundMessage);
+        inner.WasInvoked.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task RequireResource_AllowsWhenAuthorizerAllows() {
         var decorator = DecorateWithResource(
             new FakeCurrentUser { IsAuthenticated = true }, new StubResourceAuthorizer(true));
