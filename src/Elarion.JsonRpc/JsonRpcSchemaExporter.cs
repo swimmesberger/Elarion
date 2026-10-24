@@ -437,6 +437,15 @@ public static class JsonRpcSchemaExporter {
     /// schemas, and the OpenAPI document agree on the same declared constraints (ADR-0027). Attributes apply in
     /// declaration order with last-wins on duplicate keywords, matching Microsoft. Reads the attributes
     /// reflectively — appropriate for this build-time exporter.
+    /// <para>
+    /// <c>pattern</c> is exported anchored (<c>^(?:…)$</c>): the server's <see cref="RegularExpressionAttribute"/>
+    /// requires the whole value to match, while JSON Schema (and every client validator built on it) searches, so
+    /// an unanchored export would admit values the server rejects. A <see cref="RequiredAttribute"/> on a string
+    /// (with <see cref="RequiredAttribute.AllowEmptyStrings"/> off) rejects empty and whitespace-only values on the
+    /// server; it is exported as a not-blank lookahead on the same anchored pattern, combined with a regular
+    /// expression when the member has both (the regular expression's explicit message wins the shared keyword).
+    /// Requiredness itself still comes from nullability (ADR-0082).
+    /// </para>
     /// </summary>
     /// <remarks>
     /// An attribute with an explicit message (<see cref="ValidationAttribute.ErrorMessage"/> or
@@ -451,9 +460,26 @@ public static class JsonRpcSchemaExporter {
         if (ctx.PropertyInfo?.AttributeProvider is not { } provider || schema is not JsonObject obj) return schema;
 
         JsonObject? messages = null;
+        // The pattern keyword is assembled after the loop: a regular expression and a not-blank [Required] share it,
+        // whichever order they are declared in.
+        string? regularExpression = null;
+        string? regularExpressionMessage = null;
+        var notBlank = false;
+        string? notBlankMessage = null;
         // Type patterns intentionally match subclasses: a reusable custom constraint deriving a mapped
         // attribute (e.g. a [Slug] : RegularExpressionAttribute) reaches every schema surface for free.
         foreach (var attribute in provider.GetCustomAttributes(false)) {
+            switch (attribute) {
+                case RegularExpressionAttribute pattern:
+                    regularExpression = pattern.Pattern;
+                    regularExpressionMessage = ExplicitErrorMessage(pattern, provider);
+                    continue;
+                case RequiredAttribute { AllowEmptyStrings: false } required when IsStringSchema(obj):
+                    notBlank = true;
+                    notBlankMessage = ExplicitErrorMessage(required, provider);
+                    continue;
+            }
+
             var keywords = ApplyConstraint(obj, attribute);
             if (keywords.Length == 0) continue;
 
@@ -465,9 +491,70 @@ public static class JsonRpcSchemaExporter {
                 else (messages ??= new JsonObject())[keyword] = message;
         }
 
+        if (regularExpression is not null || notBlank) {
+            obj["pattern"] = AnchoredPattern(regularExpression, notBlank);
+            if ((regularExpressionMessage ?? notBlankMessage) is { } patternMessage)
+                (messages ??= new JsonObject())["pattern"] = patternMessage;
+        }
+
         if (messages is { Count: > 0 }) obj[ErrorMessagesKeyword] = messages;
 
         return schema;
+    }
+
+    /// <summary>
+    /// The exported <c>pattern</c>: <paramref name="regularExpression"/> (or any text) anchored to the whole value,
+    /// preceded by a not-blank lookahead when <paramref name="notBlank"/>. Both lookahead and non-capturing groups
+    /// mean the same in .NET and ECMAScript regular expressions. A pattern that already anchors both ends (and has
+    /// no top-level alternation the anchors would not cover) is exported unchanged.
+    /// </summary>
+    internal static string AnchoredPattern(string? regularExpression, bool notBlank) {
+        if (notBlank) return $@"^(?=[\s\S]*\S)(?:{regularExpression ?? @"[\s\S]*"})$";
+
+        return IsWhollyAnchored(regularExpression!) ? regularExpression! : $"^(?:{regularExpression})$";
+    }
+
+    // "^…$" with no '|' outside a group or character class: the anchors then bind every alternative, so the pattern
+    // already means a full match. Escapes are skipped so "\$" or "\|" do not count; anything unusual wraps.
+    private static bool IsWhollyAnchored(string pattern) {
+        if (pattern.Length < 2 || pattern[0] != '^' || pattern[^1] != '$') return false;
+
+        var depth = 0;
+        var inClass = false;
+        for (var i = 1; i < pattern.Length - 1; i++)
+            switch (pattern[i]) {
+                case '\\':
+                    // The closing '$' must not be the escaped character.
+                    if (i + 1 == pattern.Length - 1) return false;
+
+                    i++;
+                    break;
+                case '[' when !inClass:
+                    inClass = true;
+                    break;
+                case ']' when inClass:
+                    inClass = false;
+                    break;
+                case '(' when !inClass:
+                    depth++;
+                    break;
+                case ')' when !inClass:
+                    depth--;
+                    break;
+                case '|' when !inClass && depth == 0:
+                    return false;
+            }
+
+        return depth == 0 && !inClass;
+    }
+
+    private static bool IsStringSchema(JsonObject schema) {
+        return schema["type"] switch {
+            JsonValue single => single.TryGetValue<string>(out var type) && type == "string",
+            JsonArray union => union.Any(static node =>
+                node is JsonValue value && value.TryGetValue<string>(out var type) && type == "string"),
+            _ => false
+        };
     }
 
     /// <summary>
@@ -499,9 +586,6 @@ public static class JsonRpcSchemaExporter {
 
                 obj["maxLength"] = stringLength.MaximumLength;
                 return stringLength.MinimumLength > 0 ? ["minLength", "maxLength"] : ["maxLength"];
-            case RegularExpressionAttribute regularExpression:
-                obj["pattern"] = regularExpression.Pattern;
-                return ["pattern"];
             case UrlAttribute:
                 obj["format"] = "uri";
                 return ["format"];

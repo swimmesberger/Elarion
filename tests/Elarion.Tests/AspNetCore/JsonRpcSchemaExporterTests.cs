@@ -237,6 +237,49 @@ public sealed class JsonRpcSchemaExporterTests {
     }
 
     [Fact]
+    public void Generate_AnchorsPatternsAndExportsRequiredStringsAsNotBlank() {
+        var fields = ExportParamsFields<PatternRequest>("sample.patterns");
+        string Pattern(string field) => fields.GetProperty(field).GetProperty("pattern").GetString()!;
+
+        // The server matches the whole value; JSON Schema searches, so an unanchored pattern is anchored on export.
+        Pattern("letters").Should().Be("^(?:[a-z]+)$");
+        // An already-anchored pattern stays byte-identical; a top-level alternation is not anchored by its ^/$.
+        Pattern("anchored").Should().Be("^[a-z]+$");
+        Pattern("alternation").Should().Be("^(?:^a|b$)$");
+        // [Required] on a string is the BCL's not-blank constraint; with a pattern, both apply to one keyword.
+        Pattern("title").Should().Be(@"^(?=[\s\S]*\S)(?:[\s\S]*)$");
+        Pattern("code").Should().Be(@"^(?=[\s\S]*\S)(?:^[A-Z]+$)$");
+        fields.GetProperty("code").GetProperty("x-elarion-error-messages").GetProperty("pattern").GetString()
+            .Should().Be("Enter a code.");
+        // Empty strings allowed, or a non-string member: [Required] adds nothing (requiredness is nullability).
+        fields.GetProperty("free").TryGetProperty("pattern", out _).Should().BeFalse();
+        fields.GetProperty("count").TryGetProperty("pattern", out _).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("letters", "abc")]
+    [InlineData("letters", "abc1")]
+    [InlineData("letters", "1abc")]
+    [InlineData("alternation", "a")]
+    [InlineData("alternation", "ab")]
+    [InlineData("alternation", "b")]
+    [InlineData("title", "")]
+    [InlineData("title", " \t ")]
+    [InlineData("title", " x ")]
+    [InlineData("code", "   ")]
+    [InlineData("code", "ABC")]
+    [InlineData("code", "AB C")]
+    public void Generate_ExportedPatterns_AcceptExactlyWhatTheServerAccepts(string field, string value) {
+        var fields = ExportParamsFields<PatternRequest>("sample.patterns");
+        var pattern = fields.GetProperty(field).GetProperty("pattern").GetString()!;
+        var member = typeof(PatternRequest).GetProperty(char.ToUpperInvariant(field[0]) + field[1..])!;
+        var server = member.GetCustomAttributes(true).OfType<ValidationAttribute>().All(a => a.IsValid(value));
+
+        // Search semantics, as a JSON Schema validator (and the generated Zod regex) applies the pattern.
+        System.Text.RegularExpressions.Regex.IsMatch(value, pattern).Should().Be(server);
+    }
+
+    [Fact]
     public void Generate_OmitsDefaultErrorMessages() {
         var fields = ExportParamsFields<MessagedRequest>("sample.messaged");
 
@@ -462,6 +505,24 @@ public sealed class JsonRpcSchemaExporterTests {
         [MaxLength(5, ErrorMessage = "Too long.")]
         [StringLength(10)]
         public required string Overridden { get; init; }
+    }
+
+    private sealed record PatternRequest {
+        [RegularExpression("[a-z]+")] public required string Letters { get; init; }
+
+        [RegularExpression("^[a-z]+$")] public required string Anchored { get; init; }
+
+        [RegularExpression("^a|b$")] public required string Alternation { get; init; }
+
+        [Required] public required string Title { get; init; }
+
+        [RegularExpression("^[A-Z]+$")]
+        [Required(ErrorMessage = "Enter a code.")]
+        public required string Code { get; init; }
+
+        [Required(AllowEmptyStrings = true)] public required string Free { get; init; }
+
+        [Required] public required int Count { get; init; }
     }
 
     // Stands in for a generated .resx designer class: a public static string getter per message.
