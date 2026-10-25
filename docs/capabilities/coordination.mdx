@@ -418,6 +418,16 @@ delete) and a hierarchy's discriminator apply: a row the context cannot see answ
 id from a request cannot probe or stall another tenant's row. A strongly typed key with a value converter is converted
 the way EF converts it; an id of another type throws `ArgumentException`.
 
+A writer that deliberately changes rows its filters hide, such as an archived tenant, locks past them with the options
+overload. Every filter is skipped, tenant scoping included, so use it only for an id the handler has already
+authorized:
+
+```csharp
+if (!await db.LockRowAsync<Tenant>(command.TenantId,
+        new RowLockOptions { Mode = RowLockMode.NoKeyUpdate, IgnoreQueryFilters = true }, ct))
+    return AppError.NotFound("No such tenant.");
+```
+
 | `RowLockMode` | SQL | Choose it when |
 | --- | --- | --- |
 | `Update` (default) | `FOR UPDATE` | a concurrent insert of a row *referencing* this one (a foreign key) must wait too — deleting a role against a concurrent assignment of it |
@@ -428,8 +438,23 @@ the way EF converts it; an id of another type throws `ArgumentException`.
 Both refuse to run **outside a transaction** (PostgreSQL would release the lock at the end of its own statement) and
 on any provider other than PostgreSQL, so a lock never silently protects nothing. An ambient `TransactionScope` counts
 as a transaction because the connection enlists in it; a connection string with `Enlist=false` opts out of that, so
-lock inside an EF or pipeline transaction on such a connection. Tests that take a lock run against
-PostgreSQL ([Testcontainers](/docs/concepts/persistence-and-transactions#testing-persistence)), never EF InMemory.
+lock inside an EF or pipeline transaction on such a connection. Tests of locking run against
+PostgreSQL ([Testcontainers](/docs/concepts/persistence-and-transactions#testing-persistence)).
+
+A unit test on another provider that only passes through a lock, such as a handler test on EF InMemory or SQLite,
+opts its own context out explicitly:
+
+```csharp
+var options = new DbContextOptionsBuilder<AppDbContext>()
+    .UseInMemoryDatabase(Guid.CreateVersion7().ToString())
+    .UseUnenforcedElarionLocks()   // locks lock nothing; the provider and transaction checks are skipped
+    .Options;
+```
+
+On that context the helpers still validate keys and scopes, and `LockRowAsync` still answers whether a visible row has
+the key, so the handler's not-found path runs as in production. A context without the opt-in still fails closed. A
+PostgreSQL context that carries it throws at its first lock, so a shared test options helper can't leave a real
+database unlocked.
 
 ### One advisory key scheme
 
