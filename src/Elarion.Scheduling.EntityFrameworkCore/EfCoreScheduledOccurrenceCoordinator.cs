@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Elarion.Abstractions.Coordination;
 using Elarion.Abstractions.Scheduling;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -58,6 +59,15 @@ public sealed class EfCoreScheduledOccurrenceCoordinator<TDbContext>(
             .BeginTransactionAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        await dbContext.Database
+            .ExecuteSqlRawAsync(
+                sql.AdvisoryLock,
+                [AdvisoryLockKey.FrameworkText(AdvisoryLockKey.Scopes.SchedulerJob, occurrence.JobName)],
+                cancellationToken)
+            .ConfigureAwait(false);
+        // Rolling-upgrade bridge (ADR-0087): nodes of 0.2.21 and earlier lock the bare job name. Taking that key too,
+        // always after the scoped one, keeps old and new nodes serialized while both run; no old node waits on the
+        // scoped key, so the fixed order cannot deadlock. Remove once 0.2.21 is no longer a supported upgrade source.
         await dbContext.Database
             .ExecuteSqlRawAsync(sql.AdvisoryLock, [occurrence.JobName], cancellationToken)
             .ConfigureAwait(false);

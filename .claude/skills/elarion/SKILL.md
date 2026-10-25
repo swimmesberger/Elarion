@@ -351,7 +351,9 @@ deploy only on a path change with no dialog open or field focused, never on a fo
   pattern), not a custom attribute.
 - **Inject the concrete `DbContext`.** No repository layer, no `IAppDbContext`. Entities pair an
   `IEntityTypeConfiguration<T>` marked `[EntityConfiguration]` with `[GenerateDbSets]` on the
-  DbContext. Commands already run in a framework transaction — don't open your own.
+  DbContext. Commands already run in a framework transaction — don't open your own. When a rule needs a lock,
+  use `db.LockRowAsync<TEntity>(id, RowLockMode…)` or `db.AdvisoryLockAsync(scope, key)` inside that transaction,
+  never hand-written `FOR UPDATE`/`pg_advisory_xact_lock` SQL (one key scheme, `elarion.` scopes reserved).
 - **In-process calls are typed.** Inject `IHandler<TReq, Result<TRes>>` (or `IHandlerSender`) so a
   rename is a compile error; never dispatch by string name. A request declared with a self-typed marker
   (`Query : IQuery<Query, Response>`) gets fully inferred dispatch — `sender.SendAsync(new Query(id), ct)`
