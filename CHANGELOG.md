@@ -42,6 +42,15 @@ minor releases may include breaking changes.
   only while `StillEligible` holds and returns `Finalized`, `Ineligible` or `ClaimLost`; `ReleaseClaimsAsync(ids,
   lockId, update, ct)` gives a batch back in one statement with setters that undo the claim's bookkeeping; and
   `ClaimPendingAsync(claim, select, ct)` returns the won rows projected in the same query.
+- **Entity lifecycle events for soft references** (`Elarion.EntityFrameworkCore`, ADR-0088). Mark an entity
+  `[PublishLifecycleEvents]` and register `AddElarionEntityLifecycleEvents<TDbContext>()`: every save that deletes its
+  rows — tracked, or through a database cascade from another row, queried before the `DELETE` — publishes
+  `EntitiesDeleted<TEntity> { Ids }` on the inline domain-event plane, so the module that owns notes or files on those
+  records removes them with a `[ConsumeEvent]` in the same unit of work, to a fixed point. A consumer may save (a reused
+  delete command) inside a transaction without republishing. `ExecuteDelete` that deletes rows reaching a marked entity
+  and the synchronous `SaveChanges` of such a deletion are refused, as are hierarchies on a cascade path and contexts
+  not resolved from the consumers' scope. The EF Core page documents the order of Elarion's interceptors, and a wrong
+  order throws when the first context is built.
 - **Transaction-scoped row and advisory locks** (`Elarion.EntityFrameworkCore.UnitOfWork`, ADR-0087):
   `db.LockRowAsync<TEntity>(id, RowLockMode)` locks one row (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`,
   `FOR KEY SHARE`; table and key column from the EF model), and `db.AdvisoryLockAsync(scope, key)` /
