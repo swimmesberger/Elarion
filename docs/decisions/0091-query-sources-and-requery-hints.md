@@ -5,7 +5,8 @@
 - Related: [ADR-0043](0043-client-events.md) (client events: after-commit, at-most-once re-query hints),
   [ADR-0090](0090-references-between-records-stay-in-the-database.md) (entity lifecycle events removed, partly for the
   EF Core surface they needed; section 4 says why this interceptor differs),
-  [ADR-0085](0085-handler-declarations-are-projected-not-copied.md) (per-method declarations exported to the client), [ADR-0075](0075-ambient-tenant-scoping.md) (tenant scoping),
+  [ADR-0085](0085-handler-declarations-are-projected-not-copied.md) (per-method declarations exported to the client),
+  [ADR-0075](0075-ambient-tenant-scoping.md) (tenant scoping),
   [ADR-0007](0007-data-is-platform-module-as-plugin.md) (the shared data layer),
   [ADR-0025](0025-distributed-scheduler-coordination.md) (scale positioning).
 
@@ -89,7 +90,11 @@ public sealed class GetBillingDashboard(AppDbContext db)
     queryClient.invalidateQueries({ queryKey: ['billing.getDashboard'] }))
   ```
 
-  TanStack refetches only the queries a mounted component uses and marks the others stale.
+  TanStack refetches only the queries a mounted component uses and marks the others stale. The example keeps
+  `invalidateQueries`' default `cancelRefetch: true` on purpose. A fetch that started before the commit, such as a
+  focus refetch, must be cancelled, because its success would clear the stale flag and swallow the hint. Watched
+  queries should also get a high `staleTime` (`Infinity`), so that TanStack's own focus and mount refetches do not run
+  next to the hints.
 - `onStale` fires on every hint for the method and on every `elarion.connected`, because a reconnect may have lost
   hints.
 - Adding a watcher must not re-query the other watchers. Today a changed subscription set closes the `EventSource` and
@@ -103,14 +108,18 @@ public sealed class GetBillingDashboard(AppDbContext db)
   follow-up starts depends on the mode (section 6).
 - While the document is hidden the client holds hints and calls `onStale` once when the page becomes visible again. A
   background tab does not re-query.
-- The client delays each `onStale` call by a random jitter (by default up to 250 ms), so that the watchers of a tenant
-  do not all re-query in the same instant.
+- The client spreads its re-queries. Each connection picks a fixed fraction between 0 and 1 when it opens, and delays
+  every `onStale` call by that fraction of the spread window that the hint carries (section 6). The calls that
+  `elarion.connected` triggers use the same fraction, over the last window the client saw for the method and at least
+  1 s, because a listener reconnect fires every subscriber on a node at once. A fixed fraction keeps the order stable,
+  so load patterns can be reproduced.
 
 ### 3. Subscribing is authorized by the query method
 
 - The browser subscribes to the framework topic `elarion.requery`, naming one method per subscription. A hint frame
-  carries `{ "method": "billing.getDashboard" }`. In the shared mode the subscription also carries the query's request,
-  and the frame carries the result (section 6).
+  carries the method and the spread window in milliseconds (section 6), for example
+  `{ "method": "billing.getDashboard", "spread": 1250 }`. In the shared mode the subscription also carries the
+  query's request, and the frame carries the result (section 6).
 - The resolver authorizes the subscription with the method's own declarations. The method must exist, which means its
   module is enabled. Its authorization requirements must pass the registered `IAuthorizer`, with
   `AuthorizationContext.HandlerType` set to the query handler so that global rules reading handler markers apply
@@ -179,7 +188,8 @@ A hint is a pair: an entity type and a partition. The partition comes from the w
 | Any of these inside `SystemScope()` or with no tenant resolved | every partition |
 | A type that is not tenant-scoped, or a host without tenant scoping | every partition |
 
-`IRequeryHints.Changed<TEntity>(tenantId)` names the tenant explicitly.
+`IRequeryHints.Changed<TEntity>(tenantId)` names the tenant explicitly. A system job that knows which tenants it touched
+should name them, because a broadcast makes every tenant re-query.
 
 The subscribing side derives its partition the way it derives the user scope. At subscribe time the resolver reads the
 caller's tenant from `ITenantContext` and places the subscription in that tenant's partition and in the broadcast
@@ -203,8 +213,10 @@ All three modes share the publication path:
   crosses nodes through the existing `IClientEventBroadcaster` seam. Each node expands the types into the methods that
   watch them, using the catalog that every node builds the same way, and delivers to its own subscribers. The number of
   broadcasts therefore does not grow with the number of queries watching a type or with the number of watchers.
-- Each node merges its pending publications and broadcasts at most once per 100 ms; the first goes out at once. If a
-  publication does not fit one `NOTIFY` payload, its types collapse to the broadcast partition. Over-notifying is safe.
+- Each node merges its pending publications and broadcasts at most once per 100 ms; the first goes out at once. A
+  publication that does not fit one `NOTIFY` payload is split across several. Only a type whose partition list alone
+  exceeds a payload, such as a system job touching hundreds of tenants, collapses to the broadcast partition.
+  Over-notifying is safe, but a collapse makes every tenant re-query, so splitting comes first.
 - Nothing runs without a change. No mode polls: a screen whose sources do not change costs nothing after its first
   query.
 
@@ -217,27 +229,41 @@ they all see the same result:
 | `Immediate` | each viewer, as soon as a hint arrives | a handful of concurrent viewers |
 | `Shared` | each node, once for all its viewers of the same result | many viewers of a result that does not depend on the user |
 
+The research note [live-dashboards-and-fan-out.md](research/live-dashboards-and-fan-out.md) surveys how other systems
+solve this, from their primary sources. Live-query systems that serve many viewers share one execution between viewers
+of the same query in the same authorization context. Hasura merges identical subscriptions into one SQL statement and
+refetches every second. Meteor runs one observer per identical query per process. Convex runs a query once for
+concurrent callers and caches the result. PostGraphile re-runs per subscriber with a 500 ms throttle, warns about the
+thundering herd, and recommends that only for small user bases. `Immediate` and `Throttled` are the per-viewer model;
+`Shared` is the shared one.
+
 **`Throttled`, the default.** Delivery is throttled per node and per (method, partition), latest wins:
 
-- The first hint is delivered at once. Later hints within the interval (1 s by default) merge into one hint sent at the
-  end of the interval. That trailing hint is always sent, so the last re-query runs after the last commit.
-- **Backoff.** When the sources change faster than the interval, the interval grows. An interval that ends with merged
-  hints doubles the next one, up to a cap (30 s by default). An interval that ends without a hint resets it to the
-  base. Under a constant stream of writes a watched screen therefore refreshes at most once per cap interval but never
-  stops updating, and one quiet interval after the stream ends it is back at the base interval. Every node receives
-  every publication, so all nodes back off alike. The base interval and the cap are set in `AddElarionRequeryHints`.
-- On the client, the follow-up of an `onStale` call waits at least as long as the last call took. A query that is slow
-  to answer therefore spends at most half its time re-running, however fast its sources change.
-- The server's backoff limits what a change rate costs all viewers together; the client's rule limits what a slow query
-  costs one viewer. Together they cover both ways of falling behind: the data changes faster than the screens can
-  usefully refresh, and a refresh takes longer than the interval.
+- The first hint is delivered at once. Later hints within the interval merge into one hint sent at the end of the
+  interval. That trailing hint is always sent, so the last re-query runs after the last commit.
+- **The interval grows with the audience, not with the change rate.** A node gives each key a budget of re-queries per
+  second (20 by default). With W viewers of the key on the node, the interval is `max(1 s, W / budget)`, and each hint
+  carries that interval as its spread window. Each viewer delays its re-query by its own fixed fraction of the window
+  (section 2), so the audience re-queries evenly across the window instead of all at once. A key therefore costs a node
+  at most its budget in re-queries per second, however many people watch and however fast the sources change. A small
+  audience keeps the 1 s interval and a spread of a fraction of a second. The window counts every subscriber the hint
+  reaches, so a hint to the broadcast partition is spread wider.
+- **Backoff follows load.** On the server the interval grows with the audience. On the client the follow-up of an
+  `onStale` call waits at least as long as the last call took, so when the database slows down, re-queries space
+  themselves out: a query that is slow to answer spends at most half its time re-running. Together they cover both
+  ways of falling behind: more viewers than the database should serve at once, and a refresh that takes longer than
+  the interval. An earlier draft also backed off on the change rate. It was dropped, because it made two viewers of a
+  busy tenant wait 30 s, and no system in the research note lowers freshness because writes are frequent.
+- When a key's interval exceeds 5 s, the node logs once that the method is a candidate for `Shared`. The budget and
+  the base interval are set in `AddElarionRequeryHints`.
 
-**`Immediate`, for a few viewers.** There is no interval and no backoff: every hint is delivered as it arrives. The
+**`Immediate`, for a few viewers.** There is no interval, budget or spread: every hint is delivered as it arrives. The
 client calls `onStale` at once and, when hints arrived during a call, starts the one follow-up as soon as the call
 settles. Queries still never overlap. Under a burst of writes each viewer re-queries back to back, so the query's own
 duration sets the rate, and after the last change a viewer is current within two query durations. The cost is that
 during a burst every viewer keeps one query running. That suits an application with a handful of concurrent viewers,
-such as an operations screen or a small team, and not a tenant with hundreds.
+such as an operations screen or a small team, and not a tenant with hundreds. The node logs once when a key has more
+than 20 viewers on it.
 
 **`Shared`, for many viewers of the same result.** The server runs the query and pushes the result. Viewers do not
 re-query.
@@ -245,11 +271,12 @@ re-query.
 - Each node keeps the latest result per (method, partition, request) that has a subscriber on that node. The first
   subscriber of a key triggers the first computation, and every new subscriber is greeted with the current result (the
   subscription-observer pattern of ADR-0043). When the last subscriber leaves, the key lingers for 5 s and is dropped.
-- A node recomputes a key with the immediate loop: on a hint it starts at once unless a computation of that key is
-  running. Hints that arrive during a computation mark the key dirty, and one recomputation follows as soon as the
-  running one ends. At most one computation per key runs on a node, and the last published result always reflects the
-  last commit.
-- The result goes to the key's subscribers on the client-event stream with a version that grows per key, and the
+- A node recomputes a key with the immediate loop. Every hint for the key raises its generation. A computation reads
+  the generation before it opens its snapshot, and starts at once unless one is already running. If the generation
+  moved while a computation ran, one more follows as soon as it ends. At most one computation per key runs on a node,
+  and the last published result always reflects the last commit. (Convex checks the same condition before it reuses a
+  result; Meteor's polling driver uses the same follow-up rule.)
+- The result goes to the key's subscribers on the client-event stream, with its generation as the version, and the
   client drops a result older than the one it has. `onResult` hands it to the application, which stores it with
   `setQueryData`; the generated client validates it with the method's response schema. This is the versioned,
   latest-wins state tier that ADR-0043 already allows for quotes and presence.
@@ -261,6 +288,10 @@ re-query.
   that depends on the user returns nothing instead of someone else's rows. Authorization happens once per viewer, when
   the viewer subscribes (section 3), not per computation. The generator rejects `Shared` on a handler that injects
   `ICurrentUser` or declares resource requirements.
+- A shared subscription lives at most 10 minutes. The node then ends it, and the client subscribes again through the
+  normal path (section 3), opening the new subscription before it drops the old one. A revoked permission therefore
+  takes effect within that bound. Other systems leave this open: Supabase re-checks broadcast authorization only when
+  the token changes, and SignalR groups have no revocation at all.
 - A node limits the number of shared keys one connection may hold, because every distinct request is a computation.
 
 ### 7. Scale: ten nodes on one PostgreSQL
@@ -271,11 +302,13 @@ re-query.
   `NOTIFY` until the transaction ends. A `NOTIFY` inside every writing transaction would serialize the application's
   own writes.
 - **Listeners.** Every node receives every publication, as with today's client events, and looks up each type in it.
+  The `LISTEN` connection never opens a transaction: a session that holds a transaction open stops PostgreSQL from
+  cleaning the notification queue, and when the queue is full, commits that issued `NOTIFY` fail. Each node reports
+  `pg_notification_queue_usage()` as a metric.
 - **Query load.** This is the real cost, and it is what the mode decides:
-  - `Throttled`: each viewer re-queries a method at most once per interval, never while its previous re-query runs. If
-    500 users watch a dashboard whose sources change constantly, that is up to 500 dashboard queries per second at
-    first. The backoff reaches the 30 s cap within about 30 seconds, and from then on the same load is about 17 queries
-    per second.
+  - `Throttled`: at most the budget per key on each node, 20 re-queries per second by default and spread evenly, so
+    at most 200 per key for ten nodes. If 500 users on one node watch a dashboard whose sources change constantly,
+    each refreshes every 25 s; spread over ten nodes, every 2.5 s. The node's log points such audiences at `Shared`.
   - `Immediate`: up to one running query per viewer for as long as a burst lasts.
   - `Shared`: at most one running query per key on each node, so at most ten per key for ten nodes. The number of
     viewers changes only the number of frames sent.
@@ -311,14 +344,19 @@ without a report in the same method.
 - Integration events and projections that exist only to refresh a screen go away. The integration plane keeps the
   events that carry intent.
 - **Over-notification.** Any write to a source in the partition re-queries every watcher, including writes to columns
-  the query does not read and to rows outside its filter. The interval and its backoff bound the cost.
-- **Freshness gives way first under load.** In the throttled mode, while the sources change constantly, a watched
-  screen refreshes only once per cap interval (30 s by default). Freshness degrades before the database does, which is
-  the intended order. The other two modes keep freshness and pay for it: `Immediate` with a query per viewer, `Shared`
-  with the restriction to results that do not depend on the user.
+  the query does not read and to rows outside its filter. The budget bounds the cost.
+- **Freshness gives way first under load.** In the throttled mode a large audience on one node waits longer between
+  refreshes: 25 s for 500 viewers on one node at the default budget. A small audience keeps 1 s however busy its
+  tenant is. Freshness degrades before the database does, which is the intended order. The other two modes keep
+  freshness and pay for it: `Immediate` with a query per viewer, `Shared` with the restriction to results that do not
+  depend on the user.
 - **Shared results are authorized per subscription.** A viewer whose permission is revoked keeps receiving results
-  until the stream reconnects, because a computation runs for everyone and not as the viewer. Hints do not have this
-  gap, since every re-query runs the full pipeline.
+  until the subscription expires (after 10 minutes at most) or the stream reconnects, because a computation runs for
+  everyone and not as the viewer. Hints do not have this gap, since every re-query runs the full pipeline.
+- **Panels can disagree.** Under Read Committed each statement reads its own snapshot, so a watched handler that runs
+  several statements can mix two commits when one lands between them. Such a handler should read in one read-only
+  `REPEATABLE READ` transaction; the docs will say so. This is not new, but re-queries that follow writes closely make
+  it visible.
 - **Activity is visible within a tenant.** A watcher learns, at the resolution of the interval, that some row of a
   source changed in their tenant, including rows they cannot read. The hint carries no id and no content. An
   application for which the timing of changes is itself sensitive keeps explicit, resource-scoped client events.
@@ -365,12 +403,21 @@ without a report in the same method.
   once per subscription instead of on every read. Both have to be chosen per method.
 - **Sharing results through the handler cache (ADR-0004), evicted on each hint.** A computation that started before a
   commit and finishes after the eviction stores the old state as current, and every viewer reads it until the next
-  change. The shared mode's dirty loop is that cache with the race closed: a hint during a computation always causes
-  one more.
+  change. Reading HybridCache's source suggests that a run overlapping a tag invalidation is stored as valid (not yet
+  confirmed by a test), and its stampede protection is per instance. The shared mode's generation is that cache with
+  the race closed: a hint during a computation always causes one more.
+- **Serving the shared result to re-queries instead of pushing it.** Viewers would keep getting hints and re-query
+  through the full pipeline, and the node would answer from the shared result. Authorization would stay per request,
+  with no revocation gap, and nothing new would cross the wire. But every change would still cost one request per
+  viewer and an extra round trip, and removing those is what the shared mode is for. The subscription lifetime bounds
+  the revocation gap instead.
 - **Computing a shared result on one node and broadcasting it through `NOTIFY`.** Results routinely exceed
   PostgreSQL's 8000-byte notification payload, and every broadcast would take the notification lock.
-- **A fixed interval without backoff.** Under a constant stream of writes it re-queries every watcher at the full rate
-  for as long as the stream lasts, and a query slower than the interval runs back to back.
+- **A fixed interval.** Its cost grows with the audience: under a constant stream of writes it re-queries every viewer
+  at the full rate for as long as the stream lasts, and a query slower than the interval runs back to back.
+- **Backoff driven by the change rate** (an earlier draft: double the interval while hints keep coming, up to 30 s).
+  It makes a small audience pay for a busy tenant, it has no precedent in the systems the research note covers, and
+  the audience budget bounds the same cost without it.
 - **Collecting `ExecuteUpdate` in `QueryCompilationStarting` alone.** It runs once per query shape, so every later
   execution would be missed (section 4).
 - **Other names.** `[InvalidateOn]` reads like the server-side `[CacheInvalidate]`. `[LiveQuery]` suggests that the
@@ -381,5 +428,8 @@ without a report in the same method.
 
 - Confirm with Npgsql and SQLite that a tag added in `QueryCompilationStarting` reaches the SQL of `ExecuteUpdate` and
   `ExecuteDelete`, and that the command interceptor sees it on every execution.
-- Measure the defaults (100 ms broadcast window, 1 s base interval, 30 s backoff cap, 250 ms jitter) with a benchmark
-  in `tests/Elarion.Benchmarks`.
+- Measure the defaults with a benchmark in `tests/Elarion.Benchmarks`: the 100 ms broadcast window, the 1 s base
+  interval, the budget of 20 re-queries per second per key and node, the log thresholds (a 5 s interval, 20
+  immediate viewers) and the 10-minute shared subscription lifetime.
+- Decide whether the client that made a write may skip the hint for it, as Turbo and Laravel allow. This works only
+  when a merged publication comes entirely from that client's writes.
