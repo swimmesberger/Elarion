@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-25
+
 ### Added
 - **One answer for unexpected exceptions on every transport** (ADR-0086). `ConfigureElarionUnexpectedErrors(o => …)`
   sets the message and the support reference that JSON-RPC, MCP and generated `[HttpEndpoint]` routes answer for an
@@ -2317,7 +2319,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.2.21...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.0
 [0.2.21]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.21
 [0.2.20]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.20
 [0.2.19]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.19
