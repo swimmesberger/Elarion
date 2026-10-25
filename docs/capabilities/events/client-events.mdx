@@ -251,6 +251,14 @@ events.invoicing.invoiceChanged.subscribe(
 events.$client.onConnected(() => queryClient.invalidateQueries({ queryKey: ['invoices'] }))
 ```
 
+The browser's `EventSource` reconnects a dropped connection by itself, but **gives up for good** when an answer is
+not a 200 event stream — a 401 or a login page after the session expired, a 502 while the server restarts. The
+generated client reopens such a connection after a backoff (1 s, doubling up to 30 s, reset by every
+`elarion.connected`; `reconnectDelay` changes it), and the reopened connection fires `onConnected` like any other.
+Behind an authenticating proxy, pass `eventSource: session.eventSource` from
+[session renewal](/docs/capabilities/pwa#renewing-an-expired-proxy-session), so an expired session is renewed
+instead of retried.
+
 Without the generator, a plain `EventSource` works too: pass the subscription set as the `subscriptions`
 query parameter (a URL-encoded JSON array of `{"topic":"…","resource":"…?"}`) and listen for the topic name
 as the event type.

@@ -8,6 +8,25 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Renewing an expired authenticating-proxy session** (`@swimmesberger/elarion-pwa`): `createSessionRenewal()` returns
+  a `fetch` for the generated JSON-RPC client and an `eventSource` factory for the generated client-events client.
+  Behind Cloudflare Access, Google IAP or oauth2-proxy an API call after the proxy's session expired used to follow the
+  redirect to the proxy's login page and fail as a CORS error, indistinguishable from being offline, and the event
+  stream failed silently. The `fetch` now sends `X-Requested-With: XMLHttpRequest` and `Accept: application/json`
+  (which make those proxies answer `401`) with `redirect: 'manual'`; the event stream probes its own URL with the same
+  headers when it reports an error. A `401` or a redirect reloads the page once, which lets the proxy renew the
+  session — guarded in `sessionStorage` to one reload a minute, after which `onSignedOut` runs instead. See
+  *Renewing an expired proxy session* in the PWA docs.
+
+### Fixed
+- **The generated client-events client reopens a connection the `EventSource` gave up on.** The platform
+  `EventSource` stops retrying for good when an answer is not a 200 event stream — a `401` or a login page after the
+  session expired, a `502` while the server restarts — and the client never noticed, so live updates stopped until
+  the page was reloaded. It now reopens such a connection with a backoff (1 s doubling to 30 s, reset by every
+  `elarion.connected`, configurable with `reconnectDelay`), and the reopened connection fires `onConnected`.
+  `ElarionEventSourceLike` gained an optional `readyState`; a custom source without it keeps the previous behavior.
+
 ## [0.2.21] - 2026-10-24
 
 ### Added

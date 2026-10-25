@@ -1928,11 +1928,105 @@ describe('client events (ADR-0043)', () => {
     expect(sources[0].closed).toBe(true)
     expect(decodeURIComponent(sources[1].url)).toContain('"resource":"customer:42"')
   })
+
+  it('reopens a connection the EventSource gave up on, backing off until it connects again', async () => {
+    const generated = generateRpcClientFiles(eventsTestSchema())
+    const eventsModule = await loadGeneratedEventsClient(generated.eventsClientSource as string)
+    const sources: FakeEventSource[] = []
+    const attempts: number[] = []
+    const events = eventsModule.createElarionEvents({
+      url: '/events',
+      eventSource: (url) => {
+        const source = new FakeEventSource(url)
+        sources.push(source)
+        return source
+      },
+      reconnectDelay: (attempt) => {
+        attempts.push(attempt)
+        return 0
+      },
+    })
+    let connectedCount = 0
+    events.$client.onConnected(() => {
+      connectedCount += 1
+    })
+    events['invoicing']['invoiceChanged'].subscribe(() => {
+    })
+    await microtasks()
+
+    // A 401, a login page or a 502 fails the connection for good: readyState CLOSED, no platform retry.
+    sources[0].fail()
+    await microtasks()
+    expect(sources).toHaveLength(2)
+    expect(sources[1].url).toBe(sources[0].url)
+
+    sources[1].fail()
+    await microtasks()
+    expect(sources).toHaveLength(3)
+    expect(attempts).toEqual([0, 1])
+
+    // Connecting again resets the backoff and tells the app to re-query.
+    sources[2].emit('elarion.connected', '{}')
+    expect(connectedCount).toBe(1)
+    sources[2].fail()
+    await microtasks()
+    expect(attempts).toEqual([0, 1, 0])
+  })
+
+  it('leaves a dropped connection the EventSource is still retrying to the EventSource', async () => {
+    const generated = generateRpcClientFiles(eventsTestSchema())
+    const eventsModule = await loadGeneratedEventsClient(generated.eventsClientSource as string)
+    const sources: FakeEventSource[] = []
+    const events = eventsModule.createElarionEvents({
+      url: '/events',
+      eventSource: (url) => {
+        const source = new FakeEventSource(url)
+        sources.push(source)
+        return source
+      },
+      reconnectDelay: () => 0,
+    })
+    events['invoicing']['invoiceChanged'].subscribe(() => {
+    })
+    await microtasks()
+
+    sources[0].readyState = 0
+    sources[0].emit('error', '')
+    await microtasks()
+
+    expect(sources).toHaveLength(1)
+    expect(sources[0].closed).toBe(false)
+  })
+
+  it('cancels a pending reconnect when the client is closed', async () => {
+    const generated = generateRpcClientFiles(eventsTestSchema())
+    const eventsModule = await loadGeneratedEventsClient(generated.eventsClientSource as string)
+    const sources: FakeEventSource[] = []
+    const events = eventsModule.createElarionEvents({
+      url: '/events',
+      eventSource: (url) => {
+        const source = new FakeEventSource(url)
+        sources.push(source)
+        return source
+      },
+      reconnectDelay: () => 0,
+    })
+    events['invoicing']['invoiceChanged'].subscribe(() => {
+    })
+    await microtasks()
+
+    sources[0].fail()
+    events.$client.close()
+    await microtasks()
+
+    expect(sources).toHaveLength(1)
+  })
 })
 
 class FakeEventSource {
   readonly listeners = new Map<string, Array<(event: { data?: unknown }) => void>>()
   closed = false
+  readyState = 1
 
   constructor(readonly url: string) {
   }
@@ -1945,6 +2039,13 @@ class FakeEventSource {
 
   close(): void {
     this.closed = true
+    this.readyState = 2
+  }
+
+  // What the platform EventSource does on a non-200 or non-event-stream answer.
+  fail(): void {
+    this.readyState = 2
+    this.emit('error', '')
   }
 
   emit(type: string, data: string): void {
@@ -1976,6 +2077,7 @@ interface EventsClientModule {
     eventSource?: (url: string) => FakeEventSource
     validateEvents?: boolean
     onEventError?: (topic: string, error: unknown) => void
+    reconnectDelay?: (attempt: number) => number
   }): { $client: EventsClientForTests } & Record<string, Record<string, EventsTopicApiForTests>>
 }
 
