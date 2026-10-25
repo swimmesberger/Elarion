@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-25
+
 ### Security
 - **Web Push subscribe no longer lets a user take over another user's endpoint** (`Elarion.WebPush`,
   `Elarion.WebPush.EntityFrameworkCore`). The upsert by endpoint reassigned the owner unconditionally, so a signed-in
@@ -2367,7 +2369,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.2
 [0.3.1]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.1
 [0.3.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.0
 [0.2.21]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.21
