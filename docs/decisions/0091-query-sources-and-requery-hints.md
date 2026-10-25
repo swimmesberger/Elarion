@@ -572,11 +572,11 @@ Acceptance:
   silently stale, and events that only refresh a screen burden the integration plane. They remain the right tool for a
   hint that carries an id or intent, such as a detail screen's.
 - **Intercepting `ExecuteUpdate`/`ExecuteDelete` with a tag injected at query compilation,** read back by a command
-  interceptor on every execution. None of the frameworks the second research note covers intercepts set-based statements; all document the
-  gap. EF Core lists interceptors for "manipulating" operations and warns that expression-tree interception is easy to
-  get wrong. The tag depended on EF's query cache and on scanning SQL comments, missed precompiled queries, needed a
-  spike before acceptance and a test on every EF Core upgrade, and was the kind of EF-internals surface ADR-0090
-  removed. A reported line, enforced by the build, does the same job.
+  interceptor on every execution. None of the frameworks the second research note covers intercepts set-based
+  statements; all document the gap. EF Core lists interceptors for "manipulating" operations and warns that
+  expression-tree interception is easy to get wrong. The tag depended on EF's query cache and on scanning SQL comments,
+  missed precompiled queries, needed a spike before acceptance and a test on every EF Core upgrade, and was the kind of
+  EF-internals surface ADR-0090 removed. A reported line, enforced by the build, does the same job.
 - **Detecting writes at the handler boundary.** Commands could declare or have the generator infer the sources they
   write, and the pipeline would publish after the unit of work commits, as Ash notifiers fire on declared actions. It
   would be tier-neutral and AOT-safe, but many Elarion writes run outside the command pipeline (scheduled jobs,
