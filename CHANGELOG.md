@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-25
+
 ### Removed
 - **BREAKING: entity lifecycle events** (`[PublishLifecycleEvents]`, `EntitiesDeleted<TEntity>`,
   `AddElarionEntityLifecycleEvents<TDbContext>()`), introduced in 0.3.0 (ADR-0090 supersedes ADR-0088). They existed
@@ -2353,7 +2355,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.1
 [0.3.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.0
 [0.2.21]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.21
 [0.2.20]: https://github.com/swimmesberger/Elarion/releases/tag/v0.2.20
