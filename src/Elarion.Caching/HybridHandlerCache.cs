@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Caching;
 using Elarion.Abstractions.Identity;
+using Elarion.Abstractions.MultiTenancy;
 using Elarion.Abstractions.Serialization;
 
 namespace Elarion.Caching;
@@ -14,11 +15,22 @@ namespace Elarion.Caching;
 /// <summary>
 /// Default <see cref="IHandlerCache"/> implementation backed by .NET <see cref="HybridCache"/>.
 /// </summary>
+/// <remarks>
+/// When ambient tenant scoping is registered (an <see cref="ITenantContext"/> resolves), the tenant in scope is
+/// part of every physical key and tag. A cache hit never runs the handler, so it never runs the tenant read filter
+/// either: only the key keeps one tenant's result from answering another. A
+/// <see cref="ITenantContext.SystemScope">system scope</see> gets a namespace of its own, and a scope with no
+/// tenant resolved bypasses the cache. Without tenant scoping, keys and tags are exactly what they were before it
+/// existed.
+/// </remarks>
 public sealed class HybridHandlerCache(
     HybridCache cache,
     IServiceProvider services,
     IElarionJsonSerialization jsonSerialization
 ) : IHandlerCache {
+    private const string GlobalScope = "global";
+    private const string SystemTenantSegment = "tenant:system";
+
     /// <inheritdoc />
     public async ValueTask<TResponse> GetOrCreateAsync<TRequest, TResponse>(
         IHandlerCachePolicy<TRequest> policy,
@@ -31,14 +43,27 @@ public sealed class HybridHandlerCache(
         SetCacheTags(activity, "get", policy.KeyPrefix, policy.Scope, policy.Tags.Count);
 
         try {
-            // Policies own the logical cache key; this type turns it into a physical key with scope information.
-            var key = CreatePhysicalKey(policy, request);
+            var physicalScope = CreatePhysicalScope(policy.Scope);
+            ValidateTags(policy.Tags);
+            var tenant = ResolveTenant();
+            if (tenant.Kind == TenantKind.Unresolved) {
+                // Fails closed, like the tenant read filter: with no tenant there is no namespace that names whose
+                // result this is. A shared "no tenant" namespace would be poisoned by a handler that enters a
+                // tenant itself, so the cache stays out of the way and the handler answers every such call.
+                var bypassed = await factory(ct);
+                outcome = "bypass-no-tenant";
+                return bypassed;
+            }
+
+            // Policies own the logical cache key; this type turns it into a physical key with tenant and scope
+            // information.
+            var key = CreatePhysicalKey(policy.KeyPrefix, tenant, physicalScope, policy.CreateKey(request));
             var options = new HybridCacheEntryOptions {
                 Expiration = policy.Expiration,
                 LocalCacheExpiration = policy.Expiration
             };
             // Tags are how HybridCache supports group invalidation without knowing every individual key.
-            var tags = CreateEntryTags(policy.Scope, policy.Tags);
+            var tags = CreateEntryTags(tenant, policy.Scope, physicalScope, policy.Tags);
 
             if (policy is IHandlerCachePayloadPolicy<TRequest, TResponse> payloadPolicy) {
                 // Payload policies store a serialized representation, useful when response types should not be cached directly.
@@ -101,7 +126,9 @@ public sealed class HybridHandlerCache(
 
         try {
             // Invalidating by tag keeps command handlers independent from the exact read keys they invalidate.
-            var tags = CreateInvalidationTags(policy.Scope, policy.Tags);
+            var physicalScope = CreatePhysicalScope(policy.Scope);
+            ValidateTags(policy.Tags);
+            var tags = CreateInvalidationTags(ResolveTenant(), physicalScope, policy.Tags);
             foreach (var tag in tags) await cache.RemoveByTagAsync(tag, ct);
         }
         catch (Exception ex) {
@@ -138,12 +165,15 @@ public sealed class HybridHandlerCache(
         return payloadState.Policy.Deserialize(payload, jsonSerialization.Options);
     }
 
-    private string CreatePhysicalKey<TRequest>(IHandlerCachePolicy<TRequest> policy, TRequest request) {
-        var scope = CreatePhysicalScope(policy.Scope);
-        var requestKey = policy.CreateKey(request);
-
+    private static string CreatePhysicalKey(
+        string keyPrefix,
+        TenantNamespace tenant,
+        string physicalScope,
+        string requestKey) {
         // Prefixing each part makes the key readable and avoids accidental collisions between scopes and request keys.
-        return $"{policy.KeyPrefix}:scope:{scope}:request:{requestKey}";
+        return tenant.Segment is null
+            ? $"{keyPrefix}:scope:{physicalScope}:request:{requestKey}"
+            : $"{keyPrefix}:{tenant.Segment}:scope:{physicalScope}:request:{requestKey}";
     }
 
     /// <summary>
@@ -153,16 +183,28 @@ public sealed class HybridHandlerCache(
     /// every user's entries for those tags (the safe default is over-invalidation). A user-scoped invalidation
     /// still clears only the calling user's namespace.
     /// </summary>
-    private IReadOnlyList<string> CreateEntryTags(HandlerCacheScope scope, IReadOnlyList<string> tags) {
-        var scoped = CreateInvalidationTags(scope, tags);
-        if (scope == HandlerCacheScope.Global) return scoped;
+    /// <remarks>
+    /// Under tenant scoping an entry carries that same set twice: once cross-tenant (byte-identical to a host
+    /// without tenant scoping) and once inside its tenant's namespace. An invalidation inside a tenant clears the
+    /// tenant's copy; a system-scope or tenant-less invalidation clears the cross-tenant copy, which reaches every
+    /// tenant (see <see cref="CreateInvalidationTags"/>).
+    /// </remarks>
+    private static string[] CreateEntryTags(
+        TenantNamespace tenant,
+        HandlerCacheScope scope,
+        string physicalScope,
+        IReadOnlyList<string> tags) {
+        var perUser = scope != HandlerCacheScope.Global;
+        var namespaceCount = (perUser ? 2 : 1) * (tenant.Segment is null ? 1 : 2);
+        var physicalTags = new string[namespaceCount * tags.Count];
+        var offset = 0;
 
-        var physicalTags = new string[scoped.Count * 2];
-        for (var i = 0; i < scoped.Count; i++) {
-            physicalTags[i] = scoped[i];
-            physicalTags[scoped.Count + i] = $"handler-cache:global:tag:{tags[i]}";
-        }
+        AppendTags(physicalTags, ref offset, physicalScope, tags);
+        if (perUser) AppendTags(physicalTags, ref offset, GlobalScope, tags);
+        if (tenant.Segment is null) return physicalTags;
 
+        AppendTags(physicalTags, ref offset, $"{tenant.Segment}:{physicalScope}", tags);
+        if (perUser) AppendTags(physicalTags, ref offset, $"{tenant.Segment}:{GlobalScope}", tags);
         return physicalTags;
     }
 
@@ -171,27 +213,66 @@ public sealed class HybridHandlerCache(
     /// namespace (which every entry carries, see <see cref="CreateEntryTags"/>); CurrentUser clears only the
     /// calling user's namespace.
     /// </summary>
-    private IReadOnlyList<string> CreateInvalidationTags(HandlerCacheScope scope, IReadOnlyList<string> tags) {
+    /// <remarks>
+    /// Inside a tenant, that namespace is the tenant's own plus the system scope's: tenant-guarded writes can only
+    /// change the tenant's rows, so other tenants keep their entries, while a cross-tenant read cached under
+    /// <see cref="ITenantContext.SystemScope"/> spans the rows that changed. A system scope, or a scope with no tenant
+    /// resolved, clears the cross-tenant namespace every entry carries: its writes are not tenant-guarded (or, with
+    /// no tenant, can only reach data that is not tenant-scoped), so any tenant's entries may be stale.
+    /// </remarks>
+    private static string[] CreateInvalidationTags(
+        TenantNamespace tenant,
+        string physicalScope,
+        IReadOnlyList<string> tags) {
+        var offset = 0;
+        if (tenant.Kind != TenantKind.Tenant) {
+            var crossTenant = new string[tags.Count];
+            AppendTags(crossTenant, ref offset, physicalScope, tags);
+            return crossTenant;
+        }
+
+        var physicalTags = new string[tags.Count * 2];
+        AppendTags(physicalTags, ref offset, $"{tenant.Segment}:{physicalScope}", tags);
+        AppendTags(physicalTags, ref offset, $"{SystemTenantSegment}:{physicalScope}", tags);
+        return physicalTags;
+    }
+
+    private static void AppendTags(
+        string[] physicalTags,
+        ref int offset,
+        string tagNamespace,
+        IReadOnlyList<string> tags) {
+        foreach (var tag in tags) physicalTags[offset++] = $"handler-cache:{tagNamespace}:tag:{tag}";
+    }
+
+    private static void ValidateTags(IReadOnlyList<string> tags) {
         if (tags.Count == 0)
             throw new InvalidOperationException("Handler cache policies must define at least one tag.");
 
-        var physicalScope = CreatePhysicalScope(scope);
-        var physicalTags = new string[tags.Count];
-
-        for (var i = 0; i < tags.Count; i++) {
-            var tag = tags[i];
+        foreach (var tag in tags)
             if (string.IsNullOrWhiteSpace(tag) || tag == "*")
                 throw new InvalidOperationException($"Invalid handler cache tag '{tag}'.");
+    }
 
-            physicalTags[i] = $"handler-cache:{physicalScope}:tag:{tag}";
-        }
+    private TenantNamespace ResolveTenant() {
+        // Tenant scoping is opt-in: without an ITenantContext, keys and tags keep their pre-tenancy shape.
+        var tenantContext = services.GetService<ITenantContext>();
+        if (tenantContext is null) return new TenantNamespace(TenantKind.NotScoped, null);
 
-        return physicalTags;
+        // Checked first, as the tenant read filter does: a system scope spans every tenant whatever is resolved.
+        if (tenantContext.IsSystemScope) return new TenantNamespace(TenantKind.System, SystemTenantSegment);
+
+        var tenantId = tenantContext.TenantId;
+        if (string.IsNullOrWhiteSpace(tenantId)) return new TenantNamespace(TenantKind.Unresolved, null);
+
+        // Hashed like user ids, so infrastructure logs do not expose raw identifiers. The fixed-length hex segment
+        // also can never read as the system segment, whatever a tenant id looks like.
+        return new TenantNamespace(TenantKind.Tenant, $"tenant:{Hash(tenantId)}");
     }
 
     private string CreatePhysicalScope(HandlerCacheScope scope) {
         return scope switch {
-            HandlerCacheScope.Global => "global",
+            HandlerCacheScope.Global => GlobalScope,
             // User ids are hashed before entering cache keys so infrastructure logs do not expose raw identifiers.
             HandlerCacheScope.CurrentUser => $"user:{Hash(GetCurrentUserId())}",
             _ => throw new InvalidOperationException($"Unsupported handler cache scope '{scope}'.")
@@ -232,7 +313,7 @@ public sealed class HybridHandlerCache(
         if (activity?.IsAllDataRequested == true) {
             activity.SetTag("handler.cache.outcome", outcome);
             activity.SetTag("handler.cache.factory_executed",
-                outcome == "miss-factory-executed" || outcome == "miss-non-cacheable");
+                outcome is "miss-factory-executed" or "miss-non-cacheable" or "bypass-no-tenant");
 
             if (outcome == "error") activity.SetStatus(ActivityStatusCode.Error);
         }
@@ -250,6 +331,19 @@ public sealed class HybridHandlerCache(
         }));
         activity?.SetStatus(ActivityStatusCode.Error, exception.Message);
     }
+
+    private enum TenantKind {
+        NotScoped,
+        Unresolved,
+        System,
+        Tenant
+    }
+
+    /// <summary>
+    /// The tenant dimension of a key or tag. <see cref="Segment"/> is the namespace text for a tenant or the system
+    /// scope, and <see langword="null"/> when there is none to add.
+    /// </summary>
+    private readonly record struct TenantNamespace(TenantKind Kind, string? Segment);
 
     private sealed class NonCacheableResultException<TResponse>(TResponse response) : Exception {
         public TResponse Response { get; } = response;

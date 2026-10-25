@@ -124,6 +124,24 @@ A `SaveChanges` interceptor closes the other half:
 Violations raise `TenantScopeViolationException`. It is a fault, not an `AppError`: it means the
 isolation was bypassed, which no caller should handle and no client should see explained.
 
+### Cached reads — keyed by tenant
+
+A [`[Cacheable]`](/docs/capabilities/caching) hit returns a stored result without running the handler,
+so the read filter never sees it. `Elarion.Caching` closes that gap itself: when `ITenantContext` is
+registered, the tenant in scope is part of every cache key and tag, for `Global` and `CurrentUser`
+scope alike.
+
+- A tenant's entries are served only to that tenant, including for a user who switches tenants with
+  `Scope(tenantId)`.
+- A [system scope](#work-that-spans-every-tenant) caches in a namespace of its own.
+- A scope with **no tenant resolved is not cached**: the handler runs every time, so its filter
+  decides, as it does for every uncached read.
+- `[CacheInvalidate]` inside a tenant evicts that tenant's entries for every user and leaves other
+  tenants' entries cached. From a system scope, or with no tenant, it evicts every tenant.
+
+[Caching → Tenant isolation](/docs/capabilities/caching#tenant-isolation) explains why there is no
+cache without a tenant, and what this means for cached data that is not tenant-scoped.
+
 ## Work that spans every tenant
 
 Declare it. A background job crossing tenants is legitimate; *silently omitting a filter* is not, and

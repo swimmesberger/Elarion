@@ -273,7 +273,8 @@ See [Actors](/docs/concepts/actors).
 | `Scope` | `HandlerCacheScope` (init) | `CurrentUser` | Whether generated keys/tags are scoped to the current user or shared globally. |
 | `KeyProperties` | `string[]` (init) | `[]` | Request property names included in the generated key; when empty, all public request properties are used. Invalid names are reported at build time. |
 
-**`HandlerCacheScope`:** `CurrentUser` (= 0), `Global` (= 1).
+**`HandlerCacheScope`:** `CurrentUser` (= 0), `Global` (= 1). Under tenant scoping both sit inside the tenant in
+scope ([tenant isolation](/docs/capabilities/caching#tenant-isolation)).
 
 ### `[CacheInvalidate]`
 

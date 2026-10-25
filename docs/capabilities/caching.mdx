@@ -76,6 +76,9 @@ property.
 | `CurrentUser` (default) | Entries and tags are isolated by the authenticated user. Requires an [`ICurrentUser`](/docs/capabilities/current-user) with a user id; the id is hashed before it enters the physical cache key. |
 | `Global` | Entries are shared across all users. Use only for data that is not user-specific and carries no authorization context. |
 
+Both scopes sit inside the tenant when [tenant scoping](#tenant-isolation) is registered: `Global` then
+means every user *of the tenant in scope*.
+
 <Callout type="warn">
   `CurrentUser` is the default precisely so that one user's cached response is never served to
   another. Switch to `Global` deliberately, only for non-personalized data.
@@ -127,6 +130,44 @@ public sealed class UpdateClient(AppDbContext db)
   mutating caller also owns.
 </Callout>
 
+## Tenant isolation
+
+A cache hit never runs the handler, so it never runs the
+[tenant read filter](/docs/capabilities/multi-tenancy#reads--a-named-model-level-filter) either. Once
+tenant scoping is registered (`AddElarionTenantScoping()`), the default cache therefore puts the tenant in
+scope into every key and tag, whatever the `Scope`. A `[Cacheable(Scope = HandlerCacheScope.Global)]`
+query over tenant-scoped rows caches one entry per tenant, and a user who belongs to several tenants gets
+one `CurrentUser` entry per tenant. Nothing changes on the handler or its attributes.
+
+| In scope | Reads | `[CacheInvalidate]` evicts |
+| --- | --- | --- |
+| A tenant | Cached for that tenant only. | That tenant's entries, every user's at the `Global` default, plus entries cached under a system scope. Other tenants keep theirs. |
+| `SystemScope()` | Cached in a namespace of its own, never served to a tenant. | The listed tags in every tenant. |
+| No tenant resolved | Not cached: the handler runs on every call. | The listed tags in every tenant. |
+
+A tenant's id is hashed before it enters a key or tag, like a user id. A host without tenant scoping keeps
+exactly the keys and tags it had before.
+
+**No tenant means no cache.** This fails closed, the same way the read filter matches no rows when
+the tenant is unresolved. A shared namespace for every caller without a tenant would be keyed on a
+missing value: a handler that enters a tenant itself, with `ITenantContext.Scope` in its body, would
+store that tenant's result there and serve it to the next caller without a tenant. Bypassing gives up
+caching for those callers instead, typically anonymous visitors when the tenant comes from a claim. To
+cache their reads, resolve a tenant for them before the pipeline runs (from the host name, say).
+
+**Invalidation stays inside the tenant.** A tenant's writes are guarded to its own rows, so its
+`[CacheInvalidate]` leaves other tenants' entries alone, and one busy tenant cannot keep flushing
+everyone else's cache. A system scope and a scope with no tenant are not confined to one tenant's rows,
+so their invalidations reach every tenant.
+
+<Callout type="warn">
+  The cache cannot tell what a handler reads, so data that is not tenant-scoped is cached per tenant
+  as well. When such data changes inside a tenant — a user's own profile, cached in each of their
+  tenants — only that tenant's copy is evicted, and the other copies stay until they expire. Dispatch
+  a command that changes shared data inside a system scope, which evicts every tenant, or keep
+  `DurationSeconds` short for reads of such data.
+</Callout>
+
 ## Registering the cache runtime
 
 The attributes and generated policies are runtime-neutral. The host chooses the implementation. The
@@ -152,7 +193,8 @@ ways to change the backing store, from least to most invasive:
   `TryAddSingleton`, so it adds the default only when one is not already registered, and your
   implementation wins.
 - **Replace `IHandlerCache` entirely** when you want to bypass `HybridCache` and own the whole caching
-  contract.
+  contract. A replacement then owns [tenant isolation](#tenant-isolation) as well: the generated
+  policies' keys contain only request values.
 
 ## Adding an L2 distributed cache
 
@@ -211,5 +253,5 @@ ordinary handler decorators inserted by the `[Cacheable]` / `[CacheInvalidate]` 
 in the generated pipeline alongside your application decorators, so caching composes deterministically
 with logging, validation, and transactions. Cache operations are also
 [trace-visible](/docs/capabilities/telemetry): get/create spans report the precise outcome —
-`miss-factory-executed`, `miss-non-cacheable`, or `cached-or-coalesced` — and invalidation emits its
-own spans, all without leaking full keys or raw user ids into tags.
+`miss-factory-executed`, `miss-non-cacheable`, `cached-or-coalesced`, or `bypass-no-tenant` — and
+invalidation emits its own spans, all without leaking full keys, raw user ids, or tenant ids into tags.

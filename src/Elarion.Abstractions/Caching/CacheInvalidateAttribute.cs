@@ -26,6 +26,11 @@ public sealed class CacheInvalidateAttribute(params string[] tags) : Attribute {
     /// entries for the listed tags (user-scoped entries also carry the global tag namespace precisely so this
     /// pairing works). Set <see cref="HandlerCacheScope.CurrentUser"/> explicitly only for a genuinely per-user
     /// cache the mutating caller also owns — it clears the invoking user's entries and nothing else.
+    /// <para>
+    /// Under ambient tenant scoping an invalidation inside a tenant clears that tenant's entries (and cross-tenant
+    /// entries cached under a system scope) and leaves other tenants' entries cached. From a system scope, or with
+    /// no tenant resolved, it clears the listed tags in every tenant.
+    /// </para>
     /// </remarks>
     public HandlerCacheScope Scope { get; init; } = HandlerCacheScope.Global;
 }
