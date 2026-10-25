@@ -36,6 +36,9 @@ internal static class ErrorContractDiscovery {
 
     public const string ValidationDataFqn = "global::Elarion.Abstractions.ValidationErrorData";
 
+    private const string RequireResourceAttributeMetadataName =
+        "Elarion.Abstractions.Authorization.RequireResourceAttribute";
+
     private static readonly string[] AuthorizationRequirementAttributes = [
         "Elarion.Abstractions.Authorization.RequireClaimAttribute",
         "Elarion.Abstractions.Authorization.RequirePermissionAttribute",
@@ -153,6 +156,7 @@ internal static class ErrorContractDiscovery {
 
         var hasAuthorization = false;
         var hasFeatureGate = false;
+        var hasHiddenResource = false;
         for (var current = handler; current is not null; current = current.BaseType)
             foreach (var attribute in current.GetAttributes()) {
                 var name = attribute.AttributeClass?.ToDisplayString();
@@ -160,6 +164,11 @@ internal static class ErrorContractDiscovery {
 
                 if (name == FeatureGateAttributeMetadataName) hasFeatureGate = true;
                 else if (AuthorizationRequirementAttributes.Contains(name)) hasAuthorization = true;
+
+                // [RequireResource(DenyAs = ResourceDenial.NotFound)] answers a denial as not_found.
+                if (name == RequireResourceAttributeMetadataName && attribute.NamedArguments.Any(static argument =>
+                        argument.Key == "DenyAs" && argument.Value.Value is 1))
+                    hasHiddenResource = true;
             }
 
         if (hasAuthorization) {
@@ -167,7 +176,7 @@ internal static class ErrorContractDiscovery {
             yield return new ErrorDeclaration("forbidden", "Forbidden", null);
         }
 
-        if (hasFeatureGate) yield return new ErrorDeclaration("not_found", "NotFound", null);
+        if (hasFeatureGate || hasHiddenResource) yield return new ErrorDeclaration("not_found", "NotFound", null);
 
         if (isIdempotent) {
             yield return new ErrorDeclaration("idempotency.key_required", "Validation", null);

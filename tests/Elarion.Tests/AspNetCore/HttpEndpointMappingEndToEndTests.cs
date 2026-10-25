@@ -1,11 +1,14 @@
 using System.Net;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Serialization;
 using Elarion.AspNetCore;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -13,6 +16,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Elarion.Tests.AspNetCore;
@@ -169,6 +173,195 @@ public sealed class HttpEndpointMappingEndToEndTests {
         }
         finally {
             await app.StopAsync(ct);
+        }
+    }
+
+    [Fact]
+    public async Task GeneratedEndpointGroup_KeepsAllowAnonymousRoutesOpenUnderHostAuthorization() {
+        var ct = TestContext.Current.CancellationToken;
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+        builder.Services.ConfigureHttpJsonOptions(o =>
+            o.SerializerOptions.TypeInfoResolver = new DefaultJsonTypeInfoResolver());
+        builder.Services.ConfigureElarionJson(o => o.EnableReflectionFallback = true);
+        builder.Services.AddProblemDetails();
+        builder.Services.AddAuthentication(AnonymousOnlyAuthenticationHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, AnonymousOnlyAuthenticationHandler>(
+                AnonymousOnlyAuthenticationHandler.SchemeName, null);
+        // The deny-by-default posture the returned group exists for: a hand-mapped route that forgets
+        // RequireAuthorization() is closed too.
+        builder.Services.AddAuthorizationBuilder()
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+        builder.Services.AddScoped<IHandler<GetWidgetQuery, Result<WidgetResponse>>, GetWidgetHandler>();
+
+        await using var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+
+        // Mirrors MapElarionEndpoints: every route maps into one prefix-less group, which the host then guards; the
+        // [AllowAnonymous] handler's route carries .AllowAnonymous() and stays open.
+        var elarionEndpoints = app.MapGroup(string.Empty);
+        foreach (var (route, isAnonymous) in new[] { ("/public/widgets/{id}", true), ("/widgets/{id}", false) }) {
+            var endpoint = elarionEndpoints.MapGet(route,
+                    (RequestDelegate)(static async __context => {
+                        var __request = new GetWidgetQuery {
+                            Id = Guid.Parse((string)__context.Request.RouteValues["id"]!)
+                        };
+                        var __handler = __context.RequestServices
+                            .GetRequiredService<IHandler<GetWidgetQuery, Result<WidgetResponse>>>();
+                        var __result = ElarionHttpResults.ToResult(
+                            await __handler.HandleAsync(__request, __context.RequestAborted));
+                        await __result.ExecuteAsync(__context);
+                    }))
+                .ProducesElarionErrors();
+            if (isAnonymous) endpoint.AllowAnonymous();
+        }
+
+        elarionEndpoints.RequireAuthorization();
+
+        await app.StartAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+            var id = Guid.CreateVersion7();
+
+            (await client.GetAsync($"/public/widgets/{id}", ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+            (await client.GetAsync($"/widgets/{id}", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+        finally {
+            await app.StopAsync(ct);
+        }
+    }
+
+    private sealed class ThrowingWidgetHandler : IHandler<GetWidgetQuery, Result<WidgetResponse>> {
+        public ValueTask<Result<WidgetResponse>> HandleAsync(GetWidgetQuery request, CancellationToken ct) {
+            throw new InvalidOperationException("connection string leaked");
+        }
+    }
+
+    [Fact]
+    public async Task GeneratedEndpointShape_AnswersUnexpectedExceptionsWithTheConfiguredProblem() {
+        var ct = TestContext.Current.CancellationToken;
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+        builder.Services.AddProblemDetails();
+        builder.Services.ConfigureElarionUnexpectedErrors(o => {
+            o.Message = context => $"Unexpected failure in {context.Operation} ({context.Transport}).";
+            o.Reference = _ => "REF-9";
+        });
+        builder.Services.AddScoped<IHandler<GetWidgetQuery, Result<WidgetResponse>>, ThrowingWidgetHandler>();
+
+        await using var app = builder.Build();
+
+        // Mirrors the generated delegate's outermost catch around handler resolution and the whole pipeline.
+        app.MapGet("/widgets/{id}",
+                (RequestDelegate)(static async __context => {
+                    var __request = new GetWidgetQuery {
+                        Id = Guid.Parse((string)__context.Request.RouteValues["id"]!)
+                    };
+                    IResult __result;
+                    try {
+                        var __handler = __context.RequestServices
+                            .GetRequiredService<IHandler<GetWidgetQuery, Result<WidgetResponse>>>();
+                        __result = ElarionHttpResults.ToResult(
+                            await __handler.HandleAsync(__request, __context.RequestAborted));
+                    }
+                    catch (Exception __exception) when (ElarionHttpResults.IsUnexpected(__context, __exception)) {
+                        __result = ElarionHttpResults.ToUnexpectedProblem(__context, __exception, "Sample.Widgets.GetWidget");
+                    }
+                    await __result.ExecuteAsync(__context);
+                }))
+            .ProducesElarionErrors();
+
+        await app.StartAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+
+            var response = await client.GetAsync($"/widgets/{Guid.CreateVersion7()}", ct);
+
+            response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+            response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+            var body = await response.Content.ReadAsStringAsync(ct);
+            using var problem = JsonDocument.Parse(body);
+            problem.RootElement.GetProperty("detail").GetString()
+                .Should().Be("Unexpected failure in Sample.Widgets.GetWidget (http).");
+            problem.RootElement.GetProperty("code").GetString().Should().Be(ErrorCodes.Internal);
+            problem.RootElement.GetProperty("reference").GetString().Should().Be("REF-9");
+            body.Should().NotContain("connection string leaked");
+        }
+        finally {
+            await app.StopAsync(ct);
+        }
+    }
+
+    [Fact]
+    public async Task GeneratedEndpointShape_LeavesAnExceptionToTheHostWhenTheOptionsSaySo() {
+        var ct = TestContext.Current.CancellationToken;
+
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+        builder.Services.ConfigureElarionUnexpectedErrors(o =>
+            o.LeaveToHost = context => context.Exception is InvalidOperationException);
+        builder.Services.AddScoped<IHandler<GetWidgetQuery, Result<WidgetResponse>>, ThrowingWidgetHandler>();
+
+        await using var app = builder.Build();
+        // The host maps the exception to its own status, as an IExceptionHandler mapping a concurrency conflict would.
+        app.UseExceptionHandler(handler => handler.Run(static async context => {
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            await context.Response.WriteAsync("mapped by the host");
+        }));
+        app.MapGet("/widgets/{id}",
+            (RequestDelegate)(static async __context => {
+                var __request = new GetWidgetQuery { Id = Guid.Parse((string)__context.Request.RouteValues["id"]!) };
+                IResult __result;
+                try {
+                    var __handler = __context.RequestServices
+                        .GetRequiredService<IHandler<GetWidgetQuery, Result<WidgetResponse>>>();
+                    __result = ElarionHttpResults.ToResult(await __handler.HandleAsync(__request, __context.RequestAborted));
+                }
+                catch (Exception __exception) when (ElarionHttpResults.IsUnexpected(__context, __exception)) {
+                    __result = ElarionHttpResults.ToUnexpectedProblem(__context, __exception, "Sample.Widgets.GetWidget");
+                }
+                await __result.ExecuteAsync(__context);
+            }));
+
+        await app.StartAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+
+            var response = await client.GetAsync($"/widgets/{Guid.CreateVersion7()}", ct);
+
+            response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            (await response.Content.ReadAsStringAsync(ct)).Should().Be("mapped by the host");
+        }
+        finally {
+            await app.StopAsync(ct);
+        }
+    }
+
+    // Authenticates nobody: every request is anonymous, so only routes carrying IAllowAnonymous pass a policy that
+    // requires an authenticated user.
+    private sealed class AnonymousOnlyAuthenticationHandler(
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory logger,
+        UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder) {
+        public const string SchemeName = "anonymous-only";
+
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync() {
+            return Task.FromResult(AuthenticateResult.NoResult());
         }
     }
 

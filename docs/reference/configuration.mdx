@@ -176,6 +176,25 @@ See [Proxy identity](/docs/capabilities/proxy-identity).
 
 See [Current user](/docs/capabilities/current-user).
 
+## Authorization messages (options, not config)
+
+`AddElarionAuthorization(o => …)` registers `AuthorizationOptions` as a plain singleton; configure it in code:
+
+```csharp
+builder.Services.AddElarionAuthorization(o => o.ResourceNotFoundMessage = "Not found.");
+```
+
+
+| Option | Default |
+| --- | --- |
+| `PermissionClaimType` | `"permission"` — the claim `[RequirePermission]` (and `[ResourceFilter].BypassPermission`) reads |
+| `ForbiddenMessageFormat` | `"Access denied."` — `{0}` echoes the unmet requirement when included |
+| `UnauthorizedMessage` | `"Authentication required."` |
+| `ResourceNotFoundMessage` | `"The requested resource was not found."` — the answer of `[RequireResource(DenyAs = ResourceDenial.NotFound)]`; keep it identical to your handlers' own not-found message |
+
+See [Authorization](/docs/concepts/authorization) and
+[Resource authorization](/docs/concepts/resource-authorization#hidden-not-forbidden).
+
 ## Idempotency purge (options, not config)
 
 `AddElarionIdempotencyEntityFrameworkCore<TDbContext>(configure => …)` takes an optional
@@ -236,6 +255,26 @@ builder.Services.ConfigureElarionJson(o => {
 | `PostConfigure` | none (escape hatch for converters/encoder) |
 
 See [Serialization](/docs/capabilities/serialization).
+
+## Unexpected errors (options, not config)
+
+`ConfigureElarionUnexpectedErrors(o => …)` (from `Elarion.Abstractions`) sets the answer JSON-RPC, MCP and generated
+`[HttpEndpoint]` routes give for an exception that escaped the handler pipeline. Calls accumulate; a later call
+overrides only the hooks it sets. Both hooks receive an `UnexpectedErrorContext` (`Exception`, `Transport`,
+`Operation`, the call's scoped `Services`); a hook that throws falls back to the default.
+
+| Option | Default |
+| --- | --- |
+| `Message` | `"Internal error"` (`UnexpectedErrorOptions.DefaultMessage`) |
+| `Reference` | the current trace id (`Activity.Current.TraceId`), or a fresh id when no trace is active; return `null` to send none |
+| `LeaveToHost` | answer every exception. Generated HTTP routes only: `true` lets the exception reach the host's exception handling (the developer exception page, an `IExceptionHandler`); JSON-RPC and MCP always answer |
+
+```csharp
+builder.Services.ConfigureElarionUnexpectedErrors(o =>
+    o.Message = _ => "Something went wrong. Please contact support and quote the reference.");
+```
+
+See [Unexpected errors](/docs/concepts/results-and-errors#unexpected-errors).
 
 ## Request validation (options, not config)
 

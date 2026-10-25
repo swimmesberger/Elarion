@@ -56,6 +56,26 @@ internal static class RpcMethodEmission {
 
     public sealed record ParameterDescription(string PropertyName, string Description);
 
+    /// <summary>One <c>[ClientTag(key, value)]</c> hint.</summary>
+    public sealed record ClientTag(string Key, string Value);
+
+    /// <summary>
+    /// What a client may know before calling the operation (<c>HandlerClientMetadata</c> at run time): the
+    /// requirements it can evaluate, a flag for the ones only the server can, and its tags. Collections are
+    /// ordinal-sorted so the emitted registration and the manifest entry are deterministic.
+    /// </summary>
+    public sealed record ClientMetadata(
+        bool AllowAnonymous,
+        bool RequiresAuthentication,
+        EquatableArray<string> Permissions,
+        EquatableArray<string> Roles,
+        bool HasServerChecks,
+        EquatableArray<ClientTag> Tags) {
+        public bool IsEmpty =>
+            !AllowAnonymous && !RequiresAuthentication && Permissions.IsEmpty && Roles.IsEmpty && !HasServerChecks
+            && Tags.IsEmpty;
+    }
+
     public sealed record Model(
         string MethodName,
         string HandlerNamespace,
@@ -73,7 +93,9 @@ internal static class RpcMethodEmission {
         // The handler's CLR metadata name, so ErrorContractScopes can re-resolve it from the current compilation.
         // Only a current-compilation model carries it: a model decoded from a referenced manifest already holds its
         // complete contract.
-        string? HandlerMetadataName = null
+        string? HandlerMetadataName = null,
+        // Null only for a model decoded from a manifest written before client metadata existed.
+        ClientMetadata? Client = null
     );
 
     /// <summary>
@@ -89,7 +111,98 @@ internal static class RpcMethodEmission {
             $"{indent}{registryVar}.Map<{entry.RequestTypeFqn}, {entry.ResponseTypeFqn}>("
             + $"{Literal(entry.MethodName)}, {TransportsExpression(entry)}"
             + (entry.IsIdempotent ? ", idempotent: true" : "")
-            + $", errors: {ErrorsExpression(entry)});");
+            + $", errors: {ErrorsExpression(entry)}"
+            + (entry.Client is { IsEmpty: false } client ? $", client: {ClientExpression(client)}" : "")
+            + ");");
+    }
+
+    private static string ClientExpression(ClientMetadata client) {
+        var members = new List<string>();
+        if (client.AllowAnonymous) members.Add("AllowAnonymous = true");
+        if (client.RequiresAuthentication) members.Add("RequiresAuthentication = true");
+        if (!client.Permissions.IsEmpty)
+            members.Add($"Permissions = new string[] {{ {string.Join(", ", client.Permissions.Select(Literal))} }}");
+        if (!client.Roles.IsEmpty)
+            members.Add($"Roles = new string[] {{ {string.Join(", ", client.Roles.Select(Literal))} }}");
+        if (client.HasServerChecks) members.Add("HasServerChecks = true");
+        if (!client.Tags.IsEmpty)
+            members.Add("Tags = new global::System.Collections.Generic.Dictionary<string, string> { "
+                        + string.Join(", ", client.Tags.Select(static t => $"[{Literal(t.Key)}] = {Literal(t.Value)}"))
+                        + " }");
+
+        return $"new global::Elarion.Abstractions.Dispatch.HandlerClientMetadata {{ {string.Join(", ", members)} }}";
+    }
+
+    private const string AllowAnonymousAttributeName = "Elarion.Abstractions.Authorization.AllowAnonymousAttribute";
+    private const string RequirePermissionAttributeName = "Elarion.Abstractions.Authorization.RequirePermissionAttribute";
+    private const string RequireRoleAttributeName = "Elarion.Abstractions.Authorization.RequireRoleAttribute";
+    private const string ClientTagAttributeName = "Elarion.Abstractions.ClientTagAttribute";
+
+    // Requirements only the server can evaluate: a client sees them as "may be refused".
+    private static readonly HashSet<string> ServerCheckAttributeNames = new(StringComparer.Ordinal) {
+        "Elarion.Abstractions.Authorization.RequireClaimAttribute",
+        "Elarion.Abstractions.Authorization.RequirePolicyAttribute",
+        "Elarion.Abstractions.Authorization.RequireResourceAttribute"
+    };
+
+    /// <summary>
+    /// Reads the client metadata a handler declares itself (its own and its base types' attributes, which are all
+    /// <c>Inherited = true</c>, matching the runtime authorization decorator). Authentication required by an
+    /// <c>[ElarionAuthorizationDefaults]</c> in scope is merged in a second stage (<see cref="ClientRequirementScopes"/>).
+    /// </summary>
+    public static ClientMetadata ReadClientMetadata(INamedTypeSymbol type) {
+        var allowAnonymous = false;
+        var hasServerChecks = false;
+        var permissions = new SortedSet<string>(StringComparer.Ordinal);
+        var roles = new SortedSet<string>(StringComparer.Ordinal);
+        var tags = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var current = type; current is not null; current = current.BaseType) {
+            // A derived handler's tag overrides its base's; on one class the last declaration of a key wins.
+            var classTags = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var attribute in current.GetAttributes()) {
+                var name = attribute.AttributeClass?.ToDisplayString();
+                var args = attribute.ConstructorArguments;
+                switch (name) {
+                    case AllowAnonymousAttributeName:
+                        allowAnonymous = true;
+                        break;
+                    case RequirePermissionAttributeName
+                        when args.Length == 2 && args[0].Value is string resource && args[1].Value is string verb:
+                        permissions.Add(resource + "." + verb);
+                        break;
+                    case RequireRoleAttributeName when args.Length == 1 && args[0].Value is string role:
+                        roles.Add(role);
+                        break;
+                    case ClientTagAttributeName
+                        when args.Length == 2 && args[0].Value is string key && args[1].Value is string value:
+                        classTags[key] = value;
+                        break;
+                    case not null when ServerCheckAttributeNames.Contains(name):
+                        hasServerChecks = true;
+                        break;
+                }
+            }
+
+            foreach (var tag in classTags)
+                if (!tags.ContainsKey(tag.Key))
+                    tags[tag.Key] = tag.Value;
+        }
+
+        var sortedTags = tags.OrderBy(static t => t.Key, StringComparer.Ordinal)
+            .Select(static t => new ClientTag(t.Key, t.Value))
+            .ToEquatableArray();
+        // [AllowAnonymous] opts the operation out of authorization entirely, so no requirement applies to it.
+        if (allowAnonymous)
+            return new ClientMetadata(true, false, EquatableArray<string>.Empty, EquatableArray<string>.Empty, false,
+                sortedTags);
+
+        return new ClientMetadata(
+            false,
+            permissions.Count > 0 || roles.Count > 0 || hasServerChecks,
+            permissions.ToEquatableArray(),
+            roles.ToEquatableArray(),
+            hasServerChecks,
+            sortedTags);
     }
 
     private static string ErrorsExpression(Model entry) {
@@ -205,7 +318,8 @@ internal static class RpcMethodEmission {
             isNameInferred,
             isIdempotent,
             errors,
-            ModuleScanner.BuildMetadataName(type));
+            ModuleScanner.BuildMetadataName(type),
+            ReadClientMetadata(type));
         return true;
     }
 

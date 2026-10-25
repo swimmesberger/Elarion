@@ -814,6 +814,64 @@ describe('JSON-RPC client generator', () => {
       .rejects.toMatchObject({code: 'business_rule', rpcCode: -32004})
   })
 
+  it('exposes the support reference of an unexpected error, and none for other errors', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource)
+    const respond = (error: unknown) => clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async () => jsonResponse({jsonrpc: '2.0', id: 'r', error}),
+      idGenerator: () => 'r',
+    })
+
+    await expect(respond({code: -32603, message: 'Internal error', data: {code: 'internal', reference: 'abc123'}})
+      .call('math.add', {left: 1, right: 2}))
+      .rejects.toMatchObject({code: 'internal', isInternalError: true, reference: 'abc123', message: 'Internal error'})
+    await expect(respond({code: -32001, message: 'missing', data: {code: 'not_found'}})
+      .call('math.add', {left: 1, right: 2}))
+      .rejects.toMatchObject({code: 'not_found', reference: undefined})
+  })
+
+  it('emits normalized per-method requirements, read-only flags and tags as rpcMethodInfo', async () => {
+    const schema = rpcClientTestSchema()
+    schema.methods['math.add'].readOnly = true
+    schema.methods['math.add'].idempotent = true
+    schema.methods['math.add'].tags = {viewAs: 'refused', timeout: '180s'}
+    schema.methods['math.add'].requires = {
+      authenticated: true,
+      permissions: ['math.write', 'math.import'],
+      roles: ['Clerk'],
+      serverChecks: true,
+    }
+    schema.methods['user.get'].requires = {anonymous: true}
+    const generated = generateRpcClientFiles(schema)
+    const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as {
+      rpcMethodInfo: Record<string, unknown>
+    }
+
+    expect(clientModule.rpcMethodInfo).toEqual({
+      'math.add': {
+        readOnly: true,
+        idempotent: true,
+        requires: {
+          anonymous: false,
+          authenticated: true,
+          permissions: ['math.import', 'math.write'],
+          roles: ['Clerk'],
+          serverChecks: true,
+        },
+        tags: {timeout: '180s', viewAs: 'refused'},
+      },
+      'user.get': {
+        readOnly: false,
+        idempotent: false,
+        requires: {anonymous: true, authenticated: false, permissions: [], roles: [], serverChecks: false},
+        tags: {},
+      },
+    })
+    // Deterministic key order in the emitted literal, so regenerating an unchanged schema is a no-op.
+    expect(generated.clientSource).toContain('"tags":{"timeout":"180s","viewAs":"refused"}')
+  })
+
   it('propagates a transform result of null instead of falling back to the raw value', async () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     const clientModule = await loadGeneratedClient(generated.clientSource)

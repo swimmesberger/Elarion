@@ -58,6 +58,11 @@ item is not a secured operation — the handler's own `[RequirePermission]`/`[Fe
 server-side (see [Authorization](/docs/concepts/authorization)).
 </Callout>
 
+A `when` clause names a capability; an **action** usually maps to one RPC method, whose requirements the server
+already exports. `canCall(rpcMethodInfo['invoices.approve'], capabilities)` decides from those — all required
+permissions and roles, the signed-in state — so a button stays in step with the handler without repeating its
+permission (see [TypeScript client › Method requirements](/docs/capabilities/transports/typescript-client#method-requirements-and-ui-gating)).
+
 ## What you import vs. what you own
 
 The package ships the *machinery* with fixed semantics; the application owns the *points* and the shell —
@@ -72,6 +77,7 @@ Elarion deliberately ships no UI kit and no router integration:
 | `ContributionProvider`, `useContributions`, `<ExtensionSlot context=…>` (`/react`) | Route composition and module discovery (the glob) |
 | `provideContributions`, `injectContributions`→`Signal` (`/angular`) | Slot rendering — an `@for` block, or a self-owned `*extensionSlot` directive |
 | `redirectUnless` route guard (`/tanstack-router`) | Everything else routing — TanStack's own API |
+| `canCall(rpcMethodInfo[method], capabilities)` — action gating from the RPC contract | Which actions you grey out or hide |
 
 Keeping the machinery imported is what preserves review isolation: the semantics live in the framework and
 are not re-reviewed (or silently forked) in every application. Keeping the points app-owned is the same

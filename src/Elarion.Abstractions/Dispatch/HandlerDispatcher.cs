@@ -30,11 +30,16 @@ public sealed class HandlerDispatcher {
     /// <param name="errors">
     /// The failures the operation declares; <see langword="null"/> for a hand-wired route without a contract.
     /// </param>
+    /// <param name="client">
+    /// What a client may know before calling (evaluable requirements and tags), exported to the schema;
+    /// <see langword="null"/> for none.
+    /// </param>
     public HandlerDispatcher Map<TRequest, TResponse>(
         string name,
         HandlerTransports transports = HandlerTransports.All,
         bool idempotent = false,
-        IReadOnlyList<ErrorContract>? errors = null)
+        IReadOnlyList<ErrorContract>? errors = null,
+        HandlerClientMetadata? client = null)
         where TRequest : class {
         if (_frozen is not null)
             throw new InvalidOperationException("Cannot register handlers after Freeze() has been called.");
@@ -57,7 +62,8 @@ public sealed class HandlerDispatcher {
                 return Result<object>.Failure(result.Error);
             },
             idempotent,
-            errors);
+            errors,
+            client);
 
         return this;
     }
@@ -72,7 +78,8 @@ public sealed class HandlerDispatcher {
         Func<TRequest, IServiceProvider, CancellationToken, ValueTask<Result<TResponse>>> handler,
         HandlerTransports transports = HandlerTransports.All,
         bool idempotent = false,
-        IReadOnlyList<ErrorContract>? errors = null)
+        IReadOnlyList<ErrorContract>? errors = null,
+        HandlerClientMetadata? client = null)
         where TRequest : class {
         if (_frozen is not null)
             throw new InvalidOperationException("Cannot register handlers after Freeze() has been called.");
@@ -94,7 +101,8 @@ public sealed class HandlerDispatcher {
                 return Result<object>.Failure(result.Error);
             },
             idempotent,
-            errors);
+            errors,
+            client);
 
         return this;
     }

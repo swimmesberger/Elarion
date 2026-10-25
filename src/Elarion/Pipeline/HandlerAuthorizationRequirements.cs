@@ -40,7 +40,7 @@ internal static class HandlerAuthorizationRequirements {
             roles,
             claims,
             policies,
-            []);
+            []) { HandlerType = handlerType };
     }
 
     // ConditionalWeakTable requires a reference-type value, so the requirements struct is boxed once per type.

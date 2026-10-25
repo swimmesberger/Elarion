@@ -27,8 +27,7 @@ public sealed class StreamAuthorizationDecorator<TRequest, TItem>(
             type.GetCustomAttributes<RequireRoleAttribute>(true).Select(x => x.Role).ToArray(),
             type.GetCustomAttributes<RequireClaimAttribute>(true).ToArray(),
             type.GetCustomAttributes<RequirePolicyAttribute>(true).Select(x => x.Policy).ToArray(),
-            resourceBindings?.Select(binding => new ResourceRequirement(binding.ResourceType, binding.ResourceTypeName,
-                binding.Operation, binding.IdSelector(request))).ToArray() ?? []);
+            resourceBindings?.Select(binding => binding.Resolve(request)).ToArray() ?? []) { HandlerType = type };
         var error = await authorizer.AuthorizeAsync(requirements, request, ct).ConfigureAwait(false);
         if (error is null)
             return await inner.HandleAsync(request, ct).ConfigureAwait(false);

@@ -82,6 +82,12 @@
             ]
           }
         }
+      },
+      "requires": {
+        "authenticated": true,
+        "permissions": [
+          "clients.write"
+        ]
       }
     },
     "clients.get": {
@@ -131,7 +137,14 @@
         "unauthorized": {
           "kind": "unauthorized"
         }
-      }
+      },
+      "requires": {
+        "authenticated": true,
+        "permissions": [
+          "clients.read"
+        ]
+      },
+      "readOnly": true
     },
     "clients.list": {
       "params": {
@@ -182,7 +195,14 @@
         "unauthorized": {
           "kind": "unauthorized"
         }
-      }
+      },
+      "requires": {
+        "authenticated": true,
+        "permissions": [
+          "clients.read"
+        ]
+      },
+      "readOnly": true
     },
     "elarion.session": {
       "params": {
@@ -301,7 +321,14 @@
         "unauthorized": {
           "kind": "unauthorized"
         }
-      }
+      },
+      "requires": {
+        "authenticated": true,
+        "permissions": [
+          "invoices.read"
+        ]
+      },
+      "readOnly": true
     },
     "invoices.create": {
       "params": {
@@ -396,6 +423,12 @@
             ]
           }
         }
+      },
+      "requires": {
+        "authenticated": true,
+        "permissions": [
+          "invoices.write"
+        ]
       }
     },
     "invoices.list": {
@@ -456,7 +489,14 @@
         "unauthorized": {
           "kind": "unauthorized"
         }
-      }
+      },
+      "requires": {
+        "authenticated": true,
+        "permissions": [
+          "invoices.read"
+        ]
+      },
+      "readOnly": true
     },
     "invoices.sendStatus": {
       "params": {
@@ -513,7 +553,14 @@
         "unauthorized": {
           "kind": "unauthorized"
         }
-      }
+      },
+      "requires": {
+        "authenticated": true,
+        "permissions": [
+          "invoices.read"
+        ]
+      },
+      "readOnly": true
     }
   },
   "capabilities": {

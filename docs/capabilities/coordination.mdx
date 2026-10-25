@@ -11,6 +11,7 @@ being coordinated:
 | Run one recurring occurrence across the cluster | [Scheduler claim](/docs/capabilities/scheduling/multi-node) | Job + due time |
 | Deliver one integration consumer invocation at a time | [Outbox delivery lease](/docs/capabilities/events/backends) | Message + consumer |
 | Work through your own queue table, one worker per row | [Leased work rows](#leased-work-rows) | Row id + lease token |
+| Serialize writers of one row or key inside a transaction | [Row and advisory locks](#row-and-advisory-locks) | Entity key, or scope + key |
 | Make exactly one instance hold a long-lived application role | **Role lease** | Role name |
 
 A role lease answers a coarse question such as “which instance is the maintenance coordinator?” It
@@ -326,5 +327,128 @@ Delivery stays **at least once**: a worker that crashes after the remote side ac
 finalize leaves the row to be retried. Give the remote side the row `Id` as its idempotency key where it
 accepts one.
 
+### Giving up, guarding the outcome, and shutting down
+
+Four needs recur in every worker; the primitive answers each so the skeleton is not rewritten per queue:
+
+- **Give up an exhausted row at claim.** `Exhausted` names rows that have used up their attempts — evaluated right
+  after the stamp, on the values `OnClaim` wrote, so `d => d.Attempts > MaxAttempts` also catches a row whose every
+  previous worker died mid-call. Such a row is not returned: it is finalized at once with `GiveUp` (which must take
+  it out of `Eligible`) and reported to `OnGivenUp` for logging. Without it, an exhausted row just sits in the table.
+  Every given-up row is reported, even after a callback threw; a failed report fails the claim, and the won rows are
+  released first instead of staying stamped until their lease lapses. A claim can therefore come back empty while
+  work remains — every candidate given up or taken by another worker — so an empty claim is not "queue drained".
+- **Write the outcome only while it still applies.** Work done without a lock can race a concurrent writer. A
+  `LeasedWorkFinalize<TRow>` with `StillEligible` applies the setters only while the row still meets that condition;
+  otherwise the claim is ended without them. The outcome says which happened (`Finalized`, `Ineligible`, `ClaimLost`).
+  `Ineligible` clears the lease at once and ignores `VisibleAfterUtc`: that backoff belonged to the discarded result,
+  and the concurrent writer's values decide through `Eligible` whether the row is still work.
+- **Give a batch back on shutdown.** `ReleaseClaimsAsync(ids, lockId, update, ct)` ends the claims on the unfinished
+  rows in one statement and lets the update take back the attempt the claim counted — it was never made.
+- **Read related data with the claim.** `ClaimPendingAsync(claim, select, ct)` projects the won rows in the same
+  query (`m => new { m.Id, m.Attempts, m.Attachment.BlobId }`) instead of a second query per batch.
+
+```csharp
+var claimed = await db.ImageMetadata.ClaimPendingAsync(new LeasedWorkClaim<ImageMetadata> {
+    LockId = lockId, NowUtc = now, LeaseUntilUtc = now + Lease, BatchSize = 20,
+    Eligible = m => m.State == ReadState.Pending,
+    OrderBy = rows => rows.OrderBy(m => m.UploadedAt),
+    OnClaim = s => s.SetProperty(m => m.Attempts, m => m.Attempts + 1),
+    Exhausted = m => m.Attempts > MaxAttempts,
+    GiveUp = s => s.SetProperty(m => m.State, ReadState.Done).SetProperty(m => m.Error, "attemptsExhausted"),
+    OnGivenUp = (m, _) => { logger.LogWarning("Metadata of {Id} given up.", m.Id); return ValueTask.CompletedTask; },
+}, m => new { m.Id, m.Attempts, m.Attachment.BlobId }, ct);
+
+var finished = 0;
+try {
+    foreach (var row in claimed) {
+        var read = await ReadAsync(row.BlobId, ct);
+        // Only while still pending: a newer upload meanwhile wrote its own values and marked the row done.
+        await db.ImageMetadata.FinalizeClaimAsync(row.Id, lockId, new LeasedWorkFinalize<ImageMetadata> {
+            Update = s => s.SetProperty(m => m.Width, read.Width).SetProperty(m => m.State, ReadState.Done),
+            StillEligible = m => m.State == ReadState.Pending,
+        }, ct);
+        finished++;
+    }
+}
+catch (OperationCanceledException) when (ct.IsCancellationRequested) {
+    // The pass's token is cancelled: give the rest back on a fresh one, attempt uncounted.
+    await db.ImageMetadata.ReleaseClaimsAsync(claimed.Skip(finished).Select(r => r.Id), lockId,
+        s => s.SetProperty(m => m.Attempts, m => m.Attempts - 1), CancellationToken.None);
+    throw;
+}
+```
+
+### Testing a worker
+
+The claim and every finalize are `ExecuteUpdate` statements, which EF InMemory cannot run — and InMemory would hide
+the concurrency the primitive exists for anyway. Test a worker against PostgreSQL with a Testcontainers fixture, the
+way Elarion tests the primitive itself: create the schema once per fixture, give every test its own rows (a per-test
+marker column in `Eligible`, like a source or tenant id, keeps tests in one table apart), and pass `NowUtc`
+explicitly so lease expiry and backoff are exact without waiting. Two workers racing for one batch are two contexts
+on the same fixture.
+
 The invariants and the extraction history are recorded in
 [ADR-0073](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0073-leased-work-rows.md).
+
+## Row and advisory locks
+
+Most concurrency is the database's job — constraints, optimistic concurrency, `ON CONFLICT`. Some rules are not
+expressible as a constraint: "periods of one unit never overlap" across a whole set, a read-then-write that must not
+interleave with another writer of the same aggregate. For those, `Elarion.EntityFrameworkCore.UnitOfWork` adds two
+**transaction-scoped** PostgreSQL locks on `DbContext`, held until the current transaction (a command's pipeline
+transaction, or one you opened) commits or rolls back:
+
+```csharp
+using Elarion.EntityFrameworkCore.UnitOfWork;
+
+// Lock one row; table and key column come from the EF model. False when no visible row has that key.
+if (!await db.LockRowAsync<LeaseUnit>(command.UnitId, RowLockMode.NoKeyUpdate, ct))
+    return AppError.NotFound("No such unit.");
+
+// No row to lock (the account may not exist yet): lock a key instead, or try without waiting.
+await db.AdvisoryLockAsync("billing-account", command.AccountNumber, ct);
+var period = command.Period.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+if (!await db.TryAdvisoryLockAsync("statement-run", period, ct))
+    return AppError.Conflict("A statement run for this period is already in progress.");
+```
+
+`LockRowAsync` looks the row up through the entity's own set first, so its query filters (tenant scoping, soft
+delete) and a hierarchy's discriminator apply: a row the context cannot see answers `false` and is never locked, so an
+id from a request cannot probe or stall another tenant's row. A strongly typed key with a value converter is converted
+the way EF converts it; an id of another type throws `ArgumentException`.
+
+| `RowLockMode` | SQL | Choose it when |
+| --- | --- | --- |
+| `Update` (default) | `FOR UPDATE` | a concurrent insert of a row *referencing* this one (a foreign key) must wait too — deleting a role against a concurrent assignment of it |
+| `NoKeyUpdate` | `FOR NO KEY UPDATE` | only writers of the row itself must be serialized; inserts referencing it proceed |
+| `Share` | `FOR SHARE` | readers may share; writers wait |
+| `KeyShare` | `FOR KEY SHARE` | only a change of the row's key or its deletion waits |
+
+Both refuse to run **outside a transaction** (PostgreSQL would release the lock at the end of its own statement) and
+on any provider other than PostgreSQL, so a lock never silently protects nothing. An ambient `TransactionScope` counts
+as a transaction because the connection enlists in it; a connection string with `Enlist=false` opts out of that, so
+lock inside an EF or pipeline transaction on such a connection. Tests that take a lock run against
+PostgreSQL ([Testcontainers](/docs/concepts/persistence-and-transactions#testing-persistence)), never EF InMemory.
+
+### One advisory key scheme
+
+A database has one advisory-lock space. Every advisory lock taken through Elarion locks
+`hashtextextended('scope:key', 0)` — `AdvisoryLockKey.Text(scope, key)` builds the text, the same function the
+framework uses — so two `(scope, key)` pairs only meet when their hashes collide. A scope names what is serialized
+(`billing-account`) and must not contain `:`. Scopes starting with `elarion.` are reserved; the framework locks:
+
+| Scope | Key | Taken by |
+| --- | --- | --- |
+| `elarion.scheduler.job` | the job name | the multi-node scheduler's window claim |
+| `elarion.devices.pairing` | the device id | reissuing a device's pairing code |
+
+The migration runner's session-level lock uses its own fixed key (`PostgreSqlMigrationRunner.DefaultAdvisoryLockKey`),
+not a hashed text. A host on the EF-free SQL tier builds the same text with `AdvisoryLockKey.Text` and runs
+`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))` itself.
+
+<Callout type="info">
+A lock is per transaction, not per node or per process: it serializes the transactions that ask for it on the one
+PostgreSQL every instance shares, and it ends with the transaction. For "exactly one instance does this for a long
+time", use a role lease; for "one worker per queue row", use leased work rows.
+</Callout>

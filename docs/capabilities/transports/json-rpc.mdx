@@ -210,6 +210,15 @@ Every error, application or protocol, carries `error.data = { "code": "<stable c
 the codes and payloads they produce with [`[ProducesError]`](/docs/reference/result-and-errors#produceserror--the-declared-error-contract),
 and the schema export lists them per method.
 
+An exception that escapes the handler pipeline is not an `AppError`: the dispatcher answers it with `-32603`,
+`error.data.code: "internal"`, the configured message and a support `error.data.reference`, and logs the exception
+with that reference (see [Unexpected errors](/docs/concepts/results-and-errors#unexpected-errors)).
+
+Each method in the exported schema also says what a client may know before calling it — `requires` (`anonymous`, or
+`authenticated` with its `permissions` and `roles`), `readOnly` for queries, and `[ClientTag]` hints under `tags` —
+which the generated client exposes as
+[`rpcMethodInfo`](/docs/capabilities/transports/typescript-client#method-requirements-and-ui-gating).
+
 ## In this section
 
 <Cards>

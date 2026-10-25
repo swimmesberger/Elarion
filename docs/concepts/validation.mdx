@@ -36,7 +36,7 @@ using System.ComponentModel.DataAnnotations;
 public sealed class CreateClient(BillingDbContext db, ICurrentUser user)
     : IHandler<CreateClient.Command, Result<CreateClient.Response>> {
     public sealed record Command : ICommand {
-        [StringLength(200, MinimumLength = 1)]
+        [Required, StringLength(200)]   // not blank: rejects "" and whitespace-only names
         public required string Name { get; init; }
 
         [EmailAddress, MaxLength(320)]
@@ -58,7 +58,8 @@ are enforced (and reported) too. The supported vocabulary is the set every schem
 | nullable, or a request member with a default | member may be omitted | optional |
 | `[Range(min, max)]` | numeric bounds | `minimum` / `maximum` (`exclusiveMinimum`/`exclusiveMaximum` for exclusive bounds) |
 | `[MinLength]` / `[MaxLength]` / `[Length]` / `[StringLength]` | string/collection length | `minLength` / `maxLength` (`minItems`/`maxItems` on arrays) |
-| `[RegularExpression]` | pattern match | `pattern` |
+| `[RegularExpression]` | the **whole** value matches | `pattern`, anchored as `^(?:…)$` unless already anchored |
+| `[Required]` on a string | not empty and not whitespace-only | a not-blank lookahead on `pattern` |
 | `[EmailAddress]` | email shape | `format: "email"` |
 | `[Url]` | absolute URL | `format: "uri"` |
 | `[Base64String]` | base64 content | `format: "byte"` |
@@ -68,6 +69,33 @@ are enforced (and reported) too. The supported vocabulary is the set every schem
 (`[AllowedValues(ElarionVariants.EmailBackend.Smtp, ElarionVariants.EmailBackend.Office365)]`) and the 400,
 the schema `enum`, the OpenAPI document, and the TypeScript client's `z.enum(...)` all follow — see
 [Feature flags](/docs/concepts/feature-flags#the-variant-registry).
+
+### Not blank, and whole-value patterns
+
+`[StringLength(200, MinimumLength = 1)]` admits `"   "`. The DataAnnotations rule for "not blank" is `[Required]`:
+on a string it rejects `""` and whitespace-only values. Elarion does not use it for requiredness (nullability is the
+source), but it exports it as what it enforces — a not-blank `pattern`:
+
+```json
+"name": { "type": "string", "maxLength": 200, "pattern": "^(?=[\\s\\S]*\\S)(?:[\\s\\S]*)$" }
+```
+
+`[Required(AllowEmptyStrings = true)]` and `[Required]` on a non-string add nothing to the schema.
+
+The server's `RegularExpressionAttribute` requires the **whole** value to match, while JSON Schema — and every client
+validator built on it, the generated Zod `.regex(...)` included — only searches for a match. A pattern is therefore
+exported anchored: `[RegularExpression("[a-z]+")]` becomes `"pattern": "^(?:[a-z]+)$"`, so the client rejects
+`"abc1"` just as the server does. A pattern that already anchors both ends (`^…$` without a top-level `|`) is
+exported unchanged. A member with both `[Required]` and `[RegularExpression]` exports one combined pattern
+(`^(?=[\s\S]*\S)(?:…)$`); the regular expression's explicit message wins the shared keyword. The
+[OpenAPI document](/docs/capabilities/transports/openapi) keeps ASP.NET's own mapping: the pattern as declared and
+`[Required]` as a required member.
+
+Both rewrites apply to **request** schemas, which describe what the server validates. Result and event schemas keep
+the pattern as declared and get no not-blank lookahead: the server never validates what it sends, but the generated
+client parses it, and a stored value from before a constraint must not fail a read. Two edges differ between the
+anchored pattern and the server: `RegularExpressionAttribute` accepts an empty string (the client rejects it), and it
+checks only the first match, so `a|ab` rejects `"ab"` on the server while `^(?:a|ab)$` accepts it.
 
 ### Custom constraints
 

@@ -64,6 +64,19 @@ public sealed class ErrorContractGeneratorTests {
     }
 
     [Fact]
+    public void RequireResourceDeniedAsNotFound_ImpliesNotFound() {
+        var hidden = Run(Handler(
+            "[Elarion.Abstractions.Authorization.RequireResource(typeof(Redeem), Id = \"Token\", " +
+            "DenyAs = Elarion.Abstractions.Authorization.ResourceDenial.NotFound)]"), out _);
+        var forbidden = Run(Handler(
+            "[Elarion.Abstractions.Authorization.RequireResource(typeof(Redeem), Id = \"Token\")]"), out _);
+
+        ContractOf(hidden, "tokens.redeem").Should().Equal(
+            "forbidden:Forbidden:", "not_found:NotFound:", "unauthorized:Unauthorized:");
+        ContractOf(forbidden, "tokens.redeem").Should().Equal("forbidden:Forbidden:", "unauthorized:Unauthorized:");
+    }
+
+    [Fact]
     public void InvalidErrorCode_IsReported() {
         Run(Handler("[ProducesError(\"Token.Bad\", ErrorKind.Validation)]"), out var diagnostics);
 
@@ -361,7 +374,8 @@ public sealed class ErrorContractGeneratorTests {
             var fields = Decode(value.Substring(0, value.LastIndexOf("\")]", StringComparison.Ordinal)));
             if (fields[0] != operation) continue;
 
-            var errors = Decode(fields[^1]!);
+            // The error contract is field 12; later fields were appended after it (client metadata).
+            var errors = Decode(fields[12]!);
             var result = new List<string>();
             for (var i = 0; i < errors.Count; i += 3)
                 result.Add($"{errors[i]}:{errors[i + 1]}:{errors[i + 2]}");

@@ -264,7 +264,8 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
             .Select(static item => item.Model!)
             .ToEquatableArray();
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
-        var scoped = ErrorContractScopes.Apply(models, modules, compilation, diagnostics.Add, ct);
+        var scoped = ClientRequirementScopes.Apply(
+            ErrorContractScopes.Apply(models, modules, compilation, diagnostics.Add, ct), modules, compilation, ct);
 
         var result = new List<ManifestItem<RpcMethodEmission.Model>>(items.Length + 1);
         var index = 0;

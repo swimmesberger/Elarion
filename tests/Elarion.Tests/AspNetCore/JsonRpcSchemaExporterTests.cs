@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.ClientEvents;
+using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Modules;
 using Elarion.JsonRpc;
 using Elarion.Tests.Features;
@@ -237,6 +238,108 @@ public sealed class JsonRpcSchemaExporterTests {
     }
 
     [Fact]
+    public void Generate_AnchorsPatternsAndExportsRequiredStringsAsNotBlank() {
+        var fields = ExportParamsFields<PatternRequest>("sample.patterns");
+        string Pattern(string field) => fields.GetProperty(field).GetProperty("pattern").GetString()!;
+
+        // The server matches the whole value; JSON Schema searches, so an unanchored pattern is anchored on export.
+        Pattern("letters").Should().Be("^(?:[a-z]+)$");
+        // An already-anchored pattern stays byte-identical; a top-level alternation is not anchored by its ^/$.
+        Pattern("anchored").Should().Be("^[a-z]+$");
+        Pattern("alternation").Should().Be("^(?:^a|b$)$");
+        // [Required] on a string is the BCL's not-blank constraint; with a pattern, both apply to one keyword.
+        Pattern("title").Should().Be(@"^(?=[\s\S]*\S)(?:[\s\S]*)$");
+        Pattern("code").Should().Be(@"^(?=[\s\S]*\S)(?:^[A-Z]+$)$");
+        fields.GetProperty("code").GetProperty("x-elarion-error-messages").GetProperty("pattern").GetString()
+            .Should().Be("Enter a code.");
+        // Empty strings allowed, or a non-string member: [Required] adds nothing (requiredness is nullability).
+        fields.GetProperty("free").TryGetProperty("pattern", out _).Should().BeFalse();
+        fields.GetProperty("count").TryGetProperty("pattern", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Generate_ResultSchemas_KeepPatternsAsDeclared_AndAddNoNotBlank() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<PingRequest, PatternRequest>("sample.read", (_, _, _) => throw new NotSupportedException())
+            .Freeze();
+        using var doc = JsonDocument.Parse(JsonRpcSchemaExporter.Generate(dispatcher, options));
+        var fields = doc.RootElement.GetProperty("methods").GetProperty("sample.read").GetProperty("result")
+            .GetProperty("properties");
+
+        // The server never validates results, but the client parses them: a stored value from before a constraint must
+        // not fail a read, so the request-side tightening stays off.
+        fields.GetProperty("letters").GetProperty("pattern").GetString().Should().Be("[a-z]+");
+        fields.GetProperty("code").GetProperty("pattern").GetString().Should().Be("^[A-Z]+$");
+        fields.GetProperty("title").TryGetProperty("pattern", out _).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("letters", "abc")]
+    [InlineData("letters", "abc1")]
+    [InlineData("letters", "1abc")]
+    [InlineData("alternation", "a")]
+    [InlineData("alternation", "ab")]
+    [InlineData("alternation", "b")]
+    [InlineData("title", "")]
+    [InlineData("title", " \t ")]
+    [InlineData("title", " x ")]
+    [InlineData("code", "   ")]
+    [InlineData("code", "ABC")]
+    [InlineData("code", "AB C")]
+    public void Generate_ExportedPatterns_AcceptExactlyWhatTheServerAccepts(string field, string value) {
+        var fields = ExportParamsFields<PatternRequest>("sample.patterns");
+        var pattern = fields.GetProperty(field).GetProperty("pattern").GetString()!;
+        var member = typeof(PatternRequest).GetProperty(char.ToUpperInvariant(field[0]) + field[1..])!;
+        var server = member.GetCustomAttributes(true).OfType<ValidationAttribute>().All(a => a.IsValid(value));
+
+        // Search semantics, as a JSON Schema validator (and the generated Zod regex) applies the pattern.
+        System.Text.RegularExpressions.Regex.IsMatch(value, pattern).Should().Be(server);
+    }
+
+    [Fact]
+    public void Generate_ExportsClientRequirementsReadOnlyAndTagsPerMethod() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        static ValueTask<Result<PingResponse>> Ok<TRequest>(TRequest _, IServiceProvider __, CancellationToken ___) =>
+            ValueTask.FromResult<Result<PingResponse>>(new PingResponse("ok"));
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<ImportCommand, PingResponse>("ledger.import", Ok, client: new HandlerClientMetadata {
+                RequiresAuthentication = true,
+                Permissions = ["ledger.write", "ledger.import"],
+                Roles = ["Clerk"],
+                HasServerChecks = true,
+                Tags = new Dictionary<string, string> { ["viewAs"] = "refused", ["timeout"] = "180s" }
+            })
+            .MapDelegate<StatusQuery, PingResponse>("ledger.status", Ok,
+                client: new HandlerClientMetadata { AllowAnonymous = true })
+            .MapDelegate<PingRequest, PingResponse>("ledger.ping", Ok)
+            .Freeze();
+
+        using var doc = JsonDocument.Parse(JsonRpcSchemaExporter.Generate(dispatcher, options));
+        var methods = doc.RootElement.GetProperty("methods");
+
+        var import = methods.GetProperty("ledger.import");
+        var requires = import.GetProperty("requires");
+        requires.GetProperty("authenticated").GetBoolean().Should().BeTrue();
+        requires.GetProperty("permissions").EnumerateArray().Select(static p => p.GetString())
+            .Should().Equal("ledger.import", "ledger.write");
+        requires.GetProperty("roles").EnumerateArray().Select(static r => r.GetString()).Should().Equal("Clerk");
+        requires.GetProperty("serverChecks").GetBoolean().Should().BeTrue();
+        requires.TryGetProperty("anonymous", out _).Should().BeFalse();
+        import.GetProperty("tags").EnumerateObject().Select(static t => $"{t.Name}={t.Value.GetString()}")
+            .Should().Equal("timeout=180s", "viewAs=refused");
+        import.TryGetProperty("readOnly", out _).Should().BeFalse();
+
+        // An IQuery request is read-only; an anonymous operation lists no other requirement.
+        var status = methods.GetProperty("ledger.status");
+        status.GetProperty("readOnly").GetBoolean().Should().BeTrue();
+        status.GetProperty("requires").EnumerateObject().Select(static p => p.Name).Should().Equal("anonymous");
+
+        // A route without client metadata (and a non-query request) gains no member.
+        methods.GetProperty("ledger.ping").EnumerateObject().Select(static p => p.Name).Should().Equal("params", "result");
+    }
+
+    [Fact]
     public void Generate_OmitsDefaultErrorMessages() {
         var fields = ExportParamsFields<MessagedRequest>("sample.messaged");
 
@@ -462,6 +565,28 @@ public sealed class JsonRpcSchemaExporterTests {
         [MaxLength(5, ErrorMessage = "Too long.")]
         [StringLength(10)]
         public required string Overridden { get; init; }
+    }
+
+    private sealed record ImportCommand : ICommand;
+
+    private sealed record StatusQuery : IQuery;
+
+    private sealed record PatternRequest {
+        [RegularExpression("[a-z]+")] public required string Letters { get; init; }
+
+        [RegularExpression("^[a-z]+$")] public required string Anchored { get; init; }
+
+        [RegularExpression("^a|b$")] public required string Alternation { get; init; }
+
+        [Required] public required string Title { get; init; }
+
+        [RegularExpression("^[A-Z]+$")]
+        [Required(ErrorMessage = "Enter a code.")]
+        public required string Code { get; init; }
+
+        [Required(AllowEmptyStrings = true)] public required string Free { get; init; }
+
+        [Required] public required int Count { get; init; }
     }
 
     // Stands in for a generated .resx designer class: a public static string getter per message.

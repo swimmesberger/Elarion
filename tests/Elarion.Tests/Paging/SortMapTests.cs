@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using Elarion.Abstractions;
 using Elarion.Paging;
 using Xunit;
 
@@ -104,5 +105,62 @@ public sealed class SortMapTests {
 
         // Rank descending puts the rank-5 group first; its tiebreaker stays Id ascending (1, 2), then rank 1.
         ids.Should().Equal(1, 2, 3);
+    }
+
+    [Fact]
+    public void Apply_BareKey_UsesTheKeysDeclaredDirection() {
+        // A bare key is not "ascending": it is the key's declared direction. Ascending on a descending key is "+key".
+        var map = SortMap<RankedRow>.CreateBuilder("id", r => r.Id)
+            .Add("rank", r => r.Rank, SortDirection.Descending).ThenBy(r => r.Id)
+            .Build();
+
+        map.Apply(RankedRows.AsQueryable(), "rank").Select(r => r.Id).ToArray().Should().Equal(1, 2, 3);
+        map.Apply(RankedRows.AsQueryable(), "+rank").Select(r => r.Id).ToArray().Should().Equal(3, 1, 2);
+    }
+
+    [Fact]
+    public void Keys_ListEachKeyInDeclarationOrderWithItsDeclaredDirection() {
+        var map = SortMap<Row>.CreateBuilder("id", r => r.Id, SortDirection.Descending)
+            .Add("name", r => r.Name)
+            .Build();
+
+        map.Keys.Should().Equal(
+            new SortKey("id", SortDirection.Descending, true),
+            new SortKey("name", SortDirection.Ascending, false));
+    }
+
+    [Fact]
+    public void Keys_ReAddedKeyKeepsItsPositionWithTheLastDeclaration() {
+        var map = SortMap<Row>.CreateBuilder("id", r => r.Id)
+            .Add("name", r => r.Name)
+            .Add("id", r => r.Id, SortDirection.Descending)
+            .Build();
+
+        map.Keys.Should().Equal(
+            new SortKey("id", SortDirection.Descending, true),
+            new SortKey("name", SortDirection.Ascending, false));
+    }
+
+    [Fact]
+    public void Validate_KnownPrefixedOrBlankKey_Passes() {
+        var map = SortMap<Row>.CreateBuilder("id", r => r.Id).Add("name", r => r.Name).Build();
+
+        map.Validate("-NAME").Should().BeNull();
+        map.Validate("+id").Should().BeNull();
+        map.Validate("  ").Should().BeNull();
+        map.Validate(null).Should().BeNull();
+    }
+
+    [Fact]
+    public void Validate_UnknownKey_FailsWithAFieldErrorNamingTheAllowedKeys() {
+        var map = SortMap<Row>.CreateBuilder("id", r => r.Id).Add("name", r => r.Name).Build();
+
+        var error = map.Validate("-unknown", "orderBy");
+
+        error!.Kind.Should().Be(ErrorKind.Validation);
+        error.Code.Should().Be(PagingErrorCodes.SortKeyUnknown);
+        var data = error.Data.Should().BeOfType<ValidationErrorData>().Subject;
+        data.FieldErrors!["orderBy"].Should().ContainSingle()
+            .Which.Should().Be("Unknown sort key 'unknown'. Allowed keys: id, name.");
     }
 }

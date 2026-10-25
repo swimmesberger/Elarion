@@ -89,6 +89,93 @@ public sealed class QueryableAuthorizationExtensionsTests {
         authorizer.Matches(new Doc(Guid.NewGuid(), OwnerB), UserA).Should().BeFalse();
     }
 
+    [Fact]
+    public void WhereAuthorizedVia_KeepsOnlyRowsWhoseOwnerIsVisible() {
+        var docs = Docs().ToList();
+        var notes = new[] {
+            new Note(Guid.NewGuid(), docs[0].Id),
+            new Note(Guid.NewGuid(), docs[1].Id),
+            new Note(Guid.NewGuid(), docs[2].Id)
+        }.AsQueryable();
+
+        var visible = notes.WhereAuthorizedVia(
+                n => n.DocId, docs.AsQueryable(), d => d.Id,
+                new FakeQueryAuthorizer<Doc>(d => d.OwnerId == OwnerA), UserA)
+            .ToList();
+
+        visible.Select(n => n.DocId).Should().BeEquivalentTo([docs[0].Id, docs[2].Id]);
+    }
+
+    [Fact]
+    public void WhereAuthorizedVia_UnrestrictedOwner_LeavesSourceUnchanged() {
+        var notes = new[] { new Note(Guid.NewGuid(), Guid.NewGuid()) }.AsQueryable();
+
+        notes.WhereAuthorizedVia(n => n.DocId, Docs(), d => d.Id, new FakeQueryAuthorizer<Doc>(null), UserA)
+            .Should().BeSameAs(notes);
+    }
+
+    [Fact]
+    public void WhereAuthorizedVia_NullablePointer_ExcludesRowsWithoutAnOwner() {
+        var docs = Docs().ToList();
+        var notes = new[] {
+            new LooseNote(Guid.NewGuid(), docs[0].Id),
+            new LooseNote(Guid.NewGuid(), null),
+            new LooseNote(Guid.NewGuid(), docs[1].Id)
+        }.AsQueryable();
+
+        notes.WhereAuthorizedVia(
+                n => n.DocId, docs.AsQueryable(), d => (Guid?)d.Id,
+                new FakeQueryAuthorizer<Doc>(d => d.OwnerId == OwnerA), UserA)
+            .Select(n => n.DocId).ToList().Should().Equal(docs[0].Id);
+    }
+
+    [Fact]
+    public void Combinators_RefuseNullAuthorizers_AndIgnoreLaterChangesToTheArray() {
+        var ownedByA = new FakeQueryAuthorizer<Doc>(d => d.OwnerId == OwnerA);
+        var nullAnyOf = () => QueryAuthorizers.AnyOf<Doc>(ownedByA, null!);
+        var nullAllOf = () => QueryAuthorizers.AllOf<Doc>(null!, ownedByA);
+        nullAnyOf.Should().Throw<ArgumentException>();
+        nullAllOf.Should().Throw<ArgumentException>();
+
+        IQueryAuthorizer<Doc>[] parts = [ownedByA];
+        var composed = QueryAuthorizers.AllOf(parts);
+        parts[0] = new FakeQueryAuthorizer<Doc>(null);
+
+        Docs().WhereAuthorized(composed, UserA).ToList().Should().HaveCount(2, "the composition kept its own copy");
+    }
+
+    [Fact]
+    public void AnyOf_OrsTheFilters_AndAnUnrestrictedOneLiftsTheRestriction() {
+        var ownedByA = new FakeQueryAuthorizer<Doc>(d => d.OwnerId == OwnerA);
+        var ownedByB = QueryAuthorizers.From<Doc>((_, _) => d => d.OwnerId == OwnerB);
+
+        Docs().WhereAuthorized(QueryAuthorizers.AnyOf<Doc>(ownedByA, ownedByB), UserA).ToList().Should().HaveCount(3);
+        Docs().WhereAuthorized(QueryAuthorizers.AnyOf<Doc>(ownedByA), UserA).ToList().Should().HaveCount(2);
+        QueryAuthorizers.AnyOf<Doc>(ownedByA, new FakeQueryAuthorizer<Doc>(null)).GetFilter(UserA, ResourceOperation.Read)
+            .Should().BeNull();
+        Docs().WhereAuthorized(QueryAuthorizers.AnyOf<Doc>(), UserA).ToList().Should().BeEmpty("no authorizer grants anything");
+    }
+
+    [Fact]
+    public void AllOf_AndsTheFilters_AndAnUnrestrictedOneAddsNothing() {
+        var ownedByA = new FakeQueryAuthorizer<Doc>(d => d.OwnerId == OwnerA);
+        var docs = Docs().ToList();
+        var first = docs[0].Id;
+        var onlyFirst = QueryAuthorizers.From<Doc>((_, _) => d => d.Id == first);
+
+        docs.AsQueryable().WhereAuthorized(QueryAuthorizers.AllOf<Doc>(ownedByA, onlyFirst), UserA)
+            .Select(d => d.Id).ToList().Should().Equal(first);
+        docs.AsQueryable().WhereAuthorized(QueryAuthorizers.AllOf<Doc>(ownedByA, new FakeQueryAuthorizer<Doc>(null)), UserA)
+            .ToList().Should().HaveCount(2);
+        // An empty AND would lift every restriction: refused rather than failing open.
+        var empty = () => QueryAuthorizers.AllOf<Doc>();
+        empty.Should().Throw<ArgumentException>();
+    }
+
+    private sealed record Note(Guid Id, Guid DocId);
+
+    private sealed record LooseNote(Guid Id, Guid? DocId);
+
     private static IQueryable<Doc> Docs() {
         return new[] {
             new Doc(Guid.NewGuid(), OwnerA),

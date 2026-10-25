@@ -17,6 +17,12 @@ public static class HttpAppErrorMapper {
     public const string DataExtensionName = "data";
 
     /// <summary>
+    /// The RFC 7807 extension member that carries an unexpected error's support reference
+    /// (<see cref="UnexpectedError.Reference"/>); present only on the <c>500</c> answer for an exception.
+    /// </summary>
+    public const string ReferenceExtensionName = "reference";
+
+    /// <summary>
     /// Returns the ProblemDetails extension members of <paramref name="error"/>: <c>code</c> always, plus <c>data</c>
     /// when the error carries a typed payload. A <see cref="ValidationErrorData"/> payload is not repeated as
     /// <c>data</c>: the validation problem already carries it as the standard <c>errors</c> map.

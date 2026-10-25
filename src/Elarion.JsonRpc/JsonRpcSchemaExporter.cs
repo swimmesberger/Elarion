@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Dispatch;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Schema;
@@ -51,10 +52,9 @@ public static class JsonRpcSchemaExporter {
         JsonSerializerOptions? jsonOptions = null,
         JsonRpcSchemaExportOptions? exportOptions = null) {
         var options = CreateSchemaOptions(jsonOptions);
-        IReadOnlyList<(string MethodName, Type RequestType, Type ResponseType, bool Idempotent,
-            IReadOnlyList<ErrorContract> Errors)> methods;
+        IReadOnlyList<HandlerRoute> methods;
         try {
-            methods = dispatcher.GetRegisteredMethods();
+            methods = dispatcher.GetRegisteredRoutes();
         }
         catch (InvalidOperationException ex) {
             throw new InvalidOperationException(
@@ -67,24 +67,31 @@ public static class JsonRpcSchemaExporter {
                 "Cannot export the JSON-RPC schema because the dispatcher has no registered methods.");
 
         var methodsObj = new JsonObject();
-        foreach (var (methodName, requestType, responseType, idempotent, errors) in methods) {
+        foreach (var route in methods) {
             var requestSchema = BuildSchemaNode(
-                requestType, options, SchemaDirection.Request, InjectReflectedAnnotations);
+                route.RequestType, options, SchemaDirection.Request, InjectReflectedRequestAnnotations);
             var responseSchema = BuildSchemaNode(
-                responseType, options, SchemaDirection.Response, InjectReflectedAnnotations);
+                route.ResponseType, options, SchemaDirection.Response, InjectReflectedResponseAnnotations);
 
             var method = new JsonObject {
                 ["params"] = requestSchema,
                 ["result"] = responseSchema
             };
             // Only emit the flag when set, so the schema stays byte-identical for non-idempotent methods.
-            if (idempotent) method["idempotent"] = true;
+            if (route.Idempotent) method["idempotent"] = true;
 
             // The declared error contract (ADR-0080): code -> kind + optional payload schema, in ordinal code
             // order. Omitted when the operation declares none, so contract-free schemas stay byte-identical.
-            if (BuildErrorsNode(errors, options) is { } errorsNode) method["errors"] = errorsNode;
+            if (BuildErrorsNode(route.Errors ?? [], options) is { } errorsNode) method["errors"] = errorsNode;
 
-            methodsObj[methodName] = method;
+            // What a client may know before calling: the requirements it can evaluate against its session, whether
+            // the operation only reads (an IQuery request), and its [ClientTag] hints. Each member is omitted when
+            // empty, so a method without any stays byte-identical.
+            if (BuildRequiresNode(route.Client) is { } requiresNode) method["requires"] = requiresNode;
+            if (typeof(IQuery).IsAssignableFrom(route.RequestType)) method["readOnly"] = true;
+            if (BuildTagsNode(route.Client) is { } tagsNode) method["tags"] = tagsNode;
+
+            methodsObj[route.Name] = method;
         }
 
         var schema = new JsonObject {
@@ -116,12 +123,48 @@ public static class JsonRpcSchemaExporter {
         foreach (var error in errors.OrderBy(static e => e.Code, StringComparer.Ordinal)) {
             var entry = new JsonObject { ["kind"] = ErrorCodes.ForKind(error.Kind) };
             if (error.DataType is { } dataType)
-                entry["data"] = BuildSchemaNode(dataType, options, SchemaDirection.Response, InjectReflectedAnnotations);
+                entry["data"] = BuildSchemaNode(dataType, options, SchemaDirection.Response, InjectReflectedResponseAnnotations);
 
             node[error.Code] = entry;
         }
 
         return node;
+    }
+
+    /// <summary>
+    /// Builds a method's <c>requires</c> object — <c>anonymous</c>, or <c>authenticated</c> with the
+    /// <c>permissions</c> and <c>roles</c> a client can check and <c>serverChecks</c> for what only the server can —
+    /// or <see langword="null"/> when the operation declares nothing a client could act on.
+    /// </summary>
+    private static JsonObject? BuildRequiresNode(HandlerClientMetadata? client) {
+        if (client is null) return null;
+        if (client.AllowAnonymous) return new JsonObject { ["anonymous"] = true };
+
+        var node = new JsonObject();
+        if (client.RequiresAuthentication) node["authenticated"] = true;
+        if (client.Permissions.Count > 0) node["permissions"] = StringArray(client.Permissions);
+        if (client.Roles.Count > 0) node["roles"] = StringArray(client.Roles);
+        if (client.HasServerChecks) node["serverChecks"] = true;
+        return node.Count > 0 ? node : null;
+    }
+
+    /// <summary>Builds a method's <c>tags</c> object in ordinal key order, or <see langword="null"/> when it has none.</summary>
+    private static JsonObject? BuildTagsNode(HandlerClientMetadata? client) {
+        if (client is not { Tags.Count: > 0 }) return null;
+
+        var node = new JsonObject();
+        foreach (var (key, value) in client.Tags.OrderBy(static tag => tag.Key, StringComparer.Ordinal))
+            node[key] = value;
+
+        return node;
+    }
+
+    private static JsonArray StringArray(IEnumerable<string> values) {
+        return new JsonArray(values
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(static value => value, StringComparer.Ordinal)
+            .Select(static value => (JsonNode?)JsonValue.Create(value))
+            .ToArray());
     }
 
     /// <summary>
@@ -139,7 +182,7 @@ public static class JsonRpcSchemaExporter {
         foreach (var topic in manifest.Topics.OrderBy(static t => t.Name, StringComparer.Ordinal))
             events[topic.Name] = new JsonObject {
                 ["payload"] = BuildSchemaNode(
-                    topic.EventType, options, SchemaDirection.Response, InjectReflectedAnnotations)
+                    topic.EventType, options, SchemaDirection.Response, InjectReflectedResponseAnnotations)
             };
 
         return events;
@@ -400,10 +443,15 @@ public static class JsonRpcSchemaExporter {
 
     /// <summary>
     /// Composes the reflective per-property transforms applied to the full schema export: the
-    /// <see cref="DescriptionAttribute"/> description plus the DataAnnotations constraint keywords.
+    /// <see cref="DescriptionAttribute"/> description plus the DataAnnotations constraint keywords, per direction.
     /// </summary>
-    private static JsonNode InjectReflectedAnnotations(JsonSchemaExporterContext ctx, JsonNode schema) {
-        return InjectReflectedConstraints(ctx, InjectReflectedDescription(ctx, schema));
+    private static JsonNode InjectReflectedRequestAnnotations(JsonSchemaExporterContext ctx, JsonNode schema) {
+        return InjectReflectedConstraints(ctx, InjectReflectedDescription(ctx, schema), SchemaDirection.Request);
+    }
+
+    /// <inheritdoc cref="InjectReflectedRequestAnnotations"/>
+    private static JsonNode InjectReflectedResponseAnnotations(JsonSchemaExporterContext ctx, JsonNode schema) {
+        return InjectReflectedConstraints(ctx, InjectReflectedDescription(ctx, schema), SchemaDirection.Response);
     }
 
     /// <summary>
@@ -437,6 +485,21 @@ public static class JsonRpcSchemaExporter {
     /// schemas, and the OpenAPI document agree on the same declared constraints (ADR-0027). Attributes apply in
     /// declaration order with last-wins on duplicate keywords, matching Microsoft. Reads the attributes
     /// reflectively — appropriate for this build-time exporter.
+    /// <para>
+    /// <c>pattern</c> is exported anchored (<c>^(?:…)$</c>): the server's <see cref="RegularExpressionAttribute"/>
+    /// requires the whole value to match, while JSON Schema (and every client validator built on it) searches, so
+    /// an unanchored export would admit values the server rejects. A <see cref="RequiredAttribute"/> on a string
+    /// (with <see cref="RequiredAttribute.AllowEmptyStrings"/> off) rejects empty and whitespace-only values on the
+    /// server; it is exported as a not-blank lookahead on the same anchored pattern, combined with a regular
+    /// expression when the member has both (the regular expression's explicit message wins the shared keyword).
+    /// Requiredness itself still comes from nullability (ADR-0082).
+    /// </para>
+    /// <para>
+    /// Both tightenings apply to <see cref="SchemaDirection.Request"/> schemas only — the server validates requests, and
+    /// the schema must reject exactly what it rejects. Results and event payloads are never validated on the server, yet
+    /// the generated client parses them: a stored value that predates a constraint (a blank name, a code from before
+    /// the pattern) must not fail a read. They keep the pattern as declared and carry no not-blank lookahead.
+    /// </para>
     /// </summary>
     /// <remarks>
     /// An attribute with an explicit message (<see cref="ValidationAttribute.ErrorMessage"/> or
@@ -448,12 +511,36 @@ public static class JsonRpcSchemaExporter {
     /// they are generic English text a client library already has its own wording for.
     /// </remarks>
     internal static JsonNode InjectReflectedConstraints(JsonSchemaExporterContext ctx, JsonNode schema) {
+        return InjectReflectedConstraints(ctx, schema, SchemaDirection.Request);
+    }
+
+    /// <inheritdoc cref="InjectReflectedConstraints(JsonSchemaExporterContext, JsonNode)"/>
+    internal static JsonNode InjectReflectedConstraints(
+        JsonSchemaExporterContext ctx, JsonNode schema, SchemaDirection direction) {
         if (ctx.PropertyInfo?.AttributeProvider is not { } provider || schema is not JsonObject obj) return schema;
 
         JsonObject? messages = null;
+        // The pattern keyword is assembled after the loop: a regular expression and a not-blank [Required] share it,
+        // whichever order they are declared in.
+        string? regularExpression = null;
+        string? regularExpressionMessage = null;
+        var notBlank = false;
+        string? notBlankMessage = null;
         // Type patterns intentionally match subclasses: a reusable custom constraint deriving a mapped
         // attribute (e.g. a [Slug] : RegularExpressionAttribute) reaches every schema surface for free.
         foreach (var attribute in provider.GetCustomAttributes(false)) {
+            switch (attribute) {
+                case RegularExpressionAttribute pattern:
+                    regularExpression = pattern.Pattern;
+                    regularExpressionMessage = ExplicitErrorMessage(pattern, provider);
+                    continue;
+                case RequiredAttribute { AllowEmptyStrings: false } required
+                    when direction == SchemaDirection.Request && IsStringSchema(obj):
+                    notBlank = true;
+                    notBlankMessage = ExplicitErrorMessage(required, provider);
+                    continue;
+            }
+
             var keywords = ApplyConstraint(obj, attribute);
             if (keywords.Length == 0) continue;
 
@@ -465,9 +552,72 @@ public static class JsonRpcSchemaExporter {
                 else (messages ??= new JsonObject())[keyword] = message;
         }
 
+        if (regularExpression is not null || notBlank) {
+            obj["pattern"] = direction == SchemaDirection.Request
+                ? AnchoredPattern(regularExpression, notBlank)
+                : regularExpression;
+            if ((regularExpressionMessage ?? notBlankMessage) is { } patternMessage)
+                (messages ??= new JsonObject())["pattern"] = patternMessage;
+        }
+
         if (messages is { Count: > 0 }) obj[ErrorMessagesKeyword] = messages;
 
         return schema;
+    }
+
+    /// <summary>
+    /// The exported <c>pattern</c>: <paramref name="regularExpression"/> (or any text) anchored to the whole value,
+    /// preceded by a not-blank lookahead when <paramref name="notBlank"/>. Both lookahead and non-capturing groups
+    /// mean the same in .NET and ECMAScript regular expressions. A pattern that already anchors both ends (and has
+    /// no top-level alternation the anchors would not cover) is exported unchanged.
+    /// </summary>
+    internal static string AnchoredPattern(string? regularExpression, bool notBlank) {
+        if (notBlank) return $@"^(?=[\s\S]*\S)(?:{regularExpression ?? @"[\s\S]*"})$";
+
+        return IsWhollyAnchored(regularExpression!) ? regularExpression! : $"^(?:{regularExpression})$";
+    }
+
+    // "^…$" with no '|' outside a group or character class: the anchors then bind every alternative, so the pattern
+    // already means a full match. Escapes are skipped so "\$" or "\|" do not count; anything unusual wraps.
+    private static bool IsWhollyAnchored(string pattern) {
+        if (pattern.Length < 2 || pattern[0] != '^' || pattern[^1] != '$') return false;
+
+        var depth = 0;
+        var inClass = false;
+        for (var i = 1; i < pattern.Length - 1; i++)
+            switch (pattern[i]) {
+                case '\\':
+                    // The closing '$' must not be the escaped character.
+                    if (i + 1 == pattern.Length - 1) return false;
+
+                    i++;
+                    break;
+                case '[' when !inClass:
+                    inClass = true;
+                    break;
+                case ']' when inClass:
+                    inClass = false;
+                    break;
+                case '(' when !inClass:
+                    depth++;
+                    break;
+                case ')' when !inClass:
+                    depth--;
+                    break;
+                case '|' when !inClass && depth == 0:
+                    return false;
+            }
+
+        return depth == 0 && !inClass;
+    }
+
+    private static bool IsStringSchema(JsonObject schema) {
+        return schema["type"] switch {
+            JsonValue single => single.TryGetValue<string>(out var type) && type == "string",
+            JsonArray union => union.Any(static node =>
+                node is JsonValue value && value.TryGetValue<string>(out var type) && type == "string"),
+            _ => false
+        };
     }
 
     /// <summary>
@@ -499,9 +649,6 @@ public static class JsonRpcSchemaExporter {
 
                 obj["maxLength"] = stringLength.MaximumLength;
                 return stringLength.MinimumLength > 0 ? ["minLength", "maxLength"] : ["maxLength"];
-            case RegularExpressionAttribute regularExpression:
-                obj["pattern"] = regularExpression.Pattern;
-                return ["pattern"];
             case UrlAttribute:
                 obj["format"] = "uri";
                 return ["format"];

@@ -73,9 +73,10 @@ The clean way to get this right is a
 that matches commands and integration-event handlers but **not** domain-event handlers — the generator
 then never attaches it to a domain-event handler, and the integration handler keeps it because its request
 is an `IIntegrationEvent`. One decorator, attached precisely at compile time, covers commands, queries,
-domain events, and integration events with no per-handler pipeline tags. (If you prefer to be explicit, a
-named read-only pipeline attribute that omits the transaction and resilience decorators works too, since
-pipeline attributes are most-specific-wins — see [decorator pipelines](/docs/concepts/decorator-pipelines).)
+domain events, and integration events with no per-handler pipeline tags. Avoid a separate pipeline
+attribute per handler kind for this. It would work, because pipeline attributes are most-specific-wins,
+but it repeats what the request type already says and must be remembered on every new handler (see
+[decorator pipelines](/docs/concepts/decorator-pipelines#defining-named-pipelines)).
 
 ```csharp
 // Domain-event handler: shares the publisher's DbContext and transaction, so it must NOT

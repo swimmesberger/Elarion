@@ -105,3 +105,8 @@ designs that are not yet implemented.
 - [ADR-0082: Requiredness comes from nullability, in both directions — Proposed](0082-requiredness-comes-from-nullability-in-both-directions.md)
 - [ADR-0083: The installable-app shell is a framework npm package — safe caching rules built in, the privacy choice left to the app — Proposed](0083-installable-app-shell.md)
 - [ADR-0084: Authenticating-proxy identity is an optional package on IdentityModel's ConfigurationManager — Proposed](0084-authenticating-proxy-identity.md)
+- [ADR-0085: Handler declarations are projected to clients and hosts, not copied — Proposed](0085-handler-declarations-are-projected-not-copied.md)
+- [ADR-0086: One framework-owned answer for unexpected exceptions, on every transport — Proposed](0086-one-answer-for-unexpected-errors.md)
+- [ADR-0087: Transaction-scoped locks are a framework helper with one advisory key scheme — Proposed](0087-transaction-scoped-locks-and-one-advisory-key-scheme.md)
+- [ADR-0088: Deletions of marked entities are domain events, published with their database cascades — Proposed](0088-entity-lifecycle-events-for-soft-references.md)
+- [ADR-0089: Resource authorization composes — hidden-as-missing, owner-derived filters, combinators — Proposed](0089-resource-authorization-composes.md)

@@ -36,4 +36,61 @@ public sealed record Page<T> {
 
     /// <summary>An empty page (no items, no cursors).</summary>
     public static Page<T> Empty { get; } = new() { Items = [] };
+
+    /// <summary>
+    /// Projects every item with <paramref name="selector"/>, keeping the page's cursors, flags and total — the
+    /// mapping a handler needs after paging an entity query into its response DTOs.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// var page = await db.Clients.OrderBy(c =&gt; c.Name).ToOffsetPageAsync(request, ct);
+    /// return page.Map(c =&gt; new ClientRow(c.Id, c.Name));
+    /// </code>
+    /// </example>
+    public Page<TResult> Map<TResult>(Func<T, TResult> selector) {
+        ArgumentNullException.ThrowIfNull(selector);
+
+        var items = new TResult[Items.Count];
+        for (var i = 0; i < items.Length; i++) items[i] = selector(Items[i]);
+
+        return WithItems(items);
+    }
+
+    /// <summary>
+    /// Projects the whole item list at once — one batched lookup for every row of the page instead of one per row —
+    /// keeping the page's cursors, flags and total. <paramref name="selector"/> must return exactly one result per
+    /// item, in item order.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The selector returned a different number of items.</exception>
+    /// <example>
+    /// <code>
+    /// return await page.MapAsync(async (rows, token) =&gt; {
+    ///     var owners = await directory.GetNamesAsync(rows.Select(r =&gt; r.OwnerId), token);
+    ///     return rows.Select(r =&gt; new NoteRow(r.Id, owners[r.OwnerId])).ToArray();
+    /// }, ct);
+    /// </code>
+    /// </example>
+    public async ValueTask<Page<TResult>> MapAsync<TResult>(
+        Func<IReadOnlyList<T>, CancellationToken, ValueTask<IReadOnlyList<TResult>>> selector,
+        CancellationToken ct = default) {
+        ArgumentNullException.ThrowIfNull(selector);
+
+        var items = await selector(Items, ct).ConfigureAwait(false);
+        if (items.Count != Items.Count)
+            throw new InvalidOperationException(
+                $"The page selector returned {items.Count} items for a page of {Items.Count}; it must return one result per item.");
+
+        return WithItems(items);
+    }
+
+    private Page<TResult> WithItems<TResult>(IReadOnlyList<TResult> items) {
+        return new Page<TResult> {
+            Items = items,
+            StartCursor = StartCursor,
+            EndCursor = EndCursor,
+            HasNext = HasNext,
+            HasPrevious = HasPrevious,
+            Total = Total
+        };
+    }
 }

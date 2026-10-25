@@ -113,6 +113,16 @@ See [Telemetry](/docs/capabilities/telemetry) and [Connections — the low-alloc
 - **Package:** `Elarion.Abstractions` · **Applies to:** class, assembly (repeatable)
 - **Triggers:** declares a failure the handler can produce — a stable error code, its `ErrorKind`, and an optional typed payload. The generator publishes the declarations (plus the validation, authorization, feature-gate and idempotency failures the framework adds) with the operation; the schema export lists them under the method's `errors`, and the TypeScript client types `error.code`/`error.data` per method. On a pipeline decorator it declares the failure for every operation the decorator wraps, on an `[AppModule]` class for every operation in the module, and on the assembly for every operation declared in it; the declaration closest to the handler wins. Constructors: `(ErrorKind)`, `(ErrorKind, Type)`, `(string code, ErrorKind)`, `(string code, ErrorKind, Type)`. See [Result & error model](/docs/reference/result-and-errors#produceserror--the-declared-error-contract).
 
+### `[ClientTag]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** class (repeatable, inherited)
+- **Triggers:** a client hint for a `[Handler]` operation, exported under the method's `tags` in `rpc-schema.json` and in the generated client's `rpcMethodInfo` — e.g. `[ClientTag("timeout", "180s")]` for a slow operation, or a marker the UI honours. Never enforcement: the pipeline does not read it. One value per key; a derived handler's tag overrides its base's, and a key repeated on one class keeps its last declaration. See [TypeScript client › Method requirements](/docs/capabilities/transports/typescript-client#method-requirements-and-ui-gating).
+
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `key` | `string` | The tag key. |
+| `value` | `string` | The tag value. |
+
 ### `[McpHandler]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class
@@ -217,6 +227,11 @@ See [Scheduling](/docs/capabilities/scheduling), [Schedules](/docs/capabilities/
 | `Order` | `int` (init) | `0` | Relative invocation order among fan-out subscribers of the same event, ascending. Equal orders run in a stable generator-determined sequence. |
 
 See [Consuming events](/docs/capabilities/events/consuming-events) and [Backends](/docs/capabilities/events/backends).
+
+### `[PublishLifecycleEvents]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** entity class (not inherited)
+- **Triggers:** with `AddElarionEntityLifecycleEvents<TDbContext>()`, every save that deletes rows of the entity — tracked or through a database cascade — publishes `EntitiesDeleted<TEntity>` (the deleted `Ids`) on the inline domain-event plane before the `DELETE`; `ExecuteDelete` on the entity (or on a set cascading to it) and the synchronous `SaveChanges` of such a deletion are refused. Needs a single `Guid` key and no inheritance hierarchy; delete inside a transaction when a consumer saves. See [Reacting to deletions](/docs/capabilities/events/lifecycle-events).
 
 ## Actors
 
@@ -586,6 +601,7 @@ Handler requirements are class attributes the handler-registration generator rea
 | `Operation` | `string` (init) | `"read"` | The operation name (an open `ResourceOperation` value). |
 | `ResourceTypeName` | `string?` (init) | `null` | Explicit grants-table discriminator overriding the default (`ResourceType.FullName`). Set the same string on the matching `[ResourceFilter].ResourceTypeName` and on every stored grant; compared ordinally. |
 | `Id` | `string` (init) | `"Id"` | Request property path naming the resource id, e.g. `nameof(Query.Id)` or a dotted path of existing properties. |
+| `DenyAs` | `ResourceDenial` (init) | `Forbidden` | How a denial is answered: `Forbidden` (`403`), or `NotFound` (`404`, `not_found`, `AuthorizationOptions.ResourceNotFoundMessage`) so a hidden record is indistinguishable from a missing one. `NotFound` adds `not_found` to the operation's error contract. |
 
 ### `[ResourceFilter<TEntity>]`
 
@@ -601,6 +617,8 @@ Handler requirements are class attributes the handler-registration generator rea
 | `Shared` | `bool` (init) | `false` | A **grant** (OR): a correlated `EXISTS` over the resource-grants table for the caller's user **or any of their roles**, for the operation `WhereAuthorized` asks (defaults to `Read`). Makes the filter a **scoped service** (no static `Specification`); requires `ResourceTypeName` (else `ELRES005`) and a reference to `Elarion.Authorization.EntityFrameworkCore`. |
 | `ResourceTypeName` | `string?` (init) | `null` | The resource-type discriminator stored in the grants table (e.g. `"Contact"`), used by the `Shared` `EXISTS`. |
 | `IdProperty` | `string` (init) | `"Id"` | The entity key property whose stringified value matches the grant's resource id. Type Guid/string/int/long. |
+| `BypassPermission` | `string?` (init) | `null` | A permission (`"{resource}.{verb}"`) whose holders see every row of their scope: the owner and grant rules are lifted, the `TenantProperty` scope still applies (unrestricted only without one). |
+| `PermissionClaimType` | `string` (init) | `"permission"` | The claim type `BypassPermission` is read from; match `AuthorizationOptions.PermissionClaimType`. |
 
 <Callout type="info">
   Consume the filter by injecting `IQueryAuthorizer<TEntity>` (the form that works for `Shared`). A field-only

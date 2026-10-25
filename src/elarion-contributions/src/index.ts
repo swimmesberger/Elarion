@@ -129,6 +129,89 @@ export function createCapabilityStore(initial: CapabilityReader): CapabilityStor
   }
 }
 
+/**
+ * The client-visible requirements of one RPC method — structurally the `requires` member of the
+ * `rpcMethodInfo` entries the Elarion client generator emits, so this package never depends on generated code.
+ */
+export interface CallRequirements {
+  /** Any caller may call it (`[AllowAnonymous]`); nothing else applies. */
+  readonly anonymous?: boolean
+  /** The caller must be signed in. */
+  readonly authenticated?: boolean
+  /** Every listed permission is required. */
+  readonly permissions?: readonly string[]
+  /** Every listed role is required. */
+  readonly roles?: readonly string[]
+  /** The server also checks something a client cannot (a policy, claim or resource rule). */
+  readonly serverChecks?: boolean
+}
+
+/**
+ * What {@link canCall} reads about the caller: the permission/role half of a {@link CapabilityReader}, plus the
+ * signed-in state when the reader exposes it — the generated `SessionCapabilities` does, through `user`.
+ */
+export interface CallerReader {
+  hasPermission(permission: string): boolean
+
+  hasRole(role: string): boolean
+
+  readonly user?: { readonly isAuthenticated: boolean }
+}
+
+/** Options of {@link canCall}. */
+export interface CanCallOptions {
+  /**
+   * Whether the caller is signed in, overriding `caller.user`. Pass it when the reader is a store that does not
+   * expose the user; without either, a method that only requires authentication is reported as allowed.
+   */
+  readonly authenticated?: boolean
+}
+
+/**
+ * The outcome of {@link canCall}. An allowed call with `serverChecks` may still be refused by a rule only the
+ * server evaluates; a refused one names the first unmet requirement, so the UI can explain itself.
+ */
+export type CallDecision =
+  | { readonly allowed: true; readonly serverChecks: boolean }
+  | { readonly allowed: false; readonly reason: 'unauthenticated' }
+  | { readonly allowed: false; readonly reason: 'permission' | 'role'; readonly missing: string }
+
+/**
+ * Decides whether the current caller can call an RPC method, from the method's declared requirements — the one
+ * place that replaces a permission list repeated at every call site. Pass an entry of the generated
+ * `rpcMethodInfo`. A UX projection like `when`: it greys out or hides an action, while the server authorizes
+ * every call.
+ *
+ * @example
+ * ```ts
+ * const decision = canCall(rpcMethodInfo['invoices.approve'], capabilities)
+ * <button disabled={!decision.allowed}>Approve</button>
+ * ```
+ */
+export function canCall(
+  method: { readonly requires?: CallRequirements },
+  caller: CallerReader,
+  options: CanCallOptions = {}
+): CallDecision {
+  const requires = method.requires ?? {}
+  const serverChecks = requires.serverChecks === true
+  if (requires.anonymous === true) return {allowed: true, serverChecks: false}
+
+  const permissions = requires.permissions ?? []
+  const roles = requires.roles ?? []
+  const needsSession = requires.authenticated === true || permissions.length > 0 || roles.length > 0 || serverChecks
+  const authenticated = options.authenticated ?? caller.user?.isAuthenticated
+  if (needsSession && authenticated === false) return {allowed: false, reason: 'unauthenticated'}
+
+  for (const permission of permissions) {
+    if (!caller.hasPermission(permission)) return {allowed: false, reason: 'permission', missing: permission}
+  }
+  for (const role of roles) {
+    if (!caller.hasRole(role)) return {allowed: false, reason: 'role', missing: role}
+  }
+  return {allowed: true, serverChecks}
+}
+
 export function evaluateWhen(when: WhenClause | undefined, capabilities: CapabilityReader): boolean {
   if (when === undefined) return true
   if (when.module !== undefined && !capabilities.isModuleEnabled(when.module)) return false

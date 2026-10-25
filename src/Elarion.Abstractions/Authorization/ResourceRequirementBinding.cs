@@ -11,7 +11,8 @@ public sealed class ResourceRequirementBinding<TRequest>(
     Type resourceType,
     ResourceOperation operation,
     Func<TRequest, object?> idSelector,
-    string? resourceTypeName = null) {
+    string? resourceTypeName = null,
+    ResourceDenial denyAs = ResourceDenial.Forbidden) {
     /// <summary>The resource type being accessed.</summary>
     public Type ResourceType { get; } = resourceType;
 
@@ -27,4 +28,12 @@ public sealed class ResourceRequirementBinding<TRequest>(
 
     /// <summary>Reads the resource id from a request instance (a generated typed member access).</summary>
     public Func<TRequest, object?> IdSelector { get; } = idSelector;
+
+    /// <summary>How a denial is answered (<see cref="RequireResourceAttribute.DenyAs"/>).</summary>
+    public ResourceDenial DenyAs { get; } = denyAs;
+
+    /// <summary>The requirement for one request: the bound resource with the id read from <paramref name="request"/>.</summary>
+    public ResourceRequirement Resolve(TRequest request) {
+        return new ResourceRequirement(ResourceType, ResourceTypeName, Operation, IdSelector(request)) { DenyAs = DenyAs };
+    }
 }

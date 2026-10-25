@@ -51,7 +51,7 @@ public sealed class ClaimsAuthorizer(
             // build the context on the first rule so a host with no rules allocates nothing.
             AuthorizationContext? context = null;
             foreach (var rule in globalRules) {
-                context ??= new AuthorizationContext(user, resource);
+                context ??= new AuthorizationContext(user, resource, requirements.HandlerType);
                 var error = await rule.EvaluateAsync(context, ct).ConfigureAwait(false);
                 if (error is null) continue;
 
@@ -76,7 +76,8 @@ public sealed class ClaimsAuthorizer(
                 return Forbidden("policy", policyName);
             }
 
-            if (!await policy.EvaluateAsync(new AuthorizationContext(user, resource), ct).ConfigureAwait(false))
+            if (!await policy.EvaluateAsync(new AuthorizationContext(user, resource, requirements.HandlerType), ct)
+                    .ConfigureAwait(false))
                 return Forbidden("policy", policyName);
         }
 
@@ -87,8 +88,16 @@ public sealed class ClaimsAuthorizer(
                 resourceRequirement.ResourceTypeName,
                 resourceRequirement.Operation,
                 resourceRequirement.ResourceId);
-            if (!await resourceAuthorizer.AuthorizeResourceAsync(context, ct).ConfigureAwait(false))
+            if (await resourceAuthorizer.AuthorizeResourceAsync(context, ct).ConfigureAwait(false)) continue;
+
+            if (resourceRequirement.DenyAs != ResourceDenial.NotFound)
                 return Forbidden("resource", resourceRequirement.ResourceTypeName);
+
+            // A hidden record answers like a missing one, so the caller cannot probe which ids exist.
+            logger.LogDebug(
+                "Authorization denied: unmet resource requirement '{Requirement}', answered as not found.",
+                resourceRequirement.ResourceTypeName);
+            return AppError.NotFound(options.ResourceNotFoundMessage);
         }
 
         return null;

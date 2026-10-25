@@ -1,3 +1,17 @@
+/** The normalized client-visible facts of one method, emitted verbatim into `rpcMethodInfo`. */
+export interface RpcMethodInfoLiteral {
+  readOnly: boolean
+  idempotent: boolean
+  requires: {
+    anonymous: boolean
+    authenticated: boolean
+    permissions: string[]
+    roles: string[]
+    serverChecks: boolean
+  }
+  tags: Record<string, string>
+}
+
 interface GenerateRpcClientSourceOptions {
   generatedBy: string
   sourceLabel: string
@@ -5,6 +19,8 @@ interface GenerateRpcClientSourceOptions {
   schemasFileName: string
   methods: readonly string[]
   idempotentMethods: readonly string[]
+  /** Every method's normalized requirements, read-only flag and tags. */
+  methodInfo: Readonly<Record<string, RpcMethodInfoLiteral>>
   /** The declared error codes per method (ADR-0080); methods without declared errors are omitted. */
   errorCodesByMethod: Readonly<Record<string, readonly string[]>>
   /** Property paths of file payloads per method ('*' = array items, [] = the value itself); omitted methods carry none. */
@@ -142,6 +158,39 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     ...generateMethodNameLines(options.methods),
     `const rpcIdempotentMethods: ReadonlySet<RpcMethod> = new Set(${JSON.stringify(options.idempotentMethods)})`,
     '',
+    '/**',
+    ' * What a caller needs, as far as a client can tell: `anonymous` (any caller), or `authenticated` with every',
+    ' * permission and role listed. `serverChecks` marks requirements only the server evaluates (a policy, claim or',
+    ' * resource check), so an allowed-looking call may still be refused.',
+    ' */',
+    'export interface RpcMethodRequirements {',
+    '  readonly anonymous: boolean',
+    '  readonly authenticated: boolean',
+    '  readonly permissions: readonly string[]',
+    '  readonly roles: readonly string[]',
+    '  readonly serverChecks: boolean',
+    '}',
+    '',
+    '/** What the schema says about a method before it is called. */',
+    'export interface RpcMethodInfo {',
+    '  /** The request is a query: the operation only reads. */',
+    '  readonly readOnly: boolean',
+    '  /** The operation is [Idempotent]: the client attaches an idempotency key by default. */',
+    '  readonly idempotent: boolean',
+    '  readonly requires: RpcMethodRequirements',
+    '  /** The handler\'s [ClientTag] hints (for example a timeout) by key. */',
+    '  readonly tags: Readonly<Record<string, string>>',
+    '}',
+    '',
+    '/**',
+    ' * Every method\'s requirements, read-only flag and tags, from the server\'s handler declarations — the input of',
+    ' * UI gating (for example canCall from @swimmesberger/elarion-contributions). A UX projection, never security:',
+    ' * the server authorizes every call.',
+    ' */',
+    'export const rpcMethodInfo: { readonly [M in RpcMethod]: RpcMethodInfo } = {',
+    ...options.methods.map((method) => `  ${JSON.stringify(method)}: ${JSON.stringify(options.methodInfo[method])},`),
+    '}',
+    '',
     `const rpcErrorCodes: Partial<Record<RpcMethod, readonly string[]>> = ${JSON.stringify(options.errorCodesByMethod)}`,
     '',
     '/** True when `error` is an RpcError carrying one of the error codes `method` declares. */',
@@ -202,6 +251,11 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     '  readonly data: TData',
     '  /** The numeric JSON-RPC error code (the coarse error kind, see ElarionErrorCodes). */',
     '  readonly rpcCode: number',
+    '  /**',
+    '   * The support reference of an unexpected server error (code "internal"): show it next to the message so a',
+    '   * user can quote it. Undefined for every other error.',
+    '   */',
+    '  readonly reference: string | undefined',
     '',
     '  constructor(rpcCode: number, message: string, wireData?: unknown) {',
     '    super(message)',
@@ -210,6 +264,7 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     '    const envelope = readErrorData(wireData)',
     '    this.code = (envelope?.code ?? defaultErrorCode(rpcCode)) as TCode',
     '    this.data = envelope?.data as TData',
+    '    this.reference = envelope?.reference',
     '  }',
     '',
     '  get isParseError() {',
@@ -699,10 +754,11 @@ export function generateRpcClientSource(options: GenerateRpcClientSourceOptions)
     '  return rpcError',
     '}',
     '',
-    '// The wire shape of error.data is always { code, data? } (ADR-0080).',
-    'function readErrorData(value: unknown): { code: string; data?: unknown } | undefined {',
+    '// The wire shape of error.data is always { code, data?, reference? } (ADR-0080).',
+    'function readErrorData(value: unknown): { code: string; data?: unknown; reference?: string | undefined } | undefined {',
     '  if (!isRecord(value) || typeof value.code !== ' + "'string'" + ') return undefined',
-    '  return { code: value.code, data: value.data }',
+    "  const reference = typeof value.reference === 'string' ? value.reference : undefined",
+    '  return { code: value.code, data: value.data, reference }',
     '}',
     '',
     '// Fallback for a server that sends no error.data: the default code of the numeric kind.',

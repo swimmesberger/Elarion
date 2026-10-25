@@ -709,6 +709,9 @@ public sealed partial class HandlerRegistrationGenerator {
     // ADR-0012 Tier 1: a [RequireResource] references the resource id by a compile-checked path on the request.
     // The path is validated against the request type and emitted as a typed accessor; an unresolvable path is
     // ELAUTH002 (never a runtime surprise).
+    // ResourceDenial.NotFound's value in Elarion.Abstractions.
+    private const int ResourceDenialNotFound = 1;
+
     internal static EquatableArray<ResourceBindingInfo> BuildResourceBindings(
         ClassDeclarationSyntax classDecl,
         INamedTypeSymbol classSymbol,
@@ -728,6 +731,7 @@ public sealed partial class HandlerRegistrationGenerator {
             var operation = "read";
             var idPath = "Id";
             string? resourceTypeName = null;
+            var denyAsNotFound = false;
             foreach (var named in attribute.NamedArguments)
                 if (named.Key == "Operation" && named.Value.Value is string op && op.Length > 0)
                     operation = op;
@@ -735,6 +739,8 @@ public sealed partial class HandlerRegistrationGenerator {
                     idPath = id;
                 else if (named.Key == "ResourceTypeName" && named.Value.Value is string typeName && typeName.Length > 0)
                     resourceTypeName = typeName;
+                else if (named.Key == "DenyAs" && named.Value.Value is int denyAs)
+                    denyAsNotFound = denyAs == ResourceDenialNotFound;
 
             if (!ResourcePathResolves(requestType, idPath)) {
                 diagnostics.Add(DiagnosticInfo.Create(
@@ -747,7 +753,7 @@ public sealed partial class HandlerRegistrationGenerator {
             }
 
             builder.Add(new ResourceBindingInfo(resourceType.ToDisplayString(fmt), operation, idPath,
-                resourceTypeName));
+                resourceTypeName, denyAsNotFound));
         }
 
         return builder.ToImmutable();
@@ -789,7 +795,14 @@ public sealed partial class HandlerRegistrationGenerator {
         INamedTypeSymbol classSymbol,
         IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
         bool assemblyRequireAuthenticated) {
-        var handlerNamespace = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
+        return ResolveAuthorizationDefault(
+            classSymbol.ContainingNamespace?.ToDisplayString() ?? "", moduleAuthDefaults, assemblyRequireAuthenticated);
+    }
+
+    internal static bool ResolveAuthorizationDefault(
+        string handlerNamespace,
+        IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
+        bool assemblyRequireAuthenticated) {
         var hasModule = false;
         var bestValue = false;
         var bestNamespaceLength = -1;
@@ -893,7 +906,7 @@ public sealed partial class HandlerRegistrationGenerator {
         return moduleName is null ? operation : $"{RpcMethodEmission.CamelCaseModule(moduleName)}.{operation}";
     }
 
-    private static bool ResolveAssemblyAuthorizationDefault(Compilation compilation) {
+    internal static bool ResolveAssemblyAuthorizationDefault(Compilation compilation) {
         var defaultsAttr = compilation.GetTypeByMetadataName(AuthorizationDefaultsAttributeMetadataName);
         if (defaultsAttr is null)
             return false;

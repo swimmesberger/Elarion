@@ -36,11 +36,7 @@ public sealed class AuthorizationDecorator<TRequest, TResponse>(
         // parsed at run time) and merged into the requirements the authorizer evaluates.
         if (resourceBindings is { Count: > 0 }) {
             var resolved = new ResourceRequirement[resourceBindings.Count];
-            for (var i = 0; i < resourceBindings.Count; i++) {
-                var binding = resourceBindings[i];
-                resolved[i] = new ResourceRequirement(
-                    binding.ResourceType, binding.ResourceTypeName, binding.Operation, binding.IdSelector(request));
-            }
+            for (var i = 0; i < resourceBindings.Count; i++) resolved[i] = resourceBindings[i].Resolve(request);
 
             requirements = requirements with { Resources = resolved };
         }

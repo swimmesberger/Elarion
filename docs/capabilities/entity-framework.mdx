@@ -344,6 +344,24 @@ UTC, so keep the local offset in its own column if the application needs it — 
 SQL client. This stays a documented recipe rather than a shipped API because it is provider-specific and
 lossy; Elarion's centre of gravity is PostgreSQL, where `timestamptz` sorts correctly with no surrogate.
 
+## Interceptors and their order
+
+Elarion's EF Core features attach their interceptors through `IDbContextOptionsConfiguration<TContext>`, so a host
+never calls `AddInterceptors` for them. EF Core runs `SaveChanges` interceptors in the order they were added, and the
+configurations apply in **registration order** — so the order of the `Add…` calls is the order of the interceptors:
+
+| Registration | Runs in | Must come |
+| --- | --- | --- |
+| `AddElarionEntityLifecycleEvents<T>()` | `SavingChanges` — publishes `EntitiesDeleted<T>`; consumers change the tracker | before the two below, which must see the consumers' changes (a wrong order throws when the first context is built) |
+| `AddElarionTenantScopingEntityFrameworkCore<T>()` | `SavingChanges` — stamps the tenant on added rows | after lifecycle events, so rows consumers add are stamped |
+| `AddElarionAuditingEntityFrameworkCore<T>()` | `SavingChanges` — captures the field-level changes | after both, so it records what they changed |
+| The integration event bus / outbox | after the save or commit | anywhere — it reacts to the commit, not the change set |
+
+Interceptors added in `AddDbContext`'s own options callback run at that callback's registration position, which is
+usually first. That is the right place for an application soft-delete interceptor: it turns a deletion into an update
+before lifecycle events see it. An interceptor your persistence assembly adds in `OnConfiguring` runs after all of
+these.
+
 ## Pagination
 
 List handlers page against the `DbContext` and return the shared, transport-neutral `Page<T>`

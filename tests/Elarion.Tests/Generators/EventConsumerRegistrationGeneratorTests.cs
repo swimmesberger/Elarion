@@ -43,6 +43,33 @@ public sealed class EventConsumerRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void GenerateEventConsumers_LifecycleEventOfAnEntity_EmitsTheClosedGenericEventType() {
+        // EntitiesDeleted<TEntity> is how a module reacts to another module's deletions (soft references).
+        var source = CreateSource(
+            """
+            namespace Sample.Events {
+                [Elarion.Abstractions.Messaging.PublishLifecycleEvents]
+                public sealed class Property { public System.Guid Id { get; init; } }
+
+                [Elarion.Abstractions.Service]
+                public sealed class NoteCleanup {
+                    [Elarion.Abstractions.Messaging.ConsumeEvent]
+                    public System.Threading.Tasks.ValueTask OnPropertiesDeleted(
+                        Elarion.Abstractions.Messaging.EntitiesDeleted<Property> deleted,
+                        System.Threading.CancellationToken ct) =>
+                        System.Threading.Tasks.ValueTask.CompletedTask;
+                }
+            }
+            """);
+
+        var generated = AllGenerated(Generate(source));
+
+        generated.Should().Contain(
+            "EventType = typeof(global::Elarion.Abstractions.Messaging.EntitiesDeleted<global::Sample.Events.Property>)");
+        generated.Should().Contain("Plane = global::Elarion.Abstractions.Messaging.EventPlane.Domain");
+    }
+
+    [Fact]
     public void GenerateEventConsumers_VoidSubscriber_ReturnsCompletedTask() {
         var source = CreateSource(
             """

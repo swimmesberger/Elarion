@@ -107,6 +107,10 @@ app.MapElarionEndpoints(app.Configuration);                         // all [Http
 app.MapElarionJsonRpc();
 ```
 
+`MapElarionEndpoints` returns the route group it mapped into, so `.RequireAuthorization()` on it guards every
+Elarion route at once; routes of `[AllowAnonymous]` handlers carry `.AllowAnonymous()` and stay open — no
+path-prefix exception lists.
+
 ## Custom endpoints — the escape hatch
 
 For routes `[HttpEndpoint]` can't express (streaming, SSE, file download, third-party webhooks),
@@ -339,10 +343,29 @@ reload instead of failing as a CORS error — don't hand-roll an `X-Requested-Wi
 - **Authorization sits on the handler.** `[RequirePermission("resource", "verb")]`,
   `[RequireRole]`, `[RequirePolicy]`, `[FeatureGate]` — class-level, enforced identically on every
   transport. ASP.NET `[Authorize]`/policies are host-level extras (middleware or
-  `ConfigureEndpointGroup`), never the business gate.
+  `ConfigureEndpointGroup`), never the business gate. A cross-cutting rule that keys off a handler marker is an
+  `IGlobalAuthorizationRule` reading `context.GetHandlerAttribute<T>()`, not an app decorator.
+- **Row visibility is declared once.** `[ResourceFilter<T>]` (with `BypassPermission` for admins — it lifts owner and
+  sharing rules, never the tenant scope) filters lists;
+  data that belongs to a record (notes, files) uses `WhereAuthorizedVia(...)` on its owner's filter; extra rules are
+  composed with `QueryAuthorizers.AnyOf/AllOf`; a hidden record's point check is
+  `[RequireResource(..., DenyAs = ResourceDenial.NotFound)]` — never a hand-copied visibility predicate per table.
+- **The UI reads requirements from the contract.** The schema exports each method's `requires`, `readOnly` and
+  `[ClientTag]` hints; gate actions with `canCall(rpcMethodInfo[method], capabilities)` instead of repeating
+  permission names at call sites.
+- **Unexpected exceptions are the framework's.** Every transport catches them outside all decorators and answers
+  `code: "internal"` with a support `reference`; word it with `ConfigureElarionUnexpectedErrors`, never with an
+  exception decorator or `IExceptionHandler`. "Not blank" is `[Required]` on the string (exported as a not-blank
+  pattern), not a custom attribute.
 - **Inject the concrete `DbContext`.** No repository layer, no `IAppDbContext`. Entities pair an
   `IEntityTypeConfiguration<T>` marked `[EntityConfiguration]` with `[GenerateDbSets]` on the
-  DbContext. Commands already run in a framework transaction — don't open your own.
+  DbContext. Commands already run in a framework transaction — don't open your own. When a rule needs a lock,
+  use `db.LockRowAsync<TEntity>(id, RowLockMode…)` or `db.AdvisoryLockAsync(scope, key)` inside that transaction,
+  never hand-written `FOR UPDATE`/`pg_advisory_xact_lock` SQL (one key scheme, `elarion.` scopes reserved).
+- **Data owned across modules reacts to deletions.** Notes/files that point at another module's records by id (no FK)
+  are cleaned up by their own module: mark the record entity `[PublishLifecycleEvents]`, register
+  `AddElarionEntityLifecycleEvents<TDbContext>()`, and `[ConsumeEvent]` `EntitiesDeleted<TEntity>` — never a cleanup
+  call in every delete handler, never `ExecuteDelete` on such a set.
 - **In-process calls are typed.** Inject `IHandler<TReq, Result<TRes>>` (or `IHandlerSender`) so a
   rename is a compile error; never dispatch by string name. A request declared with a self-typed marker
   (`Query : IQuery<Query, Response>`) gets fully inferred dispatch — `sender.SendAsync(new Query(id), ct)`

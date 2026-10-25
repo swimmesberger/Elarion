@@ -16,4 +16,7 @@ public sealed record ResourceRequirement(
     Type ResourceType,
     string ResourceTypeName,
     ResourceOperation Operation,
-    object? ResourceId);
+    object? ResourceId) {
+    /// <summary>How a denial of this requirement is answered (<see cref="RequireResourceAttribute.DenyAs"/>).</summary>
+    public ResourceDenial DenyAs { get; init; } = ResourceDenial.Forbidden;
+}

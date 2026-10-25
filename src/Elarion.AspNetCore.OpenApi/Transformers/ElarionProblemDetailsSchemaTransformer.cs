@@ -7,7 +7,8 @@ namespace Elarion.AspNetCore.OpenApi.Transformers;
 /// <summary>
 /// Documents the Elarion extension members of an RFC 7807 error body on the <see cref="ProblemDetails"/> schemas
 /// (and every subtype, such as <c>HttpValidationProblemDetails</c>): the stable <c>code</c> string and the typed
-/// <c>data</c> payload that <see cref="HttpAppErrorMapper.Extensions"/> writes (ADR-0080). Microsoft's schema only
+/// <c>data</c> payload that <see cref="HttpAppErrorMapper.Extensions"/> writes (ADR-0080), and the <c>reference</c>
+/// of an unexpected error (ADR-0086). Microsoft's schema only
 /// knows the standard members, so without this an off-the-shelf client generator types the error contract's
 /// discriminator as an unknown extension and a client cannot branch on it without a cast. Both members stay
 /// optional: the component is shared by every operation in the document, including host-written routes whose
@@ -29,6 +30,10 @@ internal sealed class ElarionProblemDetailsSchemaTransformer : IOpenApiSchemaTra
         });
         schema.Properties.TryAdd(HttpAppErrorMapper.DataExtensionName, new OpenApiSchema {
             Description = "The typed payload the error carries, when it has one; validation errors use `errors`."
+        });
+        schema.Properties.TryAdd(HttpAppErrorMapper.ReferenceExtensionName, new OpenApiSchema {
+            Type = JsonSchemaType.String,
+            Description = "The support reference of an unexpected error (code `internal`): quote it to support."
         });
 
         return Task.CompletedTask;

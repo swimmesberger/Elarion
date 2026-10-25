@@ -157,7 +157,10 @@ Each tool call runs through the MCP adapter onto the shared `HandlerDispatcher`,
 (so scoped services such as a pooled `DbContext` are managed correctly) — the same handler and decorator
 pipeline a JSON-RPC request invokes, just entered through the MCP adapter instead of the JSON-RPC one. A
 successful handler result is returned as JSON text; a failure maps to an MCP error, preserving the
-JSON-RPC error code and data as structured content when `IncludeErrorDetails` is enabled.
+JSON-RPC error code and data as structured content when `IncludeErrorDetails` is enabled. An exception answers with
+the configured [unexpected-error](/docs/concepts/results-and-errors#unexpected-errors) message as the tool text and
+`{ "code": "internal", "reference": "…" }` as structured content — the structured content is part of the error
+details, so with `IncludeErrorDetails = false` the tool result carries the message alone.
 
 <Callout type="warn">
   If two operations collapse to the same tool name (for example `a.b` and `a_b` under the default transform),

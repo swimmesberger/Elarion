@@ -88,8 +88,70 @@ Either way, a row the caller neither owns nor was granted is never returned — 
   its own unconditional mechanism. See [multi-tenancy](/docs/capabilities/multi-tenancy).
 </Callout>
 
-For a rule beyond the conventional ones, write the `IQueryAuthorizer<T>` by hand — the logic is ordinary,
-testable C#, not a string expression.
+### Administrators: a bypass permission
+
+"Holds `contacts.manage`, sees every contact" is one property: `BypassPermission`. For a caller with that permission
+claim the owner and sharing rules are lifted; everyone else gets the declared rules. **The scope stays:** with a
+`TenantProperty`, the holder sees every contact of their own tenant, never another tenant's, and a caller without a
+tenant claim still sees nothing. Only a filter with no scope rule becomes unrestricted.
+
+```csharp
+[ResourceFilter<Contact>(OwnerProperty = nameof(Contact.OwnerId), Shared = true, ResourceTypeName = "Contact",
+    BypassPermission = "contacts.manage")]
+public sealed partial class ContactAccess;
+```
+
+The permission is read from the `permission` claim, the default of `AuthorizationOptions.PermissionClaimType`; set
+`PermissionClaimType` on the attribute when the host changes it.
+
+<Callout type="warn">
+The bypass shapes the **list filter**. The default `[RequireResource]` point check reads only the grants table: it
+knows neither the owner column nor the bypass permission, so an administrator who sees a contact in the list is
+still denied by a get-one guarded with `[RequireResource]`. Where the filter defines visibility, check the single
+record by the same filter — `db.Contacts.WhereAuthorized(access, currentUser).AnyAsync(c => c.Id == id, ct)` in the
+handler (see [the escape hatch](#the-escape-hatch--validate-before-a-write)) — so list and point check cannot drift.
+</Callout>
+
+### Data that belongs to a resource
+
+Notes, files and comments point at a resource by id and are visible exactly when that resource is. Filter them by
+their **owner's** visibility instead of re-implementing it for each table — `WhereAuthorizedVia` runs the owner's
+filter as a subquery of the same statement (`WHERE contact_id IN (SELECT id FROM contacts WHERE …)`):
+
+```csharp
+var notes = await db.Notes
+    .Where(n => n.OwnerKind == RecordKind.Contact)
+    .WhereAuthorizedVia(n => n.OwnerId, db.Contacts, c => c.Id, contactAccess, currentUser)
+    .ToOffsetPageAsync(request, n => new NoteRow(n.Id, n.Text), NoteSort, ct: ct);
+```
+
+**Narrow a shared pointer to one owner kind first.** When `OwnerId` points at contacts, properties and invoices
+alike, the `OwnerKind` filter above is mandatory, not an optimization: without it, a note on an invoice whose id
+equals a visible contact's id passes. For data whose owners are of several kinds, filter each kind's rows by its own
+owner and combine the queries (`Concat`) before paging. A nullable pointer works with an owner key of the same type
+(`c => (Guid?)c.Id`); rows pointing at no owner are then excluded.
+
+### Composing filters: membership tables and computed rules
+
+A rule the attribute cannot express — sharing through an application-owned membership table (contact groups), a
+visibility computed elsewhere — is **added to** the generated filter, not written instead of it.
+`QueryAuthorizers.AnyOf` ORs authorizers (one unrestricted authorizer lifts the restriction), `AllOf` ANDs them,
+and `From` turns a delegate into one; the result is still a single predicate the database evaluates:
+
+```csharp
+services.AddScoped<IQueryAuthorizer<Contact>>(sp => {
+    var db = sp.GetRequiredService<AppDbContext>();
+    return QueryAuthorizers.AnyOf(
+        new ContactAccess(sp.GetRequiredService<IResourceGrantSource>()),   // owner, grants, bypass
+        QueryAuthorizers.From<Contact>((user, _) => c => db.ContactGroupShares.Any(share =>
+            share.ContactId == c.Id && db.GroupMembers.Any(m => m.GroupId == share.GroupId && m.UserId == user.UserId))));
+});
+```
+
+Register the composed authorizer **after** the generated one: the generated filter registers itself as
+`IQueryAuthorizer<Contact>` when the module's services are added, and a single-service resolve takes the last
+registration. Registered before it, the composition is silently replaced by the bare generated filter. For anything else, write the `IQueryAuthorizer<T>` by hand — the logic is ordinary, testable C#, not a
+string expression.
 
 ## Sharing with users and roles
 
@@ -166,6 +228,22 @@ public sealed class GetContact : IHandler<GetContact.Query, Result<ContactDto>> 
 The decorator resolves the id and asks `IResourceAuthorizer`. The shipped default authorizes from the grants
 table (a share with the caller's user or roles); with no backend registered it **fails closed** (a logged 403).
 
+### Hidden, not forbidden
+
+A `403` tells the caller the record exists. When a list filter hides records, their point check should answer like a
+missing record instead — otherwise ids can be probed one by one:
+
+```csharp
+[RequireResource(typeof(Contact), Id = nameof(GetContact.Query.Id), DenyAs = ResourceDenial.NotFound)]
+public sealed class GetContact : IHandler<GetContact.Query, Result<ContactDto>> { /* ... */ }
+```
+
+A denial now answers `404` with the code `not_found` and `AuthorizationOptions.ResourceNotFoundMessage` (default
+"The requested resource was not found."); make the handler's own missing-record answer use the same message, or the
+two stay distinguishable. `not_found` joins the operation's declared error contract. With several `[RequireResource]`
+on one handler, they are checked in declaration order and the first denial answers with its own `DenyAs`, so declare
+the hidden resource first when a later, forbidden one would confirm it exists.
+
 ### The resource-type discriminator
 
 A grant identifies its resource by a **discriminator string**, stored in the `resource_type` column. The point
@@ -207,6 +285,14 @@ if (!allowed)
   with `[RequireResource]` or the escape hatch above. Raw SQL (`FromSqlRaw`) and `IgnoreQueryFilters` bypass the
   in-app predicate — there is no Postgres RLS backstop, so keep enforcement in your handlers.
 </Callout>
+
+## Who may see a record?
+
+Mentions and notifications ask the inverse question: *which* principals may see record X. Elarion answers the part it
+owns — `IResourceGrantStore.GetGrantsAsync(resourceType, resourceId)` lists the users and roles a record is shared
+with — while the owner column, tenant membership, bypass-permission holders and application membership tables are
+the application's data. Compose the answer from the same rules the filter declares, so the two cannot drift: the
+grants for X, plus X's owner, intersected with the active users of X's tenant.
 
 ## See also
 

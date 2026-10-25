@@ -7,6 +7,10 @@ using Microsoft.CodeAnalysis.Text;
 namespace Elarion.Generators;
 
 public sealed partial class HandlerRegistrationGenerator {
+    // Shared with the stream generator, which emits the same [RequireResource] binding.
+    internal const string ResourceDenialNotFoundFqn =
+        "global::Elarion.Abstractions.Authorization.ResourceDenial.NotFound";
+
     private static void EmitHandlerRegistration(SourceProductionContext spc, HandlerInfo handler) {
         foreach (var diagnostic in handler.Diagnostics) spc.ReportDiagnostic(diagnostic.ToDiagnostic());
 
@@ -487,8 +491,9 @@ public sealed partial class HandlerRegistrationGenerator {
             var resourceTypeNameArg = binding.ResourceTypeName is null
                 ? string.Empty
                 : $", {FormatStringLiteral(binding.ResourceTypeName)}";
+            var denyAsArg = binding.DenyAsNotFound ? $", denyAs: {ResourceDenialNotFoundFqn}" : string.Empty;
             sb.AppendLine(
-                $"            new(typeof({binding.ResourceTypeFqn}), new global::Elarion.Abstractions.Authorization.ResourceOperation({FormatStringLiteral(binding.Operation)}), static __r => __r.{binding.IdPath}{resourceTypeNameArg}),");
+                $"            new(typeof({binding.ResourceTypeFqn}), new global::Elarion.Abstractions.Authorization.ResourceOperation({FormatStringLiteral(binding.Operation)}), static __r => __r.{binding.IdPath}{resourceTypeNameArg}{denyAsArg}),");
         }
 
         sb.AppendLine("        };");
