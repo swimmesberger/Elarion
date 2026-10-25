@@ -7,8 +7,9 @@ namespace Elarion.JsonRpc;
 /// </summary>
 /// <remarks>
 /// Wire shape: <c>{ "code": "token.malformed", "data": { ... } }</c>, <c>data</c> omitted when the error has no
-/// payload. Protocol-level errors carry the codes in <see cref="RpcErrorCodes"/>. <see cref="Data"/> is serialized
-/// by its runtime type, so the type must be registered in a source-generated JSON context like any other payload.
+/// payload; an unexpected error adds <c>"reference"</c>. Protocol-level errors carry the codes in
+/// <see cref="RpcErrorCodes"/>. <see cref="Data"/> is serialized by its runtime type, so the type must be registered
+/// in a source-generated JSON context like any other payload.
 /// </remarks>
 public sealed record RpcErrorData {
     /// <summary>The stable machine-readable error code.</summary>
@@ -16,6 +17,13 @@ public sealed record RpcErrorData {
 
     /// <summary>The typed error payload, or <see langword="null"/> (omitted on the wire) when there is none.</summary>
     public object? Data { get; init; }
+
+    /// <summary>
+    /// The support reference of an unexpected error (<see cref="Elarion.Abstractions.UnexpectedError.Reference"/>),
+    /// or <see langword="null"/> (omitted on the wire). Only <see cref="Elarion.Abstractions.ErrorCodes.Internal"/>
+    /// answers for an exception carry one; a client shows it next to the message rather than parsing the message.
+    /// </summary>
+    public string? Reference { get; init; }
 }
 
 /// <summary>The stable error codes of JSON-RPC protocol-level failures (not produced by handlers).</summary>

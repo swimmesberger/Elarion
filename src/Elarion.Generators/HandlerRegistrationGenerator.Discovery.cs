@@ -789,7 +789,14 @@ public sealed partial class HandlerRegistrationGenerator {
         INamedTypeSymbol classSymbol,
         IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
         bool assemblyRequireAuthenticated) {
-        var handlerNamespace = classSymbol.ContainingNamespace?.ToDisplayString() ?? "";
+        return ResolveAuthorizationDefault(
+            classSymbol.ContainingNamespace?.ToDisplayString() ?? "", moduleAuthDefaults, assemblyRequireAuthenticated);
+    }
+
+    internal static bool ResolveAuthorizationDefault(
+        string handlerNamespace,
+        IReadOnlyList<(string Namespace, bool RequireAuthenticated)> moduleAuthDefaults,
+        bool assemblyRequireAuthenticated) {
         var hasModule = false;
         var bestValue = false;
         var bestNamespaceLength = -1;
@@ -893,7 +900,7 @@ public sealed partial class HandlerRegistrationGenerator {
         return moduleName is null ? operation : $"{RpcMethodEmission.CamelCaseModule(moduleName)}.{operation}";
     }
 
-    private static bool ResolveAssemblyAuthorizationDefault(Compilation compilation) {
+    internal static bool ResolveAssemblyAuthorizationDefault(Compilation compilation) {
         var defaultsAttr = compilation.GetTypeByMetadataName(AuthorizationDefaultsAttributeMetadataName);
         if (defaultsAttr is null)
             return false;

@@ -52,6 +52,25 @@ export interface RpcMethodSchema {
   // Set by the server exporter for [Idempotent] handlers; the generated client attaches an idempotency key
   // (params._meta) to these operations by default.
   idempotent?: boolean
+  /** What a caller needs, as far as a client can tell; omitted when the handler declares nothing. */
+  requires?: RpcMethodRequirementsSchema
+  /** Set when the request is an IQuery: the operation only reads. */
+  readOnly?: boolean
+  /** The handler's [ClientTag] hints by key; omitted when it declares none. */
+  tags?: Record<string, string>
+}
+
+/**
+ * The per-method `requires` block of the server exporter: `anonymous` alone, or the requirements a client can
+ * evaluate against its session (`authenticated`, `permissions`, `roles`, all of them) plus `serverChecks` for
+ * requirements only the server can evaluate (a policy, claim or resource check).
+ */
+export interface RpcMethodRequirementsSchema {
+  anonymous?: boolean
+  authenticated?: boolean
+  permissions?: string[]
+  roles?: string[]
+  serverChecks?: boolean
 }
 
 /** One structured permission from the schema's capability vocabulary ({resource}.{verb} plus its parts). */

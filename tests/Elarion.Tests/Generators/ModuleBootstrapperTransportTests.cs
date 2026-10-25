@@ -153,6 +153,13 @@ public sealed class ModuleBootstrapperTransportTests {
         generated.Should().Contain(".WithTags(\"Shipping\")");
         // No handler here is [Idempotent], so no idempotency marker is emitted.
         generated.Should().NotContain("ElarionIdempotentEndpointMetadata");
+
+        // Each delegate's outermost catch wraps handler resolution and the whole pipeline, answering an unexpected
+        // exception with the configured UnexpectedErrorOptions problem (an aborted request is not caught).
+        generated.Should().Contain(
+            "catch (global::System.Exception __exception) when (global::Elarion.AspNetCore.ElarionHttpResults.IsUnexpected(__context, __exception)) {");
+        generated.Should().Contain(
+            "__result = global::Elarion.AspNetCore.ElarionHttpResults.ToUnexpectedProblem(__context, __exception, \"Sample.Billing.GetInvoice\");");
     }
 
     [Fact]
@@ -198,6 +205,233 @@ public sealed class ModuleBootstrapperTransportTests {
             .Contain(".WithMetadata(global::Elarion.AspNetCore.ElarionIdempotentEndpointMetadata.Instance)");
         generated.Should().Contain(".WithTags(\"Payments\")");
         generated.Split("ElarionIdempotentEndpointMetadata").Length.Should().Be(2);
+    }
+
+    [Fact]
+    public void Bootstrapper_MarksAllowAnonymousHttpEndpoints() {
+        // [AllowAnonymous] (declared on the handler or inherited from a base handler) must survive the manifest
+        // round-trip and reach the route as ASP.NET's IAllowAnonymous, so a host FallbackPolicy or a group-wide
+        // RequireAuthorization leaves the public endpoint open. Nothing else is inferred from handler attributes:
+        // a guarded handler's route gets no authorization metadata (that policy stays the host's).
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Portal {
+                [AppModule("Portal", Kind = AppModuleKind.Core)]
+                public static class PortalModule { }
+
+                [HttpEndpoint("public/status")]
+                [AllowAnonymous]
+                public sealed class GetStatus : IHandler<GetStatus.Query, Result<GetStatus.Response>> {
+                    public sealed record Query : IQuery;
+                    public sealed record Response(string State);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("ok"));
+                }
+
+                [AllowAnonymous]
+                public abstract class PublicHandler<TRequest, TResponse> : IHandler<TRequest, Result<TResponse>> {
+                    public abstract ValueTask<Result<TResponse>> HandleAsync(TRequest request, CancellationToken ct);
+                }
+
+                [HttpEndpoint("public/terms")]
+                public sealed class GetTerms : PublicHandler<GetTerms.Query, GetTerms.Response> {
+                    public sealed record Query : IQuery;
+                    public sealed record Response(string Text);
+                    public override ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("terms"));
+                }
+
+                [HttpEndpoint("accounts/me")]
+                [RequirePermission("accounts", "read")]
+                public sealed class GetAccount : IHandler<GetAccount.Query, Result<GetAccount.Response>> {
+                    public sealed record Query : IQuery;
+                    public sealed record Response(string Name);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response("me"));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out var compilationWithGenerated);
+
+        generated.Split(".AllowAnonymous()").Length.Should().Be(3, "exactly the two anonymous routes are opened");
+        RouteChain(generated, "public/status").Should().Contain(".AllowAnonymous()");
+        RouteChain(generated, "public/terms").Should().Contain(".AllowAnonymous()");
+        RouteChain(generated, "accounts/me").Should().NotContain(".AllowAnonymous()")
+            .And.NotContain("RequireAuthorization");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_RegistersClientMetadataThroughTheManifest() {
+        // What a client may know before calling — evaluable requirements, a server-only flag and [ClientTag] hints —
+        // is read off the handler (base types included), with the authentication a module's
+        // [ElarionAuthorizationDefaults] requires merged in, and survives the manifest round-trip.
+        const string modulesSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Ledger {
+                [AppModule("Ledger", Kind = AppModuleKind.Core)]
+                [ElarionAuthorizationDefaults]
+                public static class LedgerModule { }
+
+                public sealed record Command;
+                public sealed record Response(bool Ok);
+
+                [ClientTag("timeout", "30s")]
+                public abstract class SlowHandler : IHandler<Command, Result<Response>> {
+                    public ValueTask<Result<Response>> HandleAsync(Command request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(true));
+                }
+
+                [Handler("ledger.import")]
+                [RequirePermission("ledger", "write")]
+                [RequirePermission("ledger", "import")]
+                [RequirePolicy("BusinessHours")]
+                [ClientTag("timeout", "180s")]
+                [ClientTag("viewAs", "refused")]
+                public sealed class ImportLedger : SlowHandler;
+
+                [Handler("ledger.status")]
+                [AllowAnonymous]
+                [ClientTag("cache", "short")]
+                public sealed class LedgerStatus : IHandler<LedgerStatus.Query, Result<Response>> {
+                    public sealed record Query;
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(true));
+                }
+
+                [Handler("ledger.summary")]
+                public sealed class LedgerSummary : IHandler<LedgerSummary.Query, Result<Response>> {
+                    public sealed record Query;
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(true));
+                }
+            }
+
+            namespace Sample.Open {
+                [AppModule("Open", Kind = AppModuleKind.Core)]
+                public static class OpenModule { }
+
+                [Handler("open.ping")]
+                public sealed class Ping : IHandler<Ping.Query, Result<Ping.Response>> {
+                    public sealed record Query;
+                    public sealed record Response(bool Ok);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(true));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out var compilationWithGenerated);
+
+        const string metadata = "new global::Elarion.Abstractions.Dispatch.HandlerClientMetadata";
+        // Permissions and roles sorted; the derived handler's tag overrides the base's; a policy is server-only.
+        generated.Should().Contain(
+            $"\"ledger.import\", global::Elarion.Abstractions.HandlerTransports.All, errors: ");
+        generated.Should().Contain(
+            $"client: {metadata} {{ RequiresAuthentication = true, Permissions = new string[] {{ \"ledger.import\", \"ledger.write\" }}, HasServerChecks = true, Tags = new global::System.Collections.Generic.Dictionary<string, string> {{ [\"timeout\"] = \"180s\", [\"viewAs\"] = \"refused\" }} }});");
+        // [AllowAnonymous] wins over the module default and drops every requirement; tags stay.
+        generated.Should().Contain(
+            $"client: {metadata} {{ AllowAnonymous = true, Tags = new global::System.Collections.Generic.Dictionary<string, string> {{ [\"cache\"] = \"short\" }} }});");
+        // No declaration of its own: the module's [ElarionAuthorizationDefaults] still requires a signed-in caller.
+        generated.Should().Contain($"\"ledger.summary\"");
+        generated.Should().Contain($"client: {metadata} {{ RequiresAuthentication = true }});");
+        // Nothing to say about an unguarded handler outside any default: the registration is unchanged.
+        generated.Should().Contain(
+            "(\"open.ping\", global::Elarion.Abstractions.HandlerTransports.All, errors: global::System.Array.Empty<global::Elarion.Abstractions.ErrorContract>());");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_RegistersClientMetadataForHostCompilationHandlers() {
+        // The single-project layout resolves the assembly's [ElarionAuthorizationDefaults] from the current
+        // compilation, the same way the registration generator attaches the authorization decorator.
+        const string hostSource =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Modules;
+            using Elarion.AspNetCore;
+
+            [assembly: GenerateModuleBootstrapper]
+            [assembly: ElarionAuthorizationDefaults]
+
+            namespace Host.App {
+                [AppModule("App", Kind = AppModuleKind.Core)]
+                public static class AppModule { }
+
+                [Handler("things.list")]
+                [RequireRole("Clerk")]
+                public sealed class ListThings : IHandler<ListThings.Query, Result<ListThings.Response>> {
+                    public sealed record Query : IQuery;
+                    public sealed record Response(int Count);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(0));
+                }
+
+                [Handler("things.count")]
+                public sealed class CountThings : IHandler<CountThings.Query, Result<CountThings.Response>> {
+                    public sealed record Query : IQuery;
+                    public sealed record Response(int Count);
+                    public ValueTask<Result<Response>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<Response>>(new Response(0));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(hostSource, [], out var compilationWithGenerated);
+
+        const string metadata = "new global::Elarion.Abstractions.Dispatch.HandlerClientMetadata";
+        generated.Should().Contain("(\"things.list\", global::Elarion.Abstractions.HandlerTransports.All, errors: ");
+        generated.Should().Contain(
+            $"client: {metadata} {{ RequiresAuthentication = true, Roles = new string[] {{ \"Clerk\" }} }});");
+        generated.Should().Contain(
+            $"(\"things.count\", global::Elarion.Abstractions.HandlerTransports.All, errors: global::System.Array.Empty<global::Elarion.Abstractions.ErrorContract>(), client: {metadata} {{ RequiresAuthentication = true }});");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Bootstrapper_MapElarionEndpointsReturnsOneRouteGroupForEveryMappedEndpoint() {
+        var generated = RunGenerator(out _);
+
+        // Everything maps into one prefix-less group the host can attach conventions to.
+        generated.Should().Contain(
+            "public static global::Microsoft.AspNetCore.Routing.RouteGroupBuilder MapElarionEndpoints(");
+        generated.Should().Contain(
+            "var __elarionEndpoints = global::Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions.MapGroup(endpoints, string.Empty);");
+        generated.Should().Contain("        return __elarionEndpoints;");
+    }
+
+    // The registration statement of one generated route: from its Map* call to the end of its metadata chain.
+    private static string RouteChain(string generated, string route) {
+        var start = generated.IndexOf($"(\"{route}\",", StringComparison.Ordinal);
+        start.Should().BeGreaterThanOrEqualTo(0, "the route {0} should be mapped", route);
+        var end = generated.IndexOf(".WithMetadata(__shape", start, StringComparison.Ordinal);
+        end.Should().BeGreaterThan(start);
+        return generated[start..end];
     }
 
     [Fact]
@@ -248,13 +482,13 @@ public sealed class ModuleBootstrapperTransportTests {
         var generated = RunGenerator(out _);
 
         // Core module (Billing) is mapped unconditionally on every transport — never wrapped in IsModuleEnabled.
-        generated.Should().Contain("        MapBillingHttp(endpoints);");
+        generated.Should().Contain("        MapBillingHttp(__elarionEndpoints);");
         generated.Should().Contain("        AddBillingHandlers(dispatcher);");
         generated.Should().NotContain("if (IsModuleEnabled(configuration, \"Billing\"))");
 
         // Feature module (Shipping) is gated by its feature flag on every transport.
         generated.Should().Contain("if (IsModuleEnabled(configuration, \"Shipping\"))");
-        generated.Should().Contain("MapShippingHttp(endpoints);");
+        generated.Should().Contain("MapShippingHttp(__elarionEndpoints);");
         generated.Should().Contain("AddShippingHandlers(dispatcher);");
     }
 
@@ -499,7 +733,7 @@ public sealed class ModuleBootstrapperTransportTests {
         // map onto the builder the contributor's group hook returns — no hand-written IsModuleEnabled re-check.
         generated.Should().Contain("if (IsModuleEnabled(configuration, \"Shipping\"))");
         generated.Should().Contain(
-            "var ShippingEndpoints = global::Host.Web.ShippingWebEndpoints.ConfigureEndpointGroup(endpoints);");
+            "var ShippingEndpoints = global::Host.Web.ShippingWebEndpoints.ConfigureEndpointGroup(__elarionEndpoints);");
         generated.Should().Contain("global::Host.Web.ShippingWebEndpoints.MapEndpoints(ShippingEndpoints);");
         generated.Should().Contain("MapShippingHttp(ShippingEndpoints);");
 
@@ -554,7 +788,7 @@ public sealed class ModuleBootstrapperTransportTests {
 
         // The module's own group hook wraps first; the contributor's chains onto the result.
         generated.Should().Contain(
-            "var BillingEndpoints = global::Sample.Billing.BillingModule.ConfigureEndpointGroup(endpoints);");
+            "var BillingEndpoints = global::Sample.Billing.BillingModule.ConfigureEndpointGroup(__elarionEndpoints);");
         generated.Should().Contain(
             "BillingEndpoints = global::Host.Web.BillingExtraEndpoints.ConfigureEndpointGroup(BillingEndpoints);");
         generated.Should().Contain("MapBillingHttp(BillingEndpoints);");
@@ -590,7 +824,7 @@ public sealed class ModuleBootstrapperTransportTests {
         var generated = RunGenerator([libraryReference], out var compilationWithGenerated);
 
         generated.Should().Contain("if (IsModuleEnabled(configuration, \"Manifest\"))");
-        generated.Should().Contain("global::ManifestOnly.ManifestWebEndpoints.MapEndpoints(endpoints);");
+        generated.Should().Contain("global::ManifestOnly.ManifestWebEndpoints.MapEndpoints(__elarionEndpoints);");
 
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
@@ -670,13 +904,13 @@ public sealed class ModuleBootstrapperTransportTests {
 
         // The core module's generated routes are mapped onto the builder its hook returns, not the root.
         generated.Should().Contain(
-            "var BillingEndpoints = global::Sample.Billing.BillingModule.ConfigureEndpointGroup(endpoints);");
+            "var BillingEndpoints = global::Sample.Billing.BillingModule.ConfigureEndpointGroup(__elarionEndpoints);");
         generated.Should().Contain("MapBillingHttp(BillingEndpoints);");
 
         // The feature module's hook is invoked inside its feature gate.
         generated.Should().Contain("if (IsModuleEnabled(configuration, \"Shipping\"))");
         generated.Should().Contain(
-            "var ShippingEndpoints = global::Sample.Shipping.ShippingModule.ConfigureEndpointGroup(endpoints);");
+            "var ShippingEndpoints = global::Sample.Shipping.ShippingModule.ConfigureEndpointGroup(__elarionEndpoints);");
         generated.Should().Contain("MapShippingHttp(ShippingEndpoints);");
 
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
@@ -710,7 +944,7 @@ public sealed class ModuleBootstrapperTransportTests {
 
         var generated = RunGenerator([manifestReference], out var compilationWithGenerated);
 
-        generated.Should().Contain("MapManifestHttp(endpoints);");
+        generated.Should().Contain("MapManifestHttp(__elarionEndpoints);");
         generated.Should().Contain("AddManifestHandlers(dispatcher);");
         generated.Should().Contain("app.MapGet(\"manifest\",");
         generated.Should().Contain(
@@ -801,7 +1035,7 @@ public sealed class ModuleBootstrapperTransportTests {
         var generated = RunGenerator(hostSource, [], out var compilationWithGenerated);
 
         // All three transports are wired from the host compilation alone.
-        generated.Should().Contain("MapAppHttp(endpoints);");
+        generated.Should().Contain("MapAppHttp(__elarionEndpoints);");
         generated.Should().Contain("app.MapGet(\"things/{id}\",");
         generated.Should().Contain(
             "dispatcher.Map<global::Host.App.GetThing.Query, global::Host.App.GetThing.Response>(\"app.getThing\", global::Elarion.Abstractions.HandlerTransports.All, errors: global::System.Array.Empty<global::Elarion.Abstractions.ErrorContract>());");
@@ -811,7 +1045,7 @@ public sealed class ModuleBootstrapperTransportTests {
 
         // Feature-module gating applies to host-compilation handlers exactly like referenced ones.
         generated.Should().Contain("if (IsModuleEnabled(configuration, \"Shipping\"))");
-        generated.Should().Contain("MapShippingHttp(endpoints);");
+        generated.Should().Contain("MapShippingHttp(__elarionEndpoints);");
 
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)

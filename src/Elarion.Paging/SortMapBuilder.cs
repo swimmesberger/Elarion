@@ -23,6 +23,10 @@ public sealed class SortMapBuilder<T> {
     private readonly string _defaultKey;
     private readonly List<Func<IOrderedQueryable<T>, IOrderedQueryable<T>>> _tiebreakers = new();
 
+    // Declaration order of the keys and their declared primary direction, for SortMap<T>.Keys; re-adding a key
+    // replaces its declaration in place.
+    private readonly List<SortKey> _keys = new();
+
     private string? _currentKey;
     private Func<IQueryable<T>, bool, IOrderedQueryable<T>>? _currentPrimary;
     private bool _currentPrimaryDescending;
@@ -81,7 +85,8 @@ public sealed class SortMapBuilder<T> {
     /// </summary>
     public SortMap<T> Build() {
         Flush();
-        return new SortMap<T>(_defaultKey, _entries.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase));
+        return new SortMap<T>(_defaultKey, _entries.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
+            _keys.ToArray());
     }
 
     private void Flush() {
@@ -97,6 +102,13 @@ public sealed class SortMapBuilder<T> {
 
             return ordered;
         };
+
+        var declared = new SortKey(_currentKey,
+            primaryDeclaredDescending ? SortDirection.Descending : SortDirection.Ascending,
+            string.Equals(_currentKey, _defaultKey, StringComparison.OrdinalIgnoreCase));
+        var existing = _keys.FindIndex(k => string.Equals(k.Key, _currentKey, StringComparison.OrdinalIgnoreCase));
+        if (existing >= 0) _keys[existing] = declared;
+        else _keys.Add(declared);
 
         _currentKey = null;
         _tiebreakers.Clear();

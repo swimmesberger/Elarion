@@ -169,6 +169,44 @@ public sealed class ClaimsAuthorizerTests {
     }
 
     [Fact]
+    public async Task GlobalRulesAndPoliciesReceiveTheHandlerType() {
+        var user = new FakeCurrentUser { IsAuthenticated = true, Claims = [("age", "25")] };
+        var rule = new RecordingGlobalRule(null, [], "rule");
+        var policy = new HandlerRecordingPolicy();
+        var authorizer = Create(user, [new NamedAuthorizationPolicy("recording", policy)], globalRules: [rule]);
+
+        var error = await authorizer.AuthorizeAsync(
+            Requirements(policies: ["recording"]) with { HandlerType = typeof(RequireRoleHandler) },
+            new GuardedCommand(1),
+            TestContext.Current.CancellationToken);
+
+        error.Should().BeNull();
+        rule.LastContext!.HandlerType.Should().Be(typeof(RequireRoleHandler));
+        policy.LastHandlerType.Should().Be(typeof(RequireRoleHandler));
+    }
+
+    [Fact]
+    public async Task HandlerlessRequirements_LeaveTheHandlerTypeNull() {
+        var rule = new RecordingGlobalRule(null, [], "rule");
+        var authorizer = Create(new FakeCurrentUser { IsAuthenticated = true }, globalRules: [rule]);
+
+        await authorizer.AuthorizeAsync(
+            Requirements(requireAuthenticated: true), null, TestContext.Current.CancellationToken);
+
+        rule.LastContext!.HandlerType.Should().BeNull();
+        rule.LastContext.GetHandlerAttribute<RequireRoleAttribute>().Should().BeNull();
+    }
+
+    private sealed class HandlerRecordingPolicy : IAuthorizationPolicy {
+        public Type? LastHandlerType { get; private set; }
+
+        public ValueTask<bool> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
+            LastHandlerType = context.HandlerType;
+            return ValueTask.FromResult(true);
+        }
+    }
+
+    [Fact]
     public async Task GlobalRulesAreSkippedForAllowAnonymous() {
         var calls = new List<string>();
         var authorizer = Create(

@@ -162,6 +162,46 @@ const rpcMethodNames = [
 
 const rpcIdempotentMethods: ReadonlySet<RpcMethod> = new Set([])
 
+/**
+ * What a caller needs, as far as a client can tell: `anonymous` (any caller), or `authenticated` with every
+ * permission and role listed. `serverChecks` marks requirements only the server evaluates (a policy, claim or
+ * resource check), so an allowed-looking call may still be refused.
+ */
+export interface RpcMethodRequirements {
+  readonly anonymous: boolean
+  readonly authenticated: boolean
+  readonly permissions: readonly string[]
+  readonly roles: readonly string[]
+  readonly serverChecks: boolean
+}
+
+/** What the schema says about a method before it is called. */
+export interface RpcMethodInfo {
+  /** The request is a query: the operation only reads. */
+  readonly readOnly: boolean
+  /** The operation is [Idempotent]: the client attaches an idempotency key by default. */
+  readonly idempotent: boolean
+  readonly requires: RpcMethodRequirements
+  /** The handler's [ClientTag] hints (for example a timeout) by key. */
+  readonly tags: Readonly<Record<string, string>>
+}
+
+/**
+ * Every method's requirements, read-only flag and tags, from the server's handler declarations — the input of
+ * UI gating (for example canCall from @swimmesberger/elarion-contributions). A UX projection, never security:
+ * the server authorizes every call.
+ */
+export const rpcMethodInfo: { readonly [M in RpcMethod]: RpcMethodInfo } = {
+  "clients.create": {"readOnly":false,"idempotent":false,"requires":{"anonymous":false,"authenticated":true,"permissions":["clients.write"],"roles":[],"serverChecks":false},"tags":{}},
+  "clients.get": {"readOnly":true,"idempotent":false,"requires":{"anonymous":false,"authenticated":true,"permissions":["clients.read"],"roles":[],"serverChecks":false},"tags":{}},
+  "clients.list": {"readOnly":true,"idempotent":false,"requires":{"anonymous":false,"authenticated":true,"permissions":["clients.read"],"roles":[],"serverChecks":false},"tags":{}},
+  "elarion.session": {"readOnly":false,"idempotent":false,"requires":{"anonymous":false,"authenticated":false,"permissions":[],"roles":[],"serverChecks":false},"tags":{}},
+  "invoices.clientDunning": {"readOnly":true,"idempotent":false,"requires":{"anonymous":false,"authenticated":true,"permissions":["invoices.read"],"roles":[],"serverChecks":false},"tags":{}},
+  "invoices.create": {"readOnly":false,"idempotent":false,"requires":{"anonymous":false,"authenticated":true,"permissions":["invoices.write"],"roles":[],"serverChecks":false},"tags":{}},
+  "invoices.list": {"readOnly":true,"idempotent":false,"requires":{"anonymous":false,"authenticated":true,"permissions":["invoices.read"],"roles":[],"serverChecks":false},"tags":{}},
+  "invoices.sendStatus": {"readOnly":true,"idempotent":false,"requires":{"anonymous":false,"authenticated":true,"permissions":["invoices.read"],"roles":[],"serverChecks":false},"tags":{}},
+}
+
 const rpcErrorCodes: Partial<Record<RpcMethod, readonly string[]>> = {"clients.create":["conflict","forbidden","not_found","unauthorized","validation"],"clients.get":["forbidden","not_found","unauthorized"],"clients.list":["forbidden","not_found","unauthorized"],"invoices.clientDunning":["forbidden","not_found","unauthorized"],"invoices.create":["business_rule","forbidden","not_found","unauthorized","validation"],"invoices.list":["forbidden","not_found","unauthorized"],"invoices.sendStatus":["forbidden","not_found","unauthorized"]}
 
 /** True when `error` is an RpcError carrying one of the error codes `method` declares. */
@@ -212,6 +252,11 @@ export class RpcError<TCode extends string = string, TData = unknown> extends Er
   readonly data: TData
   /** The numeric JSON-RPC error code (the coarse error kind, see ElarionErrorCodes). */
   readonly rpcCode: number
+  /**
+   * The support reference of an unexpected server error (code "internal"): show it next to the message so a
+   * user can quote it. Undefined for every other error.
+   */
+  readonly reference: string | undefined
 
   constructor(rpcCode: number, message: string, wireData?: unknown) {
     super(message)
@@ -220,6 +265,7 @@ export class RpcError<TCode extends string = string, TData = unknown> extends Er
     const envelope = readErrorData(wireData)
     this.code = (envelope?.code ?? defaultErrorCode(rpcCode)) as TCode
     this.data = envelope?.data as TData
+    this.reference = envelope?.reference
   }
 
   get isParseError() {
@@ -290,13 +336,44 @@ export class RpcProtocolError extends Error {
 // params schema. `cause` carries the underlying Zod error with the structured issues.
 export class RpcParamsValidationError extends Error {
   readonly method: RpcMethod
+  // The issue messages keyed by field path in the server notation of ValidationErrorData.fieldErrors
+  // ("address.street", "items[1].name"; "" for the params object itself), so one form helper can mark
+  // fields for a local failure and for a server validation RpcError alike.
+  readonly fieldErrors: Record<string, string[]>
 
   constructor(method: RpcMethod, cause: unknown) {
     const detail = cause instanceof Error ? `: ${cause.message}` : '.'
     super(`Invalid params for RPC method ${JSON.stringify(method)}${detail}`, { cause })
     this.name = 'RpcParamsValidationError'
     this.method = method
+    this.fieldErrors = issueFieldErrors(cause)
   }
+}
+
+// Groups Zod issues (v3 and v4 share the `issues: { path, message }[]` shape) by field path: member
+// names join with ".", array indexes become "[i]" — the notation of the server's field-error keys.
+function issueFieldErrors(cause: unknown): Record<string, string[]> {
+  const issues = (cause as { issues?: unknown } | null | undefined)?.issues
+  if (!Array.isArray(issues)) {
+    return {}
+  }
+
+  // A Map, then Object.fromEntries: a field named like an Object.prototype member stays an own key.
+  const fieldErrors = new Map<string, string[]>()
+  for (const issue of issues as readonly { path?: readonly PropertyKey[]; message?: unknown }[]) {
+    let key = ''
+    for (const segment of issue.path ?? []) {
+      key += typeof segment === 'number' ? `[${segment}]` : key === '' ? String(segment) : `.${String(segment)}`
+    }
+    const messages = fieldErrors.get(key)
+    if (messages) {
+      messages.push(String(issue.message))
+    } else {
+      fieldErrors.set(key, [String(issue.message)])
+    }
+  }
+
+  return Object.fromEntries(fieldErrors)
 }
 
 export function createRpcApi(options: RpcClientOptions): RpcApi {
@@ -654,10 +731,11 @@ function toRpcError(error: JsonRpcErrorObject, method?: RpcMethod, validate = fa
   return rpcError
 }
 
-// The wire shape of error.data is always { code, data? } (ADR-0080).
-function readErrorData(value: unknown): { code: string; data?: unknown } | undefined {
+// The wire shape of error.data is always { code, data?, reference? } (ADR-0080).
+function readErrorData(value: unknown): { code: string; data?: unknown; reference?: string | undefined } | undefined {
   if (!isRecord(value) || typeof value.code !== 'string') return undefined
-  return { code: value.code, data: value.data }
+  const reference = typeof value.reference === 'string' ? value.reference : undefined
+  return { code: value.code, data: value.data, reference }
 }
 
 // Fallback for a server that sends no error.data: the default code of the numeric kind.

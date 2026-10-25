@@ -258,6 +258,24 @@ public sealed class AuthorizationDecoratorTests {
     }
 
     [Fact]
+    public async Task GlobalRule_SeesTheGuardedHandlerAndItsAttributes() {
+        // A rule that keys off a handler marker reads it from the handler being authorized, not from a second
+        // registry of handler types.
+        var calls = new List<string>();
+        var rule = new RecordingGlobalRule(null, calls, "rule");
+        var decorator = DecorateWithGlobalRules(
+            typeof(RequirePermissionHandler),
+            new FakeCurrentUser { IsAuthenticated = true, Claims = [("permission", "tenants.write")] },
+            [rule]);
+
+        await decorator.HandleAsync(new GuardedCommand(1), TestContext.Current.CancellationToken);
+
+        rule.LastContext!.HandlerType.Should().Be(typeof(RequirePermissionHandler));
+        rule.LastContext.GetHandlerAttribute<RequirePermissionAttribute>()!.Permission.Should().Be("tenants.write");
+        rule.LastContext.GetHandlerAttribute<AllowAnonymousAttribute>().Should().BeNull();
+    }
+
+    [Fact]
     public async Task GlobalRulePasses_HandlerRuns() {
         var calls = new List<string>();
         var decorator = DecorateWithGlobalRules(

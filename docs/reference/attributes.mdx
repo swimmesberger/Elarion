@@ -113,6 +113,16 @@ See [Telemetry](/docs/capabilities/telemetry) and [Connections — the low-alloc
 - **Package:** `Elarion.Abstractions` · **Applies to:** class, assembly (repeatable)
 - **Triggers:** declares a failure the handler can produce — a stable error code, its `ErrorKind`, and an optional typed payload. The generator publishes the declarations (plus the validation, authorization, feature-gate and idempotency failures the framework adds) with the operation; the schema export lists them under the method's `errors`, and the TypeScript client types `error.code`/`error.data` per method. On a pipeline decorator it declares the failure for every operation the decorator wraps, on an `[AppModule]` class for every operation in the module, and on the assembly for every operation declared in it; the declaration closest to the handler wins. Constructors: `(ErrorKind)`, `(ErrorKind, Type)`, `(string code, ErrorKind)`, `(string code, ErrorKind, Type)`. See [Result & error model](/docs/reference/result-and-errors#produceserror--the-declared-error-contract).
 
+### `[ClientTag]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** class (repeatable, inherited)
+- **Triggers:** a client hint for a `[Handler]` operation, exported under the method's `tags` in `rpc-schema.json` and in the generated client's `rpcMethodInfo` — e.g. `[ClientTag("timeout", "180s")]` for a slow operation, or a marker the UI honours. Never enforcement: the pipeline does not read it. One value per key; a derived handler's tag overrides its base's, and a key repeated on one class keeps its last declaration. See [TypeScript client › Method requirements](/docs/capabilities/transports/typescript-client#method-requirements-and-ui-gating).
+
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `key` | `string` | The tag key. |
+| `value` | `string` | The tag value. |
+
 ### `[McpHandler]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class

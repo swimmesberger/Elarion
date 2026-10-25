@@ -1,5 +1,6 @@
 import {describe, expect, it, vi} from "vitest"
 import {
+  canCall,
   contribute,
   createCapabilityStore,
   createContributionRegistry,
@@ -43,6 +44,42 @@ describe("evaluateWhen", () => {
     expect(evaluateWhen({module: "B", permission: "a.read"}, caps)).toBe(false)
     expect(evaluateWhen({role: "admin"}, caps)).toBe(false)
     expect(evaluateWhen({flag: "beta"}, caps)).toBe(false)
+  })
+})
+
+describe("canCall", () => {
+  const importLedger = {
+    requires: {authenticated: true, permissions: ["ledger.write", "ledger.import"], roles: ["Clerk"], serverChecks: true},
+  }
+
+  it("allows an anonymous method for anyone", () => {
+    expect(canCall({requires: {anonymous: true}}, capabilities({}), {authenticated: false}))
+      .toEqual({allowed: true, serverChecks: false})
+  })
+
+  it("allows when every permission and role is held, flagging server-only checks", () => {
+    const caller = capabilities({permissions: ["ledger.write", "ledger.import"], roles: ["Clerk"]})
+    expect(canCall(importLedger, caller)).toEqual({allowed: true, serverChecks: true})
+  })
+
+  it("names the first missing permission, then role", () => {
+    expect(canCall(importLedger, capabilities({permissions: ["ledger.write"], roles: ["Clerk"]})))
+      .toEqual({allowed: false, reason: "permission", missing: "ledger.import"})
+    expect(canCall(importLedger, capabilities({permissions: ["ledger.write", "ledger.import"]})))
+      .toEqual({allowed: false, reason: "role", missing: "Clerk"})
+  })
+
+  it("refuses a signed-out caller from the reader's user or the explicit option", () => {
+    const signedOut = {...capabilities({}), user: {isAuthenticated: false}}
+    expect(canCall({requires: {authenticated: true}}, signedOut)).toEqual({allowed: false, reason: "unauthenticated"})
+    expect(canCall({requires: {authenticated: true}}, capabilities({}), {authenticated: false}))
+      .toEqual({allowed: false, reason: "unauthenticated"})
+    // Without either, an authentication-only method cannot be judged and stays allowed (the server decides).
+    expect(canCall({requires: {authenticated: true}}, capabilities({}))).toEqual({allowed: true, serverChecks: false})
+  })
+
+  it("allows a method that declares nothing", () => {
+    expect(canCall({}, capabilities({}))).toEqual({allowed: true, serverChecks: false})
   })
 })
 

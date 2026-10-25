@@ -45,6 +45,19 @@ public sealed record RpcError {
         };
     }
 
+    /// <summary>
+    /// Internal error for an exception that escaped the handler pipeline (-32603): the configured message, the code
+    /// <see cref="Abstractions.ErrorCodes.Internal"/> and the support reference in <see cref="RpcErrorData.Reference"/>.
+    /// </summary>
+    public static RpcError Unexpected(Abstractions.UnexpectedError error) {
+        ArgumentNullException.ThrowIfNull(error);
+        return new RpcError {
+            Code = -32603,
+            Message = error.Message,
+            Data = new RpcErrorData { Code = Abstractions.ErrorCodes.Internal, Reference = error.Reference }
+        };
+    }
+
     /// <summary>Internal error — an unexpected server error (-32603).</summary>
     public static RpcError InternalError(string? message = null) {
         return new RpcError {

@@ -39,13 +39,20 @@ namespace MyApp.Application.Pipeline;
 
 [DecoratorList(
     typeof(LoggingDecorator<,>),
+    typeof(Elarion.Pipeline.TransactionDecorator<,>),
     typeof(DbConstraintDecorator<,>))]
 [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
 public sealed class DefaultPipelineAttribute : Attribute;
 
-[DecoratorList(typeof(LoggingDecorator<,>))]
+// Bulk imports write thousands of rows in one command: the same decorators, plus a longer database
+// command timeout for the call (an app decorator that calls db.Database.SetCommandTimeout).
+[DecoratorList(
+    typeof(LoggingDecorator<,>),
+    typeof(Elarion.Pipeline.TransactionDecorator<,>),
+    typeof(LongCommandTimeoutDecorator<,>),
+    typeof(DbConstraintDecorator<,>))]
 [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class)]
-public sealed class ReadOnlyPipelineAttribute : Attribute;
+public sealed class BulkImportPipelineAttribute : Attribute;
 ```
 
 Apply the default at the assembly level:
@@ -61,22 +68,29 @@ using Elarion.Abstractions;
 And override it on a specific handler:
 
 ```csharp
-[ReadOnlyPipeline]
-[Handler("clients.search")]
-public sealed class SearchClients
-    : IHandler<SearchClients.Query, Result<SearchClients.Response>> {
+[BulkImportPipeline]
+[Handler("contacts.import")]
+public sealed class ImportContacts
+    : IHandler<ImportContacts.Command, Result<ImportContacts.Response>> {
     // ...
 }
 ```
 
-A read-only query gets just logging; a command additionally translates database constraint
-violations. Named
-pipelines suit per-handler overrides and axes the request type can't express. For the common
-read/write split you usually don't need a second pipeline at all: make the decorator itself decide —
-either by a compile-time generic constraint ([Filtering by request kind](#filtering-by-request-kind))
-or, for richer cases like the transaction decorator, by an
-[`AppliesTo` predicate](#conditional-attachment-with-appliesto) so one decorator is correct for
-commands, queries, and both kinds of event handler.
+A named pipeline **replaces** the default rather than adding to it, so it lists every decorator it keeps.
+
+Use one for an axis the request type cannot express. An import is a command like any other, and nothing
+on its request type says it needs a longer database timeout, so a named pipeline is the right place to
+say so.
+
+**Do not use one for the read/write split.** The request kind (`IQuery`/`ICommand`) already carries that
+split. A pipeline named after it ("read-only", "query") becomes a second source of truth: it has to be
+remembered on every new handler, and it drifts from the type the day someone forgets. Instead, let the
+decorator itself decide, in one of two ways:
+- with a compile-time generic constraint, see [Filtering by request kind](#filtering-by-request-kind);
+- with an [`AppliesTo` predicate](#conditional-attachment-with-appliesto), as the transaction decorator
+  does.
+
+Either way, one default pipeline is correct for commands, queries, and both kinds of event handler.
 
 ## Writing a decorator
 

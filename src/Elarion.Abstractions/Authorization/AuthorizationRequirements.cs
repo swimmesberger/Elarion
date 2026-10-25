@@ -20,6 +20,14 @@ public readonly record struct AuthorizationRequirements(
     IReadOnlyList<RequireClaimAttribute> Claims,
     IReadOnlyList<string> Policies,
     IReadOnlyList<ResourceRequirement> Resources) {
+    /// <summary>
+    /// The concrete handler type these requirements guard, or <see langword="null"/> when they do not come from a
+    /// handler (the client-event subscription path). Passed on to <see cref="AuthorizationContext.HandlerType"/> so
+    /// an <see cref="IGlobalAuthorizationRule"/> or <see cref="IAuthorizationPolicy"/> can key off the handler's own
+    /// attributes. It is context, not a requirement, so <see cref="HasAny"/> ignores it.
+    /// </summary>
+    public Type? HandlerType { get; init; }
+
     /// <summary>Whether any requirement beyond "anonymous" is present.</summary>
     public bool HasAny =>
         RequireAuthenticated || Permissions.Count > 0 || Roles.Count > 0 || Claims.Count > 0

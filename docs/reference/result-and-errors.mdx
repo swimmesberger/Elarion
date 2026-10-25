@@ -176,7 +176,9 @@ shipped.
 | `Internal` | `internal` |
 
 Pipeline codes: `idempotency.key_required` (`Validation`), `idempotency.in_progress` (`Conflict`),
-`idempotency.key_reused` (`BusinessRule`). `ErrorCodes.IsValid(code)` checks the format.
+`idempotency.key_reused` (`BusinessRule`). Package codes: `paging.sort_key_unknown` (`Validation`, from
+`SortMap.Validate`), `settings.pinned`, `settings.concurrency_conflict`. Every framework answer carries its specific
+code, so a client never matches the message text. `ErrorCodes.IsValid(code)` checks the format.
 
 ## `[ProducesError]` — the declared error contract
 
@@ -263,6 +265,10 @@ Every transport carries the code, and the typed payload where the transport has 
 | HTTP | ProblemDetails member `code` | ProblemDetails member `data` (a validation payload is the standard `errors` map instead) |
 | gRPC | `elarion-error-code` trailer | not carried (the kind goes in `elarion-error-kind`) |
 | MCP | structured content `code` | structured content `data` |
+
+An exception that escaped the handler pipeline additionally carries its support reference: `error.data.reference`
+on JSON-RPC, structured content `reference` on MCP, the ProblemDetails member `reference` on HTTP (see
+[Unexpected errors](/docs/concepts/results-and-errors#unexpected-errors)).
 
 ```json title="JSON-RPC error"
 { "code": -32002, "message": "The seat is taken.", "data": { "code": "seat.taken", "data": { "seat": 4 } } }

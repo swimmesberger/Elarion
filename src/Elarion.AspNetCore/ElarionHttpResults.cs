@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Claims;
 using Elarion;
 using Elarion.Abstractions;
@@ -6,7 +7,9 @@ using Elarion.Abstractions.Serialization;
 using Elarion.AspNetCore.Streams;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Elarion.AspNetCore;
 
@@ -99,6 +102,60 @@ public static class ElarionHttpResults {
         // Leave the title null so ASP.NET fills the canonical reason phrase for the status code.
         return Results.Problem(error.Message, statusCode: statusCode, extensions: HttpAppErrorMapper.Extensions(error));
     }
+
+    /// <summary>
+    /// Whether a generated endpoint answers <paramref name="exception"/> itself — everything except the cancellation of
+    /// an aborted request, which is the client leaving, not a server failure, and gets no response, and an exception
+    /// <see cref="UnexpectedErrorOptions.LeaveToHost"/> hands to the host's exception handling. Used as the catch's
+    /// filter, so an exception left to the host propagates with its stack intact.
+    /// </summary>
+    public static bool IsUnexpected(HttpContext context, Exception exception) {
+        ArgumentNullException.ThrowIfNull(context);
+        if (exception is OperationCanceledException && context.RequestAborted.IsCancellationRequested) return false;
+
+        return !UnexpectedErrorOptions.LeavesToHost(new UnexpectedErrorContext {
+            Exception = exception,
+            Transport = UnexpectedErrorTransports.Http,
+            Operation = context.GetEndpoint()?.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName,
+            Services = context.RequestServices
+        });
+    }
+
+    /// <summary>
+    /// The <c>500</c> ProblemDetails a generated <c>[HttpEndpoint]</c> answers for an exception that escaped the
+    /// handler pipeline: the <see cref="UnexpectedErrorOptions"/> message as <c>detail</c>, the code
+    /// <see cref="ErrorCodes.Internal"/> and the support reference as the <c>reference</c> member — the same answer
+    /// the JSON-RPC and MCP transports give. The exception is logged at error level with the reference and recorded
+    /// on the current activity; it does not reach the host's exception-handling middleware unless
+    /// <see cref="UnexpectedErrorOptions.LeaveToHost"/> says so.
+    /// </summary>
+    /// <param name="context">The request.</param>
+    /// <param name="exception">The exception the endpoint caught.</param>
+    /// <param name="operation">The endpoint name, passed to the options hooks and the log.</param>
+    public static IResult ToUnexpectedProblem(HttpContext context, Exception exception, string operation) {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(exception);
+
+        var unexpected = UnexpectedErrorOptions.Describe(new UnexpectedErrorContext {
+            Exception = exception, Transport = UnexpectedErrorTransports.Http, Operation = operation,
+            Services = context.RequestServices
+        });
+        context.RequestServices.GetService<ILoggerFactory>()?.CreateLogger(UnexpectedErrorLoggerCategory)
+            .LogError(exception, "Unhandled exception in HTTP endpoint {Endpoint} (reference {ErrorReference})",
+                operation, unexpected.Reference);
+        if (Activity.Current is { } activity) {
+            activity.AddException(exception);
+            activity.SetTag("elarion.error.reference", unexpected.Reference);
+        }
+
+        var extensions = new Dictionary<string, object?> { [HttpAppErrorMapper.CodeExtensionName] = ErrorCodes.Internal };
+        if (unexpected.Reference is { } reference) extensions[HttpAppErrorMapper.ReferenceExtensionName] = reference;
+
+        return Results.Problem(unexpected.Message, statusCode: StatusCodes.Status500InternalServerError,
+            extensions: extensions);
+    }
+
+    private const string UnexpectedErrorLoggerCategory = "Elarion.AspNetCore.HttpEndpoints";
 
     /// <summary>
     /// Adds the ProblemDetails response metadata (for OpenAPI) covering every status code an Elarion handler

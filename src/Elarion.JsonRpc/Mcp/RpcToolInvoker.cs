@@ -50,7 +50,8 @@ public static class RpcToolInvoker {
     /// <remarks>
     /// Unexpected handler exceptions are logged through the host's <see cref="ILoggerFactory"/> (resolved from
     /// <paramref name="rootServices"/>, like the invoker's other collaborators) before being mapped to a JSON-RPC
-    /// internal error — never propagated raw to the transport SDK.
+    /// internal error carrying the configured <see cref="UnexpectedErrorOptions"/> message and reference — never
+    /// propagated raw to the transport SDK.
     /// </remarks>
     public static async Task<RpcToolResult> InvokeAsync(
         HandlerDispatcher dispatcher,
@@ -99,11 +100,8 @@ public static class RpcToolInvoker {
                 throw;
             }
             catch (Exception ex) {
-                rootServices.GetService<ILoggerFactory>()?.CreateLogger(typeof(RpcToolInvoker))
-                    .LogError(ex, "Unhandled exception evaluating the admission gate of tool {Method}", methodName);
-                RecordError(activity, route.Name, "-32603", ex.Message, startTimestamp);
-                return new RpcToolResult { IsError = true, Text = "Internal error", ErrorCode = -32603,
-                    ErrorData = new RpcErrorData { Code = ErrorCodes.Internal } };
+                return Unexpected(ex, true, methodName, route.Name, scope.ServiceProvider, rootServices, activity,
+                    startTimestamp);
             }
 
             if (denial is not null) {
@@ -139,15 +137,9 @@ public static class RpcToolInvoker {
         }
         catch (Exception ex) {
             // An unexpected handler exception must not propagate raw to the MCP SDK. Log it, record it on the
-            // span, and map it to a JSON-RPC internal error (-32603), consistent with JsonRpcDispatcher.
-            logger?.LogError(ex, "Unhandled exception invoking tool {Method}", methodName);
-            activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
-                { "exception.type", ex.GetType().FullName },
-                { "exception.message", ex.Message }
-            }));
-            RecordError(activity, route.Name, "-32603", ex.Message, startTimestamp);
-            return new RpcToolResult { IsError = true, Text = "Internal error", ErrorCode = -32603,
-                ErrorData = new RpcErrorData { Code = ErrorCodes.Internal } };
+            // span, and answer the configured internal error (-32603), consistent with JsonRpcDispatcher.
+            return Unexpected(ex, false, methodName, route.Name, scope.ServiceProvider, rootServices, activity,
+                startTimestamp);
         }
 
         if (!result.IsSuccess) {
@@ -174,6 +166,31 @@ public static class RpcToolInvoker {
         JsonRpcTelemetry.RecordRequest(
             route.Name, "OK", Stopwatch.GetElapsedTime(startTimestamp), "mcp");
         return new RpcToolResult { IsError = false, Text = text };
+    }
+
+    // Both MCP catch sites answer through the configured unexpected-error options, so a tool call fails with the
+    // same message, code and reference as the JSON-RPC and HTTP transports; the reference is logged with the
+    // exception so support can match it.
+    private static RpcToolResult Unexpected(Exception ex, bool inAdmissionGate, string methodName, string operation,
+        IServiceProvider scopeServices, IServiceProvider rootServices, Activity? activity, long startTimestamp) {
+        var unexpected = UnexpectedErrorOptions.Describe(new UnexpectedErrorContext {
+            Exception = ex, Transport = UnexpectedErrorTransports.Mcp, Operation = operation, Services = scopeServices
+        });
+        var logger = rootServices.GetService<ILoggerFactory>()?.CreateLogger(typeof(RpcToolInvoker));
+        if (inAdmissionGate)
+            logger?.LogError(ex, "Unhandled exception evaluating the admission gate of tool {Method} (reference {ErrorReference})",
+                methodName, unexpected.Reference);
+        else
+            logger?.LogError(ex, "Unhandled exception invoking tool {Method} (reference {ErrorReference})", methodName,
+                unexpected.Reference);
+        activity?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection {
+            { "exception.type", ex.GetType().FullName },
+            { "exception.message", ex.Message }
+        }));
+        if (activity?.IsAllDataRequested == true) activity.SetTag("elarion.error.reference", unexpected.Reference);
+        RecordError(activity, operation, "-32603", ex.Message, startTimestamp);
+        var error = RpcError.Unexpected(unexpected);
+        return new RpcToolResult { IsError = true, Text = error.Message, ErrorCode = error.Code, ErrorData = error.Data };
     }
 
     private static Activity? StartToolActivity(string method) {

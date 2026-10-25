@@ -64,13 +64,15 @@ convention (here `clients.get`), while an explicit name is recommended for stabl
 - **Modules own their surface** — a module is a namespace plus an `[AppModule]` marker. Add a handler
   under it and the module publishes it automatically.
 - **Transport-neutral results** — handlers return `Result<T>` with a transport-agnostic `AppError`;
-  the host maps failures to JSON-RPC, HTTP, or anything else.
+  the host maps failures to JSON-RPC, HTTP, or anything else. An unexpected exception gets one configurable answer
+  on every transport, with a support reference in its own field.
 - **One bus, many surfaces** — every handler maps onto a single transport-neutral `HandlerDispatcher`
   (`Elarion.Abstractions.Dispatch`); JSON-RPC and MCP are thin **adapters** over that one bus, each serving
   only the operations flagged for it. Define a handler once and choose its surfaces with the `Transports`
   flag.
 - **End-to-end JSON-RPC** — mark a handler with `[Handler]`, export a schema at build time, and
-  generate a typed TypeScript + Zod client.
+  generate a typed TypeScript + Zod client. The schema carries each method's requirements, so the UI gates an
+  action with `canCall(rpcMethodInfo[method], capabilities)` instead of repeating its permissions.
 - **Validation that reaches the contract** — DataAnnotations on the request DTO are enforced by a
   generated pipeline decorator under every transport **and** exported to the JSON-RPC schema, OpenAPI,
   MCP tool schemas, and the Zod client (which pre-validates requests). One declaration, four surfaces;

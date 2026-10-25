@@ -213,10 +213,52 @@ to keep HTTP GET query binding simple (`OffsetPageRequest` is the ready-made imp
 safe for concurrent requests; the mutable `SortMapBuilder` is single-threaded and used only at
 startup.
 
-A request `Sort` of `"name"` orders by `Name` then `Id`; a leading `-` (descending) or `+`
-(ascending) flips only the entry's primary column, while declared tiebreakers keep their direction (so
-`"-name"` sorts `Name` descending, `Id` ascending). Unknown or blank keys fall back to the default
-entry. Offset pages fill `Total`; keyset pages fill the cursors instead.
+A request `Sort` names a key in one of three forms:
+
+| `Sort` | Primary column | Tiebreakers |
+| --- | --- | --- |
+| `key` (bare) | the entry's **declared** direction | declared |
+| `+key` | ascending | declared |
+| `-key` | descending | declared |
+
+A bare key is **not** "ascending": `"createdAt"` above sorts descending, because that is how the key was declared,
+and a client that wants it ascending sends `"+createdAt"`. `"-name"` sorts `Name` descending, `Id` ascending. Keys
+match case-insensitively. A blank `Sort` means the default entry. Offset pages fill `Total`; keyset pages fill the
+cursors instead.
+
+An **unknown** key also falls back to the default entry — right for a list that must always render, wrong when a
+client sends a key it should not. `Sort.Validate(query.Sort)` checks the key first and answers an unknown one with a
+field-keyed validation error (code `paging.sort_key_unknown`, keyed by the request field, naming the allowed keys),
+so the client bug surfaces instead of a silently re-sorted list:
+
+```csharp
+[ProducesError(PagingErrorCodes.SortKeyUnknown, ErrorKind.Validation)]
+public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, CancellationToken ct) {
+    if (Sort.Validate(query.Sort) is { } unknownSort) return unknownSort;
+
+    return await db.Clients
+        .Where(c => c.OwnerId == user.UserId)
+        .ToOffsetPageAsync(query, c => new Item(c.Id, c.Name, c.CreatedAt), Sort, maxSize: 100, ct);
+}
+```
+
+`Sort.Keys` lists every allowed key in declaration order with its declared direction and which one is the default —
+what a client needs to build sort parameters (a column header toggling between `+key` and `-key`) without mirroring
+the declarations by hand.
+
+### Mapping a page
+
+`Page<T>.Map(selector)` projects every item and keeps the cursors, flags and total, so enriching or renaming the
+rows of a page never rebuilds the envelope by hand. `MapAsync` hands the whole item list to the selector at once —
+one batched lookup for the page instead of one per row — and requires one result per item, in order:
+
+```csharp
+var page = await db.Notes.ToOffsetPageAsync(query, n => new { n.Id, n.Text, n.AuthorId }, Sort, maxSize: 50, ct);
+return await page.MapAsync(async (rows, token) => {
+    var authors = await directory.GetNamesAsync(rows.Select(r => r.AuthorId).Distinct(), token);
+    return rows.Select(r => new NoteRow(r.Id, r.Text, authors[r.AuthorId])).ToArray();
+}, ct);
+```
 
 ### Consuming an offset page
 

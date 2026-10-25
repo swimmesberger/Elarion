@@ -192,6 +192,26 @@ no request, so `context.Resource` is `null` — a rule that branches on the requ
 denial there, which is fail-closed but may not be what you meant. Handle `null` explicitly if a rule should treat
 subscribes differently from commands.
 
+`context.HandlerType` names the concrete handler being authorized (independent of decorator order, also `null` on
+the subscription path), so a rule keys off the handler's **own markers** instead of a second registry of handler
+types. A rule that requires every write to declare whether it is allowed in some session mode, and refuses an
+undeclared one (among the commands the authorization decorator sees — see the note on where it is attached below):
+
+```csharp
+public sealed class ViewAsRule(IViewAsSession session) : IGlobalAuthorizationRule {
+    public ValueTask<AppError?> EvaluateAsync(AuthorizationContext context, CancellationToken ct) {
+        if (!session.IsActive || context.Resource is not ICommand) return ValueTask.FromResult<AppError?>(null);
+
+        // GetHandlerAttribute reads HandlerType's attributes, inherited ones included.
+        return ValueTask.FromResult(context.GetHandlerAttribute<AllowedDuringViewAsAttribute>() is null
+            ? AppError.Forbidden("Not available while viewing as another user.")
+            : null);
+    }
+}
+```
+
+Named policies receive the same `HandlerType`.
+
 <Callout type="warn">
 A rule only runs **where the authorization decorator is attached**, and the generator attaches it at compile time
 only for handlers carrying a `Require*` attribute or in scope of `[ElarionAuthorizationDefaults]`. For broad
