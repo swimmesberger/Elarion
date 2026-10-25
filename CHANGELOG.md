@@ -42,6 +42,12 @@ minor releases may include breaking changes.
   only while `StillEligible` holds and returns `Finalized`, `Ineligible` or `ClaimLost`; `ReleaseClaimsAsync(ids,
   lockId, update, ct)` gives a batch back in one statement with setters that undo the claim's bookkeeping; and
   `ClaimPendingAsync(claim, select, ct)` returns the won rows projected in the same query.
+- **Resource authorization composes** (ADR-0089). `[RequireResource(DenyAs = ResourceDenial.NotFound)]` answers a
+  denial like a missing record (`404`, `not_found`, `AuthorizationOptions.ResourceNotFoundMessage`) and declares
+  `not_found` in the operation's error contract; `[ResourceFilter(BypassPermission = "contacts.manage")]` lifts the
+  owner and sharing rules for that permission's holders while the tenant scope still applies; `WhereAuthorizedVia(ownerKey, owners, ownerId, authorizer, user)`
+  filters notes or files by their owner's visibility in the same SQL statement; and `QueryAuthorizers.AnyOf`/`AllOf`/
+  `From` add an application rule (sharing through a membership table) to a generated filter.
 - **Entity lifecycle events for soft references** (`Elarion.EntityFrameworkCore`, ADR-0088). Mark an entity
   `[PublishLifecycleEvents]` and register `AddElarionEntityLifecycleEvents<TDbContext>()`: every save that deletes its
   rows — tracked, or through a database cascade from another row, queried before the `DELETE` — publishes

@@ -303,6 +303,29 @@ public sealed class StreamPipelineTests {
     }
 
     [Fact]
+    public async Task Authorization_ResourceDeniedAsNotFound_AnswersLikeAMissingResource() {
+        var authorizer = new ClaimsAuthorizer(
+            new Elarion.Tests.Authorization.FakeCurrentUser { IsAuthenticated = true }, [],
+            new Elarion.Tests.Authorization.StubResourceAuthorizer(false), new AuthorizationOptions(),
+            NullLogger<ClaimsAuthorizer>.Instance);
+        var steps = new List<string>();
+        var handler = new StreamAuthorizationDecorator<ResourceRequest, int>(
+            new ResourceHandler(steps),
+            new StreamHandlerMetadata(typeof(ResourceHandler), typeof(ResourceRequest), typeof(int)), authorizer,
+            resourceBindings: [
+                new ResourceRequirementBinding<ResourceRequest>(typeof(Resource), new ResourceOperation("read"),
+                    static request => request.Owner.Id, denyAs: ResourceDenial.NotFound)
+            ]);
+
+        var result =
+            await handler.HandleAsync(new ResourceRequest(new Owner(42)), TestContext.Current.CancellationToken);
+
+        result.Error.Kind.Should().Be(ErrorKind.NotFound);
+        result.Error.Message.Should().Be(new AuthorizationOptions().ResourceNotFoundMessage);
+        steps.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Authorization_GlobalRule_DeniesTheStream_AndTagsTheRulesOwnOutcomeKind() {
         // Parity with the request/reply decorator (#149): a stream goes through the same IAuthorizer, so the
         // registered IGlobalAuthorizationRule set gates it too. The real ClaimsAuthorizer is used so the rule

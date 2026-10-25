@@ -342,6 +342,11 @@ deploy only on a path change with no dialog open or field focused, never on a fo
   transport. ASP.NET `[Authorize]`/policies are host-level extras (middleware or
   `ConfigureEndpointGroup`), never the business gate. A cross-cutting rule that keys off a handler marker is an
   `IGlobalAuthorizationRule` reading `context.GetHandlerAttribute<T>()`, not an app decorator.
+- **Row visibility is declared once.** `[ResourceFilter<T>]` (with `BypassPermission` for admins — it lifts owner and
+  sharing rules, never the tenant scope) filters lists;
+  data that belongs to a record (notes, files) uses `WhereAuthorizedVia(...)` on its owner's filter; extra rules are
+  composed with `QueryAuthorizers.AnyOf/AllOf`; a hidden record's point check is
+  `[RequireResource(..., DenyAs = ResourceDenial.NotFound)]` — never a hand-copied visibility predicate per table.
 - **The UI reads requirements from the contract.** The schema exports each method's `requires`, `readOnly` and
   `[ClientTag]` hints; gate actions with `canCall(rpcMethodInfo[method], capabilities)` instead of repeating
   permission names at call sites.

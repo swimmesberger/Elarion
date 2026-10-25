@@ -109,3 +109,4 @@ designs that are not yet implemented.
 - [ADR-0086: One framework-owned answer for unexpected exceptions, on every transport — Proposed](0086-one-answer-for-unexpected-errors.md)
 - [ADR-0087: Transaction-scoped locks are a framework helper with one advisory key scheme — Proposed](0087-transaction-scoped-locks-and-one-advisory-key-scheme.md)
 - [ADR-0088: Deletions of marked entities are domain events, published with their database cascades — Proposed](0088-entity-lifecycle-events-for-soft-references.md)
+- [ADR-0089: Resource authorization composes — hidden-as-missing, owner-derived filters, combinators — Proposed](0089-resource-authorization-composes.md)

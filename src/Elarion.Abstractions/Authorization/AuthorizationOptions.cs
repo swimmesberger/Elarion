@@ -19,4 +19,10 @@ public sealed class AuthorizationOptions {
 
     /// <summary>Message returned when the principal is not authenticated.</summary>
     public string UnauthorizedMessage { get; set; } = "Authentication required.";
+
+    /// <summary>
+    /// Message of the not-found answer to a <c>[RequireResource(DenyAs = ResourceDenial.NotFound)]</c> denial. Keep it
+    /// identical to the handler's own answer for a missing resource, or the two become distinguishable.
+    /// </summary>
+    public string ResourceNotFoundMessage { get; set; } = "The requested resource was not found.";
 }

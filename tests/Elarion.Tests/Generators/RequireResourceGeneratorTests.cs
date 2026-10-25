@@ -61,6 +61,20 @@ public sealed class RequireResourceGeneratorTests {
     }
 
     [Fact]
+    public void RequireResource_DenyAsNotFound_IsEmittedOnTheBinding() {
+        var hidden = Source.Replace(
+            "[RequireResource(typeof(Contact), Operation = \"read\", Id = nameof(GetContact.Query.Id))]",
+            "[RequireResource(typeof(Contact), Operation = \"read\", Id = nameof(GetContact.Query.Id), DenyAs = ResourceDenial.NotFound)]");
+        var result = Run(hidden);
+
+        result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        var source = GetGenerated(result, "Sample_App_GetContact.g.cs");
+
+        source.Should().Contain(
+            "new(typeof(global::Sample.App.Contact), new global::Elarion.Abstractions.Authorization.ResourceOperation(\"read\"), static __r => __r.Id, denyAs: global::Elarion.Abstractions.Authorization.ResourceDenial.NotFound),");
+    }
+
+    [Fact]
     public void RequireResource_UnresolvablePath_ReportsElauth002() {
         var result = Run(Source.Replace("Id = nameof(GetContact.Query.Id)", "Id = \"Missing\""));
 

@@ -37,4 +37,27 @@ public sealed class RequireResourceAttribute(Type resourceType) : Attribute {
     /// Defaults to <c>"Id"</c>. A path that names no such member is a generator diagnostic (ELAUTH002).
     /// </summary>
     public string Id { get; init; } = "Id";
+
+    /// <summary>
+    /// How a denied caller is answered. <see cref="ResourceDenial.Forbidden"/> (the default) answers <c>403</c>;
+    /// <see cref="ResourceDenial.NotFound"/> answers exactly like a missing resource (<c>404</c>,
+    /// <c>not_found</c>), so a caller cannot tell a hidden record from one that does not exist.
+    /// </summary>
+    /// <remarks>
+    /// With several <c>[RequireResource]</c> on one handler, they are checked in declaration order and the first denial
+    /// answers, with its own <see cref="DenyAs"/>. Declare a hidden resource first when a later one would reveal it.
+    /// </remarks>
+    public ResourceDenial DenyAs { get; init; } = ResourceDenial.Forbidden;
+}
+
+/// <summary>How a <see cref="RequireResourceAttribute"/> answers a caller it denies.</summary>
+public enum ResourceDenial {
+    /// <summary>Forbidden (<c>403</c>): the caller learns the resource exists.</summary>
+    Forbidden = 0,
+
+    /// <summary>
+    /// Not found (<c>404</c>, the generic not-found message): indistinguishable from a resource that does not exist — for
+    /// records whose existence is itself confidential, matching a list filter that hides them.
+    /// </summary>
+    NotFound = 1
 }

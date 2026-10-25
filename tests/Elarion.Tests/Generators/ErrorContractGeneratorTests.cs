@@ -64,6 +64,19 @@ public sealed class ErrorContractGeneratorTests {
     }
 
     [Fact]
+    public void RequireResourceDeniedAsNotFound_ImpliesNotFound() {
+        var hidden = Run(Handler(
+            "[Elarion.Abstractions.Authorization.RequireResource(typeof(Redeem), Id = \"Token\", " +
+            "DenyAs = Elarion.Abstractions.Authorization.ResourceDenial.NotFound)]"), out _);
+        var forbidden = Run(Handler(
+            "[Elarion.Abstractions.Authorization.RequireResource(typeof(Redeem), Id = \"Token\")]"), out _);
+
+        ContractOf(hidden, "tokens.redeem").Should().Equal(
+            "forbidden:Forbidden:", "not_found:NotFound:", "unauthorized:Unauthorized:");
+        ContractOf(forbidden, "tokens.redeem").Should().Equal("forbidden:Forbidden:", "unauthorized:Unauthorized:");
+    }
+
+    [Fact]
     public void InvalidErrorCode_IsReported() {
         Run(Handler("[ProducesError(\"Token.Bad\", ErrorKind.Validation)]"), out var diagnostics);
 

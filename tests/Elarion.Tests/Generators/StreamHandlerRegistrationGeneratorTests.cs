@@ -133,6 +133,49 @@ public sealed class StreamHandlerRegistrationGeneratorTests {
     }
 
     [Fact]
+    public void RequireResource_DenyAsNotFound_IsEmittedOnTheStreamBinding() {
+        const string source = """
+                              using System.Collections.Generic;
+                              using System.Threading;
+                              using System.Threading.Tasks;
+                              using Elarion.Abstractions;
+                              using Elarion.Abstractions.Authorization;
+                              using Elarion.Abstractions.Modules;
+                              [assembly: GenerateModuleHandlers]
+                              namespace Sample.App {
+                                  [AppModule("App")] public static class AppModule { }
+                                  public sealed class Resource;
+                                  public sealed record Request(int Id);
+                                  [RequireResource(typeof(Resource), Id = nameof(Request.Id), DenyAs = ResourceDenial.NotFound)]
+                                  public sealed class Handler : IStreamHandler<Request, string> {
+                                      public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(Request request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
+                                      private static async IAsyncEnumerable<string> Values() { yield return "x"; await Task.Yield(); }
+                                  }
+                              }
+                              """;
+
+        var result = Run(source);
+        var generated = Get(result, "Sample_App_Handler.stream.g.cs");
+        generated.Should().Contain(
+            "static request => request.Id, null, global::Elarion.Abstractions.Authorization.ResourceDenial.NotFound),");
+        var compilation = CSharpCompilation.Create(
+            "DenyAsStreamResourceCompilation",
+            [
+                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview),
+                    cancellationToken: TestContext.Current.CancellationToken),
+                .. result.GeneratedTrees.Where(tree =>
+                        Path.GetFileName(tree.FilePath).EndsWith(".stream.g.cs", StringComparison.Ordinal))
+                    .Select(tree => CSharpSyntaxTree.ParseText(tree.GetText(),
+                        new CSharpParseOptions(LanguageVersion.Preview),
+                        cancellationToken: TestContext.Current.CancellationToken))
+            ],
+            References(), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        compilation.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+    }
+
+    [Fact]
     public void ResourceOperationAndTypeName_AreEmittedAsEscapedCSharpLiterals() {
         const string source = """
                               using System.Collections.Generic;
