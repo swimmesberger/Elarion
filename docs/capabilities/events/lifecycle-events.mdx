@@ -109,6 +109,35 @@ attached throws. A soft-delete interceptor, by contrast, belongs before it, so a
 lifecycle events look — see
 [EF Core › Interceptors and their order](/docs/capabilities/entity-framework#interceptors-and-their-order).
 
+## Why only deletions
+
+There is no `EntitiesAdded<T>` or `EntitiesUpdated<T>`, on purpose. Deletion needs the framework for two reasons
+that inserts and updates do not share:
+
+- **It breaks data it does not own.** Notes and files keep pointing at a deleted record, and the deleting module
+  cannot know which modules keep such data. Inserting or updating the record leaves every reference valid.
+- **Part of it is invisible to your code.** A database cascade deletes rows no handler loaded; only an interceptor
+  that reads the EF model finds them before the `DELETE`. An insert or update is always written by code that knows
+  what it wrote.
+
+A framework event for inserts and updates would also be the wrong tool:
+
+- **It carries no intent.** "Contact updated" does not say whether the contact was renamed, reassigned, or stamped by
+  a background worker, so consumers would diff columns of another module's table.
+- **It could not be complete.** Leased work, the outbox and bulk paths rely on `ExecuteUpdate`, so the event could
+  not refuse it the way deletion refuses `ExecuteDelete`.
+- **It would be expensive.** It would run a consumer in every save.
+
+Use the tool that fits the need:
+
+| You need | Use |
+| --- | --- |
+| Another module reacts to a business change | an intent-named event the handler publishes — inline [domain event](/docs/capabilities/events) or after-commit integration event |
+| Field-level history | [`[Auditable]`](/docs/concepts/auditing) with EF change capture |
+| Cache freshness | [`[CacheInvalidate]`](/docs/capabilities/caching) |
+| A browser shows the change, such as a live dashboard over several tables | a [client event](/docs/capabilities/events/client-events): a re-query hint after commit |
+| A search index or stored projection | an integration event, consumed after commit |
+
 ## An inbox fed by domain events
 
 The same shape serves a per-recipient inbox (mentions, rescheduled appointments): producers publish their own domain
