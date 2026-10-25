@@ -58,10 +58,51 @@ interceptors was undocumented.
 - Inheritance is not supported yet; supporting it means keying deletions by the event's marked type and querying
   cascades per derived type.
 
+## Why deletions, and not inserts or updates
+
+Deletion gets a framework event because it has two properties that no other change has.
+
+1. **It breaks data it does not own.** A soft reference has no foreign key, so the database keeps the orphan. The
+   deleting module cannot know which modules keep data on its records (ADR-0002), so it cannot clean up for them.
+   Inserting or updating the owner leaves every reference valid.
+2. **Part of it is invisible to code.** A database cascade removes rows that no handler loaded. Only an interceptor
+   that reads the model can find them, and only before the `DELETE` runs. An insert or an update is always written by
+   code that knows what it wrote, so that code can publish an event that also says why.
+
+Inserts and updates also fail the tests an inline framework event must pass:
+
+- **Intent.** "Contact updated" is row state, not meaning: renamed, reassigned, or a column a background worker
+  stamped. Consumers would diff columns to guess, which couples every module to another module's tables. The owning
+  handler publishes `ContactReassigned`, on the domain plane or, after commit, on the integration plane.
+- **Completeness.** Deletion can refuse `ExecuteDelete` because no framework path needs it on watched rows.
+  `ExecuteUpdate` is the core of leased work rows, the outbox and settings, and bulk updates use it too. Refusing it
+  would break those features, and allowing it would make the event silently incomplete. An inline event that may miss
+  changes is worse than none, because consumers would rely on it.
+- **Cost.** Updates far outnumber deletions. An inline consumer would run in every save, and its failure would fail
+  writes that have nothing to do with it.
+
+Each insert/update need has its own tool:
+
+| Need | Tool |
+| --- | --- |
+| Another module reacts to a business change | an intent-named domain or integration event, published by the handler |
+| Field-level history | `[Auditable]` with EF change capture (ADR-0045) |
+| Cache freshness | `[CacheInvalidate]` |
+| A browser shows the change | a client event, a re-query hint after commit (ADR-0043) |
+| A search index or stored projection | an integration event after commit |
+
+One case does not need intent: a screen showing a projection over several tables, such as a live dashboard, only
+needs to know that one of its sources changed, so it can re-query. That is a client-event concern: after commit,
+at-most-once, a hint rather than a fact. Today it is built from integration events projected onto a topic. A
+data-layer source of such hints ("rows of T changed") would belong on the client-event plane, not in this ADR.
+
 ## Rejected alternatives
 
 - **Integration events.** Cleanup belongs in the deleting transaction; an after-commit consumer leaves orphans when it
   fails and needs its own idempotency.
+- **`EntitiesAdded<T>` and `EntitiesUpdated<T>` next to `EntitiesDeleted<T>`.** See "Why deletions, and not inserts
+  or updates" above. They would carry no intent, could not be complete without refusing `ExecuteUpdate`, and would
+  run inline on the most frequent writes.
 - **Typed per-entity keys (`EntitiesDeleted<TEntity, TKey>`).** Every Elarion entity key is a `Guid`; a second type
   parameter would burden every consumer signature for a shape the framework does not use.
 - **A consumer-side registration (subscribing implies watching).** The interceptor cannot cheaply learn which closed
