@@ -27,7 +27,8 @@ public sealed class CacheableAttribute(params string[] tags) : Attribute {
     /// global tag namespace, so a <see cref="HandlerCacheScope.Global"/>-scoped <see cref="CacheInvalidateAttribute"/>
     /// (its default) evicts the entry regardless of which user cached it — over-invalidation across users is the
     /// deliberate safe default. A <see cref="HandlerCacheScope.CurrentUser"/>-scoped invalidation only clears the
-    /// invoking user's entries.
+    /// invoking user's entries. Under ambient tenant scoping every entry is also per tenant, and a scope with no
+    /// tenant resolved is not cached at all.
     /// </remarks>
     public HandlerCacheScope Scope { get; init; } = HandlerCacheScope.CurrentUser;
 

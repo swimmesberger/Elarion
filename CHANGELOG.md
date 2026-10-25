@@ -23,6 +23,18 @@ minor releases may include breaking changes.
   kinds, what each one guarantees, the row-lock recipe that replaces a foreign-key check, and where side effects
   outside the database belong.
 
+### Fixed
+- **The handler cache no longer serves one tenant's results to another** (`Elarion.Caching`). Keys and tags carried
+  only the request and the user, and a cache hit skips the handler and with it the tenant read filter of ADR-0075: a
+  `[Cacheable(Scope = HandlerCacheScope.Global)]` query over tenant-scoped rows answered every tenant with the first
+  tenant's rows, and a `CurrentUser` entry followed a user from one tenant into the next. With `ITenantContext`
+  registered, the hashed tenant in scope is now part of every key and tag. A system scope caches in a namespace of
+  its own, and a scope with no tenant resolved is not cached (the outcome is `bypass-no-tenant`). `[CacheInvalidate]`
+  inside a tenant evicts that tenant's entries for every user, plus entries cached under a system scope, and leaves
+  other tenants' entries cached; from a system scope or with no tenant it evicts every tenant. Hosts without tenant
+  scoping keep the same keys and tags. In a tenant-scoped host, entries written by an earlier version are never read
+  again and expire on their own.
+
 ## [0.3.0] - 2026-10-25
 
 ### Added
