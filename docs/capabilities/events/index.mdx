@@ -53,10 +53,6 @@ synchronous side effects that must be part of the same unit of work.
 await domainEvents.PublishAsync(new InvoiceLineAdded(c.InvoiceId, c.Amount), ct);
 ```
 
-The framework publishes on this plane too: deleting rows of a `[PublishLifecycleEvents]` entity publishes
-`EntitiesDeleted<TEntity>` before the `DELETE`, so data other modules keep on those rows is cleaned up in the same
-unit of work ([Reacting to deletions](/docs/capabilities/events/lifecycle-events)).
-
 `PublishAsync<TEvent> where TEvent : IDomainEvent` fans out to every consumer in ascending
 `[ConsumeEvent(Order = …)]`, awaiting each in turn; if one or more consumers throw, the rest still run
 and the exceptions are aggregated and rethrown. The bus is **pub/sub-only** — `PublishAsync` returns no
@@ -132,9 +128,6 @@ whose namespace falls under no module is reported (`ELEVT003`, warning) so it is
 <Cards>
   <Card title="Consuming events" href="/docs/capabilities/events/consuming-events">
     Declare consumers in the handler form or the method form, on either plane, and keep them idempotent.
-  </Card>
-  <Card title="Reacting to deletions" href="/docs/capabilities/events/lifecycle-events">
-    Publish `EntitiesDeleted<T>` for marked entities — database cascades included — so another module cleans up the data that points at them.
   </Card>
   <Card title="Event backends" href="/docs/capabilities/events/backends">
     Choose between the best-effort in-memory integration bus and the durable EF Core outbox, and wire it.

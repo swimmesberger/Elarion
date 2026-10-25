@@ -8,6 +8,21 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Removed
+- **BREAKING: entity lifecycle events** (`[PublishLifecycleEvents]`, `EntitiesDeleted<TEntity>`,
+  `AddElarionEntityLifecycleEvents<TDbContext>()`), introduced in 0.3.0 (ADR-0090 supersedes ADR-0088). They existed
+  to clean up `(kind, id)` soft references, which is the polymorphic-association anti-pattern. Every case has a
+  database pattern with stronger guarantees: a foreign key; an exclusive arc (one nullable foreign key per owner kind
+  plus `CHECK (num_nonnulls(...) = 1)`); a table per kind (TPC); a shared identity table; or per-owner delete
+  triggers while migrating an existing table. To migrate, replace the marked entity's `EntitiesDeleted<T>` consumers
+  with one of these and remove the registration. Across bounded contexts, publish an integration event from the
+  owner's delete.
+
+### Added
+- **Polymorphic references** concept page: which relational pattern to use for data that attaches to records of many
+  kinds, what each one guarantees, the row-lock recipe that replaces a foreign-key check, and where side effects
+  outside the database belong.
+
 ## [0.3.0] - 2026-10-25
 
 ### Added

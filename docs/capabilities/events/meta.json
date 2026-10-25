@@ -2,7 +2,6 @@
   "title": "Events & messaging",
   "pages": [
     "consuming-events",
-    "lifecycle-events",
     "backends",
     "client-events",
     "streams"

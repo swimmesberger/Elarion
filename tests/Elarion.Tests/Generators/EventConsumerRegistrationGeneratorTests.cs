@@ -43,19 +43,23 @@ public sealed class EventConsumerRegistrationGeneratorTests {
     }
 
     [Fact]
-    public void GenerateEventConsumers_LifecycleEventOfAnEntity_EmitsTheClosedGenericEventType() {
-        // EntitiesDeleted<TEntity> is how a module reacts to another module's deletions (soft references).
+    public void GenerateEventConsumers_ClosedGenericEvent_EmitsTheClosedEventType() {
+        // One event shape for many entities (an "archived" notification per record type): the consumer subscribes to a
+        // closed type, so the registration must name it, not the open generic.
         var source = CreateSource(
             """
             namespace Sample.Events {
-                [Elarion.Abstractions.Messaging.PublishLifecycleEvents]
                 public sealed class Property { public System.Guid Id { get; init; } }
 
+                public sealed record Archived<TEntity> : Elarion.Abstractions.Messaging.IDomainEvent where TEntity : class {
+                    public required System.Guid Id { get; init; }
+                }
+
                 [Elarion.Abstractions.Service]
-                public sealed class NoteCleanup {
+                public sealed class ArchiveFollowUp {
                     [Elarion.Abstractions.Messaging.ConsumeEvent]
-                    public System.Threading.Tasks.ValueTask OnPropertiesDeleted(
-                        Elarion.Abstractions.Messaging.EntitiesDeleted<Property> deleted,
+                    public System.Threading.Tasks.ValueTask OnPropertyArchived(
+                        Archived<Property> archived,
                         System.Threading.CancellationToken ct) =>
                         System.Threading.Tasks.ValueTask.CompletedTask;
                 }
@@ -65,7 +69,7 @@ public sealed class EventConsumerRegistrationGeneratorTests {
         var generated = AllGenerated(Generate(source));
 
         generated.Should().Contain(
-            "EventType = typeof(global::Elarion.Abstractions.Messaging.EntitiesDeleted<global::Sample.Events.Property>)");
+            "EventType = typeof(global::Sample.Events.Archived<global::Sample.Events.Property>)");
         generated.Should().Contain("Plane = global::Elarion.Abstractions.Messaging.EventPlane.Domain");
     }
 

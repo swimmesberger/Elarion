@@ -228,11 +228,6 @@ See [Scheduling](/docs/capabilities/scheduling), [Schedules](/docs/capabilities/
 
 See [Consuming events](/docs/capabilities/events/consuming-events) and [Backends](/docs/capabilities/events/backends).
 
-### `[PublishLifecycleEvents]`
-
-- **Package:** `Elarion.Abstractions` · **Applies to:** entity class (not inherited)
-- **Triggers:** with `AddElarionEntityLifecycleEvents<TDbContext>()`, every save that deletes rows of the entity — tracked or through a database cascade — publishes `EntitiesDeleted<TEntity>` (the deleted `Ids`) on the inline domain-event plane before the `DELETE`; `ExecuteDelete` on the entity (or on a set cascading to it) and the synchronous `SaveChanges` of such a deletion are refused. Needs a single `Guid` key and no inheritance hierarchy; delete inside a transaction when a consumer saves. See [Reacting to deletions](/docs/capabilities/events/lifecycle-events).
-
 ## Actors
 
 ### `[Actor]`

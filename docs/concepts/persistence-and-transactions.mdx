@@ -145,6 +145,13 @@ Two things intentionally run **after** your transaction commits rather than insi
   through its own `SaveChanges` interceptor instead.
 </Callout>
 
+## Data that attaches to many kinds of records
+
+Notes, files and comments on records of many kinds are the one place where a foreign key seems impossible, so a
+`(kind, id)` pair creeps in, and with it orphans and unchecked inserts. It is a known anti-pattern with database-level
+answers (exclusive arcs, a table per kind, a shared identity table), all within one shared schema. See
+[Polymorphic references](/docs/concepts/polymorphic-references) for which to use and what each guarantees.
+
 ## Testing persistence
 
 Test persistence against a **real PostgreSQL** — a disposable [Testcontainers](https://testcontainers.com/)

@@ -1,0 +1,216 @@
+---
+title: Polymorphic references
+description: Notes, files and comments that attach to records of many kinds — which relational pattern to use, what each guarantees, and why a (kind, id) pair is the last resort.
+---
+
+Some data attaches to records of many kinds: notes on properties, contacts and invoices; files on any record; comments,
+tags, mentions. The tempting model is one table with an owner pair, `(OwnerKind, OwnerId)`. That pair is the
+**polymorphic association**, a well-known relational anti-pattern
+([Karwin, *SQL Antipatterns*](https://pragprog.com/titles/bksap1/sql-antipatterns-volume-1/)). A foreign key points at
+exactly one table, so the database cannot check the pair. That costs three things:
+
+- **No integrity on insert.** A note can point at a record that does not exist, or never did.
+- **No integrity on delete.** Deleting the owner leaves its notes behind, and nothing in the database removes them.
+- **No protection from races or raw SQL.** Any cleanup lives in application code. A concurrent insert, an
+  `ExecuteDelete`, or a SQL script slips past it.
+
+GitLab's database guide puts it bluntly, "always use separate tables instead of polymorphic associations"
+([GitLab](https://docs.gitlab.com/development/database/polymorphic_associations/)). Comparisons of the alternatives
+find that the pair's only advantage is how easy an ORM makes it
+([Hashrocket](https://hashrocket.com/blog/posts/modeling-polymorphic-associations-in-a-relational-database)). Rails
+(`dependent: :destroy`) and Django (`GenericRelation`) ship exactly that convenience: a cascade in application code,
+which a bulk delete or raw SQL bypasses.
+
+<Callout type="info">
+**Module independence is not a reason to avoid a foreign key.** Within one context, Elarion's modules share one
+`DbContext` and one schema by design
+([ADR-0007](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0007-data-is-platform-module-as-plugin.md)).
+Module boundaries are enforced in code (handlers, services, published contracts), not by keeping tables unaware of
+each other. A notes table with a foreign key to properties breaks no boundary.
+</Callout>
+
+## Choose by the shape of the relationship
+
+| The attached data belongs to… | Use | The database guarantees | It costs |
+| --- | --- | --- | --- |
+| one kind of record | **a foreign key** with `ON DELETE CASCADE` (or `RESTRICT`) | everything: existence on insert, cleanup on delete, no races | nothing |
+| one of a few known kinds | **an exclusive arc**: one nullable foreign key per kind, plus a CHECK that exactly one is set | everything | a column and a constraint change per new kind |
+| many kinds, each with its own columns or volume | **a table per kind**, unified in EF Core with TPC | everything; one query over all kinds with `UNION ALL` | a class and a table per kind |
+| many or growing kinds, attached data uniform | **a shared identity table** every owner registers in | everything | owners take part; deletes go through the identity |
+| kinds you cannot change: another context's records, a framework table | **an integration event** from the owner's delete, or an orphan sweep | nothing; cleanup is eventual | idempotent consumers |
+| an existing `(kind, id)` table you cannot migrate yet | **a delete trigger per owner table** | cleanup on delete, cascades and raw SQL included | SQL in migrations; inserts still unchecked |
+
+The rest of this page shows each pattern with its EF Core configuration, then covers races, side effects outside the
+database, and why Elarion ships no application-level cascade.
+
+## One kind: a plain foreign key
+
+If a note only ever belongs to a property, there is nothing polymorphic about it:
+
+```csharp
+note.HasOne<Property>().WithMany().HasForeignKey(n => n.PropertyId).OnDelete(DeleteBehavior.Cascade);
+```
+
+Pick `Restrict` instead when the owner must not disappear while attached data exists. The delete then fails with a
+foreign-key violation (`23503`). Catch it in the handler, or in a constraint-mapping decorator of your pipeline, and
+answer `AppError.Conflict`.
+
+## A few kinds: the exclusive arc
+
+One nullable foreign key per owner kind, each cascading, and a CHECK that exactly one is set. This is the usual
+recommendation for a small, known set of kinds:
+
+```csharp
+public sealed class Note {
+    public required Guid Id { get; init; }
+    public Guid? PropertyId { get; init; }
+    public Guid? ContactId { get; init; }
+    public Guid? InvoiceId { get; init; }
+    public required string Text { get; set; }
+}
+
+[EntityConfiguration]
+public sealed class NoteConfiguration : IEntityTypeConfiguration<Note> {
+    public void Configure(EntityTypeBuilder<Note> note) {
+        note.HasOne<Property>().WithMany().HasForeignKey(n => n.PropertyId).OnDelete(DeleteBehavior.Cascade);
+        note.HasOne<Contact>().WithMany().HasForeignKey(n => n.ContactId).OnDelete(DeleteBehavior.Cascade);
+        note.HasOne<Invoice>().WithMany().HasForeignKey(n => n.InvoiceId).OnDelete(DeleteBehavior.Cascade);
+        // Exactly one owner. Use the column names your naming convention produces.
+        note.ToTable(t => t.HasCheckConstraint("ck_notes_one_owner",
+            "num_nonnulls(property_id, contact_id, invoice_id) = 1"));
+    }
+}
+```
+
+EF Core indexes each foreign key by convention, so "the notes of contact X" is an index lookup on its own column. The
+nullable pointer works directly with
+[`WhereAuthorizedVia`](/docs/concepts/resource-authorization#data-that-belongs-to-a-resource):
+`db.Notes.WhereAuthorizedVia(n => n.ContactId, db.Contacts, c => (Guid?)c.Id, contactAccess, user)`.
+
+**Trade-offs.**
+- The notes table names every owner kind, and a new kind is a migration that adds a column, a foreign key, and the
+  new CHECK. In practice the new owner kind arrives with a migration anyway.
+- A wide row of mostly-null columns is cheap in PostgreSQL, since nulls take no space beyond the null bitmap.
+- Nothing forces an owner to have notes. That is rarely wanted, and no pattern here enforces it either.
+
+## Many kinds with their own shape: a table per kind (TPC)
+
+When the attached data differs per kind, or one kind has far more rows than the others, give each kind its own table.
+EF Core's table-per-concrete-type mapping keeps one query surface over all of them:
+
+```csharp
+public abstract class Note {
+    public required Guid Id { get; init; }
+    public required string Text { get; set; }
+}
+
+public sealed class PropertyNote : Note { public required Guid PropertyId { get; init; } }
+public sealed class ContactNote : Note { public required Guid ContactId { get; init; } }
+
+modelBuilder.Entity<Note>().UseTpcMappingStrategy();
+modelBuilder.Entity<PropertyNote>().HasOne<Property>().WithMany().HasForeignKey(n => n.PropertyId)
+    .OnDelete(DeleteBehavior.Cascade);
+modelBuilder.Entity<ContactNote>().HasOne<Contact>().WithMany().HasForeignKey(n => n.ContactId)
+    .OnDelete(DeleteBehavior.Cascade);
+```
+
+`db.Set<PropertyNote>()` reads one table, and `db.Set<Note>()` reads all of them with a `UNION ALL`. Client-assigned
+`Guid` keys, the Elarion convention, keep ids unique across the tables, which TPC needs.
+
+**Trade-offs.** You get a class and a table per kind. The cross-kind query is a union, which is fine for a timeline
+and wasteful for hot lookups that already know the kind.
+
+## Many kinds, uniform data: a shared identity table
+
+Every owner registers its id in one table, and the attached data references that table:
+
+```sql
+create table record_identities (id uuid primary key, kind text not null);
+create table properties (id uuid primary key references record_identities (id) on delete cascade, ...);
+create table notes (id uuid primary key,
+                    record_id uuid not null references record_identities (id) on delete cascade, ...);
+```
+
+The notes table knows no owner kind, and adding a kind changes nothing in it.
+
+**Trade-offs.**
+- Every owner insert writes an identity row too.
+- **The delete must go through the identity.** Deleting the identity row removes the owner and its notes, while
+  deleting only the property row leaves both behind. Either delete the identity, or give each owner table a delete
+  trigger that removes its identity row.
+- In EF Core, a TPT mapping with an abstract `Record` base produces this shape and deletes both rows itself. But it
+  forces one base class on every owner and adds a join to every owner query, the reason EF Core's own guidance steers
+  away from TPT.
+
+## An existing `(kind, id)` table: a delete trigger
+
+To fix cleanup before migrating to one of the patterns above, give each owner table a row trigger. PostgreSQL fires
+row triggers for rows that a foreign-key cascade or raw SQL deletes too:
+
+```sql
+create function delete_notes_of() returns trigger language plpgsql as $$
+begin
+  delete from notes where owner_kind = tg_argv[0] and owner_id = old.id;
+  return old;
+end $$;
+
+create trigger properties_delete_notes after delete on properties
+  for each row execute function delete_notes_of('property');
+```
+
+Ship it as a SQL step of the [migration plan](/docs/capabilities/migrations). It makes deletes complete. Inserts are
+still unchecked: a note can still point at nothing.
+
+## Inserts and races without a foreign key
+
+A foreign-key check locks the referenced row (`FOR KEY SHARE`) until the inserting transaction ends, so the owner
+cannot be deleted under a new note. Without a foreign key, take the same locks yourself with
+[`LockRowAsync`](/docs/capabilities/coordination#row-and-advisory-locks):
+
+```csharp
+// Attaching a note: hold the owner the way a foreign-key check would. False means it is gone (or not visible).
+if (!await db.LockRowAsync<Property>(command.PropertyId, RowLockMode.KeyShare, ct))
+    return AppError.NotFound("No such property.");
+
+// Deleting the owner: lock it first, so attaches wait and cleanup sees everything committed before.
+await db.LockRowAsync<Property>(command.Id, RowLockMode.Update, ct);
+```
+
+With a foreign key, none of this is needed: the database already does it on every insert.
+
+## Side effects outside the database
+
+A cascade removes rows, not what they point at elsewhere. Pick the place by whether the other side is transactional:
+
+- **Blobs in the PostgreSQL blob store** live in the same database. Delete them in the same transaction, from the
+  handler or from a delete trigger on the files table, so a cascaded file row takes its content with it.
+- **An external object store, a search index, another system** is not part of the transaction. Record the work and
+  do it after commit: an [integration event](/docs/capabilities/events), or a row in a cleanup table that a trigger
+  writes and a [leased-work](/docs/capabilities/coordination#leased-work-rows) worker drains. Never call the external system before
+  the deletion commits, because a rollback would leave the row without its content.
+
+## Across contexts
+
+A record in another bounded context, or another database, cannot be referenced by a foreign key. Its owner publishes
+an integration event when it is deleted (`PropertyDeleted`, after commit, at least once), and the context that keeps
+attached data removes it idempotently. The data is eventually consistent, so a reader can briefly see a note whose
+owner is gone, and must tolerate that.
+
+## Why Elarion has no application-level cascade
+
+Rails (`dependent: :destroy`) and Django (`GenericRelation`) delete the attached rows in application code, and Elarion
+0.3.0 did too, with `EntitiesDeleted<T>`. It was removed in the next release
+([ADR-0090](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0090-references-between-records-stay-in-the-database.md)).
+
+It covered deletes only, and a foreign key covers deletes too and more:
+- it checks inserts;
+- it doesn't race;
+- raw SQL can't bypass it;
+- it adds no interceptor rules.
+
+Every case it served has a pattern above: the exclusive arc for a few kinds, the shared identity table for many, the
+trigger while migrating an existing table, and an integration event across contexts. What remained was convenience,
+paid for with an interceptor built on EF Core internals.
+
+**Migrating from it:** add the foreign keys (or the identity table), backfill them from `(OwnerKind, OwnerId)` in the
+same migration, drop the pair, and delete the `EntitiesDeleted<T>` consumers.
