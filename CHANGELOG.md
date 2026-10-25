@@ -22,6 +22,13 @@ minor releases may include breaking changes.
 - **Polymorphic references** concept page: which relational pattern to use for data that attaches to records of many
   kinds, what each one guarantees, the row-lock recipe that replaces a foreign-key check, and where side effects
   outside the database belong.
+- **Unenforced locks for unit-test contexts** (ADR-0087 amendment). `UseUnenforcedElarionLocks()` on a test context's
+  `DbContextOptionsBuilder`, for example EF InMemory or SQLite, makes `LockRowAsync`, `AdvisoryLockAsync` and
+  `TryAdvisoryLockAsync` lock nothing and skips the provider and transaction checks. Handler tests that only pass
+  through a lock keep running. Keys and scopes are still validated, and `LockRowAsync` still reports a missing row.
+  Contexts without the opt-in still fail closed, and a PostgreSQL context with it throws.
+- **`LockRowAsync` past query filters.** The new `RowLockOptions` overload carries the mode and `IgnoreQueryFilters`,
+  so a writer that deliberately changes rows its filters hide (an archived tenant) finds and locks them.
 
 ## [0.3.0] - 2026-10-25
 

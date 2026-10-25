@@ -45,10 +45,38 @@ framework's.
   reissue until then.
 - A unit test on EF InMemory that reaches a lock now fails with `NotSupportedException` instead of passing vacuously.
 
+## Amendment (0.3.1): an explicit test opt-in, and locks past query filters
+
+Adopting the helpers showed two gaps.
+
+**An explicit test opt-in.** A consuming application's handler tests run on EF InMemory, outside a transaction, and
+only pass through a lock: about 150 tests in one application. Both guards fail them. A
+`DbContextOptionsBuilder.UseUnenforcedElarionLocks()` extension now marks one context's options as unenforced. On that
+context:
+- the provider and transaction checks are skipped;
+- advisory locks are no-ops, and `TryAdvisoryLockAsync` answers `true`;
+- `LockRowAsync` still runs its visibility lookup and answers whether a visible row has the key;
+- keys and scopes are still validated.
+
+This is not the no-op this ADR rejected. The rejected one was **silent**: every non-PostgreSQL provider would have
+quietly locked nothing, hiding the mismatch where locking matters. The opt-in is **explicit**: the test states in its
+own options that it does not exercise locking, and every context without it still fails closed. A PostgreSQL context
+that carries the opt-in throws at its first lock, so a shared options helper cannot leave a real database unlocked.
+Locking itself is still tested on PostgreSQL. AGENTS.md's rule against EF InMemory governs Elarion's own tests, not
+an application's choice for handler tests that don't involve the database's semantics.
+
+**Locks past query filters.** `LockRowAsync` looks the row up through the entity's filtered set, so another tenant's
+id answers `false` and is never locked. A writer that deliberately changes rows its filters hide, such as an archived
+tenant loaded with `IgnoreQueryFilters()`, then got `false` and no lock, and its concurrent writers were no longer
+serialized. A `RowLockOptions` overload now carries the mode and `IgnoreQueryFilters`. It is a parameter bag rather
+than a widened signature, per AGENTS.md. It skips every filter, as EF's `IgnoreQueryFilters()` does, so it is for ids
+the handler has already authorized.
+
 ## Rejected alternatives
 
 - **A no-op on non-PostgreSQL providers.** It hides the provider mismatch exactly where locking matters; it also
-  covers non-relational providers with real concurrency.
+  covers non-relational providers with real concurrency. (An *explicit*, per-context test opt-in is a different thing;
+  see the amendment.)
 - **Hashing the key ourselves (SHA-256 to bigint).** `hashtextextended` keeps the key computable in plain SQL for
   hosts on the EF-free tier and for operators reading `pg_locks`.
 - **A distributed-lock abstraction.** Locks here are per transaction on the one shared PostgreSQL; a cross-process

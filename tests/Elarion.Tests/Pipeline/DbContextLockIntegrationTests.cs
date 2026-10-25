@@ -94,6 +94,29 @@ public sealed class DbContextLockIntegrationTests(PostgreSqlUnitOfWorkFixture fi
     }
 
     [Fact]
+    public async Task LockRow_IgnoringQueryFilters_FindsAndLocksAFilteredRow() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var archived = Guid.CreateVersion7().ToString("N");
+        await using (var seed = fixture.CreateContext()) {
+            seed.ScopedWidgets.Add(new ScopedWidgetRow { Id = archived, Tenant = "other" });
+            await seed.SaveChangesAsync(Ct);
+        }
+
+        await using var holder = fixture.CreateContext();
+        await using var held = await holder.Database.BeginTransactionAsync(Ct);
+        // A writer that deliberately changes rows its filters hide (an archived tenant) must serialize on them too.
+        (await holder.LockRowAsync<ScopedWidgetRow>(archived,
+            new RowLockOptions { Mode = RowLockMode.NoKeyUpdate, IgnoreQueryFilters = true }, Ct)).Should().BeTrue();
+
+        await using var contender = fixture.CreateContext();
+        await using var waiting = await BeginImpatientAsync(contender);
+        var blocked = async () => await contender.LockRowAsync<ScopedWidgetRow>(archived,
+            new RowLockOptions { Mode = RowLockMode.NoKeyUpdate, IgnoreQueryFilters = true }, Ct);
+        (await blocked.Should().ThrowAsync<Exception>()).Which.GetBaseException()
+            .Should().BeOfType<PostgresException>().Which.SqlState.Should().Be("55P03");
+    }
+
+    [Fact]
     public async Task LockRow_ConvertsAStronglyTypedKey_AndRejectsAnIdOfTheWrongType() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var code = new WidgetCode(Guid.CreateVersion7().ToString("N"));
