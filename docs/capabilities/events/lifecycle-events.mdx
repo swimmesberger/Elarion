@@ -8,6 +8,14 @@ an id without a foreign key: a **soft reference**. Nothing in the database remov
 every delete handler remove it by hand couples each deleting module to every module that keeps such data. Entity
 lifecycle events invert that: the owner entity is marked once, and the module that owns the referencing data reacts.
 
+<Callout type="warn">
+**Prefer a foreign key first.** A `(kind, id)` soft reference is the polymorphic-association anti-pattern. The
+database can't check it on insert, and cleanup in application code is neither race-free nor safe from raw SQL. An
+exclusive arc (one nullable foreign key per owner kind), a table per kind, or a shared identity table gives full
+database integrity. [Polymorphic references](/docs/concepts/polymorphic-references) compares them and shows where
+this event stands among them.
+</Callout>
+
 ## Mark the owner, consume the event
 
 ```csharp
