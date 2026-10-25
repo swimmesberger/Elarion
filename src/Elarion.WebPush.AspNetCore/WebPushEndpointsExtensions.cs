@@ -25,7 +25,8 @@ namespace Elarion.WebPush.AspNetCore;
 /// <see cref="PushSubscriptionRequest"/>, <see cref="WebPushUnsubscribeRequest"/> and
 /// <see cref="WebPushPublicKeyRequest"/>, so the full handler pipeline applies — global authorization rules,
 /// tenant and realm rules, audit, rate limiting, validation. A handler's failure maps to a bodyless status
-/// (<c>400</c> invalid, <c>401</c> anonymous, <c>403</c> forbidden); a malformed body is answered <c>401</c>/<c>403</c>
+/// (<c>400</c> invalid, including a subscribe refused because another user owns the endpoint, <c>401</c>
+/// anonymous, <c>403</c> forbidden); a malformed body is answered <c>401</c>/<c>403</c>
 /// by the handler's admission gate when the caller may not call it at all, otherwise <c>400</c>. The handlers
 /// usually delegate to <see cref="WebPushSubscriptionService"/>. <see cref="MapElarionWebPush"/> fails at
 /// startup, naming what is missing, when one of the three handlers is not registered — there is no undecorated

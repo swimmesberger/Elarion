@@ -106,12 +106,15 @@ public abstract class WebPushStoreTestBase<TContext>(IWebPushStoreFixture<TConte
         var refresh = first.AddDays(1);
         var reassign = first.AddDays(2);
 
-        await store.UpsertAsync(subscriber.ToSubscription(alice) with { CreatedAt = first, LastSeenAt = first }, TestToken);
-        await store.UpsertAsync(subscriber.ToSubscription(alice) with {
+        (await store.UpsertAsync(subscriber.ToSubscription(alice) with { CreatedAt = first, LastSeenAt = first }, TestToken))
+            .Should().BeTrue();
+        (await store.UpsertAsync(subscriber.ToSubscription(alice) with {
             UserAgent = "Firefox", CreatedAt = refresh, LastSeenAt = refresh
-        }, TestToken);
+        }, TestToken)).Should().BeTrue();
         var refreshed = (await store.ListByUsersAsync([alice], TestToken)).Single();
-        await store.UpsertAsync(subscriber.ToSubscription(bob) with { CreatedAt = reassign, LastSeenAt = reassign }, TestToken);
+        // The same browser, so the same auth secret: the owner change is allowed.
+        (await store.UpsertAsync(subscriber.ToSubscription(bob) with { CreatedAt = reassign, LastSeenAt = reassign }, TestToken))
+            .Should().BeTrue();
 
         refreshed.CreatedAt.Should().Be(first);
         refreshed.LastSeenAt.Should().Be(refresh);
@@ -122,6 +125,58 @@ public abstract class WebPushStoreTestBase<TContext>(IWebPushStoreFixture<TConte
         await using var context = fixture.CreateContext();
         (await context.Set<PushSubscriptionEntity>().CountAsync(entity => entity.Endpoint == subscriber.Endpoint, TestToken))
             .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SubscriptionStore_AnotherUserWithoutTheAuthSecret_WritesNothing() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var provider = CreateProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IPushSubscriptionStore>();
+        var (alice, mallory) = (NewId(), NewId());
+        var endpoint = NewEndpoint();
+        using var victim = new TestPushSubscriber(endpoint);
+        using var attacker = new TestPushSubscriber(endpoint);
+        var first = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        await store.UpsertAsync(victim.ToSubscription(alice) with { UserAgent = "Safari", CreatedAt = first, LastSeenAt = first }, TestToken);
+
+        var written = await store.UpsertAsync(attacker.ToSubscription(mallory) with {
+            UserAgent = "curl", CreatedAt = first.AddDays(1), LastSeenAt = first.AddDays(1)
+        }, TestToken);
+
+        written.Should().BeFalse();
+        (await store.ListByUsersAsync([mallory], TestToken)).Should().BeEmpty();
+        var kept = (await store.ListByUsersAsync([alice], TestToken)).Single();
+        kept.Should().Be(victim.ToSubscription(alice) with { UserAgent = "Safari", CreatedAt = first, LastSeenAt = first });
+    }
+
+    [Fact]
+    public async Task SubscriptionStore_ConcurrentSubscribesFromDifferentUsers_LeaveExactlyOneOwner() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var endpoint = NewEndpoint();
+        var subscribers = Enumerable.Range(0, 6).Select(_ => new TestPushSubscriber(endpoint)).ToArray();
+        var users = subscribers.Select(_ => NewId()).ToArray();
+        // Independent providers stand in for nodes, each writing on a connection of its own.
+        var providers = subscribers.Select(_ => CreateProvider()).ToArray();
+        try {
+            var written = await Task.WhenAll(providers.Select((provider, i) => Task.Run(async () => {
+                await using var scope = provider.CreateAsyncScope();
+                return await scope.ServiceProvider.GetRequiredService<IPushSubscriptionStore>()
+                    .UpsertAsync(subscribers[i].ToSubscription(users[i]), TestToken);
+            }, TestToken)));
+
+            written.Count(w => w).Should().Be(1);
+            var winner = Array.IndexOf(written, true);
+            await using var scope = providers[0].CreateAsyncScope();
+            var stored = (await scope.ServiceProvider.GetRequiredService<IPushSubscriptionStore>()
+                .ListByUsersAsync(users, TestToken)).Single();
+            stored.UserId.Should().Be(users[winner]);
+            stored.Auth.Should().Be(subscribers[winner].Auth);
+        }
+        finally {
+            foreach (var provider in providers) await provider.DisposeAsync();
+            foreach (var subscriber in subscribers) subscriber.Dispose();
+        }
     }
 
     [Fact]

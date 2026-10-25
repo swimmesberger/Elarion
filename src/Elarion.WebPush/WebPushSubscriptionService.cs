@@ -99,10 +99,20 @@ public sealed class WebPushSubscriptionService(
     /// subscribed under another account. Idempotent: call it on every app start to heal a rotated
     /// subscription and refresh its last-seen time.
     /// </summary>
+    /// <remarks>
+    /// An endpoint another user owns is reassigned only when the request carries that subscription's stored
+    /// <c>auth</c> secret, which the same browser always does. Anything else is refused without a write, so a user
+    /// who learned someone else's endpoint cannot take it over. The refusal is the same
+    /// <see cref="ErrorKind.Validation"/> error as an invalid subscription, never a conflict or not-found, so it
+    /// does not say whose endpoint it is.
+    /// </remarks>
     /// <param name="request">The serialized browser subscription.</param>
     /// <param name="userAgent">The caller's <c>User-Agent</c>; defaults to <see cref="PushSubscriptionRequest.UserAgent"/>.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    /// <returns>Success, <see cref="ErrorKind.Unauthorized"/> without a user, or <see cref="ErrorKind.Validation"/>.</returns>
+    /// <returns>
+    /// Success, <see cref="ErrorKind.Unauthorized"/> without a user, or <see cref="ErrorKind.Validation"/> for an
+    /// invalid subscription or a refused takeover.
+    /// </returns>
     public async ValueTask<Result> SubscribeAsync(PushSubscriptionRequest request, string? userAgent = null,
         CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(request);
@@ -111,7 +121,7 @@ public sealed class WebPushSubscriptionService(
 
         userAgent ??= request.UserAgent;
         var now = timeProvider.GetUtcNow();
-        await store.UpsertAsync(new PushSubscription {
+        var stored = await store.UpsertAsync(new PushSubscription {
             Endpoint = request.Endpoint,
             P256dh = request.Keys.P256dh,
             Auth = request.Keys.Auth,
@@ -120,7 +130,7 @@ public sealed class WebPushSubscriptionService(
             CreatedAt = now,
             LastSeenAt = now
         }, cancellationToken).ConfigureAwait(false);
-        return Result.Success();
+        return stored ? Result.Success() : AppError.Validation("The push subscription was rejected.");
     }
 
     /// <summary>

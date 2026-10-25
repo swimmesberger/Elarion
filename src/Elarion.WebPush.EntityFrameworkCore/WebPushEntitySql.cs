@@ -25,13 +25,20 @@ internal static class WebPushEntitySql {
         // One statement, so a device re-subscribing under another account (same endpoint) reassigns the row
         // atomically instead of colliding on the unique endpoint index. The id and — for the same owner — the
         // creation time survive; a new owner restarts the creation time.
+        // The WHERE guards the takeover inside that statement, so no check-then-act race exists: only the owner,
+        // or a caller presenting the stored auth secret (the same browser under another account), updates the
+        // row; any other conflict updates nothing and the statement reports zero rows. Under READ COMMITTED a
+        // concurrent insert of the same endpoint waits on the unique index and evaluates the WHERE against the
+        // committed winner. The auth comparison is plain equality, not constant-time; IPushSubscriptionStore.UpsertAsync
+        // documents why that is acceptable.
         return $"INSERT INTO {table} AS existing ({column(nameof(PushSubscriptionEntity.Id))}, {endpoint}, {p256dh}, {auth}, " +
                $"{userId}, {userAgent}, {created}, {lastSeen}) " +
                "VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}) " +
                $"ON CONFLICT ({endpoint}) DO UPDATE SET " +
                $"{p256dh} = EXCLUDED.{p256dh}, {auth} = EXCLUDED.{auth}, " +
                $"{created} = CASE WHEN existing.{userId} = EXCLUDED.{userId} THEN existing.{created} ELSE EXCLUDED.{created} END, " +
-               $"{userId} = EXCLUDED.{userId}, {userAgent} = EXCLUDED.{userAgent}, {lastSeen} = EXCLUDED.{lastSeen}";
+               $"{userId} = EXCLUDED.{userId}, {userAgent} = EXCLUDED.{userAgent}, {lastSeen} = EXCLUDED.{lastSeen} " +
+               $"WHERE existing.{userId} = EXCLUDED.{userId} OR existing.{auth} = EXCLUDED.{auth}";
     }
 
     public static string BuildVapidKeyInsertSql(DbContext context) {

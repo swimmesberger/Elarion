@@ -191,7 +191,7 @@ pipeline by accident. The wire shapes are the browser package's fixed contract:
 | Endpoint | Body | Result |
 | --- | --- | --- |
 | `GET /webpush/public-key` | — | `200 {"publicKey":"…"}` |
-| `POST /webpush/subscribe` | `subscription.toJSON()` | `204`; `400` invalid; `401` anonymous; `403` forbidden |
+| `POST /webpush/subscribe` | `subscription.toJSON()` | `204`; `400` invalid or refused; `401` anonymous; `403` forbidden |
 | `POST /webpush/unsubscribe` | `{"endpoint":"…"}` | `204`; `401` anonymous; `403` forbidden |
 
 A handler failure maps to a bodyless status by its error kind (`Validation` 400, `Unauthorized` 401, `Forbidden`
@@ -203,7 +203,15 @@ group as for any minimal API.
 
 Subscribing is an upsert **by endpoint**: the same device re-subscribing refreshes its keys and last-seen
 time, and re-subscribing under a *different* account reassigns the row instead of colliding on the unique
-endpoint. Unsubscribing only ever deletes the caller's own subscription.
+endpoint. The reassignment requires the subscription's stored `auth` secret, which the same browser always
+sends. A request for an endpoint another user owns, with other keys, writes nothing and fails with the same
+`Validation` error (`400`) as an invalid subscription, so a user who learned someone else's endpoint cannot
+redirect it to keys of their own. The check is part of the store's single `INSERT … ON CONFLICT … DO UPDATE …
+WHERE` statement, not a read before the write, so concurrent subscribes for one endpoint leave exactly one owner.
+The secret is compared with plain SQL equality rather than in constant time. That is acceptable because it is
+16 random bytes and each guess costs an authenticated request and a database round trip. A custom
+`IPushSubscriptionStore` must apply the same rule atomically and return from `UpsertAsync` whether it wrote the
+row. Unsubscribing only ever deletes the caller's own subscription.
 
 ### Endpoint allow-list
 

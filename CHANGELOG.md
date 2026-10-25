@@ -8,6 +8,18 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Security
+- **Web Push subscribe no longer lets a user take over another user's endpoint** (`Elarion.WebPush`,
+  `Elarion.WebPush.EntityFrameworkCore`). The upsert by endpoint reassigned the owner unconditionally, so a signed-in
+  user who learned someone else's push endpoint could post it with their own keys: the victim's device received
+  payloads it could not decrypt, and the victim's notifications stopped. An existing endpoint is now updated only for
+  its owner, or for another user presenting the stored `auth` secret (the same browser signed in under another
+  account). The guard sits in the store's single `INSERT … ON CONFLICT … DO UPDATE … WHERE` statement, and in
+  `InMemoryPushSubscriptionStore` behind a compare-and-swap, so concurrent subscribes cannot race past it. A refused
+  subscribe writes nothing and returns the same `Validation` error (HTTP `400`) as an invalid subscription.
+  **BREAKING:** `IPushSubscriptionStore.UpsertAsync` returns `ValueTask<bool>`, whether the row was written; a custom
+  store must apply the same guard atomically.
+
 ## [0.3.1] - 2026-10-25
 
 ### Removed
