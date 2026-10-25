@@ -12,10 +12,12 @@
   [ADR-0007](0007-data-is-platform-module-as-plugin.md) (the shared data layer),
   [ADR-0025](0025-distributed-scheduler-coordination.md) (scale positioning),
   [ADR-0004](0004-handler-result-caching.md), [ADR-0037](0037-read-replica-routing-and-consistency-tokens.md),
-  [ADR-0050](0050-role-holder-proxy.md) and [ADR-0053](0053-bidirectional-client-connections.md) (cited where they
-  bound this decision), and the research note
-  [live-dashboards-and-fan-out.md](research/live-dashboards-and-fan-out.md), which surveys how other systems solve
-  this, from their primary sources.
+  [ADR-0049](0049-role-leases.md), [ADR-0050](0050-role-holder-proxy.md) and
+  [ADR-0053](0053-bidirectional-client-connections.md) (cited where they
+  bound this decision), and two research notes, both from primary sources:
+  [live-dashboards-and-fan-out.md](research/live-dashboards-and-fan-out.md) (how other systems deliver and fan out
+  live updates) and [change-detection-for-live-queries.md](research/change-detection-for-live-queries.md) (where other
+  frameworks detect that data changed).
 
 ## Context
 
@@ -53,6 +55,14 @@ query in the same authorization context: Hasura merges identical subscriptions i
 observer per identical query, and Convex caches results. PostGraphile re-runs per subscriber, warns about the
 thundering herd, and recommends that only for small user bases. No system in the survey lowers freshness because the
 change rate rises; they bound cost by sharing or by a throttle. This decision follows the same split.
+
+The second research note asked where frameworks notice a write. Rails (`after_commit`, under Turbo's broadcasts),
+Laravel, Django, Hibernate and ABP detect tracked writes in ORM hooks, and every one of them documents that set-based
+statements (`update_all`, `QuerySet.update()`, bulk HQL) bypass those hooks; none intercepts them. Elixir chose the
+other end on purpose: Ecto removed model callbacks in 2.0, Phoenix contexts broadcast explicitly, and Ash declares
+notifiers on actions and sends them after commit. Only the database itself, through triggers or logical replication,
+sees every writer. This decision detects tracked writes automatically, has set-based and raw writes reported at the
+call site with the build enforcing it, and leaves the database-level producers as replacements.
 
 ## Decision
 
@@ -119,39 +129,47 @@ attaches the producer to a context with `AddElarionRequeryHints<TDbContext>()`.
 - **Every writing host registers the producer, and it publishes every type it writes** that a context maps and that is
   not excluded. Only the receiving node filters, through the catalog it already uses (section 3). Whether a write
   counts as watched therefore never depends on which modules the writing host enables: a worker host that serves no
-  dashboard still publishes its nightly `ExecuteUpdate`. Because framework types are excluded, an idle cluster sends no
+  dashboard still publishes its nightly job's writes. Because framework types are excluded, an idle cluster sends no
   `NOTIFY`.
 - **What the producer collects** into a scoped change set:
   - tracked `Added`, `Modified` and `Deleted` entries;
   - database cascades: when a deleted principal's cascading or set-null foreign key reaches another type, that type is
-    added too. This comes from the model and needs no query, for tracked deletes and for `ExecuteDelete` alike;
-  - `ExecuteUpdate` and `ExecuteDelete` (below);
+    added too. This comes from the model and needs no query. A report (below) expands the same way, because it does
+    not say whether it stands for a delete; over-notifying is safe;
   - Elarion's bulk paths: `ExecuteInsertAsync` reports its entity type, and the SQL tier's
     `session.ExecuteInsertAsync` reports when its copy record names a source;
-  - everything else by hand, through `IRequeryHints.Changed<TSource>()` (a scoped service in `Elarion.Abstractions`):
-    raw SQL, the SQL tier and stored procedures. Writes made by database triggers, by other applications on the same
-    database and by migrations are not seen.
-- **`ExecuteUpdate` and `ExecuteDelete`.** `IQueryExpressionInterceptor.QueryCompilationStarting` runs only while EF
-  compiles a query, and compiled queries are cached, so it would see only the first execution of each query shape. A
-  hook that refuses a query works there, because a query that throws is never cached; a hook that collects does not.
-  The producer therefore tags the statement while it compiles (`TagWith`, which becomes a SQL comment in the cached
-  SQL), and a command interceptor reads the tag on every execution, scanning the whole leading comment block because
-  application tags may come first. It recognizes the two methods by their `MethodInfo`, not by name. EF's precompiled
-  queries never run the hook; they are unsupported and report by hand. A spike must confirm the mechanism before this
-  ADR is accepted ("Before this is accepted"). If it fails on any supported provider, every `ExecuteUpdate` and
-  `ExecuteDelete` on a published type falls back to reporting by hand, and the analyzer (section 10) flags calls
-  without a report.
+  - everything else through reports at the call site, `IRequeryHints.Changed<TSource>()` (a scoped service in
+    `Elarion.Abstractions`): `ExecuteUpdate` and `ExecuteDelete`, raw SQL, the SQL tier and stored procedures. Writes
+    made by database triggers, by other applications on the same database and by migrations are not seen; the
+    replacement producers below cover them.
+- **Set-based statements are reported, not intercepted.** `ExecuteUpdate` and `ExecuteDelete` bypass the change
+  tracker, as set-based statements bypass the hooks of every ORM the second research note covers, and none of those
+  frameworks intercepts them. An EF hook would have to run where EF compiles a query (`QueryCompilationStarting`),
+  which happens once per query shape because compiled queries are cached, and EF's precompiled queries never run it.
+  Instead, the call site reports the write:
+
+  ```csharp
+  await db.Invoices.Where(i => i.DueDate < today).ExecuteUpdateAsync(s => s.SetProperty(i => i.Overdue, true), ct);
+  hints.Changed<Invoice>();
+  ```
+
+  An analyzer makes this a build error rather than a stale screen (section 10). It reads the written type from the
+  generic argument of `ExecuteUpdate<T>`/`ExecuteDelete<T>`, so it works with precompiled queries too.
 - **Commit tracking.** The change set keeps a transaction depth that three things maintain: the EF transaction
-  interceptor; new internal after-commit, after-rollback and savepoint hooks on `SqlUnitOfWork`; and an ambient
-  `System.Transactions` transaction, through `TransactionCompleted`, as the settings notifier already does. The change
-  set is published after the outermost commit, discarded on rollback, and truncated on a rollback to a savepoint. A
-  tagged autocommit `Execute*` publishes after `NonQueryExecuted`; a hand report at depth 0 publishes at once, because
-  the write it reports is already durable. The SQL tier also opens transactions outside the unit of work, through
-  `ISqlOwnedSession.BeginTransactionAsync` and `ISqlDatabase.BeginTransactionAsync`, which return an
-  `ISqlTransaction`. A report for a write inside one uses `IRequeryHints.Changed<TSource>(transaction)`, which
-  publishes after that transaction commits, through internal hooks on its implementation. A transaction opened with
-  raw ADO.NET is not seen at all, so a report inside it would publish before that commit; the docs require such a
-  report to come after the commit.
+  interceptor (transactions EF begins, and those attached with `UseTransaction`); new internal after-commit,
+  after-rollback and savepoint hooks on `SqlUnitOfWork`; and an ambient `System.Transactions` transaction, through
+  `TransactionCompleted`, as the settings notifier already does. The change set is published after the outermost
+  commit, discarded on rollback, and truncated on a rollback to a savepoint. A report at depth 0 publishes at once,
+  because the write it reports is already durable; an autocommit `ExecuteUpdate` and its report are that case. The SQL
+  tier also opens transactions outside the unit of work, through `ISqlOwnedSession.BeginTransactionAsync` and
+  `ISqlDatabase.BeginTransactionAsync`, which return an `ISqlTransaction`. A report for a write inside one uses
+  `IRequeryHints.Changed<TSource>(transaction)`, which publishes after that transaction commits, through internal hooks
+  on its implementation.
+- **Reports in untracked transactions warn.** A report at depth 0 checks whether it can see an open transaction that
+  the change set does not track: a `DbContext` resolved in the scope whose `Database.CurrentTransaction` is set, which
+  happens when that context has no producer attached. If so, it still publishes at once and logs a warning naming the
+  source and the context, as Ash warns about notifications from a transaction it did not start. A transaction opened
+  with raw ADO.NET on a bare connection is invisible; the docs require a report inside it to come after the commit.
 - **Missing producers.** `IRequeryHints` defaults to a no-op that core registers with `TryAdd`. It logs a warning once
   per process and source when it drops a report, so a CLI, the migration runner or a forgotten worker shows up in its
   own logs. Where the feature is registered, startup logs once for every registered `DbContext` without the producer
@@ -168,10 +186,28 @@ parts that made that surface fragile:
   here fails closed at run time, queries cascaded rows before a `DELETE`, or refuses `ExecuteDelete`.
 - **No application code runs inside the save.** The producer only records types. Everything that reacts runs after
   commit, so there is no nested save and no recursion to guard against.
-- **Public APIs only.** It uses the change tracker's entries, the model's foreign keys, and save, transaction and
-  command interceptors attached per scope, as the integration-event buffer's are. The one singleton, the
-  query-expression interceptor, is stateless: it adds a tag and reaches no scope.
-- **The most fragile piece has a fallback**, described above.
+- **Public APIs only.** It uses the change tracker's entries, the model's foreign keys, and the save and transaction
+  interceptors attached per scope, as the integration-event buffer's are. There is no query-expression interceptor, no
+  command interceptor and no SQL-comment scanning, and nothing to re-verify on an EF Core upgrade.
+
+**Replacement producers.** The publication (section 3) is a public contract, and `IRequeryPublications` (in
+`Elarion.ClientEvents`) lets another producer feed it, alongside or instead of the EF one. Two are documented as
+recipes, not shipped:
+
+- **Statement-level triggers into a change table.** An `AFTER … FOR EACH STATEMENT` trigger on each published table
+  inserts its (table, tenant) pairs from the transition tables into a change table, and a role holder (ADR-0049) polls
+  it, gap-safely, and publishes. It sees every database write, including raw SQL, database-only cascades, other
+  applications and data migrations, and rows appear only on commit, so no commit tracking is needed. The costs are
+  schema objects the migration plan has to keep in step with the model, tenant logic in SQL, an extra insert per write
+  statement, cleanup of the table, and no SQLite path. A trigger that calls `pg_notify` directly is not offered: it
+  takes the notification lock at commit and serializes every watched write (section 8).
+- **Logical replication.** A role holder reads `pgoutput` from one slot and maps relations to sources. It sees
+  everything committed, but it needs `wal_level = logical`, a slot that retains WAL while its reader is down, and
+  database permissions that managed services often restrict, which puts it past this tier.
+
+A team with other writers on the database, or that wants no reports at all, adopts one of them; the delivery side
+does not change. A team that replaces the EF producer this way leaves the unreported-write analyzer (section 10)
+switched off.
 
 ### 3. Publication and fan-out
 
@@ -396,15 +432,30 @@ The server runs the query and pushes the result; viewers do not re-query.
   pushes and bytes, frames coalesced, and the notification-queue gauge. The method name may be a tag, since the catalog
   bounds it; the tenant never is, only on spans and logs.
 
-### 10. Analyzer
+### 10. Analyzers
 
-A diagnostic analyzer warns when the body of a `[RequeryOn]` handler reads an entity type it does not declare: a
-`DbSet<T>` or `Set<T>()` access, or a navigation to such a type. It is an analyzer and not part of the generator,
-because the generator runs on every keystroke and must stay cheap. It does not follow calls into services, module APIs,
-raw SQL or views, so the declaration stays the source of truth and the warning is only a reminder. It does not report a
-declared source that the body never reads, because queries often read through a helper. If `ExecuteUpdate` falls back
-to reporting by hand (section 2), the analyzer also flags an `ExecuteUpdate` or `ExecuteDelete` on a published type
-without a report in the same method.
+Two diagnostics. Both live in a diagnostic analyzer rather than the generator, because the generator runs on every
+keystroke and must stay cheap. They ship with the `Elarion` package's bundled analyzers, so they run in every assembly
+that writes or reads, module assemblies included; analyzer assets are not transitive, so the producer package could not
+carry them.
+
+- **An unreported set-based write is a build error.** An `ExecuteUpdate` or `ExecuteDelete` (sync or async) on an
+  entity type `T` needs an `IRequeryHints.Changed<T>()`, or `Changed<T>(transaction)`, in the same method; a code fix
+  inserts the report after the statement. The analyzer reads `T` from the method's generic argument, so precompiled
+  queries are covered. It skips framework-owned types and types the compilation excludes with `ExcludeFromRequery()`
+  where it can see that configuration. For an exclusion declared in another assembly, the report is harmless, since a
+  report of an excluded type is dropped like its tracked writes, or the diagnostic is suppressed with a justification.
+  It is an error, not a warning, because the failure it prevents is a silently stale screen (AGENTS.md prefers a clear
+  compile-time error over a silent run-time gap). Applications that do not use the feature never see it: it is enabled
+  solution-wide by the MSBuild property `ElarionRequeryHints`, set for example in `Directory.Build.props`, which the
+  producer's docs require.
+- **An undeclared source is a warning.** The analyzer warns when the body of a `[RequeryOn]` handler reads an entity
+  type it does not declare: a `DbSet<T>` or `Set<T>()` access, or a navigation to such a type. It does not follow calls
+  into services, module APIs, raw SQL or views, so the declaration stays the source of truth and the warning is only a
+  reminder. It does not report a declared source that the body never reads, because queries often read through a
+  helper.
+
+Raw SQL cannot be checked this way; reports for it stay the developer's responsibility, as section 2 says.
 
 ### 11. Packages
 
@@ -413,10 +464,11 @@ without a report in the same method.
   `ClientEventScope.Tenant`, `AuthorizationContext.IsSubscription`.
 - `Elarion` and its generator: the method-to-sources catalog in the generated module registration, the `requery` mode
   in the handler client metadata, the `Shared` computation entry point and its checks, the no-op `IRequeryHints`, and
-  the analyzer.
+  the two analyzers with their code fix.
 - `Elarion.EntityFrameworkCore`: the requery model annotations and their entity-configuration extensions.
-- `Elarion.ClientEvents`: the change set, the publication and its merger, the `elarion.requery` subscription, the
-  expansion, `PerViewer` throttling and budgets, the catch-up cursor, and `Shared` computation.
+- `Elarion.ClientEvents`: the change set, the publication, `IRequeryPublications` for replacement producers, the
+  merger, the `elarion.requery` subscription, the expansion, `PerViewer` throttling and budgets, the catch-up cursor,
+  and `Shared` computation.
 - `Elarion.ClientEvents.AspNetCore`: the SSE endpoint's side: `t` as the `id:` of every frame, reading
   `Last-Event-ID` and `since`, the acknowledgement, fallback and resubscribe frames, and capturing the authentication
   expiry at subscribe.
@@ -433,13 +485,14 @@ without a report in the same method.
 
 The implementation lands as stacked PRs, each targeting the previous one:
 
-1. a test-only spike of the `ExecuteUpdate` tag, whose result is recorded here before acceptance;
-2. contracts, the catalog, the schema value, the generator checks, the analyzer and the startup checks;
-3. the producer: change set, EF sibling package, SQL-tier hooks, `TransactionScope`, model annotations, publication and
-   merger;
-4. `PerViewer` delivery: the local-delivery decorator, throttling and budgets, the catch-up cursor, per-key
+1. contracts, the catalog, the schema value, the generator checks, the analyzers and the startup checks;
+2. the producer: change set, EF sibling package, SQL-tier hooks, `TransactionScope`, model annotations, publication,
+   merger and `IRequeryPublications`;
+3. `PerViewer` delivery: the local-delivery decorator, throttling and budgets, the catch-up cursor, per-key
    coalescing, `ClientEventScope.Tenant`, `IsSubscription` with the ADR-0085 edit, and the TypeScript `onStale`;
-5. `Shared` delivery.
+4. `Shared` delivery.
+
+The trigger and logical-replication producers are docs recipes, written once step 2 has landed.
 
 Acceptance:
 
@@ -450,10 +503,11 @@ Acceptance:
 - **Benchmark, recorded in the PR:** the writer's commit latency at p50 and p99 with and without the producer, in
   `tests/Elarion.Benchmarks`. The benchmarks do not run in CI, so they record rather than gate.
 - **Test matrix:**
-  - Testcontainers PostgreSQL: tracked writes, cascades, `ExecuteUpdate`/`ExecuteDelete` in autocommit and inside a
-    transaction, rollback, savepoints, join entities, `TransactionScope`, excluded types, and the SQL-tier hooks
-    (unit of work and `ISqlTransaction`) and sources;
-  - SQLite for the tag;
+  - Testcontainers PostgreSQL: tracked writes, cascades, reported `ExecuteUpdate`/`ExecuteDelete` in autocommit and
+    inside a transaction, rollback, savepoints, join entities, `TransactionScope`, `UseTransaction`, excluded types,
+    the untracked-transaction warning, and the SQL-tier hooks (unit of work and `ISqlTransaction`) and sources;
+  - analyzer tests: the unreported-write error and its code fix, framework and excluded types, the opt-in property,
+    and the undeclared-source warning;
   - a two-node fan-out over a real `LISTEN`;
   - `FakeTimeProvider` tests for the throttle, the budgets, the catch-up cursor and its horizon;
   - the `Shared` generation race: a hint during a computation produces exactly one more;
@@ -461,8 +515,7 @@ Acceptance:
   - TypeScript client tests: in-flight merge, duration spacing, hidden page, `Last-Event-ID`, the acknowledgement and
     fallback of `awaitResult`, and the per-subscription version guard;
   - generator tests with the incremental cache test, and byte-identity tests;
-  - NodeNext type-checking of the emitted client;
-  - the tag test, run on every EF Core upgrade.
+  - NodeNext type-checking of the emitted client.
 
 ## Consequences
 
@@ -489,11 +542,14 @@ Acceptance:
   the producing node after commit. A publication lives in memory, so a crash in that window loses it for viewers on
   other nodes; they stay stale until the next change. An application that cannot accept this sets a
   `refetchInterval` as a safety net.
-- **Known completeness gaps.** Raw SQL, the AOT SQL tier and stored procedures are seen only when reported. A report
-  inside a transaction opened with raw ADO.NET publishes early, which is the one known case where a hint can be
-  swallowed; framework transactions (the unit of work and `ISqlTransaction`) are covered. Writes by triggers, other
-  applications and migrations are not seen at all. A writing host that registers neither the feature nor the producer
-  goes undetected. EF precompiled queries report by hand.
+- **Set-based and raw writes cost one line.** Every `ExecuteUpdate` and `ExecuteDelete` carries a `Changed<T>()` next
+  to it, which the build enforces and a code fix writes. Raw SQL, the AOT SQL tier and stored procedures are seen only
+  when reported, and nothing checks those reports.
+- **Known completeness gaps.** A report inside a transaction opened with raw ADO.NET on a bare connection publishes
+  early, which is the one known case where a hint can be swallowed; framework transactions (EF, the unit of work and
+  `ISqlTransaction`) are covered, and other visible but untracked transactions log a warning. Writes by triggers,
+  other applications and migrations are not seen unless a replacement producer runs. A writing host that registers
+  neither the feature nor the producer goes undetected.
 - **The catch-up cursor uses wall clocks.** Clock skew between nodes beyond the 5 s margin, or a backward clock step,
   can make a catch-up miss.
 - **Docs-only hazards in v1.**
@@ -515,16 +571,32 @@ Acceptance:
 - **Per-writer topics (today's way).** The dependency lives at the writers, so a forgotten event leaves the screen
   silently stale, and events that only refresh a screen burden the integration plane. They remain the right tool for a
   hint that carries an id or intent, such as a detail screen's.
-- **Database triggers that call `pg_notify`.** They see every write, raw SQL included. But a `NOTIFY` in the writing
-  transaction takes the cluster-wide lock at commit and serializes every watched write, and nothing can be throttled
-  before that lock. Triggers would be schema objects that change whenever a query's sources change, would need
-  generated migrations, are PostgreSQL-only although Elarion's migration and SQL tiers also support SQLite, and would
-  read the tenant in PL/pgSQL.
-- **Logical replication.** It sees every committed change, including raw SQL, cascades and other applications. It needs
-  `wal_level = logical` (a restart, and often restricted on managed databases), a replication slot that retains WAL
-  while its consumer is down (a known way to fill a disk), one elected consumer, and a publication per table. That is
-  change-data capture beyond this tier. An application that needs completeness can replace the producer with it and
-  keep the publication format and the fan-out.
+- **Intercepting `ExecuteUpdate`/`ExecuteDelete` with a tag injected at query compilation,** read back by a command
+  interceptor on every execution. None of the frameworks the second research note covers intercepts set-based statements; all document the
+  gap. EF Core lists interceptors for "manipulating" operations and warns that expression-tree interception is easy to
+  get wrong. The tag depended on EF's query cache and on scanning SQL comments, missed precompiled queries, needed a
+  spike before acceptance and a test on every EF Core upgrade, and was the kind of EF-internals surface ADR-0090
+  removed. A reported line, enforced by the build, does the same job.
+- **Detecting writes at the handler boundary.** Commands could declare or have the generator infer the sources they
+  write, and the pipeline would publish after the unit of work commits, as Ash notifiers fire on declared actions. It
+  would be tier-neutral and AOT-safe, but many Elarion writes run outside the command pipeline (scheduled jobs,
+  method-form consumers, actors, hosted services), and the dependency would move back to the writers, which is the
+  problem this ADR exists to fix.
+- **A report for every write, as Phoenix broadcasts explicitly.** Tracked writes are caught automatically and
+  reliably; requiring reports for them too would bring back the forgetting problem with no way to check it at build
+  time.
+- **Generated C# interceptors at `Execute*` call sites.** They could make the report automatic, but EF's precompiled
+  queries intercept the same call sites, and two interceptors on one call site do not compile. Left open; the code fix
+  makes the explicit line cheap.
+- **Database triggers as the default producer.** Statement-level triggers into a change table see every write and are
+  a documented replacement producer (section 2). As the default they would add schema objects to keep in step with the
+  model, tenant logic in SQL, an extra insert per write statement, a gap-safe poller and no SQLite path, for a hint
+  that only needs table names. A trigger that calls `pg_notify` directly is rejected outright: it takes the
+  cluster-wide lock at commit and serializes every watched write, before any throttling can apply.
+- **Logical replication as the default producer.** It sees every committed change, including raw SQL, cascades and
+  other applications, and is a documented replacement producer. As the default it needs `wal_level = logical` (a
+  restart, and often restricted on managed databases), a replication slot that retains WAL while its reader is down (a
+  known way to fill a disk), one elected reader and a publication per table: change-data capture beyond this tier.
 - **Exporting the source types and subscribing per type.** This exposes the internal model to the browser and would
   need an authorization vocabulary per entity type. The query method already has the right one.
 - **Inferring the sources at run time** by recording which types a handler's queries touched. Sources vary by branch
@@ -566,9 +638,6 @@ Acceptance:
 
 ## Before this is accepted
 
-- The spike: a tag added in `QueryCompilationStarting` must reach the SQL of `ExecuteUpdate` and `ExecuteDelete` on
-  Npgsql and SQLite, synchronously and asynchronously, with and without an application tag, and the command
-  interceptor must see it on every execution after the first. Record the result here.
 - Measure the defaults with a benchmark in `tests/Elarion.Benchmarks` and record them here: the 100 ms batching window,
   the 100 ms floor, the per-key budget of 20 re-queries per second, the node budget of 200 re-queries and 0.5
   database-seconds per second, the 5 s demand window, the `Shared` minimum interval of 1 s, the catch-up lookback,
