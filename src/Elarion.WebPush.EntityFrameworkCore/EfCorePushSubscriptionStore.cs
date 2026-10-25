@@ -17,7 +17,7 @@ namespace Elarion.WebPush.EntityFrameworkCore;
 /// caller's open transaction already holds, its write would wait for that lock until the busy timeout.
 /// </para>
 /// <para>
-/// Writes are change-tracker-free — the upsert is one <c>INSERT … ON CONFLICT (endpoint) DO UPDATE</c>, removal
+/// Writes are change-tracker-free — the upsert is one guarded <c>INSERT … ON CONFLICT (endpoint) DO UPDATE … WHERE</c>, removal
 /// an <c>ExecuteDelete</c> — so they neither flush nor disturb what the caller has tracked. Like the context,
 /// the store is not safe for concurrent use; the sender calls it sequentially.
 /// </para>
@@ -30,7 +30,7 @@ public sealed class EfCorePushSubscriptionStore<TDbContext>(TDbContext dbContext
     private static readonly ConditionalWeakTable<IModel, string> UpsertSqlCache = new();
 
     /// <inheritdoc />
-    public async ValueTask UpsertAsync(PushSubscription subscription, CancellationToken cancellationToken = default) {
+    public async ValueTask<bool> UpsertAsync(PushSubscription subscription, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(subscription);
         var sql = UpsertSqlCache.GetOrAdd(
             dbContext.Model,
@@ -45,7 +45,8 @@ public sealed class EfCorePushSubscriptionStore<TDbContext>(TDbContext dbContext
             (nameof(PushSubscriptionEntity.UserAgent), string.IsNullOrEmpty(subscription.UserAgent) ? null : subscription.UserAgent),
             (nameof(PushSubscriptionEntity.CreatedOnUtc), subscription.CreatedAt),
             (nameof(PushSubscriptionEntity.LastSeenOnUtc), subscription.LastSeenAt));
-        await dbContext.Database.ExecuteSqlRawAsync(sql, parameters, cancellationToken).ConfigureAwait(false);
+        // A conflict the guard refuses updates no row, so the affected-row count is the outcome.
+        return await dbContext.Database.ExecuteSqlRawAsync(sql, parameters, cancellationToken).ConfigureAwait(false) > 0;
     }
 
     /// <inheritdoc />

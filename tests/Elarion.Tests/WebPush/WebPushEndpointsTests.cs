@@ -62,6 +62,22 @@ public sealed class WebPushEndpointsTests {
     }
 
     [Fact]
+    public async Task Subscribe_AnotherUsersEndpoint_Returns400AndKeepsTheirSubscription() {
+        await using var host = await StartAsync();
+        using var owner = new TestPushSubscriber(Endpoint);
+        using var attacker = new TestPushSubscriber(Endpoint);
+        var store = host.App.Services.GetRequiredService<IPushSubscriptionStore>();
+        await store.UpsertAsync(owner.ToSubscription("bob"), TestToken);
+
+        var response = await host.Client.PostAsync("/webpush/subscribe", Json(
+            $$$"""{"endpoint":"{{{Endpoint}}}","keys":{"p256dh":"{{{attacker.P256dh}}}","auth":"{{{attacker.Auth}}}"}}"""), TestToken);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await store.ListByUsersAsync(["alice"], TestToken)).Should().BeEmpty();
+        (await store.ListByUsersAsync(["bob"], TestToken)).Single().Auth.Should().Be(owner.Auth);
+    }
+
+    [Fact]
     public async Task Subscribe_Unauthenticated_Returns401() {
         await using var host = await StartAsync(new FakeCurrentUser { UserId = "alice" });
         using var subscriber = new TestPushSubscriber(Endpoint);

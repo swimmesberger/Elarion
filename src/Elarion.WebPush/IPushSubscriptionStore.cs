@@ -3,7 +3,7 @@ namespace Elarion.WebPush;
 /// <summary>
 /// One browser's push subscription, owned by one user. The <see cref="Endpoint"/> is the identity: a
 /// browser profile has one per application server key, so the same device re-subscribing under another
-/// account reassigns the row instead of creating a second one.
+/// account (presenting the same <see cref="Auth"/> secret) reassigns the row instead of creating a second one.
 /// </summary>
 public sealed record PushSubscription {
     /// <summary>The push service URL messages are POSTed to. Treat it as a secret-ish capability; do not log it.</summary>
@@ -34,13 +34,27 @@ public sealed record PushSubscription {
 /// </summary>
 public interface IPushSubscriptionStore {
     /// <summary>
-    /// Inserts the subscription, or updates the row with the same <see cref="PushSubscription.Endpoint"/>:
-    /// keys, owner, user agent, and <see cref="PushSubscription.LastSeenAt"/> are overwritten;
-    /// <see cref="PushSubscription.CreatedAt"/> is kept unless the owner changed.
+    /// Inserts the subscription, or updates the row with the same <see cref="PushSubscription.Endpoint"/> when
+    /// the caller may take it: the row's owner re-subscribing, or another user presenting the row's stored
+    /// <see cref="PushSubscription.Auth"/> secret (the same browser signed in under another account). An update
+    /// overwrites keys, owner, user agent, and <see cref="PushSubscription.LastSeenAt"/>, and keeps
+    /// <see cref="PushSubscription.CreatedAt"/> unless the owner changed. Any other conflict writes nothing, so a
+    /// user who learned someone else's endpoint cannot take it over and redirect it to keys of their own.
     /// </summary>
+    /// <remarks>
+    /// The ownership check and the write are one atomic step (the EF store's single
+    /// <c>INSERT … ON CONFLICT … DO UPDATE … WHERE</c>), never a read followed by a write: two concurrent
+    /// subscribes for one endpoint from different users leave exactly one owner. An implementation may compare the
+    /// auth secret with plain (not constant-time) equality: it is 16 random bytes, and a timing difference of one
+    /// short comparison is lost in the authenticated request and database round trip every guess costs.
+    /// </remarks>
     /// <param name="subscription">The subscription, with both timestamps set to "now".</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    ValueTask UpsertAsync(PushSubscription subscription, CancellationToken cancellationToken = default);
+    /// <returns>
+    /// Whether the row was written (inserted, refreshed, or reassigned); <see langword="false"/> when another user
+    /// owns the endpoint and the auth secret did not match, in which case nothing changed.
+    /// </returns>
+    ValueTask<bool> UpsertAsync(PushSubscription subscription, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes the subscription with <paramref name="endpoint"/>.</summary>
     /// <param name="endpoint">The subscription endpoint.</param>

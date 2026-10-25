@@ -10,16 +10,22 @@ public sealed class InMemoryPushSubscriptionStore : IPushSubscriptionStore {
     private readonly ConcurrentDictionary<string, PushSubscription> _subscriptions = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
-    public ValueTask UpsertAsync(PushSubscription subscription, CancellationToken cancellationToken = default) {
+    public ValueTask<bool> UpsertAsync(PushSubscription subscription, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(subscription);
-        _subscriptions.AddOrUpdate(
-            subscription.Endpoint,
-            static (_, added) => added,
-            static (_, existing, added) => existing.UserId == added.UserId
-                ? added with { CreatedAt = existing.CreatedAt }
-                : added,
-            subscription);
-        return ValueTask.CompletedTask;
+        // Compare-and-swap, so the ownership check and the write are one step, as in the EF store's single
+        // statement: a concurrent write between them makes TryAdd/TryUpdate fail and the check run again.
+        while (true) {
+            if (!_subscriptions.TryGetValue(subscription.Endpoint, out var existing)) {
+                if (_subscriptions.TryAdd(subscription.Endpoint, subscription)) return ValueTask.FromResult(true);
+                continue;
+            }
+
+            var sameOwner = existing.UserId == subscription.UserId;
+            if (!sameOwner && existing.Auth != subscription.Auth) return ValueTask.FromResult(false);
+
+            var updated = sameOwner ? subscription with { CreatedAt = existing.CreatedAt } : subscription;
+            if (_subscriptions.TryUpdate(subscription.Endpoint, updated, existing)) return ValueTask.FromResult(true);
+        }
     }
 
     /// <inheritdoc />

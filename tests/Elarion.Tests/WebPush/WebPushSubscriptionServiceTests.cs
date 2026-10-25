@@ -42,6 +42,38 @@ public sealed class WebPushSubscriptionServiceTests {
     }
 
     [Fact]
+    public async Task Subscribe_AnotherUsersEndpointWithoutItsAuthSecret_IsRefusedAndChangesNothing() {
+        await using var provider = CreateProvider();
+        using var victim = new TestPushSubscriber(Endpoint);
+        using var attacker = new TestPushSubscriber(Endpoint);
+        await Service(provider, "alice").SubscribeAsync(victim.ToRequest(), cancellationToken: TestToken);
+
+        var result = await Service(provider, "mallory").SubscribeAsync(attacker.ToRequest(), cancellationToken: TestToken);
+
+        // The same kind as any invalid subscription: nothing says the endpoint is someone else's.
+        result.Error.Kind.Should().Be(ErrorKind.Validation);
+        (await Store(provider).ListByUsersAsync(["mallory"], TestToken)).Should().BeEmpty();
+        var kept = (await Store(provider).ListByUsersAsync(["alice"], TestToken)).Single();
+        kept.P256dh.Should().Be(victim.P256dh);
+        kept.Auth.Should().Be(victim.Auth);
+    }
+
+    [Fact]
+    public async Task Subscribe_SameOwnerWithNewKeys_RefreshesTheSubscription() {
+        await using var provider = CreateProvider();
+        using var original = new TestPushSubscriber(Endpoint);
+        using var rotated = new TestPushSubscriber(Endpoint);
+        await Service(provider, "alice").SubscribeAsync(original.ToRequest(), cancellationToken: TestToken);
+
+        var result = await Service(provider, "alice").SubscribeAsync(rotated.ToRequest(), cancellationToken: TestToken);
+
+        result.IsSuccess.Should().BeTrue();
+        var stored = (await Store(provider).ListByUsersAsync(["alice"], TestToken)).Single();
+        stored.P256dh.Should().Be(rotated.P256dh);
+        stored.Auth.Should().Be(rotated.Auth);
+    }
+
+    [Fact]
     public async Task Subscribe_Unauthenticated_IsUnauthorized() {
         await using var provider = CreateProvider();
         using var subscriber = new TestPushSubscriber(Endpoint);
@@ -124,16 +156,53 @@ public sealed class WebPushSubscriptionServiceTests {
         using var subscriber = new TestPushSubscriber(Endpoint);
         var created = DateTimeOffset.UnixEpoch.AddDays(1);
         var later = created.AddDays(1);
-        await store.UpsertAsync(subscriber.ToSubscription("alice") with { CreatedAt = created, LastSeenAt = created }, TestToken);
+        (await store.UpsertAsync(subscriber.ToSubscription("alice") with { CreatedAt = created, LastSeenAt = created }, TestToken))
+            .Should().BeTrue();
 
-        await store.UpsertAsync(subscriber.ToSubscription("alice") with { CreatedAt = later, LastSeenAt = later }, TestToken);
+        (await store.UpsertAsync(subscriber.ToSubscription("alice") with { CreatedAt = later, LastSeenAt = later }, TestToken))
+            .Should().BeTrue();
         var refreshed = (await store.ListByUsersAsync(["alice"], TestToken)).Single();
-        await store.UpsertAsync(subscriber.ToSubscription("bob") with { CreatedAt = later, LastSeenAt = later }, TestToken);
+        (await store.UpsertAsync(subscriber.ToSubscription("bob") with { CreatedAt = later, LastSeenAt = later }, TestToken))
+            .Should().BeTrue();
         var reassigned = (await store.ListByUsersAsync(["bob"], TestToken)).Single();
 
         refreshed.CreatedAt.Should().Be(created);
         refreshed.LastSeenAt.Should().Be(later);
         reassigned.CreatedAt.Should().Be(later);
+    }
+
+    [Fact]
+    public async Task InMemoryStore_AnotherUserWithoutTheAuthSecret_WritesNothing() {
+        var store = new InMemoryPushSubscriptionStore();
+        using var victim = new TestPushSubscriber(Endpoint);
+        using var attacker = new TestPushSubscriber(Endpoint);
+        await store.UpsertAsync(victim.ToSubscription("alice"), TestToken);
+
+        (await store.UpsertAsync(attacker.ToSubscription("mallory") with { LastSeenAt = DateTimeOffset.UnixEpoch.AddDays(1) }, TestToken))
+            .Should().BeFalse();
+
+        (await store.ListByUsersAsync(["alice", "mallory"], TestToken)).Should().Equal(victim.ToSubscription("alice"));
+    }
+
+    [Fact]
+    public async Task InMemoryStore_ConcurrentSubscribesFromDifferentUsers_LeaveExactlyOneOwner() {
+        var store = new InMemoryPushSubscriptionStore();
+        var subscribers = Enumerable.Range(0, 8).Select(_ => new TestPushSubscriber(Endpoint)).ToArray();
+        try {
+            using var start = new Barrier(subscribers.Length);
+            var written = await Task.WhenAll(subscribers.Select((subscriber, i) => Task.Run(() => {
+                start.SignalAndWait(TestToken);
+                return store.UpsertAsync(subscriber.ToSubscription($"user-{i}"), TestToken).AsTask();
+            }, TestToken)));
+
+            written.Count(w => w).Should().Be(1);
+            var winner = Array.IndexOf(written, true);
+            (await store.ListByUsersAsync(subscribers.Select((_, i) => $"user-{i}").ToArray(), TestToken))
+                .Should().Equal(subscribers[winner].ToSubscription($"user-{winner}"));
+        }
+        finally {
+            foreach (var subscriber in subscribers) subscriber.Dispose();
+        }
     }
 
     private static ServiceProvider CreateProvider(Action<WebPushOptions>? configure = null) {
