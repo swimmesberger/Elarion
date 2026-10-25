@@ -65,4 +65,31 @@ public sealed record LeasedWorkClaim<TRow> where TRow : class, ILeasedWorkRow {
     /// eligible. Must not set the lease columns.
     /// </summary>
     public Action<UpdateSettersBuilder<TRow>>? OnClaim { get; init; }
+
+    /// <summary>
+    /// The rows that have used up their attempts, evaluated in the database right after the claim stamp — so on the
+    /// values <see cref="OnClaim"/> just wrote (<c>r =&gt; r.Attempts &gt; 5</c> after counting this attempt catches a row
+    /// whose previous workers all died during the call). Such a row is not returned: it is finalized at once with
+    /// <see cref="GiveUp"/> and reported to <see cref="OnGivenUp"/>. <see langword="null"/> gives nothing up.
+    /// </summary>
+    public Expression<Func<TRow, bool>>? Exhausted { get; init; }
+
+    /// <summary>
+    /// The setters that mark an <see cref="Exhausted"/> row as given up — a failed state, an error text — applied in
+    /// the statement that ends its claim. They must take the row out of <see cref="Eligible"/>, or the next claim
+    /// gives it up again. Required with <see cref="Exhausted"/>; must not set the lease columns.
+    /// </summary>
+    public Action<UpdateSettersBuilder<TRow>>? GiveUp { get; init; }
+
+    /// <summary>
+    /// Called once for every row given up by this claim, after its finalize and after the won rows are read, with the
+    /// row as it was claimed — the place to log it. <see langword="null"/> skips the read the report needs.
+    /// </summary>
+    /// <remarks>
+    /// Every given-up row is reported, even when an earlier callback threw, because the give-up is already written. If
+    /// any callback throws, the claim throws that exception (an <see cref="AggregateException"/> for several) after
+    /// releasing the won rows; what <see cref="OnClaim"/> wrote stays, as after a crashed worker. Keep it to logging
+    /// that cannot fail.
+    /// </remarks>
+    public Func<TRow, CancellationToken, ValueTask>? OnGivenUp { get; init; }
 }

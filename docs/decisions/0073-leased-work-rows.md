@@ -174,3 +174,11 @@ payload, a handler returning sent/retry/failed, payload protection, queue caps, 
 hosted worker. That layer is application policy, and only one application would adopt it today. It
 stays a documented recipe (the coordination capability page) under the same second-demand convention.
 Lease renewal stays manual; nothing heartbeats a claim automatically.
+
+> **Amendment (2026-10-25):** four consumers in one application each re-derived the same skeleton around the claim,
+> so the primitive grew it, still without owning any consumer column: `LeasedWorkClaim.Exhausted`/`GiveUp`/`OnGivenUp`
+> finalize rows that used up their attempts at claim time; `FinalizeClaimAsync` with a `LeasedWorkFinalize<TRow>`
+> applies the setters only while `StillEligible` holds and reports `Finalized`/`Ineligible`/`ClaimLost`;
+> `ReleaseClaimsAsync` gives a batch back with undo setters (a shutdown must not burn the attempt the claim counted);
+> and `ClaimPendingAsync(claim, select)` projects the won rows in the claim's read. The test seam is PostgreSQL, not
+> EF InMemory, which cannot execute the claim's `ExecuteUpdate`.

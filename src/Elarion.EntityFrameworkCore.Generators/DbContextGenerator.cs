@@ -395,8 +395,17 @@ public sealed class DbContextGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
     }
 
+    // English mass nouns that keep their form in the plural ("ImageMetadata" → "ImageMetadata", not "…Metadatas").
+    // Matched as PascalCase word endings; "Metadata" is listed on its own because "data" is not a word start there.
+    private static readonly string[] UncountableSuffixes =
+        ["Data", "Metadata", "Information", "Info", "Equipment", "Feedback"];
+
     private static string Pluralize(string name) {
         if (string.IsNullOrEmpty(name)) return name;
+
+        foreach (var suffix in UncountableSuffixes)
+            if (name.EndsWith(suffix, StringComparison.Ordinal))
+                return name;
 
         if (name.EndsWith("ings", StringComparison.Ordinal) ||
             name.EndsWith("ies", StringComparison.Ordinal) ||
