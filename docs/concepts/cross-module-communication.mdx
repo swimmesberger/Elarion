@@ -199,11 +199,12 @@ internal sealed class CustomerLookup(ISalesApi api) : ICustomerLookup {
 
 ## Data owned across modules
 
-Some data belongs to records of other modules — notes or files attached to a property, a contact, a request — and
-points at them by an id without a foreign key. The owning module must not ask every deleting module to clean it up,
-and the deleting module must not know it exists. Mark the record entity `[PublishLifecycleEvents]` and let the
-data's module consume `EntitiesDeleted<TEntity>` in the deleting unit of work (database cascades included); see
-[Reacting to deletions](/docs/capabilities/events/lifecycle-events).
+Some data belongs to records of other modules: notes or files attached to a property, a contact, a request. Keep
+the reference in the database, not in a cleanup call in every deleting handler. Modules share one schema, so a
+foreign key to another module's table breaks no boundary. For data that attaches to several kinds of records, use an
+exclusive arc (one nullable foreign key per kind) or a shared identity table, and let `ON DELETE CASCADE` remove it
+with its owner. [Polymorphic references](/docs/concepts/polymorphic-references) compares the patterns. Records in
+another bounded context announce their deletion with an integration event instead.
 
 ## Why not just call the handler (`IHandlerSender`/`IHandler`)?
 

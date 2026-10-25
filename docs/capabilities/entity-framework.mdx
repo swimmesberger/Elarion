@@ -352,15 +352,13 @@ configurations apply in **registration order** — so the order of the `Add…` 
 
 | Registration | Runs in | Must come |
 | --- | --- | --- |
-| `AddElarionEntityLifecycleEvents<T>()` | `SavingChanges` — publishes `EntitiesDeleted<T>`; consumers change the tracker | before the two below, which must see the consumers' changes (a wrong order throws when the first context is built) |
-| `AddElarionTenantScopingEntityFrameworkCore<T>()` | `SavingChanges` — stamps the tenant on added rows | after lifecycle events, so rows consumers add are stamped |
-| `AddElarionAuditingEntityFrameworkCore<T>()` | `SavingChanges` — captures the field-level changes | after both, so it records what they changed |
+| `AddElarionTenantScopingEntityFrameworkCore<T>()` | `SavingChanges` — stamps the tenant on added rows | before auditing, so the audit records the stamped tenant |
+| `AddElarionAuditingEntityFrameworkCore<T>()` | `SavingChanges` — captures the field-level changes | after tenant scoping, so it records the final values |
 | The integration event bus / outbox | after the save or commit | anywhere — it reacts to the commit, not the change set |
 
 Interceptors added in `AddDbContext`'s own options callback run at that callback's registration position, which is
 usually first. That is the right place for an application soft-delete interceptor: it turns a deletion into an update
-before lifecycle events see it. An interceptor your persistence assembly adds in `OnConfiguring` runs after all of
-these.
+before auditing records it. An interceptor your persistence assembly adds in `OnConfiguring` runs after all of these.
 
 ## Pagination
 

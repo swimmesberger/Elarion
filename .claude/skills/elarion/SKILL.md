@@ -362,10 +362,10 @@ reload instead of failing as a CORS error — don't hand-roll an `X-Requested-Wi
   DbContext. Commands already run in a framework transaction — don't open your own. When a rule needs a lock,
   use `db.LockRowAsync<TEntity>(id, RowLockMode…)` or `db.AdvisoryLockAsync(scope, key)` inside that transaction,
   never hand-written `FOR UPDATE`/`pg_advisory_xact_lock` SQL (one key scheme, `elarion.` scopes reserved).
-- **Data owned across modules reacts to deletions.** Notes/files that point at another module's records by id (no FK)
-  are cleaned up by their own module: mark the record entity `[PublishLifecycleEvents]`, register
-  `AddElarionEntityLifecycleEvents<TDbContext>()`, and `[ConsumeEvent]` `EntitiesDeleted<TEntity>` — never a cleanup
-  call in every delete handler, never `ExecuteDelete` on such a set.
+- **References between records stay in the database.** Modules share one schema, so data owned by one module (notes,
+  files) keeps a real foreign key to another module's record and is removed by `ON DELETE CASCADE`. For data attached to
+  several kinds of records, use an exclusive arc (one nullable FK per kind plus `CHECK (num_nonnulls(...) = 1)`) or a
+  shared identity table, never an `(OwnerKind, OwnerId)` pair cleaned up in application code.
 - **In-process calls are typed.** Inject `IHandler<TReq, Result<TRes>>` (or `IHandlerSender`) so a
   rename is a compile error; never dispatch by string name. A request declared with a self-typed marker
   (`Query : IQuery<Query, Response>`) gets fully inferred dispatch — `sender.SendAsync(new Query(id), ct)`

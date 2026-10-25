@@ -108,5 +108,6 @@ designs that are not yet implemented.
 - [ADR-0085: Handler declarations are projected to clients and hosts, not copied — Proposed](0085-handler-declarations-are-projected-not-copied.md)
 - [ADR-0086: One framework-owned answer for unexpected exceptions, on every transport — Proposed](0086-one-answer-for-unexpected-errors.md)
 - [ADR-0087: Transaction-scoped locks are a framework helper with one advisory key scheme — Proposed](0087-transaction-scoped-locks-and-one-advisory-key-scheme.md)
-- [ADR-0088: Deletions of marked entities are domain events, published with their database cascades — Proposed](0088-entity-lifecycle-events-for-soft-references.md)
+- [ADR-0088: Deletions of marked entities are domain events, published with their database cascades — Superseded by ADR-0090](0088-entity-lifecycle-events-for-soft-references.md)
 - [ADR-0089: Resource authorization composes — hidden-as-missing, owner-derived filters, combinators — Proposed](0089-resource-authorization-composes.md)
+- [ADR-0090: References between records stay in the database — entity lifecycle events are removed](0090-references-between-records-stay-in-the-database.md)

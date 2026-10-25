@@ -1,10 +1,15 @@
 # ADR-0088: Deletions of marked entities are domain events, published with their database cascades
 
-- Status: Proposed
+- Status: Superseded by [ADR-0090](0090-references-between-records-stay-in-the-database.md)
 - Date: 2026-10-25
 - Related: [ADR-0001](0001-event-transaction-phase.md) (domain events are inline in the caller's transaction),
   [ADR-0002](0002-cross-module-communication.md) (modules do not reach into each other),
   [ADR-0007](0007-data-is-platform-module-as-plugin.md) (the data layer is shared; modules are plugins over it).
+
+> **Superseded.** Shipped in 0.3.0 and removed in the next release. A `(kind, id)` soft reference is the
+> polymorphic-association anti-pattern, and each case this ADR served has a database pattern with stronger guarantees:
+> a foreign key, an exclusive arc, a table per kind, a shared identity table, or, across contexts, an integration
+> event. ADR-0090 records the reasoning. This record is kept for history.
 
 ## Context
 

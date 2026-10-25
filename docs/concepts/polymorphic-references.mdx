@@ -41,7 +41,7 @@ each other. A notes table with a foreign key to properties breaks no boundary.
 | an existing `(kind, id)` table you cannot migrate yet | **a delete trigger per owner table** | cleanup on delete, cascades and raw SQL included | SQL in migrations; inserts still unchecked |
 
 The rest of this page shows each pattern with its EF Core configuration, then covers races, side effects outside the
-database, and where `EntitiesDeleted<T>` stands among them.
+database, and why Elarion ships no application-level cascade.
 
 ## One kind: a plain foreign key
 
@@ -196,21 +196,21 @@ an integration event when it is deleted (`PropertyDeleted`, after commit, at lea
 attached data removes it idempotently. The data is eventually consistent, so a reader can briefly see a note whose
 owner is gone, and must tolerate that.
 
-## Keeping `(kind, id)` with `EntitiesDeleted<T>`
+## Why Elarion has no application-level cascade
 
-[`EntitiesDeleted<T>`](/docs/capabilities/events/lifecycle-events) is a cascade in application code for the pair: the
-owner is marked `[PublishLifecycleEvents]`, and the module that keeps notes deletes them in the same save, cascaded
-rows included.
+Rails (`dependent: :destroy`) and Django (`GenericRelation`) delete the attached rows in application code, and Elarion
+0.3.0 did too, with `EntitiesDeleted<T>`. It was removed in the next release
+([ADR-0090](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0090-references-between-records-stay-in-the-database.md)).
 
-**What it buys.** One generic table and API with no schema change per owner kind, and cleanup written in C#.
+It covered deletes only, and a foreign key covers deletes too and more:
+- it checks inserts;
+- it doesn't race;
+- raw SQL can't bypass it;
+- it adds no interceptor rules.
 
-**What it does not fix.**
-- It covers deletes only: inserts stay unchecked.
-- It is not race-free without the locks above.
-- Raw SQL bypasses it.
-- Its interceptor brings rules of its own: a scoped context, no inheritance on cascade paths, registration order, and
-  a transaction when a consumer saves.
+Every case it served has a pattern above: the exclusive arc for a few kinds, the shared identity table for many, the
+trigger while migrating an existing table, and an integration event across contexts. What remained was convenience,
+paid for with an interceptor built on EF Core internals.
 
-Every case it covers has a database pattern above with stronger guarantees: the exclusive arc for a few kinds, the
-shared identity table for many, and the trigger while migrating an existing table. Choose it knowingly, for
-convenience, not because a foreign key seemed impossible.
+**Migrating from it:** add the foreign keys (or the identity table), backfill them from `(OwnerKind, OwnerId)` in the
+same migration, drop the pair, and delete the `EntitiesDeleted<T>` consumers.
