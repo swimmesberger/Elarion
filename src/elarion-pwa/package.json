@@ -1,7 +1,7 @@
 {
   "name": "@swimmesberger/elarion-pwa",
   "version": "0.1.0",
-  "description": "The installable-app shell for Elarion frontends: install-prompt capture with iOS Home Screen instructions, a deploy-update watcher that reloads only on a safe page change, service-worker registration, a /sw module whose shell router never caches the API, HTML, redirects, or no-store answers, and a /vite plugin that publishes the build version.",
+  "description": "The installable-app shell for Elarion frontends: install-prompt capture with iOS Home Screen instructions, a deploy-update watcher that reloads only on a safe page change, renewal of an expired authenticating-proxy session, service-worker registration, a /sw module whose shell router never caches the API, HTML, redirects, or no-store answers, and a /vite plugin that publishes the build version.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {

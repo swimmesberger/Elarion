@@ -134,7 +134,7 @@ Read the [actor decision guide](/docs/concepts/actors) before adding the actor p
 | `@swimmesberger/elarion-jsonrpc-client-generator` | A TypeScript client should be generated from `rpc-schema.json` with Zod validation and typed client-event subscriptions. |
 | `@swimmesberger/elarion-contributions` | A frontend needs typed extension points, declarative module contributions, capability gating, action gating from the RPC contract (`canCall` over the generated `rpcMethodInfo`), and optional React/Angular/TanStack Router bindings. |
 | `@swimmesberger/elarion-webpush` | A browser/PWA should subscribe to Web Push: availability detection (including the iOS Home Screen requirement), gesture-safe permission, subscribe/refresh helpers, and the service-worker handlers. |
-| `@swimmesberger/elarion-pwa` | The frontend should install as an app: install-prompt capture with iOS instructions, reloading into a new deploy only on a safe page change, a service-worker shell router (`/sw`) that never caches the API, personal pages, or redirects, and a Vite plugin (`/vite`) publishing the build version. See [Installable apps (PWA)](/docs/capabilities/pwa). |
+| `@swimmesberger/elarion-pwa` | The frontend should install as an app: install-prompt capture with iOS instructions, reloading into a new deploy only on a safe page change, renewing an expired authenticating-proxy session, a service-worker shell router (`/sw`) that never caches the API, personal pages, or redirects, and a Vite plugin (`/vite`) publishing the build version. See [Installable apps (PWA)](/docs/capabilities/pwa). |
 
 ## Dependency rules
 

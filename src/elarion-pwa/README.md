@@ -10,6 +10,10 @@ loads its assets from the cache, and moves to a new deploy without throwing away
 - **Updates** — `createUpdateWatcher({ currentVersion })` asks the server which web build is live when the app returns
   to the foreground and reloads into a new one **on the next navigation that changed the path**, never on the
   foreground return itself, never while a dialog is open or a field is focused, at most once a minute.
+- **Session renewal** — `createSessionRenewal()` for an app behind an authenticating proxy (Cloudflare Access, IAP,
+  oauth2-proxy): its `fetch` (for the JSON-RPC client) marks calls so the proxy answers an expired session with `401`
+  instead of a login redirect, its `eventSource` (for the client-events client) probes a failing stream, and an
+  expired session reloads the page once so the proxy renews it — at most once a minute, then `onSignedOut`.
 - **Registration** — `registerServiceWorker('/sw.js')` with `updateViaCache: 'none'`; resolves `null` instead of
   throwing where there is no service worker.
 - **`/sw`** — `registerShellRouter(self, …)`: network-only or network-first navigations, cache-first hashed assets,
@@ -22,7 +26,7 @@ loads its assets from the cache, and moves to a new deploy without throwing away
 ## Page
 
 ```ts
-import { createInstallPrompt, createUpdateWatcher, registerServiceWorker } from '@swimmesberger/elarion-pwa'
+import { createInstallPrompt, createSessionRenewal, createUpdateWatcher, registerServiceWorker } from '@swimmesberger/elarion-pwa'
 
 if (import.meta.env.PROD) void registerServiceWorker('/sw.js')
 
@@ -30,6 +34,11 @@ export const install = createInstallPrompt() // at module load: the prompt event
 
 export const updates = createUpdateWatcher({ currentVersion: __APP_VERSION__, enabled: import.meta.env.PROD })
 router.subscribe('onResolved', (event) => updates.navigationResolved({ pathChanged: event.pathChanged }))
+
+// Behind an authenticating proxy:
+const session = createSessionRenewal({ onSignedOut: () => showSignedOut() })
+export const rpc = createRpcApi({ url: '/rpc', fetch: session.fetch })
+export const events = createElarionEvents({ url: '/events', eventSource: session.eventSource })
 ```
 
 ## Service worker

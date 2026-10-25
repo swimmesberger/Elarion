@@ -179,6 +179,30 @@ A discovery document must name exactly the configured issuer (OpenID Connect Dis
 issuer is refused, so it can never widen the accepted issuers. Proxies that publish keys in another format than a JWKS
 (for example per-key PEM endpoints) are not covered.
 
+## Expired sessions in the browser
+
+The proxy's session expires on its own schedule, and the app only learns of it from the next request. A page load
+is fine: the proxy renews the session on the way, through redirects to its own and the identity provider's origins,
+usually without the person seeing a sign-in. An API call is not, and a single-page app or an installed one makes
+little else:
+
+| Proxy | API call after expiry | Without a marker header |
+| --- | --- | --- |
+| Cloudflare Access | `401` with `X-Requested-With: XMLHttpRequest` | Redirect to the team domain: a CORS failure |
+| Google Cloud IAP | `401`; send `X-Requested-With: XMLHttpRequest` where it redirects instead | Redirect: a CORS failure |
+| oauth2-proxy | `401` with `Accept: application/json` | Redirect to the provider: a CORS failure |
+
+A browser's `EventSource` sends neither header, so a live-update stream fails without a reason. Elarion's browser
+side handles both: `createSessionRenewal()` from `@swimmesberger/elarion-pwa` marks the JSON-RPC calls, probes a
+failing event stream, and answers an expired session with one reload that lets the proxy renew it — see
+[Renewing an expired proxy session](/docs/capabilities/pwa#renewing-an-expired-proxy-session).
+
+How often that reload ends at a sign-in page is the proxy's and the identity provider's configuration, not the app's.
+On Cloudflare Access the application token expires after the application's session duration (24 hours unless set),
+and Access renews it silently while the **global session** is still valid; raise both for an app people keep open
+for weeks, and keep the identity provider's own session persistent (an IdP that forces a password on every
+re-authentication, or a session cookie that dies with the browser process, defeats the silent renewal).
+
 ## Signing keys
 
 The package builds one IdentityModel `ConfigurationManager<OpenIdConnectConfiguration>` per scheme; a JWKS URL is

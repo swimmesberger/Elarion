@@ -87,7 +87,9 @@ When the schema carries an `events` block (the host registers Elarion client-eve
 additionally emits `events-client.ts`: `createElarionEvents(...)` multiplexes topic-typed subscriptions over one
 `EventSource`, validates incoming payloads with the generated Zod schemas (`rpcEventPayloadSchemas`), and exposes
 `$client.onConnected(...)` — fired on connect and every reconnect — as the "you may have missed events, re-query"
-signal. Event-free schemas produce byte-identical output with no events file.
+signal. The platform `EventSource` stops retrying when an answer is not a 200 event stream (a 401, a login page, a
+502 during a restart), so the client reopens such a connection itself, backing off from 1 s to 30 s
+(`reconnectDelay`). Event-free schemas produce byte-identical output with no events file.
 
 ```ts
 import { createElarionEvents } from './generated/events-client'

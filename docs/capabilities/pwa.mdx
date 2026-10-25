@@ -15,7 +15,7 @@ offline page, and every UI string stay in the application.
 
 | Entry | Role |
 | --- | --- |
-| `@swimmesberger/elarion-pwa` | `createInstallPrompt()`, `createUpdateWatcher()`, `registerServiceWorker()`, standalone/iOS detection. Framework-neutral. |
+| `@swimmesberger/elarion-pwa` | `createInstallPrompt()`, `createUpdateWatcher()`, `createSessionRenewal()`, `registerServiceWorker()`, standalone/iOS detection. Framework-neutral. |
 | `@swimmesberger/elarion-pwa/sw` | `registerShellRouter(self, …)` — the service worker's install, activate and fetch handlers. |
 | `@swimmesberger/elarion-pwa/vite` | `appVersionFile()` — publishes `/app-version.json` and bakes the same version into the bundle. |
 | `@swimmesberger/elarion-webpush` | Optional: [Web Push](/docs/capabilities/web-push) for the same worker — `registerWebPushHandlers(self)`. |
@@ -29,6 +29,8 @@ offline page, and every UI string stay in the application.
 4. **Registration** and the **update watcher** in the client entry, the watcher wired to the router.
 5. **Caching headers** on the host: hashed assets immutable, everything else revalidated.
 6. The **iOS details**: 16 px inputs, safe-area insets, no rubber-band in standalone mode.
+7. Behind an **authenticating proxy** (Cloudflare Access, IAP, oauth2-proxy): **session renewal** on the JSON-RPC and
+   client-events clients.
 
 ## Manifest and icons
 
@@ -320,6 +322,53 @@ const queryClient = new QueryClient({
 explicit "Reload" button. Without a build step to publish a version file, compare the hashed entry script instead —
 `createUpdateWatcher({ currentVersion: currentEntryScript(), servedVersion: entryScriptVersionSource('/') })` — at
 the cost of one shell render per check.
+
+## Renewing an expired proxy session
+
+An app behind an [authenticating proxy](/docs/capabilities/proxy-identity) has no session of its own: the proxy's
+expires after a fixed time (24 hours by default on Cloudflare Access), and the proxy renews it — usually silently,
+from its own longer session and the identity provider's — **only on a full page load**, because the renewal runs
+through redirects to other origins. An installed app is resumed rather than reloaded, so it meets the expiry on an API
+call instead, and there neither transport can tell:
+
+- **`fetch`** follows the proxy's redirect to its login page on another origin and fails CORS — a `TypeError`
+  indistinguishable from being offline. Cloudflare Access and Google IAP answer `401` instead when the request carries
+  `X-Requested-With: XMLHttpRequest` (ASP.NET Core's cookie handler does too), oauth2-proxy when it carries
+  `Accept: application/json`.
+- **`EventSource`** cannot send headers. Redirected off-origin it retries forever; answered with a `401` or a login
+  page it gives up. Either way the live updates stop without a sign.
+
+`createSessionRenewal()` turns both into one signal and answers it with **one reload**, which lets the proxy renew the
+session and lands the user on the page they were on:
+
+```ts title="src/lib/rpc.ts"
+import { createSessionRenewal } from '@swimmesberger/elarion-pwa'
+import { createElarionEvents } from '@/generated/events-client'
+import { createRpcApi } from '@/generated/rpc-client'
+
+const session = createSessionRenewal({ onSignedOut: () => signedOut.set(true) })
+
+export const rpc = createRpcApi({ url: '/rpc', fetch: session.fetch })
+export const events = createElarionEvents({ url: '/events', eventSource: session.eventSource })
+```
+
+- **`session.fetch`** adds `X-Requested-With: XMLHttpRequest` and `Accept: application/json` (unless the call sets
+  them) and fetches with `redirect: 'manual'`, so a proxy that redirects anyway yields a readable opaque redirect
+  instead of a CORS failure. A `401` or a redirect reloads the page, and the call never settles — the page goes away
+  instead of flashing an error first.
+- **`session.eventSource`** opens the platform `EventSource` and, when the stream reports an error, probes the same
+  URL once with those headers (at most every 10 s, `probeIntervalMs`). Only a `401` or a redirect renews; a network
+  error is left to the stream's own retries, and the generated events client reopens a stream that gave up.
+- **One reload per minute at most.** The time of the last renewal is kept in `sessionStorage`; an expiry within 60 s
+  of it (`reloadGuardMs`) is not one a reload can renew — the proxy denies the person, or the app itself answers
+  `401` — so the answer passes through and `onSignedOut` runs: show a signed-out state with a button that reloads.
+  Without `sessionStorage` it never reloads on its own.
+
+The reload is an ordinary navigation, which the [service worker](#what-it-does-with-each-request) never answers from a
+cache when it is redirected, so the browser follows it to the proxy's login page whenever the proxy cannot renew
+silently. Use it only behind a proxy, or with a server whose `401` means "sign in again on a full page load": an app
+with its own sign-in form handles `401` in the app instead. The [proxy recipes](/docs/capabilities/proxy-identity#expired-sessions-in-the-browser)
+list the session settings that decide how often renewal needs a real sign-in.
 
 ## Caching headers on the host
 

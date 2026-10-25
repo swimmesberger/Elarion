@@ -154,8 +154,9 @@ When the schema declares an `events` block (the host registers
 [client-event topics](/docs/capabilities/events/client-events)), the generator also emits
 `events-client.ts`: a topic-typed subscription client that multiplexes every subscription over one
 `EventSource`, validates payloads with the same generated Zod schemas, and exposes
-`$client.onConnected` as the "re-query now" signal. A schema without events produces byte-identical
-output — the file simply doesn't exist.
+`$client.onConnected` as the "re-query now" signal. A connection the `EventSource` gave up on (a 401, a login
+page, a 502 mid-deploy) is reopened with a backoff (`reconnectDelay`). A schema without events produces
+byte-identical output — the file simply doesn't exist.
 
 ```ts
 import { createElarionEvents } from './generated/events-client.js'

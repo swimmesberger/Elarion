@@ -1,7 +1,8 @@
 // The page half of the Elarion installable-app shell (ADR-0083): how the app can be installed (the deferred
 // `beforeinstallprompt` prompt, or the iOS share-sheet instructions), reloading into a new deploy at a safe moment,
-// and registering the service worker. Framework-neutral: subscribe/snapshot pairs plug into React's
-// `useSyncExternalStore`, and the update watcher takes navigation events from any router.
+// renewing an expired authenticating-proxy session, and registering the service worker. Framework-neutral:
+// subscribe/snapshot pairs plug into React's `useSyncExternalStore`, and the update watcher takes navigation events
+// from any router.
 //
 // The service-worker half (the shell router and its caching strategies) is the `/sw` sub-export; the Vite plugin
 // that publishes the build version is `/vite`.
@@ -18,6 +19,17 @@ export {
   type InstallPromptOptions,
   type InstallPromptOutcome,
 } from './install.js'
+export {
+  createSessionRenewal,
+  DEFAULT_SESSION_PROBE_INTERVAL_MS,
+  DEFAULT_SESSION_RENEWAL_GUARD_MS,
+  DEFAULT_SESSION_RENEWAL_STORAGE_KEY,
+  isSessionExpired,
+  SESSION_REQUEST_HEADERS,
+  type SessionEventSource,
+  type SessionRenewal,
+  type SessionRenewalOptions,
+} from './session.js'
 export { registerServiceWorker, type RegisterServiceWorkerOptions, type ServiceWorkerContainerLike } from './register.js'
 export {
   BUSY_SELECTOR,
