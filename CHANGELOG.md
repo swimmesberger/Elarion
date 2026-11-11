@@ -8,6 +8,25 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **.NET 11 support.** Every runtime package now ships `net10.0` and `net11.0` builds. A .NET 10 application keeps
+  a supported line; a .NET 11 application gets assets built against .NET 11: the `Microsoft.Extensions` abstractions
+  that .NET 11 includes in the shared framework are no longer package dependencies, and packages on the .NET release
+  train resolve to their 11.x majors (`Microsoft.OpenApi` 3.x under `Elarion.AspNetCore.OpenApi`). The Entity
+  Framework Core packages stay on EF Core 10 for both frameworks until the Npgsql EF Core 11 provider is released.
+- **Request validation on .NET 11** (`Elarion.Validation`). `Microsoft.Extensions.Validation` 11 no longer exposes
+  its validation walker, so the `net11.0` build carries an adaptation of it (MIT, see `THIRD-PARTY-NOTICES.md`), and
+  the generated module resolvers bind to whichever walker the application's framework provides. On .NET 11 the
+  walker also runs `AsyncValidationAttribute` and `IAsyncValidatableObject`; they run before the transaction, so keep
+  database checks in the handler.
+- **`Elarion.AspNetCore.SchemaGeneration` ships one schema tool per framework** (`tools/net10.0`, `tools/net11.0`)
+  and picks the one matching the application's `TargetFramework`, as the tool loads the application in-process.
+
+### Changed
+- Building the repository requires the .NET 11 SDK (and the .NET 10 runtime for the `net10.0` tests). The samples
+  target `net11.0`. Dependencies updated to their latest patch/minor releases (Aspire 13.6, gRPC 2.85, OpenTelemetry
+  1.21, ModelContextProtocol 2.4, Azure.Storage.Blobs 12.30, Testcontainers 4.16, .NET 10 packages 10.0.15).
+
 ## [0.3.2] - 2026-10-25
 
 ### Security

@@ -70,6 +70,51 @@ public sealed class ValidationResolverGeneratorTests {
     }
 
     [Fact]
+    public void Resolver_BindsTheWalkerOfTheReferencedValidationBuild() {
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+
+                                  public sealed record CreateThingCommand : ICommand {
+                                      [StringLength(100)]
+                                      public required string Name { get; init; }
+                                  }
+
+                                  public sealed class CreateThingHandler : IHandler<CreateThingCommand, Result<Unit>> {
+                                      public ValueTask<Result<Unit>> HandleAsync(CreateThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<Unit>.Success(default));
+                                  }
+                              }
+                              """;
+
+        var generated = GetGenerated(Run(source), "AppValidatableInfoResolver.g.cs");
+
+        // The test compilation references the Elarion.Validation build of the running framework, so each target
+        // framework pins its own shape: Microsoft.Extensions.Validation 11 no longer exposes the walker base
+        // classes, and the net11 build of Elarion.Validation carries them instead (ADR-0027).
+#if NET11_0_OR_GREATER
+        generated.Should().Contain(
+            "private sealed class ElarionValidatableTypeInfo : global::Elarion.Validation.Metadata.ValidatableTypeInfo");
+        generated.Should().Contain(
+            "private sealed class ElarionValidatablePropertyInfo : global::Elarion.Validation.Metadata.ValidatablePropertyInfo");
+        generated.Should().Contain("out global::Microsoft.Extensions.Validation.IValidatableTypeInfo? validatableInfo)");
+        generated.Should().Contain(
+            "out global::Microsoft.Extensions.Validation.IValidatableParameterInfo? validatableInfo)");
+        generated.Should().NotContain("global::Microsoft.Extensions.Validation.ValidatableTypeInfo");
+#else
+        generated.Should().Contain(
+            "private sealed class ElarionValidatableTypeInfo : global::Microsoft.Extensions.Validation.ValidatableTypeInfo");
+        generated.Should().Contain("out global::Microsoft.Extensions.Validation.IValidatableInfo? validatableInfo)");
+        generated.Should().NotContain("Elarion.Validation.Metadata");
+#endif
+
+        AssertGeneratedOutputCompiles(source);
+    }
+
+    [Fact]
     public void AllowedValuesRequest_EmitsConstantConstructedEnumAttribute() {
         const string source = Preamble +
                               """

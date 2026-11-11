@@ -29,7 +29,12 @@ internal sealed class ElarionFileResponseOperationTransformer : IOpenApiOperatio
             operation.Responses["200"] = response;
         }
 
+#if NET11_0_OR_GREATER
+        // Microsoft.OpenApi 3.x (net11) types response content through the IOpenApiMediaType interface.
+        response.Content ??= new Dictionary<string, IOpenApiMediaType>(StringComparer.Ordinal);
+#else
         response.Content ??= new Dictionary<string, OpenApiMediaType>(StringComparer.Ordinal);
+#endif
         response.Content[BinaryContentType] = new OpenApiMediaType {
             Schema = new OpenApiSchema { Type = JsonSchemaType.String, Format = "binary" }
         };

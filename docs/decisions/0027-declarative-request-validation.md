@@ -161,6 +161,35 @@ standalone validator class layer anymore.
   a new optional `FieldErrors` member; sample pipelines change. Downstream apps migrate rules to attributes or
   re-own a FluentValidation decorator locally.
 
+## Update (2026-11-11): .NET 11 — the walker is vendored for net11
+
+**The trigger fired.** The Consequences above anticipated that the experimental `Microsoft.Extensions.Validation`
+surface might shift and named vendoring as the cheap answer. Version 11 did shift: it stabilized the surface but
+removed the public walker base classes (`ValidatableTypeInfo`, `ValidatablePropertyInfo`, `ValidatableParameterInfo`)
+and split the info contract into `IValidatableTypeInfo`/`IValidatablePropertyInfo`/`IValidatableParameterInfo`.
+Microsoft's own generator now compiles the walker into each application as file-local classes. The generated
+resolvers derived from those base classes, so on .NET 11 they no longer compiled.
+
+**Decision.** Since the runtime packages build for `net10.0` and `net11.0`, the `net11.0` build of
+`Elarion.Validation` carries an adaptation of Microsoft's 11.0.0 walker templates (MIT, `THIRD-PARTY-NOTICES.md`) as
+`Elarion.Validation.Metadata.ValidatableTypeInfo`/`ValidatablePropertyInfo` — public for generated code, hidden
+from IntelliSense. `ValidationResolverGenerator` probes the compilation for that walker and emits the matching
+shape: against `Microsoft.Extensions.Validation` 10 it keeps deriving from Microsoft's base classes; against 11 it
+derives from Elarion's copy and implements the split contracts. The constructor signatures are identical, so the
+two shapes differ only in type names. Behavior follows Microsoft's walker, including what 11 adds:
+`AsyncValidationAttribute` (after every synchronous attribute of a member passed) and `IAsyncValidatableObject`.
+
+**Why the package, not the generator.** Emitting the templates from the generator (Microsoft's approach) would
+avoid public types, but would compile one copy of about 1,000 lines into every module and leave the walker testable
+only through generator output. A copy in the opt-in sibling package is compiled once, tested directly, and keeps
+generated code thin (ADR-0017). The cost is re-syncing the copy from each `Microsoft.Extensions.Validation` release.
+
+**Unchanged.** Async attributes do not change the two-tier model: they run in the validation decorator, before the
+transaction, so a database or service lookup there is the time-of-check/time-of-use race described above. The
+documentation warns against it; an analyzer that flags async validation on handler request types is a follow-up.
+Union-typed and `[SkipValidation]` members, which Microsoft's 11 walker also handles, are not modeled because the
+generator does not emit them.
+
 ## Alternatives considered
 
 ### Zod-in-C# validators (e.g. ZodSharp)

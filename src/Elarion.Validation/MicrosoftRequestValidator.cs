@@ -34,10 +34,18 @@ public sealed class MicrosoftRequestValidator(
 
         // The explicit-display-name constructor is the trim-safe one (no reflection over DisplayNameAttribute);
         // the validation walker overwrites DisplayName per member before each check anyway.
+#if NET11_0_OR_GREATER
+        // Microsoft.Extensions.Validation 11 builds each member's ValidationContext itself from the service provider.
+        var context = new ValidateContext {
+            ServiceProvider = serviceProvider,
+            ValidationOptions = options
+        };
+#else
         var context = new ValidateContext {
             ValidationContext = new ValidationContext(request, requestType.Name, serviceProvider, null),
             ValidationOptions = options
         };
+#endif
 
         await validatableInfo.ValidateAsync(request, context, cancellationToken).ConfigureAwait(false);
 
@@ -45,7 +53,13 @@ public sealed class MicrosoftRequestValidator(
 
         var namingPolicy = jsonSerialization.Options.PropertyNamingPolicy;
         var fieldErrors = new Dictionary<string, string[]>(errors.Count, StringComparer.Ordinal);
-        foreach (var (path, messages) in errors) {
+        foreach (var (path, pathErrors) in errors) {
+#if NET11_0_OR_GREATER
+            var messages = new string[pathErrors.Count];
+            for (var i = 0; i < messages.Length; i++) messages[i] = pathErrors[i].ErrorMessage;
+#else
+            var messages = pathErrors;
+#endif
             // Two CLR paths can collide on one wire path (e.g. "Name" and "name" both camelCase to "name");
             // merge rather than overwrite so no violation is silently dropped.
             var wirePath = TranslatePath(path, namingPolicy);

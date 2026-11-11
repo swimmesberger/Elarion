@@ -1,4 +1,12 @@
 <Project>
+  <PropertyGroup Condition="'$(ElarionJsonRpcSchemaToolPath)' == '' and '$(TargetFramework)' != ''">
+    <!-- The tool loads the application in-process, so it runs on the application's framework: net10 applications
+         use the net10 tool build, net11 and later the net11 one. -->
+    <_ElarionJsonRpcSchemaToolFramework>net10.0</_ElarionJsonRpcSchemaToolFramework>
+    <_ElarionJsonRpcSchemaToolFramework Condition="'$(TargetFrameworkIdentifier)' == '.NETCoreApp' and $([MSBuild]::VersionGreaterThanOrEquals('$([MSBuild]::GetTargetFrameworkVersion('$(TargetFramework)'))', '11.0'))">net11.0</_ElarionJsonRpcSchemaToolFramework>
+    <ElarionJsonRpcSchemaToolPath>$(_ElarionJsonRpcSchemaToolDirectory)$(_ElarionJsonRpcSchemaToolFramework)\dotnet-elarion-getrpcschema.dll</ElarionJsonRpcSchemaToolPath>
+  </PropertyGroup>
+
   <PropertyGroup>
     <ElarionJsonRpcGenerateSchemaOnBuild Condition="'$(ElarionJsonRpcGenerateSchemaOnBuild)' == ''">$(ElarionJsonRpcGenerateSchema)</ElarionJsonRpcGenerateSchemaOnBuild>
     <ElarionJsonRpcSchemaOutputPath Condition="'$(ElarionJsonRpcSchemaOutputPath)' == ''">$(ElarionJsonRpcSchemaOutputDirectory)$(ElarionJsonRpcSchemaFileName)</ElarionJsonRpcSchemaOutputPath>

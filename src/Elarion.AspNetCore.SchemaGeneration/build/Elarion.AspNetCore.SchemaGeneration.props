@@ -8,6 +8,8 @@
     <ElarionJsonRpcSchemaOutputDirectory Condition="'$(ElarionJsonRpcSchemaOutputDirectory)' == ''">$(BaseIntermediateOutputPath)</ElarionJsonRpcSchemaOutputDirectory>
     <ElarionJsonRpcSchemaFileName Condition="'$(ElarionJsonRpcSchemaFileName)' == ''">rpc-schema.json</ElarionJsonRpcSchemaFileName>
     <ElarionJsonRpcSchemaOutputPath Condition="'$(ElarionJsonRpcSchemaOutputPath)' == ''"/>
-    <ElarionJsonRpcSchemaToolPath Condition="'$(ElarionJsonRpcSchemaToolPath)' == ''">$(MSBuildThisFileDirectory)..\tools\dotnet-elarion-getrpcschema.dll</ElarionJsonRpcSchemaToolPath>
+    <!-- The default tool path depends on the application's TargetFramework, which is not known yet while package
+         props are imported; build/*.targets resolves it from this directory. -->
+    <_ElarionJsonRpcSchemaToolDirectory>$(MSBuildThisFileDirectory)..\tools\</_ElarionJsonRpcSchemaToolDirectory>
   </PropertyGroup>
 </Project>

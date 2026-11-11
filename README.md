@@ -164,7 +164,7 @@ Full guides live at [elarion.wimmesberger.dev](https://elarion.wimmesberger.dev/
 
 ## Requirements
 
-- .NET 10 SDK or later
+- .NET 10 SDK or later; packages target `net10.0` and `net11.0`
 - ASP.NET Core for the JSON-RPC HTTP transport
 - Node.js 20.11+ for the TypeScript client generator and frontend contributions packages
 
