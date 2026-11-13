@@ -317,6 +317,12 @@ Applies to `**/*.cs` (Copilot scopes this section through
   `CancellationToken.None` only with a documented reason. Long-lived work belongs to a host-managed
   `IHostedService`, scheduler, explicit queue, or loop, not a hidden helper. Handle expected
   `OperationCanceledException` deliberately and do not log it as an error.
+- Hot-path async methods return `ValueTask`/`ValueTask<T>`; keep `PoolingAsyncValueTaskMethodBuilder` where a method
+  suspends on I/O. The `net11.0` build compiles with runtime async, where the compiler ignores the builder; the `net10.0`
+  build uses compiler state machines, where it keeps suspension allocation-free (ADR-0092).
+- In generic code, inspect a response with `ResultInspection.IsSuccess`/`IsFailure`/`TryGetError`, never an inline
+  `response is IResultLike { … }` pattern: inside a runtime-async method body the inline pattern boxes a struct
+  `Result<T>` on every call.
 
 ### Telemetry
 
@@ -361,7 +367,11 @@ cd src/elarion-jsonrpc-client-generator
 npm ci && npm run build && npm test && npm pack --dry-run
 ```
 
-Run `dotnet run --project tests/Elarion.Benchmarks -c Release` for relevant performance-sensitive changes.
+Run `dotnet run --project tests/Elarion.Benchmarks -c Release` for relevant performance-sensitive changes. The `net11.0`
+build compiles with runtime async (ADR-0092; `ElarionRuntimeAsync=false` opts out); when a change touches async hot paths,
+compare both models with `ELARION_BENCH_RUNTIME_ASYNC=compare` (see `tests/Elarion.Benchmarks/Program.cs`). Benchmark
+methods should await the call under test the way application code does: returning a `ValueTask` straight to
+BenchmarkDotNet's harness measures the harness's own continuation.
 When changing the TypeScript generator, generate from a representative `rpc-schema.json` and type-check
 `rpc-types.ts`, `rpc-schemas.ts`, and `rpc-client.ts` under `moduleResolution: NodeNext`.
 

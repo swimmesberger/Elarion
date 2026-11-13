@@ -28,6 +28,11 @@ namespace Elarion.Benchmarks.Handlers;
 /// scope + scoped-instance cost a minimal API pays for <em>any</em> handler, decorators or not.</item>
 /// <item><c>ResolveScopedAndCall</c> — a fresh DI scope, resolve <c>IHandler&lt;,&gt;</c> (builds a fresh chain), call: the realistic per-request cost.</item>
 /// <item><c>ViaHandlerSender</c> — the same through the typed <see cref="IHandlerSender"/> mediator.</item>
+/// <item><c>SuspendingDirectCall</c> / <c>SuspendingDecorated</c> — a handler that really suspends (a plain
+/// <c>async</c> method awaiting <c>Task.Yield()</c>, standing in for the database call of a typical handler), bare and
+/// behind the observability decorator. The other arms complete synchronously; these show what a suspension costs,
+/// which is where compiler state machines (pooled in the decorator) and runtime async differ most (ADR-0092). Their
+/// time includes a thread-pool hop.</item>
 /// </list>
 /// The per-request allocation splits cleanly:
 /// <c>ResolveScopedAndCall − ScopeAndBareHandler</c> is the cost Elarion actually adds over a bare
@@ -51,6 +56,8 @@ public class HandlerPipelineBenchmarks {
     private IServiceScope _scope = null!;
     private EchoHandler _direct = null!;
     private IHandler<EchoRequest, Result<int>> _decorated = null!;
+    private SuspendingEchoHandler _suspendingDirect = null!;
+    private IHandler<EchoRequest, Result<int>> _suspendingDecorated = null!;
     private ActivityListener? _listener;
     private readonly EchoRequest _request = new(7);
 
@@ -93,6 +100,14 @@ public class HandlerPipelineBenchmarks {
         // A long-lived scope holds the cached decorated chain for the per-call-cost arm.
         _scope = _provider.CreateScope();
         _decorated = _scope.ServiceProvider.GetRequiredService<IHandler<EchoRequest, Result<int>>>();
+
+        _suspendingDirect = new SuspendingEchoHandler();
+        _suspendingDecorated = new ObservabilityDecorator<EchoRequest, Result<int>>(
+            _suspendingDirect,
+            "bench.echo.suspending",
+            new HandlerMetadata(typeof(SuspendingEchoHandler), typeof(EchoRequest), typeof(Result<int>)),
+            [],
+            _provider.GetService<ILoggerFactory>());
     }
 
     [GlobalCleanup]
@@ -146,6 +161,18 @@ public class HandlerPipelineBenchmarks {
         return result.Value;
     }
 
+    [Benchmark]
+    public async ValueTask<int> SuspendingDirectCall() {
+        var result = await _suspendingDirect.HandleAsync(_request, Ct);
+        return result.Value;
+    }
+
+    [Benchmark]
+    public async ValueTask<int> SuspendingDecorated() {
+        var result = await _suspendingDecorated.HandleAsync(_request, Ct);
+        return result.Value;
+    }
+
     // --- The handler under test: a bare [Handler] equivalent (manual wiring mirrors the generator). ---
 
     public sealed record EchoRequest(int Value);
@@ -154,6 +181,17 @@ public class HandlerPipelineBenchmarks {
         public ValueTask<Result<int>> HandleAsync(EchoRequest request, CancellationToken ct) {
             Result<int> result = request.Value + 1;
             return new ValueTask<Result<int>>(result);
+        }
+    }
+
+    /// <summary>
+    /// Written the way an application handler usually is — a plain <c>async</c> method, no pooling builder — and
+    /// suspending once, as a handler awaiting a database call does.
+    /// </summary>
+    public sealed class SuspendingEchoHandler : IHandler<EchoRequest, Result<int>> {
+        public async ValueTask<Result<int>> HandleAsync(EchoRequest request, CancellationToken ct) {
+            await Task.Yield();
+            return request.Value + 1;
         }
     }
 }

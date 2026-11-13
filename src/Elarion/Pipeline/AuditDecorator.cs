@@ -57,8 +57,8 @@ public sealed class AuditDecorator<TRequest, TResponse>(
                 throw;
             }
 
-            if (!scope.Recorded && response is IResultLike { IsSuccess: false }) {
-                var kind = response is IResultError { Error: { } error } ? error.Kind : (ErrorKind?)null;
+            if (!scope.Recorded && ResultInspection.IsFailure(response)) {
+                var kind = ResultInspection.TryGetError(response, out var error) ? error.Kind : (ErrorKind?)null;
                 var outcome = kind is ErrorKind.Unauthorized or ErrorKind.Forbidden
                     ? AuditOutcome.Denied
                     : AuditOutcome.Failed;

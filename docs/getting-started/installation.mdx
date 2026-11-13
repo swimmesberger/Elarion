@@ -10,7 +10,8 @@ client generation and frontend contributions. You only install the pieces you us
 
 - **.NET 10 SDK** or later. Every runtime package ships `net10.0` and `net11.0` builds, so a .NET 10
   application keeps a supported line while a .NET 11 application gets assets built against .NET 11 (in-box
-  `Microsoft.Extensions` abstractions, .NET 11 package majors). The source generators target `netstandard2.0` so
+  `Microsoft.Extensions` abstractions, .NET 11 package majors, and runtime async instead of compiler-generated state
+  machines, so live stack traces show the real handler and decorator chain). The source generators target `netstandard2.0` so
   they load in the Roslyn analyzer host of either SDK. The Entity Framework Core packages depend on EF Core 10 for
   both frameworks until the Npgsql EF Core 11 provider is released.
 - An **ASP.NET Core** host project if you want the JSON-RPC HTTP transport (`Elarion.AspNetCore`).

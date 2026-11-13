@@ -1,0 +1,14 @@
+<Project>
+  <!-- Runtime async (.NET 11): async methods compile to runtime-managed suspension instead of compiler-generated state
+       machines. It is ON for Elarion's net11 build (ADR-0092): measured on the handler, connection and actor hot paths,
+       calls are faster with the same or fewer allocations, both when they complete synchronously and when they suspend,
+       and live stack traces (profilers, debuggers, new StackTrace()) show the real handler and decorator chain.
+
+       Build with ElarionRuntimeAsync=false for compiler state machines (the net10 build always uses them); compare the
+       two with ELARION_BENCH_RUNTIME_ASYNC=compare (tests/Elarion.Benchmarks/Program.cs). This only changes how this
+       repository's own methods compile: code generated into a consumer's assembly follows the consumer's setting.
+       Set in .targets, not .props: a single-target project assigns TargetFramework in its body. -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0' and '$(ElarionRuntimeAsync)' != 'false'">
+    <Features>$(Features);runtime-async=on</Features>
+  </PropertyGroup>
+</Project>

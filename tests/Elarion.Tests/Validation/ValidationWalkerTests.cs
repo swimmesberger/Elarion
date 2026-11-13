@@ -65,6 +65,79 @@ public sealed class ValidationWalkerTests {
         result.Should().BeNull();
     }
 
+    [Fact]
+    public async Task UnionValue_IsValidatedAsItsActiveCase_AtTheJsonPath() {
+        var request = new OrderRequest {
+            Result = new Lookup(new Found { Name = "far too long" }),
+            History = [new Lookup(new Found { Name = "ok" }), new Lookup(new Found { Name = "also too long" })]
+        };
+
+        var result = await ValidateOrderAsync(request);
+
+        // A union is written as its active case, so there is no "value" segment in the path.
+        result.Should().NotBeNull();
+        result!.FieldErrors.Keys.Should().BeEquivalentTo("result.name", "history[1].name");
+    }
+
+    [Fact]
+    public async Task UnionValue_WithAnUnregisteredOrEmptyCase_IsValid() {
+        var result = await ValidateOrderAsync(new OrderRequest { Result = new Lookup(new Missing()), History = [default] });
+
+        result.Should().BeNull();
+    }
+
+    private static async Task<RequestValidationErrors?> ValidateOrderAsync(OrderRequest request) {
+        var services = new ServiceCollection();
+        services.AddElarionValidation();
+        services.AddElarionValidationResolver(new OrderResolver());
+        await using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        return await scope.ServiceProvider.GetRequiredService<IRequestValidator>()
+            .ValidateAsync(typeof(OrderRequest), request, Ct);
+    }
+
+    private sealed record Found {
+        public required string Name { get; init; }
+    }
+
+    private sealed record Missing;
+
+    /// <summary>The shape the compiler lowers <c>union Lookup(Found, Missing)</c> to.</summary>
+    private readonly struct Lookup : IUnion {
+        public Lookup(Found value) => Value = value;
+        public Lookup(Missing value) => Value = value;
+        public object? Value { get; }
+    }
+
+    private sealed record OrderRequest {
+        public Lookup Result { get; init; }
+        public List<Lookup> History { get; init; } = [];
+    }
+
+    /// <summary>What the generator registers for a union property: the request and the case types, not the union.</summary>
+    private sealed class OrderResolver : IValidatableInfoResolver {
+        private static readonly IValidatableTypeInfo Order = new TestTypeInfo(typeof(OrderRequest), [
+            new TestPropertyInfo(typeof(OrderRequest), typeof(Lookup), nameof(OrderRequest.Result), []),
+            new TestPropertyInfo(typeof(OrderRequest), typeof(List<Lookup>), nameof(OrderRequest.History), [])
+        ]);
+
+        private static readonly IValidatableTypeInfo FoundInfo = new TestTypeInfo(typeof(Found), [
+            new TestPropertyInfo(typeof(Found), typeof(string), nameof(Found.Name), [new StringLengthAttribute(5)])
+        ]);
+
+        public bool TryGetValidatableTypeInfo(Type type, [NotNullWhen(true)] out IValidatableTypeInfo? validatableInfo) {
+            validatableInfo = type == typeof(OrderRequest) ? Order : type == typeof(Found) ? FoundInfo : null;
+            return validatableInfo is not null;
+        }
+
+        public bool TryGetValidatableParameterInfo(ParameterInfo parameterInfo,
+            [NotNullWhen(true)] out IValidatableParameterInfo? validatableInfo) {
+            validatableInfo = null;
+            return false;
+        }
+    }
+
     private static Profile ValidProfile => new() { DisplayName = "Free" };
 
     private static async Task<RequestValidationErrors?> ValidateAsync(SignupRequest request, AsyncProbe probe) {

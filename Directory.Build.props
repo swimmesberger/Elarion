@@ -2,7 +2,8 @@
   <PropertyGroup>
     <!-- Every runtime package targets the current LTS (net10.0) and the current release (net11.0): apps that
          cannot move yet keep a supported line, while net11 apps get assets compiled against the .NET 11 surface
-         (in-box Microsoft.Extensions abstractions, .NET 11 package majors, runtime async). Package versions
+         (in-box Microsoft.Extensions abstractions, .NET 11 package majors). The net11 build compiles
+         with runtime async (Directory.Build.targets, ADR-0092). Package versions
          that differ per framework are conditioned in Directory.Packages.props. Source code compiles for both,
          so it is limited to C# 14 unless guarded with #if NET11_0_OR_GREATER. Generator projects (*.Generators)
          are excluded: they target netstandard2.0 (the Roslyn analyzer host) with a singular TargetFramework, which

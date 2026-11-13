@@ -135,6 +135,43 @@ the conversion also runs when validation is disabled. Everything used is standar
 20+; schemas without file payloads generate byte-identical output. Remember `ElarionFile` is the
 small-file tier — for large transfers use the [staged-blob flows](/docs/capabilities/blob-uploads#streaming-downloads-and-temp-file-flows).
 
+## C# unions map to TypeScript unions
+
+On .NET 11 a request or response property can be a C# 15 union. System.Text.Json writes the active case with no
+wrapper or discriminator and exports the union as `anyOf`, one schema per case; the generator turns that into a
+TypeScript union and a Zod `z.union`:
+
+```csharp
+public sealed record Found(string Name, int Stock);
+public sealed record Missing(int Reason);
+
+[JsonUnion(TypeClassifier = typeof(JsonUnionTypeStructuralClassifier))]
+public union ProductLookup(Found, Missing);
+
+public sealed record Response(ProductLookup Result);
+```
+
+```ts
+// rpc-types.ts
+result: { name: string; stock: number } | { reason: number }
+// rpc-schemas.ts
+result: z.union([z.strictObject({ ... }), z.strictObject({ ... })])
+```
+
+- **Object cases need a classifier on the server.** Out of the box System.Text.Json picks a case by JSON token kind
+  only, so a union of two object cases cannot be deserialized. `JsonUnionTypeStructuralClassifier` picks the case by
+  its property names; give each case a property the others lack (or mark distinguishing properties `required`).
+- **Object cases are strict on the client.** They are emitted as `z.strictObject`, so like the server's classifier a
+  payload carrying another case's property matches no case instead of being stripped into the first one.
+- **Nullability follows the declaration**, like any other property: a `ProductLookup` property is required, a
+  `ProductLookup?` one optional and nullable. A `default` union holds no case and serializes as `null`, so give a
+  non-nullable union property a value.
+- **Not inside unions:** [file payloads](#file-payloads-map-to-native-file) — which case is active is only known per
+  value, so the client could not convert them at a fixed path; the generator rejects that schema.
+
+Validation attributes on the case types are enforced on the active case, at the property's path
+(see [Validation](/docs/concepts/validation)).
+
 ## Batching
 
 Batch requests are built through generated `$request` helpers and preserve input order even when the
@@ -468,7 +505,7 @@ about whether a separate opt-in file may exist.
 
 <Callout type="warn">
   The generator interprets the framework's schema format and does not support arbitrary JSON Schema
-  composition. Schemas using `oneOf`, `anyOf`, or `allOf` are rejected; adjust the exported DTO shape
-  or extend the generator deliberately. Re-run the generator whenever `rpc-schema.json` changes, or
+  composition. `anyOf` is supported in the shape the server exports for [C# unions](#c-unions-map-to-typescript-unions);
+  `oneOf` and `allOf` are rejected — adjust the exported DTO shape or extend the generator deliberately. Re-run the generator whenever `rpc-schema.json` changes, or
   the frontend types go stale.
 </Callout>

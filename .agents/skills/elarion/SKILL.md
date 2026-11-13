@@ -333,14 +333,16 @@ deploy only on a path change with no dialog open or field focused, never on a fo
   (enforced at runtime *and* exported to OpenAPI/JSON-RPC/Zod schemas). Cross-field, async, or DB
   checks belong in the handler, inside its transaction. No FluentValidation, no pre-handler async
   validator — on .NET 11 that includes `AsyncValidationAttribute` and `IAsyncValidatableObject`: they run in
-  Elarion's validation decorator, before the transaction, so a uniqueness or existence check there is a race.
+  Elarion's validation decorator, before the transaction, so a uniqueness or existence check there is a race
+  (`ELVAL003`).
 - **C# 15 (net11 projects only).** Unions (`union Pet(Cat, Dog)`), `closed` classes, `[with(...), ..]`
   collection arguments, extension indexers, and labeled `break`/`continue` are newer than most training data;
   they exist only when the project targets `net11.0` (C# 14 on `net10.0`). Use `closed` records and unions for
   domain logic and actor state — prefer a `null` arm over `_` when switching on a union, since a `default` union
-  holds `null`. Do not use a union as a handler's return type instead of `Result<T>`, and do not put union-typed
-  properties on handler request/response DTOs: the JSON-RPC schema and generated TypeScript client do not support
-  union (`anyOf`) contracts yet.
+  holds `null`. Do not use a union as a handler's return type instead of `Result<T>`. Union-typed DTO properties are
+  supported (schema `anyOf`, TypeScript/Zod unions, validation of the active case), but a union with two or more
+  object cases needs `[JsonUnion(TypeClassifier = typeof(JsonUnionTypeStructuralClassifier))]` and a distinguishing
+  property per case, or System.Text.Json cannot deserialize it; no `ElarionFile` inside a union.
 - **Authorization sits on the handler.** `[RequirePermission("resource", "verb")]`,
   `[RequireRole]`, `[RequirePolicy]`, `[FeatureGate]` — class-level, enforced identically on every
   transport. A `[FeatureGate]` name must be a declared flag: `[FeatureFlag]` on an `IFeatureFlagResolver`

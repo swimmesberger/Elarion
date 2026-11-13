@@ -11,8 +11,10 @@
     <PackageVersion Include="MessagePack" Version="2.5.307"/>
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.15"/>
     <PackageVersion Include="AwesomeAssertions" Version="9.6.0"/>
-    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8"/>
-    <PackageVersion Include="BenchmarkDotNet.Diagnostics.dotTrace" Version="0.15.8"/>
+    <!-- tests/Elarion.Benchmarks only. A preview: 0.15.x does not recognize net11.0 (the runtime async comparison
+         runs on it); return to a stable release once one supports .NET 11. -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.16.0-preview.2"/>
+    <PackageVersion Include="BenchmarkDotNet.Diagnostics.dotTrace" Version="0.16.0-preview.2"/>
     <!-- Bulk-insert benchmark competitors (tests/Elarion.Benchmarks only, never a src/ dependency).
          Deliberately the MIT fork of EFCore.BulkExtensions — the upstream package is revenue-gated dual-license. -->
     <PackageVersion Include="EFCore.BulkExtensions.MIT.PostgreSql" Version="10.22.0"/>

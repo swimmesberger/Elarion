@@ -137,7 +137,7 @@ internal static class HandlerObservability {
             }
 
             // Note: only the success/failure outcome is recorded — never the response payload.
-            var outcome = response is IResultLike { IsSuccess: false } ? "error" : "ok";
+            var outcome = ResultInspection.IsFailure(response) ? "error" : "ok";
             if (activity is not null) {
                 activity.SetTag("elarion.handler.outcome", outcome);
                 if (outcome == "error") activity.SetStatus(ActivityStatusCode.Error);

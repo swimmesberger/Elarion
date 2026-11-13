@@ -112,7 +112,118 @@ public sealed class ValidationResolverGeneratorTests {
 #endif
 
         AssertGeneratedOutputCompiles(source);
+        Run(source).Diagnostics.Should().NotContain(diagnostic => diagnostic.Id == "ELVAL003");
     }
+
+#if NET11_0_OR_GREATER
+    [Fact]
+    public void UnionProperty_RegistersEveryCaseType_ButNotTheUnion() {
+        // The shape the compiler lowers `union Lookup(Found, Missing)` to (the test compiler predates the keyword):
+        // IUnion, one public constructor per case. The runtime walker validates the active case at the property's
+        // path, so the case types need entries and the union struct does not.
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+
+                                  public sealed record Found {
+                                      [StringLength(5)] public required string Name { get; init; }
+                                  }
+
+                                  public sealed record Missing {
+                                      [Range(1, 9)] public int Reason { get; init; }
+                                  }
+
+                                  public readonly struct Lookup : System.Runtime.CompilerServices.IUnion {
+                                      public Lookup(Found value) => Value = value;
+                                      public Lookup(Missing value) => Value = value;
+                                      public object? Value { get; }
+                                  }
+
+                                  public sealed record LookupCommand : ICommand {
+                                      public Lookup Result { get; init; }
+                                      public List<Lookup> History { get; init; } = [];
+                                  }
+
+                                  public sealed class LookupHandler : IHandler<LookupCommand, Result<Unit>> {
+                                      public ValueTask<Result<Unit>> HandleAsync(LookupCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<Unit>.Success(default));
+                                  }
+                              }
+                              """;
+
+        var generated = GetGenerated(Run(source), "AppValidatableInfoResolver.g.cs");
+
+        generated.Should().Contain("if (type == typeof(global::Sample.App.LookupCommand))")
+            .And.Contain("if (type == typeof(global::Sample.App.Found))")
+            .And.Contain("if (type == typeof(global::Sample.App.Missing))")
+            .And.Contain("\"Result\",")
+            .And.Contain("\"History\",");
+        generated.Should().NotContain("typeof(global::Sample.App.Lookup))");
+        AssertGeneratedOutputCompiles(source);
+    }
+
+    [Fact]
+    public void AsyncValidators_WarnThatTheyRunBeforeTheTransaction_AndStayEnforced() {
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+
+                                  public sealed class EmailAvailableAttribute : AsyncValidationAttribute {
+                                      protected override ValidationResult? IsValid(object? value, ValidationContext context) =>
+                                          throw new System.InvalidOperationException();
+
+                                      protected override Task<ValidationResult?> IsValidAsync(
+                                          object? value, ValidationContext context, CancellationToken cancellationToken) =>
+                                          Task.FromResult<ValidationResult?>(ValidationResult.Success);
+                                  }
+
+                                  public sealed record Address : IAsyncValidatableObject {
+                                      public string? Street { get; init; }
+
+                                      public IEnumerable<ValidationResult> Validate(ValidationContext context) => [];
+
+                                      public async IAsyncEnumerable<ValidationResult> ValidateAsync(
+                                          ValidationContext context,
+                                          [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken) {
+                                          await Task.Yield();
+                                          yield break;
+                                      }
+                                  }
+
+                                  public sealed record RegisterCommand : ICommand {
+                                      [EmailAddress, EmailAvailable]
+                                      public required string Email { get; init; }
+
+                                      public Address? Address { get; init; }
+                                  }
+
+                                  public sealed class RegisterHandler : IHandler<RegisterCommand, Result<Unit>> {
+                                      public ValueTask<Result<Unit>> HandleAsync(RegisterCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<Unit>.Success(default));
+                                  }
+                              }
+                              """;
+
+        var result = Run(source);
+
+        var warning = result.Diagnostics.Should().ContainSingle(diagnostic => diagnostic.Id == "ELVAL003").Subject;
+        warning.Severity.Should().Be(DiagnosticSeverity.Warning);
+        var message = warning.GetMessage();
+        message.Should().Contain("[EmailAvailableAttribute] on RegisterCommand.Email");
+        message.Should().Contain("Address implements IAsyncValidatableObject");
+
+        // A warning, not a refusal: the async attribute is still part of the generated metadata.
+        GetGenerated(result, "AppValidatableInfoResolver.g.cs")
+            .Should().Contain("new global::Sample.App.EmailAvailableAttribute(),");
+        AssertGeneratedOutputCompiles(source);
+    }
+#endif
 
     [Fact]
     public void AllowedValuesRequest_EmitsConstantConstructedEnumAttribute() {

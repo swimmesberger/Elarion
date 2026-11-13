@@ -154,7 +154,8 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
         var response = await inner.HandleAsync(request, ct);
 
         // The handler already succeeded, so the finalizing commit is deliberately uncancellable.
-        if (response is IResultLike { IsSuccess: true }) {
+        // ResultInspection, not an inline `is IResultLike` pattern: no boxing of the struct Result<T> (ADR-0092).
+        if (ResultInspection.IsSuccess(response)) {
             await scope.CommitAsync(CancellationToken.None);
         } else {
             await scope.RollbackAsync(CancellationToken.None);

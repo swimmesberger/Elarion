@@ -186,7 +186,8 @@ generated code thin (ADR-0017). The cost is re-syncing the copy from each `Micro
 
 **Unchanged.** Async attributes do not change the two-tier model: they run in the validation decorator, before the
 transaction, so a database or service lookup there is the time-of-check/time-of-use race described above. The
-documentation warns against it; an analyzer that flags async validation on handler request types is a follow-up.
+documentation warns against it, and `ELVAL003` (a warning from the resolver generator) names every asynchronous
+validator in a handler's request graph.
 Union-typed and `[SkipValidation]` members, which Microsoft's 11 walker also handles, are not modeled because the
 generator does not emit them.
 

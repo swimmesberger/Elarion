@@ -33,7 +33,7 @@ public sealed class AuditCommitDecorator<TRequest, TResponse>(
         scope.BeginAttempt();
         var response = await inner.HandleAsync(request, ct).ConfigureAwait(false);
 
-        if (scope.IsActive && response is not IResultLike { IsSuccess: false }) {
+        if (scope.IsActive && !ResultInspection.IsFailure(response)) {
             // The record is handed over as a factory: the sink flushes the handler's pending writes first (so
             // change capture contributes their diffs to the scope) and materializes the record only after.
             var durability = await trail.RecordAsync(

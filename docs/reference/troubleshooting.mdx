@@ -29,7 +29,8 @@ rather than a runtime failure. This table maps the common symptoms to fixes.
 | Build-time schema generation does not run | `ElarionJsonRpcGenerateSchema` is not `true`, the schema package is not referenced, or `…GenerateSchemaOnBuild` was disabled. | Add the private package reference and set `ElarionJsonRpcGenerateSchema=true`, or invoke `GenerateElarionJsonRpcSchema` manually. |
 | Schema generation fails after loading the app | Startup code before `builder.Build()` threw, or no frozen `JsonRpcDispatcher` was registered before build. | Register the dispatcher before `builder.Build()` and guard expensive startup work with `JsonRpcSchemaGeneration.IsRunning`. |
 | Generated frontend RPC types are stale | `rpc-schema.json` was updated but the client generator was not rerun. | Export the schema and re-run the client generator. |
-| Client generator fails on schema composition | The schema uses unsupported constructs such as `oneOf`, `anyOf`, or `allOf`. | Adjust the exported DTO shape, or extend the generator deliberately. |
+| Client generator fails on schema composition | The schema uses unsupported constructs such as `oneOf` or `allOf`, or a file payload inside a union (`anyOf`). | Adjust the exported DTO shape, or extend the generator deliberately. C# unions themselves (`anyOf`) are supported. |
+| A union request fails with "JSON value type 'Object' is ambiguous for union type" | System.Text.Json picks a union case by JSON token kind only, and two cases are objects. | Add `[JsonUnion(TypeClassifier = typeof(JsonUnionTypeStructuralClassifier))]` to the union and give each object case a property the others lack. |
 
 ## Persistence and serialization
 

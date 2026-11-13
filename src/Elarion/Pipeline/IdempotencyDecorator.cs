@@ -125,7 +125,7 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
             throw;
         }
 
-        if (response is IResultLike { IsSuccess: true }) {
+        if (ResultInspection.IsSuccess(response)) {
             RecordOutcome("completed");
             // The handler succeeded: finalize the key and commit uncancellably. A cancellation arriving now must
             // not roll back completed work and leave the key claimable again — that would re-run a done command.
@@ -177,9 +177,8 @@ public sealed class IdempotencyDecorator<TRequest, TResponse>(
     }
 
     private static bool IsDefinitiveFailure(TResponse response) {
-        return response is IResultError {
-            Error.Kind: ErrorKind.Validation or ErrorKind.BusinessRule or ErrorKind.NotFound or ErrorKind.Forbidden
-        };
+        return ResultInspection.TryGetError(response, out var error)
+               && error.Kind is ErrorKind.Validation or ErrorKind.BusinessRule or ErrorKind.NotFound or ErrorKind.Forbidden;
     }
 
     private static string Hash(string value) {

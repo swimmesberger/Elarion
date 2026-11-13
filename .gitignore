@@ -53,6 +53,8 @@ dist/
 # Test results
 TestResults/
 BenchmarkDotNet.Artifacts/
+# BenchmarkDotNet 0.16+ builds its per-job projects here.
+.bdn/
 coverage/
 *.trx
 

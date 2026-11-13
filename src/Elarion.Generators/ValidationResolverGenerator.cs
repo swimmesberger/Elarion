@@ -84,6 +84,17 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Warning,
         true);
 
+    private static readonly DiagnosticDescriptor AsyncValidationBeforeTransactionDescriptor = new(
+        "ELVAL003",
+        "Asynchronous request validation runs before the transaction",
+        "Handler '{0}' validates request type '{1}' asynchronously ({2}); this runs in the validation decorator before "
+        + "the handler's transaction, so a database or service lookup there is a time-of-check/time-of-use race. "
+        + "Move the check into the handler and return AppError.Validation or AppError.Conflict, or suppress ELVAL003 "
+        + "when the check reads no shared state.",
+        "Elarion.Abstractions.Validation",
+        DiagnosticSeverity.Warning,
+        true);
+
     private sealed record ModuleResolverModel(
         string ModuleName,
         string ModuleNamespace,
@@ -193,6 +204,17 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
                         requestType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
                     continue;
                 }
+
+                // .NET 11 async validators are enforced like every other attribute, but their usual purpose — a
+                // lookup — belongs inside the handler's transaction (ADR-0027); make that a visible choice.
+                var asyncValidators = ValidatableTypeWalker.FindAsyncValidators(requestType, walkContext);
+                if (!asyncValidators.IsEmpty)
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        AsyncValidationBeforeTransactionDescriptor,
+                        LocationInfo.From(classSymbol),
+                        classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                        requestType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                        string.Join("; ", asyncValidators)));
 
                 if (!moduleRoots.TryGetValue(module, out var roots)) {
                     roots = new List<ITypeSymbol>();

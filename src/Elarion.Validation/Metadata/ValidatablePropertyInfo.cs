@@ -2,14 +2,17 @@
 // Adapted from the Microsoft.Extensions.Validation 11.0.0 source-generator templates (dotnet/aspnetcore,
 // src/Validation), Copyright (c) .NET Foundation and Contributors, licensed under the MIT License — see
 // THIRD-PARTY-NOTICES.md. Differences from the template: the display name is a constructor string (Elarion's
-// generator resolves it at compile time) instead of a localizable DisplayNameInfo, and union-valued and
-// [SkipValidation] properties are not modeled because Elarion's generator does not emit them.
+// generator resolves it at compile time) instead of a localizable DisplayNameInfo; [SkipValidation] is not modeled
+// because Elarion's generator does not emit it; and a C# union value (IUnion) is validated as its active case at the
+// property's own path — the template instead registers the union type with a synthetic "Value" member, which adds a
+// "Value" segment to error paths that the JSON (where a union is written as its active case) does not have.
 
 using System.Collections;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Validation;
 
 namespace Elarion.Validation.Metadata;
@@ -85,11 +88,13 @@ public abstract class ValidatablePropertyInfo : ValidatableInfo, IValidatablePro
         context.CurrentDepth++;
 
         try {
-            if (IsEnumerable(PropertyType) && propertyValue is IEnumerable enumerable) {
+            var (value, collectionType) = Unwrap(propertyValue);
+            if (collectionType is not null && IsEnumerable(collectionType) && value is IEnumerable enumerable) {
                 var index = 0;
                 var currentPrefix = context.CurrentValidationPath;
                 var tracker = new AsyncValidationTracker(context);
-                foreach (var item in enumerable) {
+                foreach (var element in enumerable) {
+                    var item = element is IUnion union ? union.Value : element;
                     if (item is not null
                         && validationOptions.TryGetValidatableTypeInfo(item.GetType(), out var validatableType)) {
                         var currentContext = tracker.NextContext();
@@ -108,9 +113,9 @@ public abstract class ValidatablePropertyInfo : ValidatableInfo, IValidatablePro
                 await tracker.CompleteAsync().ConfigureAwait(false);
                 context.CurrentValidationPath = currentPrefix;
             }
-            else if (propertyValue is not null
-                     && validationOptions.TryGetValidatableTypeInfo(propertyValue.GetType(), out var validatableType)) {
-                await validatableType.ValidateAsync(propertyValue, context, cancellationToken).ConfigureAwait(false);
+            else if (value is not null
+                     && validationOptions.TryGetValidatableTypeInfo(value.GetType(), out var validatableType)) {
+                await validatableType.ValidateAsync(value, context, cancellationToken).ConfigureAwait(false);
             }
         }
         finally {
@@ -146,10 +151,12 @@ public abstract class ValidatablePropertyInfo : ValidatableInfo, IValidatablePro
         context.CurrentDepth++;
 
         try {
-            if (IsEnumerable(PropertyType) && propertyValue is IEnumerable enumerable) {
+            var (value, collectionType) = Unwrap(propertyValue);
+            if (collectionType is not null && IsEnumerable(collectionType) && value is IEnumerable enumerable) {
                 var index = 0;
                 var currentPrefix = context.CurrentValidationPath;
-                foreach (var item in enumerable) {
+                foreach (var element in enumerable) {
+                    var item = element is IUnion union ? union.Value : element;
                     if (item is not null
                         && validationOptions.TryGetValidatableTypeInfo(item.GetType(), out var validatableType)) {
                         context.CurrentValidationPath = $"{currentPrefix}[{index}]";
@@ -161,15 +168,25 @@ public abstract class ValidatablePropertyInfo : ValidatableInfo, IValidatablePro
 
                 context.CurrentValidationPath = currentPrefix;
             }
-            else if (propertyValue is not null
-                     && validationOptions.TryGetValidatableTypeInfo(propertyValue.GetType(), out var validatableType)) {
-                validatableType.Validate(propertyValue, context);
+            else if (value is not null
+                     && validationOptions.TryGetValidatableTypeInfo(value.GetType(), out var validatableType)) {
+                validatableType.Validate(value, context);
             }
         }
         finally {
             context.CurrentDepth--;
             context.CurrentValidationPath = originalPrefix;
         }
+    }
+
+    /// <summary>
+    /// The value to walk into, and the type that decides whether it is a collection: for a C# union the active case
+    /// and its runtime type (the declared type is the union struct); otherwise the value and the declared type.
+    /// </summary>
+    private (object? Value, Type? CollectionType) Unwrap(object? propertyValue) {
+        return propertyValue is IUnion union
+            ? (union.Value, union.Value?.GetType())
+            : (propertyValue, PropertyType);
     }
 
     private void ValidateDepth(ValidateContext context) {

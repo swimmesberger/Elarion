@@ -79,10 +79,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6.1.0
         with:
-          # The 11 SDK builds both target frameworks (global.json pins it); the 10 runtime runs the net10.0 tests.
-          dotnet-version: |
-            10.0.x
-            11.0.x
+          # The 11 SDK builds both target frameworks (global.json pins it). Tests run on net11.0 only, so no
+          # .NET 10 runtime is needed here; the net10.0 build is still compiled and packed.
+          dotnet-version: 11.0.x
           dotnet-quality: ga
 
       - name: Restore
@@ -92,7 +91,7 @@ jobs:
         run: dotnet build Elarion.slnx --configuration Release --no-restore /p:Version=${{ steps.version.outputs.version }}
 
       - name: Test
-        run: dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release --no-build --report-xunit-trx --report-xunit-trx-filename elarion-results.trx
+        run: dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release --no-build --framework net11.0 --report-xunit-trx --report-xunit-trx-filename elarion-results.trx
 
       - name: Pack
         run: dotnet pack Elarion.slnx --configuration Release --no-build --output artifacts/nuget /p:PackageVersion=${{ steps.version.outputs.version }}
