@@ -26,9 +26,16 @@
     <None Include="buildMultiTargeting\Elarion.AspNetCore.SchemaGeneration.targets"
           Pack="true"
           PackagePath="buildMultiTargeting\"/>
+    <!-- One tool build per supported framework: the tool loads the application assembly in-process, so it must
+         run on the application's framework (build/*.targets picks tools/<tfm>/ from the application's
+         TargetFramework). -->
     <None Include="..\Elarion.AspNetCore.SchemaGeneration.Tool\bin\$(Configuration)\net10.0\**\*"
           Pack="true"
-          PackagePath="tools\%(RecursiveDir)%(Filename)%(Extension)"
+          PackagePath="tools\net10.0\%(RecursiveDir)%(Filename)%(Extension)"
+          Visible="false"/>
+    <None Include="..\Elarion.AspNetCore.SchemaGeneration.Tool\bin\$(Configuration)\net11.0\**\*"
+          Pack="true"
+          PackagePath="tools\net11.0\%(RecursiveDir)%(Filename)%(Extension)"
           Visible="false"/>
   </ItemGroup>
 

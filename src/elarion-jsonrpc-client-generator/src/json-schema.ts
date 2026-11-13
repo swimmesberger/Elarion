@@ -117,6 +117,11 @@ function visitFileNodes(schema: JsonSchema, ctx: SchemaContext, prefix: string[]
     visitFileNodes(stripNullable(resolved.items), childContext(resolvedCtx, 'items'), [...prefix, '*'], paths)
   }
 
+  if (resolved.anyOf && collectFilePathsInUnion(resolved, resolvedCtx)) {
+    // A file inside a union case cannot be converted at a fixed path: which case is active is only known per value.
+    throw new UnsupportedJsonSchemaError(resolvedCtx.path, 'x-elarion-file payloads inside an anyOf union are not supported')
+  }
+
   if (resolved.properties) {
     for (const [key, property] of Object.entries(resolved.properties)) {
       visitFileNodes(property, childContext(resolvedCtx, `properties.${key}`), [...prefix, key], paths)
@@ -124,12 +129,52 @@ function visitFileNodes(schema: JsonSchema, ctx: SchemaContext, prefix: string[]
   }
 }
 
+/**
+ * The alternatives of a union schema (`anyOf`) — the shape the server exports for a C# 15 union: the active case
+ * is written without a wrapper or discriminator, each alternative is one case's schema, and the JSON types of all
+ * cases (plus `null`) are collected on the union node itself. Object cases are exported without their own `type`,
+ * so an alternative without one is typed from its keywords (`properties` → object, `items` → array) or, failing
+ * that, from the union's single non-null type. Returns `undefined` for a schema that is not a union.
+ */
+export function unionAlternatives(schema: JsonSchema): JsonSchema[] | undefined {
+  if (!schema.anyOf) {
+    return undefined
+  }
+
+  const unionTypes = Array.isArray(schema.type)
+    ? schema.type.filter((type) => type !== 'null')
+    : schema.type !== undefined && schema.type !== 'null' ? [schema.type] : []
+  return schema.anyOf.map((alternative) => {
+    const member = alternative as JsonSchema
+    if (member.type !== undefined || member.$ref !== undefined || member.enum !== undefined) {
+      return member
+    }
+    if (member.properties !== undefined) {
+      return {...member, type: 'object'}
+    }
+    if (member.items !== undefined) {
+      return {...member, type: 'array'}
+    }
+    return unionTypes.length === 1 ? {...member, type: unionTypes[0]} : member
+  })
+}
+
+/** True for an alternative that only admits `null` (`{"type": "null"}`); it makes the union nullable instead. */
+export function isNullOnly(schema: JsonSchema): boolean {
+  return schema.type === 'null' || (Array.isArray(schema.type) && schema.type.every((type) => type === 'null'))
+}
+
+function collectFilePathsInUnion(schema: JsonSchema, ctx: SchemaContext): boolean {
+  return (unionAlternatives(schema) ?? []).some((alternative, index) =>
+    collectFilePaths(alternative, childContext(ctx, `anyOf[${index}]`)).length > 0)
+}
+
 function assertSupportedComposition(schema: JsonSchema, path: string) {
   if (schema.oneOf) {
     throw new UnsupportedJsonSchemaError(path, 'oneOf is not supported')
   }
-  if (schema.anyOf) {
-    throw new UnsupportedJsonSchemaError(path, 'anyOf is not supported')
+  if (schema.anyOf && !Array.isArray(schema.anyOf)) {
+    throw new UnsupportedJsonSchemaError(path, 'anyOf must be an array of schemas')
   }
   if (schema.allOf) {
     throw new UnsupportedJsonSchemaError(path, 'allOf is not supported')
@@ -144,6 +189,11 @@ function resolveJsonPointer(root: JsonSchema, ref: string, path: string): JsonSc
 
   let current: unknown = root
   for (const segment of segments) {
+    // Array segments are indices — a reference into a union case (`#/properties/result/anyOf/0`).
+    if (Array.isArray(current) && /^(0|[1-9]\d*)$/.test(segment) && Number(segment) < current.length) {
+      current = current[Number(segment)]
+      continue
+    }
     if (!isObjectRecord(current) || !(segment in current)) {
       throw new UnsupportedJsonSchemaError(path, `could not resolve $ref ${ref}`)
     }

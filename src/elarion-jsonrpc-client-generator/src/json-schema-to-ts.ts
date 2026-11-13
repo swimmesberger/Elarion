@@ -4,8 +4,11 @@ import {
   childContext,
   formatPropertyName,
   isNullable,
+  isNullOnly,
   resolveSchema,
+  stripNullable,
   type SchemaContext,
+  unionAlternatives,
 } from './json-schema.js'
 
 export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, indent = 0): string {
@@ -26,6 +29,27 @@ export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, i
       .map((value) => JSON.stringify(value))
     const union = values.length > 0 ? values.join(' | ') : 'never'
     return nullable ? `(${union}) | null | undefined` : union
+  }
+
+  const alternatives = unionAlternatives(resolved)
+  if (alternatives) {
+    // A C# union: the type of whichever case is active. Each alternative is emitted without its own nullability
+    // and `null` is added once for the union, so `Found | Missing | null | undefined` stays flat.
+    let unionNullable = nullable
+    const members: string[] = []
+    alternatives.forEach((alternative, index) => {
+      const {schema: member, ctx: memberCtx} = resolveSchema(alternative, childContext(resolvedCtx, `anyOf[${index}]`))
+      unionNullable ||= isNullable(member)
+      if (isNullOnly(member)) {
+        return
+      }
+      const memberType = jsonSchemaToTypeScript(stripNullable(member), memberCtx, indent)
+      if (!members.includes(memberType)) {
+        members.push(memberType)
+      }
+    })
+    const union = members.length > 0 ? members.join(' | ') : 'never'
+    return unionNullable ? `${union} | null | undefined` : union
   }
 
   if (base === 'string') {

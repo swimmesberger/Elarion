@@ -11,6 +11,17 @@ using Elarion.Validation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Validation;
 using Xunit;
+#if NET11_0_OR_GREATER
+// Microsoft.Extensions.Validation 11 splits the info contract and no longer exposes the walker base classes;
+// Elarion.Validation carries the walker for net11 (ADR-0027).
+using TypeInfoContract = Microsoft.Extensions.Validation.IValidatableTypeInfo;
+using ParameterInfoContract = Microsoft.Extensions.Validation.IValidatableParameterInfo;
+using ValidatableTypeInfo = Elarion.Validation.Metadata.ValidatableTypeInfo;
+using ValidatablePropertyInfo = Elarion.Validation.Metadata.ValidatablePropertyInfo;
+#else
+using TypeInfoContract = Microsoft.Extensions.Validation.IValidatableInfo;
+using ParameterInfoContract = Microsoft.Extensions.Validation.IValidatableInfo;
+#endif
 
 namespace Elarion.Tests.Validation;
 
@@ -208,7 +219,7 @@ public sealed class MicrosoftRequestValidatorTests {
     /// properties and dictionary keys) so the wire-path translation can be exercised deterministically.
     /// </summary>
     private sealed class PathInjectingResolver(Dictionary<string, string[]> errors) : IValidatableInfoResolver {
-        public bool TryGetValidatableTypeInfo(Type type, [NotNullWhen(true)] out IValidatableInfo? validatableInfo) {
+        public bool TryGetValidatableTypeInfo(Type type, [NotNullWhen(true)] out TypeInfoContract? validatableInfo) {
             if (type == typeof(PathInjectingRequest)) {
                 validatableInfo = new PathInjectingInfo(errors);
                 return true;
@@ -219,19 +230,38 @@ public sealed class MicrosoftRequestValidatorTests {
         }
 
         public bool TryGetValidatableParameterInfo(ParameterInfo parameterInfo,
-            [NotNullWhen(true)] out IValidatableInfo? validatableInfo) {
+            [NotNullWhen(true)] out ParameterInfoContract? validatableInfo) {
             validatableInfo = null;
             return false;
         }
     }
 
-    private sealed class PathInjectingInfo(Dictionary<string, string[]> errors) : IValidatableInfo {
+    private sealed class PathInjectingInfo(Dictionary<string, string[]> errors) : TypeInfoContract {
+#if NET11_0_OR_GREATER
+        public void Validate(object? value, ValidateContext context) {
+            foreach (var (path, messages) in errors)
+            foreach (var message in messages)
+                context.AddValidationError(new ValidationError { Name = path, Path = path, ErrorMessage = message, Container = value });
+        }
+
+        public Task ValidateAsync(object? value, ValidateContext context, CancellationToken cancellationToken) {
+            Validate(value, context);
+            return Task.CompletedTask;
+        }
+
+        public bool TryFindProperty(string propertyName, ValidationOptions validationOptions,
+            [NotNullWhen(true)] out IValidatablePropertyInfo? validatablePropertyInfo) {
+            validatablePropertyInfo = null;
+            return false;
+        }
+#else
         public Task ValidateAsync(object? value, ValidateContext context, CancellationToken cancellationToken) {
             context.ValidationErrors ??= [];
             foreach (var (path, messages) in errors) context.ValidationErrors[path] = messages;
 
             return Task.CompletedTask;
         }
+#endif
     }
 
     /// <summary>
@@ -239,7 +269,7 @@ public sealed class MicrosoftRequestValidatorTests {
     /// attribute arrays behind the <see cref="IValidatableInfoResolver"/> seam.
     /// </summary>
     private sealed class TestResolver : IValidatableInfoResolver {
-        public bool TryGetValidatableTypeInfo(Type type, [NotNullWhen(true)] out IValidatableInfo? validatableInfo) {
+        public bool TryGetValidatableTypeInfo(Type type, [NotNullWhen(true)] out TypeInfoContract? validatableInfo) {
             if (type == typeof(CreateClientRequest)) {
                 validatableInfo = new TestTypeInfo(typeof(CreateClientRequest), [
                     new TestPropertyInfo(typeof(CreateClientRequest), typeof(string), nameof(CreateClientRequest.Name),
@@ -267,7 +297,7 @@ public sealed class MicrosoftRequestValidatorTests {
         }
 
         public bool TryGetValidatableParameterInfo(ParameterInfo parameterInfo,
-            [NotNullWhen(true)] out IValidatableInfo? validatableInfo) {
+            [NotNullWhen(true)] out ParameterInfoContract? validatableInfo) {
             validatableInfo = null;
             return false;
         }

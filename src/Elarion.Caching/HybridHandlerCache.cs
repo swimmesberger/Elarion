@@ -89,7 +89,7 @@ public sealed class HybridHandlerCache(
                     static async (state, token) => {
                         state.MarkFactoryExecuted();
                         var response = await state.Factory(token);
-                        if (response is IResultLike { IsSuccess: false })
+                        if (ResultInspection.IsFailure(response))
                             // Throwing here is a control-flow adapter for HybridCache: it prevents failed Result<T> values from being cached.
                             throw new NonCacheableResultException<TResponse>(response);
 
@@ -153,7 +153,7 @@ public sealed class HybridHandlerCache(
             static async (state, token) => {
                 state.MarkFactoryExecuted();
                 var response = await state.Factory(token);
-                if (response is IResultLike { IsSuccess: false })
+                if (ResultInspection.IsFailure(response))
                     throw new NonCacheableResultException<TResponse>(response);
 
                 return state.Policy.Serialize(response, state.JsonOptions);

@@ -190,6 +190,19 @@ graph carries validation attributes. Two consequences:
   nothing to add to a `[DecoratorList]`.
 </Callout>
 
+### On .NET 11
+
+Behavior is the same on both target frameworks; the plumbing differs. `Microsoft.Extensions.Validation` 11 no
+longer exposes the walker that runs the attributes (its own generator compiles that walker into each application),
+so the `net11.0` build of `Elarion.Validation` carries the same walker, and the generated resolvers bind to it. The
+.NET 11 walker also runs `AsyncValidationAttribute`s (after every synchronous attribute of the member passed) and
+`IAsyncValidatableObject`. Both still run in the validation decorator, **before the transaction** — see the next
+section for what that rules out.
+
+A property typed as a C# 15 union is validated as its active case: the attributes of the case type apply, and errors
+use the property's path (`result.name`, not `result.value.name`), matching the JSON, where a union is written as its
+active case.
+
 ## Field-keyed errors
 
 A violation fails with `AppError.Validation` carrying `FieldErrors` — messages keyed by **wire-named
@@ -259,6 +272,13 @@ anyway: the validation decorator runs before the transaction opens, so a pre-fli
 is a time-of-check/time-of-use race — the database constraint is the real fence, and the handler must
 handle the conflict regardless.
 
+<Callout type="warn">
+  .NET 11 adds `AsyncValidationAttribute` and `IAsyncValidatableObject`, and Microsoft's documentation shows a
+  uniqueness check as the example. On an Elarion request DTO they run in the validation decorator, before the
+  transaction — the race described above, which `ELVAL003` reports at build time. Keep database and service lookups
+  in the handler.
+</Callout>
+
 ```csharp
 public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
     // Cross-field rule: field-keyed so the client can bind it to the input.
@@ -303,6 +323,7 @@ Nothing pretends a uniqueness check can run in a browser; the contract simply gu
 | --- | --- | --- |
 | `ELVAL001` | Error | A handler's request carries validation attributes but the response type cannot represent failure (no `IResultFailureFactory<T>`, i.e. not `Result<T>`/`Result`) — the decorator could not short-circuit and would be silently skipped. Mirrors `ELAUTH001`. |
 | `ELVAL002` | Warning | A request carries validation attributes but the compilation does not reference `Elarion.Validation` — the constraints are documented in every schema but **unenforced** at runtime. Reference the package and call `AddElarionValidation()`, or remove the attributes; the gap must be a visible choice, never a silent one. |
+| `ELVAL003` | Warning | (.NET 11) The request graph has an `AsyncValidationAttribute` or an `IAsyncValidatableObject`. It is enforced, but it runs in the validation decorator **before the transaction**, so a database or service lookup there is a time-of-check/time-of-use race. Move the check into the handler and return `AppError.Validation`/`AppError.Conflict`, or suppress the warning when the check reads no shared state. |
 
 ## Coming from FluentValidation
 

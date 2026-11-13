@@ -21,6 +21,13 @@ namespace Elarion.Generators;
 /// (<c>AddValidators</c>), so a disabled module contributes no validation metadata.
 /// </para>
 /// <para>
+/// Two API shapes are emitted, chosen from what the compilation references. Against Microsoft.Extensions.Validation
+/// 10 the info subclasses derive from its public walker base classes. Version 11 no longer exposes those (its own
+/// generator compiles the walker into each application), so against the net11 build of <c>Elarion.Validation</c> —
+/// which carries that walker as <c>Elarion.Validation.Metadata</c> — they derive from Elarion's copy and implement
+/// the split <c>IValidatableTypeInfo</c>/<c>IValidatableParameterInfo</c> resolver contract.
+/// </para>
+/// <para>
 /// Generation is conditional on the compilation referencing <c>Elarion.Validation</c>. When validatable request
 /// types exist without that reference, the attributes would be documented in the exported schemas but silently
 /// unenforced — reported as <c>ELVAL002</c> so it is a visible choice.
@@ -43,11 +50,29 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
     private const string ValidationAttributeFqn =
         "global::System.ComponentModel.DataAnnotations.ValidationAttribute";
 
-    private const string ValidatablePropertyInfoFqn =
-        "global::Microsoft.Extensions.Validation.ValidatablePropertyInfo";
+    /// <summary>The probe for the walker the net11 build of <c>Elarion.Validation</c> carries.</summary>
+    private const string ElarionWalkerMetadataName = "Elarion.Validation.Metadata.ValidatableTypeInfo";
 
-    private const string ValidatableInfoFqn =
-        "global::Microsoft.Extensions.Validation.IValidatableInfo";
+    /// <summary>The validation contracts and walker base classes the emitted resolver binds against.</summary>
+    private sealed record ApiShape(
+        string TypeInfoContractFqn,
+        string ParameterInfoContractFqn,
+        string TypeInfoBaseFqn,
+        string PropertyInfoBaseFqn) {
+        /// <summary>Microsoft.Extensions.Validation 10: one info contract and public walker base classes.</summary>
+        public static readonly ApiShape Version10 = new(
+            "global::Microsoft.Extensions.Validation.IValidatableInfo",
+            "global::Microsoft.Extensions.Validation.IValidatableInfo",
+            "global::Microsoft.Extensions.Validation.ValidatableTypeInfo",
+            "global::Microsoft.Extensions.Validation.ValidatablePropertyInfo");
+
+        /// <summary>Microsoft.Extensions.Validation 11: split info contracts and Elarion's copy of the walker.</summary>
+        public static readonly ApiShape Version11 = new(
+            "global::Microsoft.Extensions.Validation.IValidatableTypeInfo",
+            "global::Microsoft.Extensions.Validation.IValidatableParameterInfo",
+            "global::Elarion.Validation.Metadata.ValidatableTypeInfo",
+            "global::Elarion.Validation.Metadata.ValidatablePropertyInfo");
+    }
 
     private static readonly DiagnosticDescriptor ValidationNotEnforcedDescriptor = new(
         "ELVAL002",
@@ -59,10 +84,22 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Warning,
         true);
 
+    private static readonly DiagnosticDescriptor AsyncValidationBeforeTransactionDescriptor = new(
+        "ELVAL003",
+        "Asynchronous request validation runs before the transaction",
+        "Handler '{0}' validates request type '{1}' asynchronously ({2}); this runs in the validation decorator before "
+        + "the handler's transaction, so a database or service lookup there is a time-of-check/time-of-use race. "
+        + "Move the check into the handler and return AppError.Validation or AppError.Conflict, or suppress ELVAL003 "
+        + "when the check reads no shared state.",
+        "Elarion.Abstractions.Validation",
+        DiagnosticSeverity.Warning,
+        true);
+
     private sealed record ModuleResolverModel(
         string ModuleName,
         string ModuleNamespace,
         string ModuleTypeName,
+        bool UsesElarionWalker,
         EquatableArray<ValidatableTypeModel> Types);
 
     private sealed record ValidationModel(
@@ -129,6 +166,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
 
         var hasElarionValidation =
             compilation.GetTypeByMetadataName(ElarionValidationExtensionsMetadataName) is not null;
+        var usesElarionWalker = compilation.GetTypeByMetadataName(ElarionWalkerMetadataName) is not null;
         var walkContext = new ValidatableTypeWalker.Context(compilation.Assembly);
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
 
@@ -167,6 +205,17 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
                     continue;
                 }
 
+                // .NET 11 async validators are enforced like every other attribute, but their usual purpose — a
+                // lookup — belongs inside the handler's transaction (ADR-0027); make that a visible choice.
+                var asyncValidators = ValidatableTypeWalker.FindAsyncValidators(requestType, walkContext);
+                if (!asyncValidators.IsEmpty)
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        AsyncValidationBeforeTransactionDescriptor,
+                        LocationInfo.From(classSymbol),
+                        classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                        requestType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                        string.Join("; ", asyncValidators)));
+
                 if (!moduleRoots.TryGetValue(module, out var roots)) {
                     roots = new List<ITypeSymbol>();
                     moduleRoots[module] = roots;
@@ -190,7 +239,8 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
             if (types.IsEmpty)
                 continue;
 
-            moduleModels.Add(new ModuleResolverModel(module.Name, module.Namespace, module.TypeName, types));
+            moduleModels.Add(new ModuleResolverModel(module.Name, module.Namespace, module.TypeName,
+                usesElarionWalker, types));
         }
 
         return new ValidationModel(moduleModels.ToImmutable(), diagnostics.ToImmutable());
@@ -198,6 +248,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
 
     private static void EmitModuleResolver(SourceProductionContext spc, ModuleResolverModel module) {
         var resolverName = $"{module.ModuleName}ValidatableInfoResolver";
+        var shape = module.UsesElarionWalker ? ApiShape.Version11 : ApiShape.Version10;
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("// Source: Elarion.Generators.ValidationResolverGenerator");
@@ -221,13 +272,13 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
             $"internal sealed class {resolverName} : global::Microsoft.Extensions.Validation.IValidatableInfoResolver");
         sb.AppendLine("{");
 
-        AppendTryGetValidatableTypeInfo(sb, module);
+        AppendTryGetValidatableTypeInfo(sb, module, shape);
         sb.AppendLine();
-        AppendTryGetValidatableParameterInfo(sb);
+        AppendTryGetValidatableParameterInfo(sb, shape);
         sb.AppendLine();
-        AppendTypeInfoFields(sb, module);
+        AppendTypeInfoFields(sb, module, shape);
         sb.AppendLine();
-        AppendInfoSubclasses(sb);
+        AppendInfoSubclasses(sb, shape);
 
         sb.AppendLine("}");
 
@@ -243,12 +294,12 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
             $"global::Elarion.Validation.ElarionValidationServiceCollectionExtensions.AddElarionValidationResolver(services, new {nsPrefix}{resolverName}());");
     }
 
-    private static void AppendTryGetValidatableTypeInfo(StringBuilder sb, ModuleResolverModel module) {
+    private static void AppendTryGetValidatableTypeInfo(StringBuilder sb, ModuleResolverModel module, ApiShape shape) {
         sb.AppendLine("    /// <inheritdoc />");
         sb.AppendLine("    public bool TryGetValidatableTypeInfo(");
         sb.AppendLine("        global::System.Type type,");
         sb.AppendLine(
-            $"        [global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {ValidatableInfoFqn}? validatableInfo)");
+            $"        [global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {shape.TypeInfoContractFqn}? validatableInfo)");
         sb.AppendLine("    {");
         for (var i = 0; i < module.Types.Length; i++) {
             sb.AppendLine($"        if (type == typeof({module.Types[i].TypeFqn}))");
@@ -264,12 +315,12 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
     }
 
-    private static void AppendTryGetValidatableParameterInfo(StringBuilder sb) {
+    private static void AppendTryGetValidatableParameterInfo(StringBuilder sb, ApiShape shape) {
         sb.AppendLine("    /// <inheritdoc />");
         sb.AppendLine("    public bool TryGetValidatableParameterInfo(");
         sb.AppendLine("        global::System.Reflection.ParameterInfo parameterInfo,");
         sb.AppendLine(
-            $"        [global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {ValidatableInfoFqn}? validatableInfo)");
+            $"        [global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out {shape.ParameterInfoContractFqn}? validatableInfo)");
         sb.AppendLine("    {");
         sb.AppendLine(
             "        // Handler requests are dispatched as whole objects; parameter binding is a transport concern.");
@@ -278,7 +329,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
     }
 
-    private static void AppendTypeInfoFields(StringBuilder sb, ModuleResolverModel module) {
+    private static void AppendTypeInfoFields(StringBuilder sb, ModuleResolverModel module, ApiShape shape) {
         if (NeedsEmptyAttributeArray(module)) {
             sb.AppendLine($"    private static readonly {ValidationAttributeFqn}[] __noAttributes =");
             sb.AppendLine($"        global::System.Array.Empty<{ValidationAttributeFqn}>();");
@@ -291,13 +342,13 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
                 sb.AppendLine();
 
             sb.AppendLine(
-                $"    private static readonly {ValidatableInfoFqn} __type{i} = new ElarionValidatableTypeInfo(");
+                $"    private static readonly {shape.TypeInfoContractFqn} __type{i} = new ElarionValidatableTypeInfo(");
             sb.AppendLine($"        typeof({type.TypeFqn}),");
             if (type.Members.IsEmpty) {
-                sb.AppendLine($"        global::System.Array.Empty<{ValidatablePropertyInfoFqn}>(),");
+                sb.AppendLine($"        global::System.Array.Empty<{shape.PropertyInfoBaseFqn}>(),");
             }
             else {
-                sb.AppendLine($"        new {ValidatablePropertyInfoFqn}[]");
+                sb.AppendLine($"        new {shape.PropertyInfoBaseFqn}[]");
                 sb.AppendLine("        {");
                 foreach (var member in type.Members) {
                     sb.AppendLine("            new ElarionValidatablePropertyInfo(");
@@ -345,12 +396,12 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
         return false;
     }
 
-    private static void AppendInfoSubclasses(StringBuilder sb) {
-        // The constructor signatures below bind against Microsoft.Extensions.Validation's protected base
-        // constructors; the DynamicallyAccessedMembers annotations mirror the base parameters so the trimmer
-        // keeps what the runtime walker touches.
+    private static void AppendInfoSubclasses(StringBuilder sb, ApiShape shape) {
+        // The constructor signatures below bind against the walker's protected base constructors — identical in
+        // Microsoft.Extensions.Validation 10 and Elarion's copy for 11; the DynamicallyAccessedMembers annotations
+        // mirror the base parameters so the trimmer keeps what the runtime walker touches.
         sb.AppendLine(
-            "    private sealed class ElarionValidatableTypeInfo : global::Microsoft.Extensions.Validation.ValidatableTypeInfo");
+            $"    private sealed class ElarionValidatableTypeInfo : {shape.TypeInfoBaseFqn}");
         sb.AppendLine("    {");
         sb.AppendLine($"        private readonly {ValidationAttributeFqn}[] _typeAttributes;");
         sb.AppendLine();
@@ -358,7 +409,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
         sb.AppendLine(
             "            [param: global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.Interfaces)]");
         sb.AppendLine("            global::System.Type type,");
-        sb.AppendLine($"            {ValidatablePropertyInfoFqn}[] members,");
+        sb.AppendLine($"            {shape.PropertyInfoBaseFqn}[] members,");
         sb.AppendLine($"            {ValidationAttributeFqn}[] typeAttributes) : base(type, members)");
         sb.AppendLine("        {");
         sb.AppendLine("            _typeAttributes = typeAttributes;");
@@ -369,7 +420,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine(
-            "    private sealed class ElarionValidatablePropertyInfo : global::Microsoft.Extensions.Validation.ValidatablePropertyInfo");
+            $"    private sealed class ElarionValidatablePropertyInfo : {shape.PropertyInfoBaseFqn}");
         sb.AppendLine("    {");
         sb.AppendLine($"        private readonly {ValidationAttributeFqn}[] _validationAttributes;");
         sb.AppendLine();

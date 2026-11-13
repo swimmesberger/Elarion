@@ -30,6 +30,18 @@ internal static class ValidatableTypeWalker {
     private const string ValidatableObjectDisplay = "System.ComponentModel.DataAnnotations.IValidatableObject";
     private const string DisplayAttributeDisplay = "System.ComponentModel.DataAnnotations.DisplayAttribute";
 
+    // .NET 11 asynchronous validation. Absent from older reference sets, so nothing matches there.
+    // C# 15 unions (.NET 11). Recognized by IUnion — what every compiler-declared union implements (its [Union]
+    // attribute is synthesized at emit, so a source declaration does not show it) and what the runtime walker unwraps.
+    // A hand-written union that only carries [Union] is walked like any other struct.
+    private const string UnionInterfaceDisplay = "System.Runtime.CompilerServices.IUnion";
+
+    private const string AsyncValidationAttributeDisplay =
+        "System.ComponentModel.DataAnnotations.AsyncValidationAttribute";
+
+    private const string AsyncValidatableObjectDisplay =
+        "System.ComponentModel.DataAnnotations.IAsyncValidatableObject";
+
     private static readonly SymbolDisplayFormat Fmt = SymbolDisplayFormat.FullyQualifiedFormat;
 
     // Leaf BCL types never walked (beyond what SpecialType already excludes: primitives, string, object,
@@ -68,6 +80,12 @@ internal static class ValidatableTypeWalker {
 
         public List<string> TypeAttributes { get; } = new();
 
+        /// <summary>
+        /// Human-readable descriptions of the type's asynchronous validators (an <c>AsyncValidationAttribute</c>
+        /// on the type or a property, or <c>IAsyncValidatableObject</c>) — each runs before the transaction.
+        /// </summary>
+        public List<string> AsyncValidators { get; } = new();
+
         public List<PropertyEntry> Properties { get; } = new();
     }
 
@@ -76,7 +94,7 @@ internal static class ValidatableTypeWalker {
         string DisplayName,
         string PropertyTypeFqn,
         EquatableArray<string> Attributes,
-        TypeNode? Target);
+        IReadOnlyList<TypeNode> Targets);
 
     /// <summary>
     /// True when the request type's graph contains any annotated type — i.e. the handler needs the
@@ -130,7 +148,7 @@ internal static class ValidatableTypeWalker {
                     continue;
 
                 foreach (var property in node.Properties)
-                    if (property.Target is not null && registered.Contains(property.Target)) {
+                    if (property.Targets.Any(registered.Contains)) {
                         registered.Add(node);
                         changed = true;
                         break;
@@ -145,7 +163,7 @@ internal static class ValidatableTypeWalker {
         foreach (var node in registered) {
             var members = ImmutableArray.CreateBuilder<ValidatablePropertyModel>();
             foreach (var property in node.Properties) {
-                var carriesRecursion = property.Target is not null && registered.Contains(property.Target);
+                var carriesRecursion = property.Targets.Any(registered.Contains);
                 if (property.Attributes.IsEmpty && !carriesRecursion)
                     continue;
 
@@ -166,13 +184,32 @@ internal static class ValidatableTypeWalker {
         return models.ToImmutable();
     }
 
+    /// <summary>
+    /// Describes every asynchronous validator in the request type's graph (sorted, distinct): .NET 11's
+    /// <c>AsyncValidationAttribute</c> and <c>IAsyncValidatableObject</c> run in the validation decorator, before the
+    /// handler's transaction, which makes a database or service lookup there a time-of-check/time-of-use race.
+    /// </summary>
+    public static EquatableArray<string> FindAsyncValidators(ITypeSymbol requestType, Context context) {
+        if (!IsWalkable(requestType, context))
+            return EquatableArray<string>.Empty;
+
+        var closure = new HashSet<TypeNode>();
+        CollectClosure(Visit(requestType, context), closure);
+
+        var descriptions = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var node in closure)
+            descriptions.UnionWith(node.AsyncValidators);
+
+        return descriptions.ToImmutableArray();
+    }
+
     private static void CollectClosure(TypeNode node, HashSet<TypeNode> closure) {
         if (!closure.Add(node))
             return;
 
         foreach (var property in node.Properties)
-            if (property.Target is not null)
-                CollectClosure(property.Target, closure);
+            foreach (var target in property.Targets)
+                CollectClosure(target, closure);
     }
 
     private static bool ReachesAnnotated(TypeNode node, HashSet<TypeNode> visited) {
@@ -183,8 +220,9 @@ internal static class ValidatableTypeWalker {
             return true;
 
         foreach (var property in node.Properties)
-            if (property.Target is not null && ReachesAnnotated(property.Target, visited))
-                return true;
+            foreach (var target in property.Targets)
+                if (ReachesAnnotated(target, visited))
+                    return true;
 
         return false;
     }
@@ -198,9 +236,17 @@ internal static class ValidatableTypeWalker {
         // node and only read after the full build, so the in-cycle early return is safe.
         context.Nodes[type] = node;
 
-        node.TypeAttributes.AddRange(RenderValidationAttributes(type.GetAttributes(), context));
+        // The node's symbol may carry the referencing property's nullable annotation; describe the type itself.
+        var typeDisplay = type.WithNullableAnnotation(NullableAnnotation.None)
+            .ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+        var typeAttributeData = type.GetAttributes();
+        node.TypeAttributes.AddRange(RenderValidationAttributes(typeAttributeData, context));
         var annotated = node.TypeAttributes.Count > 0 ||
                         HandlerShape.Implements(type, ValidatableObjectDisplay);
+
+        AddAsyncAttributes(node, typeAttributeData, typeDisplay);
+        if (HandlerShape.Implements(type, AsyncValidatableObjectDisplay))
+            node.AsyncValidators.Add($"{typeDisplay} implements IAsyncValidatableObject");
 
         foreach (var property in CollectProperties(type)) {
             var attributeData = CollectPropertyAttributeData(property);
@@ -208,19 +254,34 @@ internal static class ValidatableTypeWalker {
             if (!attributes.IsEmpty)
                 annotated = true;
 
-            var targetType = UnwrapWalkTarget(property.Type, context);
-            var target = targetType is not null ? Visit(targetType, context) : null;
+            AddAsyncAttributes(node, attributeData, $"{typeDisplay}.{property.Name}");
+
+            var targets = ResolveTargets(property.Type, context);
 
             node.Properties.Add(new PropertyEntry(
                 property.Name,
                 ResolveDisplayName(attributeData, property.Name),
                 property.Type.ToDisplayString(Fmt),
                 attributes,
-                target));
+                targets));
         }
 
         node.Annotated = annotated;
         return node;
+    }
+
+    private static void AddAsyncAttributes(TypeNode node, IEnumerable<AttributeData> attributes, string target) {
+        foreach (var attribute in attributes)
+            if (DerivesFrom(attribute.AttributeClass, AsyncValidationAttributeDisplay))
+                node.AsyncValidators.Add($"[{attribute.AttributeClass!.Name}] on {target}");
+    }
+
+    private static bool DerivesFrom(INamedTypeSymbol? type, string baseDisplay) {
+        for (var current = type?.BaseType; current is not null; current = current.BaseType)
+            if (current.ToDisplayString() == baseDisplay)
+                return true;
+
+        return false;
     }
 
     // Public, gettable instance properties (no indexers), including inherited ones with most-derived-wins
@@ -277,6 +338,51 @@ internal static class ValidatableTypeWalker {
         }
 
         return propertyName;
+    }
+
+    /// <summary>
+    /// The graph nodes a property recurses into: the unwrapped property type, or — for a C# union, which serializes as
+    /// its active case and is validated as that case at the property's own path — every case type. The runtime walker
+    /// unwraps <c>IUnion.Value</c> to reach the case, so the union struct itself never needs a resolver entry.
+    /// </summary>
+    private static IReadOnlyList<TypeNode> ResolveTargets(ITypeSymbol propertyType, Context context) {
+        var target = UnwrapWalkTarget(propertyType, context);
+        if (target is null)
+            return Array.Empty<TypeNode>();
+
+        if (!IsUnion(target))
+            return new[] { Visit(target, context) };
+
+        var nodes = new List<TypeNode>();
+        var seen = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default) { target };
+        CollectUnionCaseTargets((INamedTypeSymbol)target, context, nodes, seen);
+        return nodes;
+    }
+
+    private static void CollectUnionCaseTargets(INamedTypeSymbol union, Context context, List<TypeNode> nodes,
+        HashSet<ITypeSymbol> seen) {
+        // Case types are the single-parameter public constructors (the basic union pattern).
+        foreach (var constructor in union.InstanceConstructors) {
+            if (constructor.DeclaredAccessibility != Accessibility.Public || constructor.Parameters.Length != 1)
+                continue;
+
+            var caseType = UnwrapWalkTarget(constructor.Parameters[0].Type, context);
+            if (caseType is null || !seen.Add(caseType))
+                continue;
+
+            if (IsUnion(caseType)) {
+                CollectUnionCaseTargets((INamedTypeSymbol)caseType, context, nodes, seen);
+                continue;
+            }
+
+            var node = Visit(caseType, context);
+            if (!nodes.Contains(node))
+                nodes.Add(node);
+        }
+    }
+
+    private static bool IsUnion(ITypeSymbol type) {
+        return type is INamedTypeSymbol named && HandlerShape.Implements(named, UnionInterfaceDisplay);
     }
 
     /// <summary>

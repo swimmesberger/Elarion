@@ -15,8 +15,11 @@ dotnet restore Elarion.slnx
 dotnet build Elarion.slnx --configuration Release
 ```
 
-You need the **.NET 10 SDK** (see [`global.json`](global.json) for the exact version) and, for the
-npm packages, **Node.js 20.11+** (the `engines` floor in their `package.json`).
+You need the **.NET 11 SDK** (see [`global.json`](global.json) for the exact version) plus the **.NET 10 runtime**
+(the packages target `net10.0` and `net11.0`, and the test suite runs on both) and, for the npm packages,
+**Node.js 20.11+** (the `engines` floor in their `package.json`). Run one framework's tests with
+`-f net10.0`/`-f net11.0`. CI builds both frameworks but runs the tests on `net11.0` only, so run the `net10.0`
+tests locally when a change is framework-specific.
 
 ## Validation
 

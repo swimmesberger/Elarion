@@ -1,9 +1,14 @@
 <Project>
-  <!-- Inherit the repo-wide settings (net10.0, nullable, warnings-as-errors, etc.) but never publish
+  <!-- Inherit the repo-wide settings (nullable, warnings-as-errors, etc.) but never publish
        the samples as NuGet packages. -->
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))"/>
 
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <!-- Samples are applications, not packages: they run on the newest framework only (a single TargetFramework,
+         so the repo-wide multi-targeting is cleared — the Aspire AppHost SDK also cannot run in a multi-targeting
+         outer build). The framework packages they reference still build for every supported framework. -->
+    <TargetFrameworks></TargetFrameworks>
+    <TargetFramework>net11.0</TargetFramework>
   </PropertyGroup>
 </Project>

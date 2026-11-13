@@ -11,6 +11,8 @@ namespace Elarion.Benchmarks.Actors;
 /// <list type="bullet">
 /// <item><c>DirectCall</c> — the plain awaited method call an actor call is compared against (the floor).</item>
 /// <item><c>Ask</c> — one awaited facade call on a non-reentrant actor (the default configuration).</item>
+/// <item><c>Ask_Awaited</c> — the same call awaited inside an <c>async</c> method, the way application code calls an
+/// actor; <c>Ask</c> hands the <c>ValueTask</c> straight to BenchmarkDotNet, whose harness then does the awaiting.</item>
 /// <item><c>Ask_NoCallTimeout</c> — isolates the per-call timeout cost (CancellationTokenSource + timer).</item>
 /// <item><c>Ask_Reentrant</c> — isolates the exclusive-scheduler cost only [Reentrant] actors pay.</item>
 /// <item><c>Ask_Pipelined</c> — 1000 calls in flight against one mailbox (throughput, not latency).</item>
@@ -85,6 +87,11 @@ public class ActorCallBenchmarks {
     [Benchmark]
     public ValueTask<int> Ask() {
         return _echo.Echo(7);
+    }
+
+    [Benchmark]
+    public async ValueTask<int> Ask_Awaited() {
+        return await _echo.Echo(7);
     }
 
     [Benchmark]

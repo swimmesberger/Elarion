@@ -260,6 +260,96 @@ describe('JSON-RPC client generator', () => {
     expect(generated.schemasSource).toContain('medium: z.enum(["Water", "Power"]).nullish().optional(),')
   })
 
+  it('maps a C# union (anyOf, as System.Text.Json 11 exports it) to a TypeScript union and a Zod union', () => {
+    // The exact shape JsonSchemaExporter produces for `union ProductLookup(Found, Missing)`: object cases without
+    // their own "type", the cases' JSON types (plus null) collected on the union node.
+    const foundCase = {
+      properties: {name: {type: 'string'}, stock: {type: 'integer'}},
+      required: ['name', 'stock'],
+    }
+    const missingCase = {
+      properties: {reason: {type: 'integer'}, retired: {type: 'boolean', default: false}},
+      required: ['reason'],
+    }
+    const schema = {
+      methods: {
+        'products.lookup': {
+          params: {
+            type: 'object',
+            properties: {
+              id: {type: 'integer'},
+              filter: {anyOf: [{type: 'integer'}, {type: ['string', 'null']}]},
+            },
+            required: ['id', 'filter'],
+          },
+          result: {
+            type: 'object',
+            properties: {
+              result: {type: ['object', 'null'], anyOf: [foundCase, missingCase]},
+              history: {type: 'array', items: {type: ['object', 'null'], anyOf: [foundCase, missingCase]}},
+            },
+            required: ['history'],
+          },
+        },
+      },
+    } satisfies RpcSchema
+
+    const generated = generateRpcClientFiles(schema)
+
+    expect(generated.typesSource).toContain('filter: number | string | null | undefined')
+    expect(generated.typesSource).toMatch(/result\?: \{\n\s+name: string\n\s+stock: number\n\s+\} \| \{\n\s+reason: number\n\s+retired\?: boolean\n\s+\} \| null \| undefined/)
+    // A union element type is parenthesized inside an array.
+    expect(generated.typesSource).toMatch(/history: \(\{[\s\S]+\| null \| undefined\)\[\]/)
+    expect(generated.schemasSource).toContain('filter: z.union([z.number().int(), z.string()]).nullish(),')
+    // Object cases are strict, like the server's structural classifier: a payload carrying another case's
+    // properties matches no case instead of being stripped into the first one.
+    expect(generated.schemasSource).toMatch(/result: z\.union\(\[z\.strictObject\(\{\n\s+name: z\.string\(\),\n\s+stock: z\.number\(\)\.int\(\),\n\s+\}\), z\.strictObject\(\{\n\s+reason: z\.number\(\)\.int\(\),\n\s+retired: z\.boolean\(\)\.optional\(\),\n\s+\}\)\]\)\.nullish\(\)\.optional\(\),/)
+    expect(generated.schemasSource).not.toContain('z.unknown()')
+  })
+
+  it('resolves $ref union cases and collapses a single remaining case', () => {
+    // Local pointers resolve against the method schema, like the `#/properties/...` references STJ emits.
+    const schema = {
+      methods: {
+        'products.find': {
+          params: {type: 'object', properties: {}},
+          result: {
+            anyOf: [
+              {type: 'object', properties: {name: {type: 'string'}}, required: ['name']},
+              {$ref: '#/anyOf/0'},
+              {type: 'null'},
+            ],
+          },
+        },
+      },
+    } satisfies RpcSchema
+
+    const generated = generateRpcClientFiles(schema)
+
+    // The duplicate collapses and the null-only alternative only makes the union nullable.
+    expect(generated.typesSource).toMatch(/"products\.find": \{\n\s+params: \{\n\s+\}\n\s+result: \{\n\s+name: string\n\s+\}/)
+    expect(generated.schemasSource).toContain('z.strictObject({')
+    expect(generated.schemasSource).not.toContain('z.union(')
+  })
+
+  it('rejects an x-elarion-file payload inside a union case', () => {
+    const schema = {
+      methods: {
+        'files.pick': {
+          params: {type: 'object', properties: {}},
+          result: {
+            anyOf: [
+              {type: 'object', 'x-elarion-file': true, properties: {data: {type: 'string'}}},
+              {type: 'string'},
+            ],
+          },
+        },
+      },
+    } satisfies RpcSchema
+
+    expect(() => generateRpcClientFiles(schema)).toThrow(UnsupportedJsonSchemaError)
+  })
+
   it('parenthesizes union item types in arrays', () => {
     const schema = {
       methods: {

@@ -48,7 +48,7 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
         await using var scope = await unitOfWork.BeginAsync(UnitOfWorkOptions.Default, ct).ConfigureAwait(false);
         var response = await inner.HandleAsync(request, ct).ConfigureAwait(false);
 
-        if (response is IResultLike { IsSuccess: true })
+        if (ResultInspection.IsSuccess(response))
             await scope.CommitAsync(CancellationToken.None).ConfigureAwait(false);
         else
             await scope.RollbackAsync(CancellationToken.None).ConfigureAwait(false);

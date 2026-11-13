@@ -92,10 +92,12 @@ public interface IResultLike {
 }
 ```
 
-Both `Result<T>` and `Result` implement it, so a decorator can branch on the outcome:
+Both `Result<T>` and `Result` implement it, so a decorator can branch on the outcome. In generic code use
+`ResultInspection.IsSuccess`, `IsFailure`, and `TryGetError` (for `IResultError`): they inspect the response without
+boxing a struct result, which an inline `response is IResultLike { … }` pattern does under .NET 11 runtime async:
 
 ```csharp
-if (response is IResultLike { IsSuccess: true }) {
+if (ResultInspection.IsSuccess(response)) {
     await transaction.CommitAsync(ct);
 } else {
     await transaction.RollbackAsync(ct);

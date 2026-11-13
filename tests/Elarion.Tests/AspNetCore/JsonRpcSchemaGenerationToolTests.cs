@@ -17,7 +17,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
                           <PropertyGroup>
                             <OutputType>Exe</OutputType>
                             <AssemblyName>dotnet-elarion-getrpcschema</AssemblyName>
-                            <TargetFramework>net10.0</TargetFramework>
+                            <TargetFramework>{{CurrentTargetFramework}}</TargetFramework>
                             <Nullable>enable</Nullable>
                             <ImplicitUsings>enable</ImplicitUsings>
                           </PropertyGroup>
@@ -56,7 +56,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
         var build = await RunDotnetAsync(projectDirectory, "build", "--configuration", TestConfiguration, "--nologo");
         build.ExitCode.Should().Be(0, build.ToString());
 
-        var assemblyPath = Path.Combine(projectDirectory, "bin", TestConfiguration, "net10.0", "FixtureApp.dll");
+        var assemblyPath = Path.Combine(projectDirectory, "bin", TestConfiguration, CurrentTargetFramework, "FixtureApp.dll");
         var schemaPath = Path.Combine(projectDirectory, "rpc-schema.json");
         var toolPath = GetToolPath(root);
 
@@ -102,7 +102,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
         var project = $$"""
                         <Project Sdk="Microsoft.NET.Sdk.Web">
                           <PropertyGroup>
-                            <TargetFramework>net10.0</TargetFramework>
+                            <TargetFramework>{{CurrentTargetFramework}}</TargetFramework>
                             <Nullable>enable</Nullable>
                             <ImplicitUsings>enable</ImplicitUsings>
                             {{generationProperties}}
@@ -159,7 +159,7 @@ public sealed class JsonRpcSchemaGenerationToolTests {
             "Elarion.AspNetCore.SchemaGeneration.Tool",
             "bin",
             TestConfiguration,
-            "net10.0",
+            CurrentTargetFramework,
             "dotnet-elarion-getrpcschema.dll");
     }
 
@@ -206,6 +206,13 @@ public sealed class JsonRpcSchemaGenerationToolTests {
 
         return new CommandResult(process.ExitCode, stdout, stderr);
     }
+
+    /// <summary>
+    /// The framework this test run targets: fixture applications and the schema tool are built for it, so each
+    /// target framework of the suite exercises its own tool build (the tool loads the application in-process, and
+    /// a net10 tool cannot load a net11 application).
+    /// </summary>
+    private static string CurrentTargetFramework => $"net{Environment.Version.Major}.0";
 
     private static string FindRepositoryRoot() {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

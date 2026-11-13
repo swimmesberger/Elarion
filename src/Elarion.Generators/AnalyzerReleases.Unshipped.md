@@ -98,6 +98,7 @@
  ELVAR010   | Elarion.Abstractions.Features      | Warning  | Variant registry accessor collision
  ELVAL001   | Elarion.Abstractions.Validation    | Error    | Validated handler response cannot represent failure
  ELVAL002   | Elarion.Abstractions.Validation    | Warning  | Validation attributes are not enforced without Elarion.Validation
+ ELVAL003   | Elarion.Abstractions.Validation    | Warning  | Asynchronous request validation runs before the transaction
  ELIDEM001  | Elarion.Abstractions.Idempotency   | Error    | Idempotent handler response cannot represent failure
  ELIDEM002  | Elarion.Abstractions.Idempotency   | Warning  | [Idempotent] handler is not a command
  ELIDEM003  | Elarion.Abstractions.Idempotency   | Error    | [Idempotent] retention is invalid

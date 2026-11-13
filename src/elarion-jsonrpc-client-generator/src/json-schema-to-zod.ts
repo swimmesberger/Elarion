@@ -4,11 +4,20 @@ import {
   childContext,
   formatPropertyName,
   isNullable,
+  isNullOnly,
   resolveSchema,
+  stripNullable,
   type SchemaContext,
+  unionAlternatives,
 } from './json-schema.js'
 
-export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent = 0): string {
+/**
+ * @param strictObject emit an object schema that rejects unknown keys (`z.strictObject`) — used for the object cases
+ *   of a union, mirroring the server's structural classifier, which rules out a case that does not declare a property
+ *   present in the payload. Plain `z.object` would instead accept the first case whose required keys match and strip
+ *   the others' properties.
+ */
+export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent = 0, strictObject = false): string {
   const {schema: resolved, ctx: resolvedCtx} = resolveSchema(schema, ctx)
   const nullable = isNullable(resolved)
   const base = baseType(resolved)
@@ -32,6 +41,25 @@ export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent =
         : `z.union([${literals.join(', ')}]${paramsArg(resolved, 'enum')})`
     }
     return nullish(zodExpression, nullable)
+  }
+
+  const alternatives = unionAlternatives(resolved)
+  if (alternatives) {
+    let unionNullable = nullable
+    const members: string[] = []
+    alternatives.forEach((alternative, index) => {
+      const {schema: member, ctx: memberCtx} = resolveSchema(alternative, childContext(resolvedCtx, `anyOf[${index}]`))
+      unionNullable ||= isNullable(member)
+      if (isNullOnly(member)) {
+        return
+      }
+      const memberSchema = jsonSchemaToZod(stripNullable(member), memberCtx, indent, true)
+      if (!members.includes(memberSchema)) {
+        members.push(memberSchema)
+      }
+    })
+    const union = members.length === 0 ? 'z.never()' : members.length === 1 ? members[0] : `z.union([${members.join(', ')}])`
+    return nullish(union, unionNullable)
   }
 
   if (base === 'string') {
@@ -62,7 +90,8 @@ export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent =
       }
       return `${pad}${formatPropertyName(key)}: ${fieldSchema},`
     })
-    return nullish(`z.object({\n${fields.join('\n')}\n${'  '.repeat(indent)}})`, nullable)
+    const factory = strictObject ? 'z.strictObject' : 'z.object'
+    return nullish(`${factory}({\n${fields.join('\n')}\n${'  '.repeat(indent)}})`, nullable)
   }
 
   return 'z.unknown()'

@@ -157,10 +157,12 @@ JSON-RPC and MCP always answer: a batch entry or a tool call has no host handler
 ## Results in pipelines
 
 Decorators can inspect a `Result<T>` through the non-generic `IResultLike` interface — for example a
-transaction decorator that commits on success and rolls back on failure:
+transaction decorator that commits on success and rolls back on failure. In generic code, go through
+`ResultInspection` rather than an inline `response is IResultLike { … }` pattern: the helpers never box a struct
+result, while the inline pattern does inside a method compiled with .NET 11 runtime async:
 
 ```csharp
-if (response is IResultLike { IsSuccess: true }) {
+if (ResultInspection.IsSuccess(response)) {
     await transaction.CommitAsync(ct);
 } else {
     await transaction.RollbackAsync(ct);

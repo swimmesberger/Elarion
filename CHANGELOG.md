@@ -8,6 +8,41 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **.NET 11 support.** Every runtime package now ships `net10.0` and `net11.0` builds. A .NET 10 application keeps
+  a supported line; a .NET 11 application gets assets built against .NET 11: the `Microsoft.Extensions` abstractions
+  that .NET 11 includes in the shared framework are no longer package dependencies, and packages on the .NET release
+  train resolve to their 11.x majors (`Microsoft.OpenApi` 3.x under `Elarion.AspNetCore.OpenApi`). The Entity
+  Framework Core packages stay on EF Core 10 for both frameworks until the Npgsql EF Core 11 provider is released.
+- **Request validation on .NET 11** (`Elarion.Validation`). `Microsoft.Extensions.Validation` 11 no longer exposes
+  its validation walker, so the `net11.0` build carries an adaptation of it (MIT, see `THIRD-PARTY-NOTICES.md`), and
+  the generated module resolvers bind to whichever walker the application's framework provides. On .NET 11 the
+  walker also runs `AsyncValidationAttribute` and `IAsyncValidatableObject`; they run before the transaction, so keep
+  database checks in the handler.
+- **`ELVAL003`** (warning): a handler's request graph has an `AsyncValidationAttribute` or an
+  `IAsyncValidatableObject`. They are enforced, but in the validation decorator, before the handler's transaction, so
+  a database or service lookup there is a time-of-check/time-of-use race; the warning names each async validator.
+- **C# union contracts (.NET 11).** A union-typed request or response property is exported as `anyOf` (System.Text.Json
+  11) and the TypeScript client generator maps it to a TypeScript union and a Zod `z.union` (object cases as
+  `z.strictObject`, mirroring `JsonUnionTypeStructuralClassifier`). Request validation walks into the active case:
+  the case types' attributes are enforced at the property's own path. Local `$ref` pointers may now index arrays.
+- **`Elarion.AspNetCore.SchemaGeneration` ships one schema tool per framework** (`tools/net10.0`, `tools/net11.0`)
+  and picks the one matching the application's `TargetFramework`, as the tool loads the application in-process.
+- **`ResultInspection`** (`Elarion.Abstractions`): `IsSuccess`, `IsFailure` and `TryGetError` inspect a generic
+  response for the result pattern without boxing a struct `Result<T>`. The built-in decorators and `HybridHandlerCache`
+  use it; an inline `response is IResultLike { … }` boxes the result on every call inside a method compiled with .NET 11
+  runtime async.
+- **The net11 build compiles with runtime async** (ADR-0092): handler dispatch is faster with the same or fewer
+  allocations — synchronous and suspending — and live stack traces show the real handler and decorator chain.
+  `ElarionRuntimeAsync=false` builds with compiler state machines; `ELARION_BENCH_RUNTIME_ASYNC=compare` benchmarks both,
+  and `HandlerPipelineBenchmarks`/`ActorCallBenchmarks` gained suspending-handler and awaited-call arms.
+
+### Changed
+- CI builds and packs both frameworks but runs the test suite on `net11.0` only.
+- Building the repository requires the .NET 11 SDK (and the .NET 10 runtime for the `net10.0` tests). The samples
+  target `net11.0`. Dependencies updated to their latest patch/minor releases (Aspire 13.6, gRPC 2.85, OpenTelemetry
+  1.21, ModelContextProtocol 2.4, Azure.Storage.Blobs 12.30, Testcontainers 4.16, .NET 10 packages 10.0.15).
+
 ## [0.3.2] - 2026-10-25
 
 ### Security
