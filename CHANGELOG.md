@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-16
+
 ### Added
 - **.NET 11 support.** Every runtime package now ships `net10.0` and `net11.0` builds. A .NET 10 application keeps
   a supported line; a .NET 11 application gets assets built against .NET 11: the `Microsoft.Extensions` abstractions
@@ -2404,7 +2406,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.0
 [0.3.2]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.2
 [0.3.1]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.1
 [0.3.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.0
