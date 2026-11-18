@@ -1,3 +1,4 @@
+using Elarion.Tests.Infrastructure;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -19,8 +20,8 @@ public sealed class PostgreSqlMigrationsFixture : IAsyncLifetime {
 
     public async ValueTask InitializeAsync() {
         try {
-            var container = new PostgreSqlBuilder("postgres:17-alpine").Build();
-            await container.StartAsync();
+            var container = await TestContainerLifecycle.Shared.StartAsync(() =>
+                new PostgreSqlBuilder("postgres:17-alpine").Build());
             _container = container;
             IsAvailable = true;
         }
@@ -30,7 +31,7 @@ public sealed class PostgreSqlMigrationsFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) await _container.DisposeAsync();
+        await TestContainerLifecycle.Shared.DisposeAsync(_container);
     }
 
     /// <summary>Creates a fresh database and returns a connection string targeting it.</summary>

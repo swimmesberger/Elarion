@@ -1,3 +1,4 @@
+using Elarion.Tests.Infrastructure;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -20,8 +21,8 @@ public sealed class PostgreSqlSqlMapperFixture : IAsyncLifetime {
 
     public async ValueTask InitializeAsync() {
         try {
-            var container = new PostgreSqlBuilder("postgres:17-alpine").Build();
-            await container.StartAsync();
+            var container = await TestContainerLifecycle.Shared.StartAsync(() =>
+                new PostgreSqlBuilder("postgres:17-alpine").Build());
             _container = container;
             ConnectionString = container.GetConnectionString();
 
@@ -61,7 +62,7 @@ public sealed class PostgreSqlSqlMapperFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) await _container.DisposeAsync();
+        await TestContainerLifecycle.Shared.DisposeAsync(_container);
     }
 
     public NpgsqlConnection CreateConnection() {

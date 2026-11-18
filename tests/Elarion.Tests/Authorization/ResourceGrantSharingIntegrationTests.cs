@@ -6,6 +6,7 @@ using Elarion.Abstractions.Identity;
 using Elarion.Abstractions.Paging;
 using Elarion.Paging;
 using Elarion.Authorization.EntityFrameworkCore;
+using Elarion.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
@@ -261,8 +262,8 @@ public sealed class ResourceGrantSharingFixture : IAsyncLifetime {
     public async ValueTask InitializeAsync() {
         PostgreSqlContainer container;
         try {
-            container = new PostgreSqlBuilder("postgres:17-alpine").Build();
-            await container.StartAsync();
+            container = await TestContainerLifecycle.Shared.StartAsync(() =>
+                new PostgreSqlBuilder("postgres:17-alpine").Build());
         }
         catch (Exception ex) {
             SkipReason = $"PostgreSQL Testcontainer unavailable (Docker required): {ex.Message}";
@@ -278,6 +279,6 @@ public sealed class ResourceGrantSharingFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) await _container.DisposeAsync();
+        await TestContainerLifecycle.Shared.DisposeAsync(_container);
     }
 }

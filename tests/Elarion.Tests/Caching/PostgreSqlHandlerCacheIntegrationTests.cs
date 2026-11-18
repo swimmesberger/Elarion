@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using Elarion.Caching.PostgreSql;
+using Elarion.Tests.Infrastructure;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -25,8 +26,8 @@ public sealed class PostgreSqlHandlerCacheIntegrationTests : IAsyncLifetime {
         PostgreSqlContainer container;
         try {
             // Build() validates the Docker endpoint, so it must run inside the guard too.
-            container = new PostgreSqlBuilder("postgres:17-alpine").Build();
-            await container.StartAsync();
+            container = await TestContainerLifecycle.Shared.StartAsync(() =>
+                new PostgreSqlBuilder("postgres:17-alpine").Build());
         }
         catch (Exception ex) {
             // The only expected failure here is Docker being unavailable; surface it as a skip.
@@ -40,7 +41,7 @@ public sealed class PostgreSqlHandlerCacheIntegrationTests : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) await _container.DisposeAsync();
+        await TestContainerLifecycle.Shared.DisposeAsync(_container);
     }
 
     [Fact]
