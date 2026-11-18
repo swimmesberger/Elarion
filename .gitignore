@@ -26,6 +26,9 @@ obj/
 publish/
 .nuget/
 packages/
+# The Elarion.Typst test templates are a Typst package (source), not a NuGet packages folder
+!tests/Elarion.Tests/Typst/Assets/packages/
+!tests/Elarion.Tests/Typst/Assets/packages/**
 
 # ASP.NET
 appsettings.Development.json

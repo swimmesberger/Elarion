@@ -130,6 +130,13 @@ Properties read by `Elarion.AspNetCore.SchemaGeneration` during build:
 
 See [Schema generation](/docs/capabilities/transports/schema-generation).
 
+## Typst PDF rendering (MSBuild and options)
+
+Properties read by the `Elarion.Typst` build targets: `ElarionTypstBundle`, `ElarionTypstAssetsDirectory`,
+`ElarionTypstVersion`, `ElarionTypstSha256`, `ElarionTypstExecutable`, and `ElarionTypstCacheDirectory`. Runtime
+settings are `TypstOptions`, set through `AddElarionTypst(options => …)` (options, not config). Both tables, with
+defaults, are in [PDF documents](/docs/capabilities/pdf-documents#build-integration).
+
 ## Proxy identity
 
 `AddElarionProxyIdentity(configuration, environment)` binds the `ProxyIdentity` section (package

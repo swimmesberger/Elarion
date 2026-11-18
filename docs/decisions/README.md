@@ -113,3 +113,5 @@ designs that are not yet implemented.
 - [ADR-0090: References between records stay in the database — entity lifecycle events are removed](0090-references-between-records-stay-in-the-database.md)
 - [ADR-0091: A query declares its source entities; committed writes to them become re-query hints — Proposed](0091-query-sources-and-requery-hints.md)
 - [ADR-0092: The net11 build compiles with runtime async](0092-runtime-async-on-net11.md)
+- [ADR-0093: Typst PDF rendering is a framework package — the pinned CLI, bundled by the build, one sandboxed workspace per document — Proposed](0093-typst-pdf-rendering.md)
+- [ADR-0094: An in-process Typst engine is an opt-in second implementation of ITypstCompiler — prototype findings — Proposed](0094-in-process-typst-engine.md)
