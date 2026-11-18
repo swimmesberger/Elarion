@@ -59,6 +59,21 @@ The binary is downloaded once per version and platform into `<LocalApplicationDa
 SHA-256 checksums that ship with the package, and reused offline afterwards. The application never downloads anything
 at runtime.
 
+<Callout type="warn">
+Check that your templates are committed. Typst's package folder is named `packages/`, and most .NET `.gitignore` files
+(including the standard Visual Studio template) ignore every `packages/` folder as a NuGet restore folder. The build and
+tests then pass on your machine, and CI or a colleague's checkout fails with `package not found`. Add an exception:
+
+```text
+# Typst templates are source, not a NuGet packages folder
+!**/Typst/packages/
+!**/Typst/packages/**
+```
+
+Both lines are needed: the first re-includes the folder for rules that ignore the folder itself (`packages/`), the
+second its contents for rules that ignore what is inside (`**/[Pp]ackages/*`).
+</Callout>
+
 </Step>
 <Step>
 
