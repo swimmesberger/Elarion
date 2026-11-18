@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Typst PDF rendering for Elarion (ADR-0093): ITypstCompiler runs the pinned Typst CLI in a fresh, sandboxed workspace per document (data.json, assets, a generated main file), bounds concurrency and time, and returns the PDF as a self-deleting stream. Its MSBuild targets acquire the pinned, checksum-verified Typst binary at build time for every executable that references it, and copy the application's Typst package and font tree next to it.</Description>
+    <PackageTags>elarion;typst;pdf;documents;reports;dotnet</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- AddElarionTypst(IConfiguration) binds through the configuration-binding source generator, not the reflection binder. -->
+    <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Abstractions\Elarion.Abstractions.csproj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- buildTransitive: the binary must land in the *executable's* output for the executable's RuntimeIdentifier,
+         and the executable usually references this package only through an infrastructure library. build/ imports
+         the same files for a direct reference. -->
+    <None Include="buildTransitive\Elarion.Typst.targets" Pack="true" PackagePath="buildTransitive\;build\"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+    <InternalsVisibleTo Include="Elarion.Typst.Native"/>
+    <InternalsVisibleTo Include="Elarion.Typst.Native.Tests"/>
+    <InternalsVisibleTo Include="Elarion.Typst.Native.Benchmarks"/>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- CLI vs in-process Typst measurements behind ADR-0094 and docs/decisions/research/typst-in-process-concurrency.md.
+       Outside Elarion.slnx (building it runs cargo). Run instructions are in Program.cs. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ElarionTypstAssetsDirectory>../Elarion.Tests/Typst/Assets</ElarionTypstAssetsDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Elarion.Typst.Native/Elarion.Typst.Native.csproj"/>
+  </ItemGroup>
+  <Import Project="../../src/Elarion.Typst/buildTransitive/Elarion.Typst.targets"/>
+</Project>

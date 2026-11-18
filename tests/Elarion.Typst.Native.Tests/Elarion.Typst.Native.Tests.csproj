@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Tests for the in-process Typst engine prototype (ADR-0094). Kept apart from Elarion.Tests so the main suite and
+       CI need no Rust toolchain; building this project runs cargo. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The same test package the CLI engine tests compile, so both engines render identical templates. -->
+    <ElarionTypstAssetsDirectory>../Elarion.Tests/Typst/Assets</ElarionTypstAssetsDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.mtp-v2"/>
+    <PackageReference Include="AwesomeAssertions"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection"/>
+    <PackageReference Include="Microsoft.Extensions.Logging"/>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Elarion.Typst.Native/Elarion.Typst.Native.csproj"/>
+  </ItemGroup>
+  <!-- The CLI binary too: the conformance tests compile every request with both engines. -->
+  <Import Project="../../src/Elarion.Typst/buildTransitive/Elarion.Typst.targets"/>
+</Project>

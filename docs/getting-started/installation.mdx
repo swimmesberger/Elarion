@@ -31,6 +31,7 @@ client generation and frontend contributions. You only install the pieces you us
 | `Elarion.FeatureFlags.FeatureManagement` | Application / host | Batteries-included config-driven flags via the Microsoft.FeatureManagement OpenFeature provider — `services.AddElarionFeatureManagement(configuration)`. |
 | `Elarion.Blobs` | Application | Provider-neutral blob storage contracts and DTOs. |
 | `Elarion.Blobs.PostgreSql` | Infrastructure / host | PostgreSQL-backed blob storage using EF Core model configuration and Npgsql content I/O. |
+| `Elarion.Typst` | Infrastructure / host | PDF rendering with Typst — `services.AddElarionTypst()`. Its build targets bundle the pinned, checksum-verified Typst binary into every executable that references it. See [PDF documents](/docs/capabilities/pdf-documents). |
 | `Elarion.JsonRpc` | Host | Transport-neutral JSON-RPC dispatcher, envelopes, telemetry, and schema export. |
 | `Elarion.Grpc` | Custom gRPC host | Host-neutral unary and request-driven server-streaming invocation, configurable principal capture, and stable startup `AppError` → `RpcException` translation. Bring your own host and generated protobuf contracts. |
 | `Elarion.Grpc.AspNetCore` | ASP.NET Core gRPC host | Recommended grpc-dotnet conventions: `AddGrpc().AddElarion()`, automatic `HttpContext.User`/`RequestServices` adoption, and delegate-free `ServerCallContext.InvokeElarionAsync<TRequest,TResponse>(request)`/`InvokeElarionStreamAsync<TRequest,TItem>(request)` dispatch. |

@@ -8,6 +8,23 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **`Elarion.Typst`: PDF documents with Typst** (ADR-0093). `ITypstCompiler` runs the pinned Typst CLI in a fresh,
+  sandboxed workspace per document. The workspace holds a generated `main.typ` that calls an entry point of the
+  application's Typst package with the parsed `data.json` and a dictionary of asset bytes. The compiler bounds
+  concurrency and time, kills the process tree on timeout or cancellation, keeps fonts deterministic, and returns the
+  PDF as a self-deleting stream (`TypstPdf`) for a blob store or an `ElarionFile` response. The package's
+  `buildTransitive` targets download the pinned, checksum-verified Typst binary once and copy it into every
+  executable that references the package, for that executable's runtime identifier, including test projects. They
+  also copy the application's package and font tree (`ElarionTypstAssetsDirectory`). A startup check refuses to
+  start, or warns, when the toolchain is incomplete. `TypstImage` passes only complete pictures in formats Typst can
+  decode, and `TypstTelemetry` records compilation and queue durations by outcome. Entry points can take named
+  arguments (`TypstSource.WithArgument`, emitted as escaped Typst literals), and
+  `AddElarionTypst(configuration.GetSection("Typst"))` binds the options through the source-generated binder. On .NET
+  11 the Typst process uses the new process APIs: `KillOnParentExit`, no inherited handles, a null standard input,
+  `RunAndCaptureTextAsync`, and the terminating signal in the diagnostics. See
+  [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents).
+
 ## [0.4.0] - 2026-11-16
 
 ### Added

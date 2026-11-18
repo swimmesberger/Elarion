@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>PROTOTYPE. In-process Typst engine for Elarion.Typst: the same ITypstCompiler, TypstCompileRequest and templates, compiled by an embedded Rust library (native/elarion-typst) instead of the typst CLI. Fonts load once and package files stay cached across documents; the PDF is handed over without a copy.</Description>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- A prototype: not published until the per-RID native packaging exists (see ADR-0094). -->
+    <IsPackable>false</IsPackable>
+    <ElarionTypstNativeCrate>$(MSBuildThisFileDirectory)../../native/elarion-typst/</ElarionTypstNativeCrate>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Typst\Elarion.Typst.csproj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Typst.Native.Tests"/>
+    <InternalsVisibleTo Include="Elarion.Typst.Native.Benchmarks"/>
+  </ItemGroup>
+
+  <!-- Prototype build integration: compile the Rust library for the host with cargo and copy it next to the assemblies
+       of this project and every project that references it. A release would instead ship one runtime package per RID
+       (runtimes/<rid>/native/), built by a CI matrix. -->
+  <PropertyGroup>
+    <_ElarionTypstNativeFile Condition="$([MSBuild]::IsOSPlatform('Windows'))">elarion_typst.dll</_ElarionTypstNativeFile>
+    <_ElarionTypstNativeFile Condition="$([MSBuild]::IsOSPlatform('OSX'))">libelarion_typst.dylib</_ElarionTypstNativeFile>
+    <_ElarionTypstNativeFile Condition="'$(_ElarionTypstNativeFile)' == ''">libelarion_typst.so</_ElarionTypstNativeFile>
+    <_ElarionTypstNativePath>$(ElarionTypstNativeCrate)target/release/$(_ElarionTypstNativeFile)</_ElarionTypstNativePath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(_ElarionTypstNativePath)" Link="$(_ElarionTypstNativeFile)" CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" Visible="false"/>
+  </ItemGroup>
+
+  <Target Name="ElarionBuildTypstNative" BeforeTargets="AssignTargetPaths"
+          Inputs="$(ElarionTypstNativeCrate)Cargo.toml;@(_ElarionTypstNativeSources)"
+          Outputs="$(_ElarionTypstNativePath)"
+          Condition="'$(ElarionTypstNativeBuild)' != 'false'">
+    <Exec Command="cargo build --release --manifest-path &quot;$(ElarionTypstNativeCrate)Cargo.toml&quot;" />
+  </Target>
+
+  <ItemGroup>
+    <_ElarionTypstNativeSources Include="$(ElarionTypstNativeCrate)src/**/*.rs"/>
+  </ItemGroup>
+
+</Project>
