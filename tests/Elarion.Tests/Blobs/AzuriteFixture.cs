@@ -1,4 +1,5 @@
 using Azure.Storage.Blobs;
+using Elarion.Tests.Infrastructure;
 using Testcontainers.Azurite;
 using Xunit;
 
@@ -30,10 +31,10 @@ public sealed class AzuriteFixture : IAsyncLifetime {
             // Build() validates the Docker endpoint, so it must run inside the guard too. The SDK's
             // default service version can be newer than what Azurite ships (the SDK releases first), so
             // skip the emulator's version check — the operations exercised here are stable-surface.
-            container = new AzuriteBuilder("mcr.microsoft.com/azure-storage/azurite:3.35.0")
-                .WithCommand("--skipApiVersionCheck")
-                .Build();
-            await container.StartAsync();
+            container = await TestContainerLifecycle.Shared.StartAsync(() =>
+                new AzuriteBuilder("mcr.microsoft.com/azure-storage/azurite:3.35.0")
+                    .WithCommand("--skipApiVersionCheck")
+                    .Build());
         }
         catch (Exception ex) {
             SkipReason = $"Azurite Testcontainer unavailable (Docker required): {ex.Message}";
@@ -47,6 +48,6 @@ public sealed class AzuriteFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) await _container.DisposeAsync();
+        await TestContainerLifecycle.Shared.DisposeAsync(_container);
     }
 }

@@ -1,4 +1,5 @@
 using Elarion.Blobs.PostgreSql;
+using Elarion.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -26,8 +27,8 @@ public sealed class PostgreSqlBlobStoreFixture : IAsyncLifetime {
         PostgreSqlContainer container;
         try {
             // Build() validates the Docker endpoint, so it must run inside the guard too.
-            container = new PostgreSqlBuilder("postgres:17-alpine").Build();
-            await container.StartAsync();
+            container = await TestContainerLifecycle.Shared.StartAsync(() =>
+                new PostgreSqlBuilder("postgres:17-alpine").Build());
         }
         catch (Exception ex) {
             // The only expected failure here is Docker being unavailable; surface it as a skip.
@@ -43,7 +44,7 @@ public sealed class PostgreSqlBlobStoreFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) await _container.DisposeAsync();
+        await TestContainerLifecycle.Shared.DisposeAsync(_container);
     }
 
     /// <summary>Creates a fresh context bound to the container, so each test owns its own connection.</summary>

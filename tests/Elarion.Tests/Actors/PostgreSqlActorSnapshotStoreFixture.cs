@@ -1,5 +1,6 @@
 using Elarion.Actors.PostgreSql;
 using Elarion.Coordination.PostgreSql;
+using Elarion.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -23,8 +24,8 @@ public sealed class PostgreSqlActorSnapshotStoreFixture : IAsyncLifetime {
     public async ValueTask InitializeAsync() {
         PostgreSqlContainer container;
         try {
-            container = new PostgreSqlBuilder("postgres:17-alpine").Build();
-            await container.StartAsync();
+            container = await TestContainerLifecycle.Shared.StartAsync(() =>
+                new PostgreSqlBuilder("postgres:17-alpine").Build());
         }
         catch (Exception ex) {
             SkipReason = $"PostgreSQL Testcontainer unavailable (Docker required): {ex.Message}";
@@ -39,7 +40,7 @@ public sealed class PostgreSqlActorSnapshotStoreFixture : IAsyncLifetime {
     }
 
     public async ValueTask DisposeAsync() {
-        if (_container is not null) await _container.DisposeAsync();
+        await TestContainerLifecycle.Shared.DisposeAsync(_container);
     }
 
     public ActorSnapshotIntegrationDbContext CreateContext() {
