@@ -86,6 +86,7 @@
     <Project Path="src/Elarion.Generators/Elarion.Generators.csproj"/>
     <Project Path="src/Elarion.JsonRpc/Elarion.JsonRpc.csproj"/>
     <Project Path="src/Elarion.Validation/Elarion.Validation.csproj"/>
+    <Project Path="src/Elarion.Typst/Elarion.Typst.csproj"/>
     <Project Path="src/Elarion.WebPush/Elarion.WebPush.csproj"/>
     <Project Path="src/Elarion.WebPush.AspNetCore/Elarion.WebPush.AspNetCore.csproj"/>
     <Project Path="src/Elarion.WebPush.EntityFrameworkCore/Elarion.WebPush.EntityFrameworkCore.csproj"/>

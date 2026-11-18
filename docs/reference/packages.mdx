@@ -117,6 +117,12 @@ Read the [actor decision guide](/docs/concepts/actors) before adding the actor p
 | `Elarion.Blobs.AspNetCore` | An ASP.NET host needs direct upload/cancel and owner-scoped streaming download endpoints. |
 | `Elarion.Blobs.Tus` | Large uploads should use the recommended tus 1.0 resumable transport over any staged-upload store. |
 
+## Documents
+
+| Package | Add it when |
+| --- | --- |
+| `Elarion.Typst` | The application renders PDFs (invoices, quotes, protocols, reports) from its own data with [Typst](/docs/capabilities/pdf-documents): `ITypstCompiler` runs the pinned CLI in one sandboxed workspace per document, with bounded time and concurrency and a self-deleting output stream. Its `buildTransitive` targets bundle the checksum-verified binary into every executable that references it (for that executable's RID) and copy the application's Typst package and fonts (`ElarionTypstAssetsDirectory`). Depends on `Elarion.Abstractions` and `Microsoft.Extensions` packages only; AOT-compatible. |
+
 ## Runtime settings
 
 | Package | Add it when |
@@ -158,4 +164,5 @@ Read the [actor decision guide](/docs/concepts/actors) before adding the actor p
 | EF-free NativeAOT host (PostgreSQL) | `Elarion.Sql` + `Elarion.Sql.PostgreSql` + `Elarion.Migrations` |
 | EF-free NativeAOT host (SQLite, single-node / edge) | `Elarion.Sql` + `Elarion.Sql.Sqlite` + `Elarion.Migrations` |
 | ASP.NET Core host | `Elarion`, `Elarion.JsonRpc`, `Elarion.AspNetCore`; opt in to OpenAPI, MCP, schema generation, Identity, SSE, and blob transports as needed |
+| Assembly that renders PDF documents | `Elarion.Typst`, with `ElarionTypstAssetsDirectory` pointing at its Typst package and fonts; the executables referencing it get the binary |
 | Frontend | `@swimmesberger/elarion-jsonrpc-client-generator`; optionally `@swimmesberger/elarion-contributions`, `@swimmesberger/elarion-pwa`, and `@swimmesberger/elarion-webpush` |

@@ -133,6 +133,7 @@ public package, grouped by capability, with the reason to add each one.
 | Events and live clients     | `Elarion.Messaging.Outbox`, `Elarion.ClientEvents` | PostgreSQL fan-out and SSE transport; `Elarion.WebPush` to notify users whose app is closed                        |
 | Live state and device links | `Elarion.Actors`, `Elarion.Connections`            | PostgreSQL actor state/home, WebSocket/TCP adapters, simulation, and device identity                                |
 | Blob storage                | `Elarion.Blobs`                                    | PostgreSQL or Azure storage plus direct HTTP or tus upload transports                                               |
+| PDF documents               | `Elarion.Typst`                                    | Typst templates rendered by a pinned CLI the build bundles into each executable                                    |
 | Runtime settings            | `Elarion.Settings`                                 | EF persistence, configuration reload, and PostgreSQL cross-node notifications                                       |
 | Frontend tooling            | `@swimmesberger/elarion-jsonrpc-client-generator`  | Typed frontend contributions and framework bindings; `@swimmesberger/elarion-pwa` to install as an app, `@swimmesberger/elarion-webpush` for browser push |
 

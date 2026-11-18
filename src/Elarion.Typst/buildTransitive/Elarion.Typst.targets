@@ -1,0 +1,139 @@
+<Project>
+  <!--
+    Elarion.Typst build integration (ADR-0093).
+
+    The runtime never downloads anything: the build acquires the pinned Typst CLI once, verifies it against the
+    SHA-256 table below, caches it per user, and copies it to <output>/typst/bin/ of every executable that references
+    Elarion.Typst (directly or through a library). The binary follows $(RuntimeIdentifier) when one is set, so
+    `dotnet publish -r linux-x64` on a Mac bundles the Linux binary; otherwise it follows the SDK's own RID.
+
+    Properties (all optional):
+      ElarionTypstBundle            true/false. Default: true for executables (OutputType Exe/WinExe, which includes
+                                    Microsoft.Testing.Platform test projects), false for libraries.
+      ElarionTypstVersion           The Typst release to bundle. Default: the version this package was tested with.
+                                    Another version also needs ElarionTypstSha256.
+      ElarionTypstSha256            SHA-256 of the release archive for the target RID; required only with a
+                                    non-default ElarionTypstVersion.
+      ElarionTypstExecutable        A pre-fetched binary to bundle instead of downloading (air-gapped builds).
+      ElarionTypstCacheDirectory    Download cache. Default: <LocalApplicationData>/elarion/typst. A cached binary is
+                                    reused, so rebuilds work offline.
+      ElarionTypstAssetsDirectory   A project directory copied verbatim to <output>/typst/ - conventionally holding
+                                    packages/ (the application's Typst package) and fonts/. Unset copies nothing.
+  -->
+  <PropertyGroup>
+    <_ElarionTypstDefaultVersion>0.15.1</_ElarionTypstDefaultVersion>
+    <ElarionTypstVersion Condition="'$(ElarionTypstVersion)' == ''">$(_ElarionTypstDefaultVersion)</ElarionTypstVersion>
+    <ElarionTypstBundle Condition="'$(ElarionTypstBundle)' == '' and ('$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe')">true</ElarionTypstBundle>
+    <ElarionTypstBundle Condition="'$(ElarionTypstBundle)' == ''">false</ElarionTypstBundle>
+    <ElarionTypstCacheDirectory Condition="'$(ElarionTypstCacheDirectory)' == ''">$([System.IO.Path]::Combine($([System.Environment]::GetFolderPath(SpecialFolder.LocalApplicationData)), 'elarion', 'typst'))</ElarionTypstCacheDirectory>
+
+    <_ElarionTypstRid>$(RuntimeIdentifier)</_ElarionTypstRid>
+    <_ElarionTypstRid Condition="'$(_ElarionTypstRid)' == ''">$(NETCoreSdkRuntimeIdentifier)</_ElarionTypstRid>
+  </PropertyGroup>
+
+  <!-- Release targets and archive checksums of the default version, from the GitHub release's asset digests. Update
+       the table together with _ElarionTypstDefaultVersion. -->
+  <PropertyGroup Condition="$(_ElarionTypstRid.StartsWith('win'))">
+    <_ElarionTypstTarget Condition="$(_ElarionTypstRid.EndsWith('-x64'))">x86_64-pc-windows-msvc</_ElarionTypstTarget>
+    <_ElarionTypstKnownSha256 Condition="$(_ElarionTypstRid.EndsWith('-x64'))">19ce3551153c2fe7ee9fa2f95208310c8f4d3209fedb699e0333faf8913f6736</_ElarionTypstKnownSha256>
+    <_ElarionTypstTarget Condition="$(_ElarionTypstRid.EndsWith('-arm64'))">aarch64-pc-windows-msvc</_ElarionTypstTarget>
+    <_ElarionTypstKnownSha256 Condition="$(_ElarionTypstRid.EndsWith('-arm64'))">4ab28e1b71ec3184d38d580ab797f499b6770d952b6b19167be5cea5c2662e14</_ElarionTypstKnownSha256>
+    <_ElarionTypstArchiveExtension>.zip</_ElarionTypstArchiveExtension>
+    <_ElarionTypstExecutableName>typst.exe</_ElarionTypstExecutableName>
+  </PropertyGroup>
+  <PropertyGroup Condition="$(_ElarionTypstRid.StartsWith('linux'))">
+    <!-- The musl builds are statically linked, so they also run on glibc distributions and in distroless images. -->
+    <_ElarionTypstTarget Condition="$(_ElarionTypstRid.EndsWith('-x64'))">x86_64-unknown-linux-musl</_ElarionTypstTarget>
+    <_ElarionTypstKnownSha256 Condition="$(_ElarionTypstRid.EndsWith('-x64'))">a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c</_ElarionTypstKnownSha256>
+    <_ElarionTypstTarget Condition="$(_ElarionTypstRid.EndsWith('-arm64'))">aarch64-unknown-linux-musl</_ElarionTypstTarget>
+    <_ElarionTypstKnownSha256 Condition="$(_ElarionTypstRid.EndsWith('-arm64'))">5aa8d74a3d906e60ea12a66ac2f37f8eef1b14cbad7182a745e393a10c23dcee</_ElarionTypstKnownSha256>
+    <_ElarionTypstArchiveExtension>.tar.xz</_ElarionTypstArchiveExtension>
+    <_ElarionTypstExecutableName>typst</_ElarionTypstExecutableName>
+  </PropertyGroup>
+  <PropertyGroup Condition="$(_ElarionTypstRid.StartsWith('osx'))">
+    <_ElarionTypstTarget Condition="$(_ElarionTypstRid.EndsWith('-x64'))">x86_64-apple-darwin</_ElarionTypstTarget>
+    <_ElarionTypstKnownSha256 Condition="$(_ElarionTypstRid.EndsWith('-x64'))">7f9fdd9584866245de9a79e0add8f9236fae6f40a8a45e2c4771ccc14db4e0fa</_ElarionTypstKnownSha256>
+    <_ElarionTypstTarget Condition="$(_ElarionTypstRid.EndsWith('-arm64'))">aarch64-apple-darwin</_ElarionTypstTarget>
+    <_ElarionTypstKnownSha256 Condition="$(_ElarionTypstRid.EndsWith('-arm64'))">48f62ed034aa3a7978309579ac6ca00045e2ef0da73114e8af27cfd8e74dc05a</_ElarionTypstKnownSha256>
+    <_ElarionTypstArchiveExtension>.tar.xz</_ElarionTypstArchiveExtension>
+    <_ElarionTypstExecutableName>typst</_ElarionTypstExecutableName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_ElarionTypstExecutableName Condition="'$(_ElarionTypstExecutableName)' == ''">typst</_ElarionTypstExecutableName>
+    <_ElarionTypstSha256>$(ElarionTypstSha256)</_ElarionTypstSha256>
+    <_ElarionTypstSha256 Condition="'$(_ElarionTypstSha256)' == '' and '$(ElarionTypstVersion)' == '$(_ElarionTypstDefaultVersion)'">$(_ElarionTypstKnownSha256)</_ElarionTypstSha256>
+    <_ElarionTypstArchiveName>typst-$(_ElarionTypstTarget)$(_ElarionTypstArchiveExtension)</_ElarionTypstArchiveName>
+    <_ElarionTypstVersionDirectory>$([System.IO.Path]::Combine('$(ElarionTypstCacheDirectory)', '$(ElarionTypstVersion)', '$(_ElarionTypstTarget)'))</_ElarionTypstVersionDirectory>
+    <_ElarionTypstExecutable>$(ElarionTypstExecutable)</_ElarionTypstExecutable>
+    <_ElarionTypstExecutable Condition="'$(_ElarionTypstExecutable)' == ''">$([System.IO.Path]::Combine('$(_ElarionTypstVersionDirectory)', '$(_ElarionTypstExecutableName)'))</_ElarionTypstExecutable>
+  </PropertyGroup>
+
+  <!-- Declared statically so the binary flows to the output and publish directory like any content file. -->
+  <ItemGroup Condition="'$(ElarionTypstBundle)' == 'true'">
+    <None Include="$(_ElarionTypstExecutable)"
+          Link="typst/bin/$(_ElarionTypstExecutableName)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false"/>
+  </ItemGroup>
+
+  <!-- Explicit Link rather than LinkBase: LinkBase only applies to items outside the project directory. -->
+  <ItemGroup Condition="'$(ElarionTypstAssetsDirectory)' != ''">
+    <None Include="$([MSBuild]::EnsureTrailingSlash('$(ElarionTypstAssetsDirectory)'))**/*"
+          Link="typst/%(RecursiveDir)%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"/>
+  </ItemGroup>
+
+  <Target Name="ElarionAcquireTypst"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(ElarionTypstBundle)' == 'true' and !Exists('$(_ElarionTypstExecutable)')">
+    <Error Condition="'$(ElarionTypstExecutable)' != ''"
+           Text="ElarionTypstExecutable points at '$(ElarionTypstExecutable)', which does not exist."/>
+    <Error Condition="'$(_ElarionTypstTarget)' == ''"
+           Text="Elarion.Typst knows no Typst release for runtime identifier '$(_ElarionTypstRid)'. Set ElarionTypstExecutable to a pre-fetched binary, or ElarionTypstBundle=false and configure TypstOptions.ExecutablePath."/>
+    <Error Condition="'$(_ElarionTypstSha256)' == ''"
+           Text="ElarionTypstVersion $(ElarionTypstVersion) is not the version Elarion.Typst ships checksums for ($(_ElarionTypstDefaultVersion)). Set ElarionTypstSha256 to the SHA-256 of $(_ElarionTypstArchiveName) from that GitHub release."/>
+
+    <PropertyGroup>
+      <!-- A unique staging directory per build: multi-targeted projects build their frameworks in parallel. -->
+      <_ElarionTypstStagingId>$([System.Guid]::NewGuid().ToString('N'))</_ElarionTypstStagingId>
+      <_ElarionTypstStaging>$([System.IO.Path]::Combine('$(_ElarionTypstVersionDirectory)', '.staging-$(_ElarionTypstStagingId)'))</_ElarionTypstStaging>
+      <_ElarionTypstArchive>$([System.IO.Path]::Combine('$(_ElarionTypstStaging)', '$(_ElarionTypstArchiveName)'))</_ElarionTypstArchive>
+      <_ElarionTypstExtracted>$([System.IO.Path]::Combine('$(_ElarionTypstStaging)', 'typst-$(_ElarionTypstTarget)', '$(_ElarionTypstExecutableName)'))</_ElarionTypstExtracted>
+    </PropertyGroup>
+
+    <Message Importance="high" Text="Elarion.Typst: acquiring Typst $(ElarionTypstVersion) ($(_ElarionTypstTarget)) into $(_ElarionTypstVersionDirectory)"/>
+    <MakeDir Directories="$(_ElarionTypstStaging)"/>
+    <DownloadFile SourceUrl="https://github.com/typst/typst/releases/download/v$(ElarionTypstVersion)/$(_ElarionTypstArchiveName)"
+                  DestinationFolder="$(_ElarionTypstStaging)"
+                  Retries="3"/>
+
+    <GetFileHash Files="$(_ElarionTypstArchive)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Hash" PropertyName="_ElarionTypstActualSha256"/>
+    </GetFileHash>
+    <RemoveDir Condition="'$(_ElarionTypstActualSha256.ToLowerInvariant())' != '$(_ElarionTypstSha256.ToLowerInvariant())'"
+               Directories="$(_ElarionTypstStaging)"/>
+    <Error Condition="'$(_ElarionTypstActualSha256.ToLowerInvariant())' != '$(_ElarionTypstSha256.ToLowerInvariant())'"
+           Text="Checksum mismatch for $(_ElarionTypstArchiveName): expected $(_ElarionTypstSha256), got $(_ElarionTypstActualSha256.ToLowerInvariant()). The download was discarded."/>
+
+    <Unzip Condition="'$(_ElarionTypstArchiveExtension)' == '.zip'"
+           SourceFiles="$(_ElarionTypstArchive)"
+           DestinationFolder="$(_ElarionTypstStaging)"
+           OverwriteReadOnlyFiles="true"/>
+    <Exec Condition="'$(_ElarionTypstArchiveExtension)' == '.tar.xz'"
+          Command="tar -xJf &quot;$(_ElarionTypstArchive)&quot; -C &quot;$(_ElarionTypstStaging)&quot;"/>
+    <Error Condition="!Exists('$(_ElarionTypstExtracted)')"
+           Text="Typst archive $(_ElarionTypstArchiveName) did not contain typst-$(_ElarionTypstTarget)/$(_ElarionTypstExecutableName)."/>
+    <Exec Condition="'$(_ElarionTypstExecutableName)' == 'typst'" Command="chmod +x &quot;$(_ElarionTypstExtracted)&quot;"/>
+
+    <!-- Publish the verified binary into the cache last, so a cancelled build never leaves a half-written one. -->
+    <Copy SourceFiles="$(_ElarionTypstExtracted)"
+          DestinationFiles="$(_ElarionTypstExecutable)"
+          Retries="3"
+          Condition="!Exists('$(_ElarionTypstExecutable)')"/>
+    <Exec Condition="'$(_ElarionTypstExecutableName)' == 'typst'" Command="chmod +x &quot;$(_ElarionTypstExecutable)&quot;"/>
+    <RemoveDir Directories="$(_ElarionTypstStaging)" ContinueOnError="true"/>
+  </Target>
+</Project>

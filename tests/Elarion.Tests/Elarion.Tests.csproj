@@ -108,6 +108,7 @@
     <ProjectReference Include="../../src/Elarion.Caching/Elarion.Caching.csproj"/>
     <ProjectReference Include="../../src/Elarion.Caching.PostgreSql/Elarion.Caching.PostgreSql.csproj"/>
     <ProjectReference Include="../../src/Elarion.Resilience/Elarion.Resilience.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Typst/Elarion.Typst.csproj"/>
     <ProjectReference Include="../../src/Elarion.Validation/Elarion.Validation.csproj"/>
     <ProjectReference Include="../../src/Elarion.Scheduling.EntityFrameworkCore/Elarion.Scheduling.EntityFrameworkCore.csproj"/>
     <ProjectReference Include="../../src/Elarion.Scheduling.EntityFrameworkCore.Generators/Elarion.Scheduling.EntityFrameworkCore.Generators.csproj"/>
@@ -116,4 +117,11 @@
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity/Elarion.EntityFrameworkCore.Identity.csproj"/>
     <ProjectReference Include="../../src/Elarion.EntityFrameworkCore.Identity.Generators/Elarion.EntityFrameworkCore.Identity.Generators.csproj"/>
   </ItemGroup>
+  <!-- A NuGet consumer gets these targets from the package's buildTransitive folder; a project reference does not, so
+       the test host imports them itself. They bundle the pinned Typst binary and copy the test package to
+       <output>/typst/: the tests run against the layout an application gets, and CI needs no Typst installation. -->
+  <PropertyGroup>
+    <ElarionTypstAssetsDirectory>Typst/Assets</ElarionTypstAssetsDirectory>
+  </PropertyGroup>
+  <Import Project="../../src/Elarion.Typst/buildTransitive/Elarion.Typst.targets"/>
 </Project>
