@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>EF Core resource-grants backend for Elarion data-level authorization: a DB-native ResourceGrant table (user/role shares), IResourceGrantStore, and the [GenerateElarionResourceGrants] DbSet generator. Auth-provider-neutral — composes with, but does not depend on, ASP.NET Core Identity.</Description>
+    <Description>EF Core backend for Elarion data-level authorization: the filter-backed [RequireResource] point check over an entity's IQueryAuthorizer, a DB-native ResourceGrant table (user/role shares), IResourceGrantStore, and the [GenerateElarionResourceGrants] DbSet generator. Auth-provider-neutral — composes with, but does not depend on, ASP.NET Core Identity.</Description>
   </PropertyGroup>
 
   <ItemGroup>

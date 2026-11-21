@@ -8,8 +8,9 @@ namespace Elarion.Authorization.EntityFrameworkCore;
 /// The grants-backed <see cref="IResourceAuthorizer"/>: authorizes a point check when the resource-grants table
 /// records a share of that resource (matched by the resource-type discriminator — the stable
 /// <see cref="ResourceAuthorizationContext.ResourceTypeName"/>, default <see cref="System.Type.FullName"/> — and
-/// the stringified id) with the caller's user id or any of their roles, for the operation. Owner-based access is
-/// the handler's concern via the escape hatch, or modeled as a user grant.
+/// the stringified id) with the caller's user id or any of their roles, for the operation. A resource type with its
+/// own registered check (<c>AddElarionResourceFilterCheck</c>, which sees the owner rule and every other part of the
+/// entity's filter) is answered by that check instead; the grants alone know only shares.
 /// </summary>
 /// <remarks>
 /// The resource-type discriminator, principal ids (user ids), and role names are matched <b>case-sensitively</b>
@@ -17,9 +18,13 @@ namespace Elarion.Authorization.EntityFrameworkCore;
 /// to SQL): a casing mismatch between a stored grant and <c>ICurrentUser</c> fails closed (denies), it never
 /// grants access.
 /// </remarks>
-internal sealed class GrantResourceAuthorizer(IResourceGrantSource grants) : IResourceAuthorizer {
+internal sealed class GrantResourceAuthorizer(IResourceGrantSource grants, IServiceProvider services)
+    : IResourceAuthorizer {
     public async ValueTask<bool> AuthorizeResourceAsync(ResourceAuthorizationContext context, CancellationToken ct) {
         ArgumentNullException.ThrowIfNull(context);
+
+        if (ResourceTypeAuthorizer.Find(services, context.ResourceType) is { } typed)
+            return await typed.AuthorizeResourceAsync(context, ct).ConfigureAwait(false);
 
         var user = context.User;
         if (!user.IsAuthenticated || context.ResourceId is null) return false;
