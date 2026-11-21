@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0073: Leased work rows are a recognized pattern, extracted on second demand"
+description: "Leased work rows are a recognized pattern, extracted on second demand."
+status: stable
+---
 # ADR-0073: Leased work rows are a recognized pattern, extracted on second demand
 
 - Status: Accepted (the extraction trigger fired 2026-10-10; the primitive ships as

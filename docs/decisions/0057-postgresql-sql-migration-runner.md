@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0057: A Flyway-shaped PostgreSQL migration runner for EF-free (AOT) hosts"
+description: "A Flyway-shaped PostgreSQL migration runner for EF-free (AOT) hosts."
+status: stable
+---
 # ADR-0057: A Flyway-shaped PostgreSQL migration runner for EF-free (AOT) hosts
 
 - Status: Accepted (the "PostgreSQL only by design" positioning is amended by

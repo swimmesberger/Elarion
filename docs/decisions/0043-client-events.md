@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0043: Client events — after-commit facts projected to the browser over SSE"
+description: "Client events — after-commit facts projected to the browser over SSE."
+status: stable
+---
 # ADR-0043: Client events — after-commit facts projected to the browser over SSE
 
 - Status: Accepted

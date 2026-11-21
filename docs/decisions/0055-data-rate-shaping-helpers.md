@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0055: Data-rate shaping helpers — write-behind buffer and keyed conflater"
+description: "Data-rate shaping helpers — write-behind buffer and keyed conflater."
+status: stable
+---
 # ADR-0055: Data-rate shaping helpers — write-behind buffer and keyed conflater
 
 - Status: Accepted (implemented 2026-07-13); amended by [ADR-0069](0069-producer-owned-hot-state-buffering.md)

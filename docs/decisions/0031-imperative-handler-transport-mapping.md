@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0031: Imperative handler transport mapping (and why HTTP stays concrete)"
+description: "Imperative handler transport mapping (and why HTTP stays concrete)."
+status: stable
+---
 # ADR-0031: Imperative handler transport mapping (and why HTTP stays concrete)
 
 - Status: Accepted (the RDG mechanism claim is amended by

@@ -1,26 +1,96 @@
 # AGENTS.md — Elarion
 
-Canonical agent and contributor guidance. Tool entry points point here and must not duplicate content:
-`CLAUDE.md` imports this file (`@AGENTS.md`); `.github/copilot-instructions.md` points here; and
-`.github/instructions/csharp.instructions.md` scopes the **C# coding standards** section to `**/*.cs` for
-Copilot. Add or change mandatory repository guidance here, not in the pointer files.
+Elarion is a reusable .NET application framework, delivered as NuGet and npm packages: an application writes
+handlers inside modules, source generators emit the wiring, and opt-in packages add transports, persistence,
+events and actors. People start at `README.md` and `CONTRIBUTING.md`. Agents: this file and the files it
+points to are your instructions.
 
-Elarion is a reusable .NET application framework. Keep it independent of every downstream application: do
-not mention, depend on, or optimize for a consuming app by name. Application domain code, database
-conventions, UI frameworks, deployment quirks, and application-specific generators belong in consuming
-repositories.
+This file holds the rules that apply to every task and pointers, phrased by task, to everything else. Rules
+for one kind of file live in a pattern rule under `.github/instructions/`. Add or change mandatory guidance
+here or in a pattern rule, never in a router, a mirror or a pointer file.
 
-This file states the rules an agent needs while changing the framework. Use the owning source for detail:
+## Layout
 
-| Need | Canonical source |
-| --- | --- |
-| Package selection and dependencies | [`docs/reference/packages.mdx`](docs/reference/packages.mdx) |
-| Current behavior and public API | [`docs/concepts/`](docs/concepts/) and [`docs/capabilities/`](docs/capabilities/) |
-| Attributes, diagnostics, and configuration | [`docs/reference/`](docs/reference/) |
-| Design rationale, trade-offs, and rejected alternatives | [`docs/decisions/`](docs/decisions/) — ADRs are rationale, not necessarily current API |
-| Build, validation, and contributor workflow | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Release operation | [`RELEASING.md`](RELEASING.md) |
-| Mechanical formatting | [`.editorconfig`](.editorconfig) |
+- `src/`: the packages. `Elarion.Abstractions` (contracts), `Elarion` (core), provider, protocol and host
+  packages, the `*.Generators` projects bundled by them, and the npm packages (`src/elarion-*`).
+- `tests/`: `Elarion.Tests` (the one test project) and `Elarion.Benchmarks`.
+- `samples/`: applications that show the intended use of the framework.
+- `docs/`: project knowledge beyond the code, and the content source of the documentation website. Two kinds
+  of pages, told apart by extension: `.mdx` pages are published and describe shipped behavior; `.md` pages
+  (decisions, research, architecture, the workflow) are repository knowledge, kept as an Open Knowledge Format
+  bundle. `docs/index.md` is the map, `docs/guide.md` says what lives where and how the folder is kept.
+- `docs/decisions/`: the ADRs. Not `docs/adr/`.
+- `website/`: the documentation website, which renders `docs/`.
+- `specs/`: what a new feature must do, and how it is built; format in `specs/README.md`.
+- `GLOSSARY.md`: the glossary.
+- `.github/instructions/*.instructions.md`: the pattern rules, each scoped to the files its `applyTo` matches.
+  `.claude/rules/*.md` mirrors them for Claude Code and only points at them.
+- `.agents/skills/`: procedures in the Agent Skills format. `.claude/skills` is a symlink to it.
+- `tools/`: `check_repo.py` keeps this layout consistent, `check_commits.py` checks commit messages,
+  `log_add.py` adds log entries, `hooks/` holds the commit-msg hook, `tests/` the tests of these tools.
+  `scripts/` holds the release script.
+- `CLAUDE.md` files: one-line routers (`@AGENTS.md`). Never put content in them; a `CLAUDE.md` with content of
+  its own stops Claude Code from reading the `AGENTS.md` next to it. A folder that gets rules of its own gets
+  an `AGENTS.md` and a router next to it.
+
+## Commands
+
+The repository's own checks, all run by `make check` (they need `python3` and nothing else):
+
+- Tests of the tools: `python3 -m unittest discover -s tools/tests`
+- Repository consistency: `python3 tools/check_repo.py`
+- Commit messages of this branch, against the remote's default branch: `make check-commits` (needs the remote,
+  so not part of `make check`)
+
+The framework's validation. The complete contributor workflow, and what to do when the machine picks the wrong
+SDK, is in [`CONTRIBUTING.md`](CONTRIBUTING.md). Run the relevant checks before requesting review; the normal
+baseline is:
+
+```bash
+dotnet restore Elarion.slnx
+dotnet build Elarion.slnx --configuration Release
+dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release
+dotnet pack Elarion.slnx --configuration Release --no-build
+
+cd src/elarion-jsonrpc-client-generator
+npm ci && npm run build && npm test && npm pack --dry-run
+```
+
+Run `dotnet run --project tests/Elarion.Benchmarks -c Release` for relevant performance-sensitive changes. The `net11.0`
+build compiles with runtime async (ADR-0092; `ElarionRuntimeAsync=false` opts out); when a change touches async hot paths,
+compare both models with `ELARION_BENCH_RUNTIME_ASYNC=compare` (see `tests/Elarion.Benchmarks/Program.cs`). Benchmark
+methods should await the call under test the way application code does: returning a `ValueTask` straight to
+BenchmarkDotNet's harness measures the harness's own continuation.
+When changing the TypeScript generator, generate from a representative `rpc-schema.json` and type-check
+`rpc-types.ts`, `rpc-schemas.ts`, and `rpc-client.ts` under `moduleResolution: NodeNext`.
+
+The documentation website (the link check is a separate CI step and fails the deploy; a successful build does
+not catch a broken route or anchor):
+
+```bash
+cd website && npm install && npm run build && npm run check:links
+```
+
+Other commands:
+
+- Log entry: `python3 tools/log_add.py "**Update**: what and why, with a [link](page.md)"`
+- Commit hook: `git config core.hooksPath tools/hooks` checks each commit message as it is made.
+
+## Rules that always apply
+
+- Keep Elarion independent of every downstream application: do not mention, depend on, or optimize for a
+  consuming app by name. Application domain code, database conventions, UI frameworks, deployment quirks, and
+  application-specific generators belong in consuming repositories.
+- Use the terms in `GLOSSARY.md`; do not invent synonyms. A new term goes into the glossary in the same change.
+- Record a design decision, its trade-offs and its rejected alternatives in `docs/decisions/`, with the `adr`
+  skill. An ADR is rationale, not necessarily the current API; the published pages say what holds today.
+- Every behavior change comes with a test, and every bug fix with a regression test. Documentation is part of
+  the change: update the published page under `docs/` and `CHANGELOG.md` when consumers notice the change.
+- Spec and code change together: a pull request that changes the behavior of a specified feature updates its
+  spec, or says why not.
+- Run `make check` and the relevant validation commands before you report a task as done.
+- Never commit secrets. `.env` files are ignored; do not paste their contents into prompts.
+- Do not use harness memory; it is off in the committed settings. See [Repository memory](#repository-memory).
 
 **Scale positioning.** Elarion targets small-to-mid apps: roughly **1–10 nodes, vertical-first, on the
 one PostgreSQL the application already runs**. Shipped defaults must work at that tier, but need not scale
@@ -29,39 +99,7 @@ broker, cache, or actor system; do not grow a default's complexity or configurat
 default with: “does it cover ten nodes on one Postgres?” (ADR-0025). PostgreSQL extensions are composition,
 not scale-out (ADR-0056): document extension recipes, but keep packages usable without extensions.
 
-**Actor placement API.** Actor placement is `ActorPlacementMode.Local` (default), `SingleHome`, or
-`VirtualShards` on `[Actor]`/`ActorOptions` (ADR-0061). Do not reintroduce the legacy `SingleHomed` boolean;
-use `Placement = ActorPlacementMode.SingleHome`.
-
-## Package layout
-
-[`docs/reference/packages.mdx`](docs/reference/packages.mdx) is the canonical grouped public-package
-reference. Start an application/module assembly with `Elarion`, then add only the provider and host adapters
-it uses. Add `Elarion.Abstractions` only to contract-only assemblies that cannot take runtime behavior.
-
-- Core packages stay independent of ASP.NET Core, EF Core, and concrete providers. Provider/host packages
-  are opt-in siblings, not dependencies pulled into `Elarion` or `Elarion.Abstractions`.
-- Choose a host tier deliberately: EF applications author EF migrations and run them as steps of the one
-  migration plan (`Elarion.Migrations.EntityFrameworkCore`); EF-free NativeAOT hosts pair `Elarion.Sql` with
-  `Elarion.Migrations` and exactly one migration provider. SQL scripts, C# code steps, and EF migrations share
-  one version sequence, history, and lock (ADR-0081).
-- `Elarion` bundles `Elarion.Generators`, and `Elarion.EntityFrameworkCore` bundles its EF generator.
-  Analyzer assets are not transitive: every assembly that needs a bundled generator must reference the
-  appropriate public package directly.
-- Generator implementation projects are bundled implementation details, not independently selectable
-  packages. Do not reconstruct a second package catalog here.
-- Runtime packages build for `net10.0` (LTS) and `net11.0` (`Directory.Build.props`); `*.Generators` projects stay
-  `netstandard2.0`. Packages on the .NET release train resolve to the major of the framework being built
-  (`Directory.Packages.props`); the EF Core stack stays on 10.x for both until the Npgsql EF Core 11 provider ships.
-  Bridge an API difference between the majors with `#if NET11_0_OR_GREATER` in the package, and, for generated
-  code, by having the generator detect which shape the compilation references (as `ValidationResolverGenerator`
-  does) — generated code compiles against the consumer's framework, not ours. Keep the generators' Roslyn floor at
-  the oldest consumer SDK band, not at `global.json`.
-- Package-specific API shape, dependencies, supported providers, and typical references belong in the
-  package reference. Read the relevant capability page before adding actors, connections, blobs, devices,
-  migrations, a transport, or frontend tooling.
-
-## Architecture boundaries
+### Architecture boundaries
 
 - Core packages remain reusable and domain-neutral. Do not add consuming-app names, application domain
   types, host-specific UI code, deployment conventions, or application infrastructure to Elarion packages.
@@ -94,308 +132,34 @@ it uses. Add `Elarion.Abstractions` only to contract-only assemblies that cannot
 - Design every seam for its strongest intended implementation, never for pre-1.0 compatibility or a weak
   test/single-node implementation. A weaker implementation provides the closest semantics and documents the
   difference. Prefer an optional options bag to repeatedly widening signatures.
+- Decide, do not defer. When a feature is in scope and the only obstacle is that several reasonable designs
+  exist, choose the simplest coherent one, implement it, and record the choice and the rejected alternatives in
+  the ADR as revisable. A pre-1.0 decision can be revisited; an unshipped feature helps nobody. Defer only when
+  no answer makes sense yet, or when the choice would be unsafe (a default that fails open).
 - Prefer compile-time generation over runtime reflection scanning. Framework paths must preserve trimming
   and AOT friendliness; a reflection fallback is an explicit, isolated opt-in, not a quiet default.
 
-## Source generator conventions
+## Commits and pull requests
 
-Generators run on every keystroke, so incrementality is correctness. Read
-[ADR-0006](docs/decisions/0006-incremental-source-generator-conventions.md) for rationale, and copy a
-current reference generator (`AppModuleDiscoveryGenerator`, `ElarionManifestGenerator`,
-`ModuleDefaultServicesGenerator`, or a registration generator), not the old “scan and emit” shape.
-
-When adding or changing a generator:
-
-- **Discover through a syntax provider, never by scanning `CompilationProvider`.** Use
-  `ForAttributeWithMetadataName` for attribute triggers (branch on `ctx.TargetSymbol` for methods versus
-  types), or a predicate-filtered `CreateSyntaxProvider` for structural triggers. Never enumerate
-  `SyntaxTrees` from `RegisterSourceOutput(CompilationProvider, …)`.
-- **Make every pipeline value value-equatable.** `ImmutableArray<T>.Equals` is reference equality; use
-  `EquatableArray<T>` for every collection field, including nested collections. Carry immutable facts and
-  fully qualified strings, not `ISymbol`, `Compilation`, `SyntaxNode`, `Location`, or `object?[]` through a
-  pipeline.
-- **Treat diagnostics as data.** Transforms stay pure and return `EquatableArray<DiagnosticInfo>` built with
-  `DiagnosticInfo.Create` and `LocationInfo`; report diagnostics only in the final
-  `RegisterSourceOutput` callback. Do not call `spc.ReportDiagnostic` from a transform.
-- **Reuse shared discovery.** Use `ModuleProviders.CollectModules`, `ModuleScanner.FindBest`/`IsInScope`, and
-  `ModuleProviders.HasTrigger`. Do not hand-roll module scanning, namespace matching, or assembly-trigger
-  detection.
-- **Make emitted output deterministic and prove caching.** Provider order is unspecified, so preserve
-  emit-time sorting. Tag collect/combine nodes with `.WithTrackingName`; add
-  `GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit`; and run the affected `*GeneratorTests.cs` suite.
-  Generated text is a byte-identical contract, not an incidental implementation detail.
-- **Emit concrete AOT-safe code.** Avoid reflection and open generics in generated hot paths. For
-  cross-assembly discovery, emit/read assembly metadata through `MetadataReferencesProvider` using the
-  existing Elarion/EF manifests; never scan referenced symbol trees.
-- Add new analyzer diagnostics to `AnalyzerReleases.Unshipped.md` (RS2008) and preserve stable diagnostic
-  behavior. Prefer a clear compile-time error over a delayed, silent runtime fallback.
-
-## Framework invariants
-
-### Modules, handlers, and transports
-
-- A handler is the framework's use-case boundary. JSON-RPC, MCP, and HTTP are parallel optional projections
-  of one handler definition; HTTP is explicit because routing and binding are transport-specific. Keep
-  handler behavior transport-neutral.
-- `[GenerateModuleBootstrapper]` and the generated module registration/mapping path are canonical. Modules
-  own handlers, services, validators, jobs, consumers, actors, and client-event topics by namespace. Do not
-  add flat, ungated handler maps or manually duplicate generated default registrations.
-- Core modules map unconditionally; feature modules are enabled through configuration and must disappear
-  consistently from registration, validation, HTTP, JSON-RPC, and MCP when disabled. A host still declares a
-  core module even if it has no feature modules.
-- In-process request/reply is always typed: inject `IHandler<TRequest, Result<TResponse>>`, use
-  `IHandlerSender`, `HandlerInvoker`, or a typed generated module API. The named `HandlerDispatcher` is a
-  transport seam for dynamic wire names, not a normal application mediator. Event buses are pub/sub only and
-  never implement request/reply.
-- HTTP handlers resolve the typed handler directly and translate `Result` through framework HTTP helpers.
-  Keep endpoint conventions in the host; do not infer host authorization policy from handler attributes.
-- Small, in-memory files use `ElarionFile`; large exports/uploads use the staged-blob tier. Consult the file
-  and blob capability docs before changing envelope, ownership, lifecycle, or resumable-upload behavior.
-- The schema/client chain is `[Handler]` → `rpc-schema.json` → generated TypeScript. Do not hand-write a
-  parallel JSON-RPC fetch client or a second transport registry.
-
-### Serialization and AOT
-
-- All framework subsystems obtain canonical JSON through `IElarionJsonSerialization`, never a bare
-  `JsonSerializerOptions` from DI. Configure framework JSON through `AddElarionJson`/
-  `ConfigureElarionJson`; this prevents collisions with host JSON configuration.
-- Source-generated metadata is the default and expected path. Fix a missing type by contributing its type
-  info resolver/context. Do not casually enable reflection fallback to make a missing contract work.
-- Resolver composition is ordered and first-match-wins. Transport envelope contexts, generated module
-  contexts, and host contexts must use the established contributor seam; read the serialization capability
-  page before changing resolver ordering or reflection behavior.
-
-### Authorization, feature gates, and validation
-
-- Authorization is declarative, transport-neutral, provider-independent, and enforced in the handler
-  pipeline. Hosts authenticate and populate `ICurrentUser`; handlers express authorization requirements.
-  Never move a business authorization decision solely into an HTTP endpoint or frontend condition.
-- Requirement kinds compose as documented. Unauthenticated and forbidden outcomes remain normal `Result`/
-  `AppError` values, not exceptions. A provider replacement must not require changing `[Require*]` contracts.
-- Feature gates are runtime handler gates, distinct from compile-time module enablement. A closed feature
-  returns the documented generic not-found outcome so its name is not leaked. Use a feature variant when
-  selection differs between concurrent requests; use a configuration variant when one process-wide choice is
-  configured. Prefer a strategy service over swapping a handler implementation.
-- Client capability/session data and frontend contribution `when` conditions are read-only UX projections.
-  They may hide or adapt UI, but never enforce a permission or feature decision; the handler gate remains the
-  authority.
-- Validation is two-tier. Standard DataAnnotations express wire-contract rules and flow to schema surfaces;
-  nullability expresses requiredness (ADR-0082). Cross-field, conditional, asynchronous, and database/business
-  rules live in the handler or a domain service and return `AppError.Validation`/`Conflict` **inside the
-  transaction**. A pre-handler async check is a TOCTOU bug.
-- The validation provider receives wire-named paths and produces structured errors. Do not reintroduce runtime
-  attribute scanning where generated validation metadata exists. See the authorization, feature-flag,
-  client-capability, and validation concepts for exact attribute/provider APIs.
-
-### Events, modules, and cross-module communication
-
-- Events have two transaction-defined planes. Domain events are inline in the caller's scope and transaction:
-  consumers share the transaction and a failure fails the command. Integration events are recorded with the
-  caller's unit of work and delivered after commit in an independent scope; they are the only broker-portable
-  plane. An event belongs to exactly one plane.
-- An event bus is pub/sub. A non-`Unit` result is request/reply and belongs behind a typed handler call,
-  not a consumer. Prefer handler-form consumers when the full pipeline is needed; use method-form consumers
-  only for lightweight side effects that do not require it.
-- Durable integration delivery needs an outbox. Handler-form integration consumers are inbox-deduped when a
-  durable idempotency store is registered; opting out declares redelivery safe. Method-form consumers and
-  external side effects still need explicit idempotency reasoning around the message id.
-- All generated event consumers, scheduled jobs, and other discovered module content remain module-scoped and
-  feature-gated. Do not bypass generated catalog/registration paths to make a consumer run in a disabled
-  module.
-- Synchronous cross-module calls use a published `[ModuleContract]`; implementations remain internal. Solve
-  a boundary violation with a genuine contract, a platform capability port outside modules, or a shared-kernel
-  type outside modules—never another module's internal handler/service type. `ELMOD002` is location-based;
-  track any new analyzer diagnostics in `AnalyzerReleases.Unshipped.md`.
-- A generated module API is an in-process, typed facade over a module's handlers, not a transport or a way
-  to make an internal module surface public. Mapping from a published contract to a module's handler DTOs is
-  the module's responsibility.
-
-### Actors, connections, and live updates
-
-- **Default to the database.** Optimistic concurrency, constraints, `[Idempotent]`, jobs, and normal
-  request/reply solve classical web-app concurrency. An actor is justified only when the consistency unit is
-  a live in-memory thing: a stateful external resource/connection, hot loss-tolerant ephemeral state, or an
-  event-driven decide-once coordinator. If it sketches as a table with a version column, use the table.
-- Actor methods apply a pure state transition, write durable state explicitly when required, then perform a
-  side effect. State records are query contracts: keep interpretation and pure transitions on the state type,
-  not in an activation-only migration. Snapshot conflicts can replay a turn, so side effects before a write
-  must be idempotent or moved after the write. Read the actor state/placement concept before changing actor
-  lifecycle, snapshots, routing, or streaming.
-- Default to request/reply plus client events. A bidirectional connection is justified only for interactive
-  command rates, a connection that is itself state (such as a device link), or server-to-client RPC. The
-  registry is node-local; multi-node ingress is co-located with the actor home/role holder rather than made
-  into an implicit balancer.
-- Client events are at-most-once, latest-wins re-query hints. Keep their payloads light and make clients
-  converge by re-querying; they are not a durable event plane. Use an ordered stream only when losing a
-  message makes the consumer wrong and a single live sequencer exists for that key. If a missed update only
-  makes the consumer stale, use a client event instead.
-- Connection adapters own framing and transport lifecycle; codecs own protocol encoding/decoding. Socket-less
-  simulated connections are first-class. Use the simulation package for gateway behavior tests; reserve real
-  sockets for adapter integration tests.
-- Device pairing/authentication, actor placement, role routing, and cross-node client-event fan-out are
-  security/correctness-sensitive seams. Preserve fail-closed behavior; consult the capability and ADR docs
-  before changing identity, leases, proxying, or durable delivery targeting.
-
-### Persistence, blobs, and SQL
-
-- Application handlers inject the concrete `DbContext`; do not introduce repositories or an `IAppDbContext`
-  abstraction. The generator owns discovered `DbSet`s and entity configuration application.
-- `Guid` entity keys are client-assigned and use the repository's v7 GUID convention. Preserve the model's
-  `ValueGeneratedNever` behavior; explicit configuration or a store-generated default wins where designed.
-- Bulk inserts, SQL mapping, migrations, settings, blobs, and auditing each have deliberate transaction and
-  provider seams. Preserve ambient-transaction behavior and connection ownership; do not add a second
-  connection/data source merely for convenience.
-- Blob contracts remain provider-neutral and streaming-first. Pending blobs are temporary until committed in
-  the caller's transaction; owner checks fail closed; staged uploads are protocol-neutral. Listing is a
-  browse/operations surface, not a substitute for an application query model.
-- The AOT SQL tier is not an ORM: no change tracking, LINQ, reflection fallback, or query-builder DSL. SQL
-  interpolation binds values; only explicit trusted identifier fragments are verbatim. Use real bulk COPY for
-  bulk throughput rather than growing convenience batch APIs into a second bulk subsystem.
-- The migration core is database-neutral and roll-forward only. A provider is a new package, not a dialect
-  configuration flag; keep no-transaction behavior explicit and fail closed on an unresolved migration.
-
-### TypeScript client and frontend contributions
-
-- Generated TypeScript output is deterministic and portable: keep the ergonomic direct API and generic
-  transport primitive, tuple-aware batching, Zod validation, browser support, and NodeNext support. Generated
-  runtime code must not import React, TanStack, Vite, or an application framework.
-- The contributions package supplies typed extension points and capability-aware UX composition, not a UI kit,
-  route system, or security model. Applications own point payloads, module discovery, shell composition, and
-  route composition. Duplicate co-visible contribution ids are an error because they are render keys.
-- Frontend `when` axes remain strict against the application's declared vocabulary and fail closed for omitted
-  axes. They are still UX projections; server-side authorization and feature gates protect the action.
-
-## C# coding standards
-
-Applies to `**/*.cs` (Copilot scopes this section through
-`.github/instructions/csharp.instructions.md`).
-
-### Style
-
-- Use the latest C# every target framework supports: runtime packages build for `net10.0` and `net11.0`, so source
-  is C# 14. C# 15 features (unions, `closed`, collection-expression arguments, extension indexers, labeled
-  `break`/`continue`) only inside `#if NET11_0_OR_GREATER`, until `net10.0` is dropped.
-- Make classes `sealed` unless they intentionally support inheritance; document the extensibility contract.
-- Use immutable records for DTOs, options, and data containers. Prefer nominal property-based records with
-  `required` and `init` properties (nullable `init` for optional values); reserve positional records for tiny
-  internal helpers and tests.
-- Use read-only collection types (`IReadOnlyList<T>`, `ImmutableArray<T>`, and similar) for immutable public
-  surfaces. Use concise primary constructors for DI services.
-- Mint general identifiers with `Guid.CreateVersion7()`, not `Guid.NewGuid()`. Its important benefit for
-  persisted values is index locality plus a debuggable timestamp; use it for never-persisted identifiers too
-  for consistency. Never use v7 where guessability matters: it leaks creation time and has 74 random bits.
-  Capability-style codes, tokens, and sharing values use v4 or a real CSPRNG token, and an id is never the
-  only authorization gate.
-
-### Naming
-
-- Use PascalCase for types, methods, and public members; `_camelCase` for private instance fields; camelCase
-  for locals and parameters; PascalCase for constants/static readonly members. Interfaces begin with `I` and
-  type parameters with `T`.
-
-### Formatting
-
-- `.editorconfig` is the source of truth. Use file-scoped namespaces, single-line usings, and opening braces
-  on the same line.
-- Prefer early returns to deep nesting. Use pattern matching, switch expressions, and `nameof` when they
-  clarify intent; leave the final `return` on its own line.
-
-### Comments and public API docs
-
-- Public APIs need XML documentation; include `<example>`/`<code>` for non-obvious APIs. Comments explain
-  intent, constraints, or non-obvious trade-offs, never restate code. Document *why* for a non-obvious
-  compatibility, source-generation, AOT, or performance pattern.
-
-### Nullable reference types
-
-- Non-nullable is the default. Validate nullability at entry points, use `is null`/`is not null`, and trust
-  the type system instead of adding redundant null checks.
-
-### Async and background work
-
-- Do not fire-and-forget unobserved work. Thread `CancellationToken` through async flows; use
-  `CancellationToken.None` only with a documented reason. Long-lived work belongs to a host-managed
-  `IHostedService`, scheduler, explicit queue, or loop, not a hidden helper. Handle expected
-  `OperationCanceledException` deliberately and do not log it as an error.
-- Hot-path async methods return `ValueTask`/`ValueTask<T>`; keep `PoolingAsyncValueTaskMethodBuilder` where a method
-  suspends on I/O. The `net11.0` build compiles with runtime async, where the compiler ignores the builder; the `net10.0`
-  build uses compiler state machines, where it keeps suspension allocation-free (ADR-0092).
-- In generic code, inspect a response with `ResultInspection.IsSuccess`/`IsFailure`/`TryGetError`, never an inline
-  `response is IResultLike { … }` pattern: inside a runtime-async method body the inline pattern boxes a struct
-  `Result<T>` on every call.
-
-### Telemetry
-
-- Follow OpenTelemetry semantic conventions when they exist. Duration histograms record floating-point
-  **seconds** (`s`), never milliseconds, and use semconv bucket boundaries through
-  `InstrumentAdvice<double>`; SDK default buckets are millisecond-scaled and unsuitable for seconds-valued
-  histograms. `Record*` helpers take `TimeSpan` so this unit decision lives in one place per meter.
-- Reuse semconv names such as `rpc.server.call.duration`; namespace custom names and attributes with
-  `elarion.*`. Metric tags stay bounded (type, operation, outcome), never payloads, keys, or user identity.
-  Put high-cardinality identity on spans only. Explicitly unit-suffixed span tags such as `*_ms` are
-  self-describing and exempt from the seconds rule.
-
-## Testing
-
-- Add a regression test for every bug fix. Follow nearby naming/capitalization and avoid
-  `Arrange`/`Act`/`Assert` comments.
-- Keep tests deterministic. Timing-sensitive tests are appropriate only when concurrency, scheduling, or a
-  timing contract is itself under test.
-- Generator changes require generator tests, inspectable deterministic output, and the incremental cache test
-  described above. Run the affected generator suite after each change.
-- Test database behavior against **real PostgreSQL through Testcontainers**, never EF Core InMemory. InMemory
-  diverges from PostgreSQL semantics and produces false confidence. Use Docker-gated fixtures: start a real
-  container when Docker is available and **skip**, rather than fail, when it is not. Tag integration tests
-  `[Trait("Category", "Integration")]`. `Microsoft.EntityFrameworkCore.InMemory` is deliberately absent from
-  `Directory.Packages.props`; do not add it.
-- Hot-path changes need the relevant benchmark in `tests/Elarion.Benchmarks`; connection, actor, SQL-mapping,
-  and bulk-operation claims require measured evidence, not an allocation intuition. TypeScript generator
-  changes also require generating a representative schema and NodeNext type-checking emitted client files.
-
-## Development and validation
-
-The complete contributor workflow is in [`CONTRIBUTING.md`](CONTRIBUTING.md). Run the relevant checks before
-requesting review; the normal baseline is:
-
-```bash
-dotnet restore Elarion.slnx
-dotnet build Elarion.slnx --configuration Release
-dotnet test --project tests/Elarion.Tests/Elarion.Tests.csproj --configuration Release
-dotnet pack Elarion.slnx --configuration Release --no-build
-
-cd src/elarion-jsonrpc-client-generator
-npm ci && npm run build && npm test && npm pack --dry-run
-```
-
-Run `dotnet run --project tests/Elarion.Benchmarks -c Release` for relevant performance-sensitive changes. The `net11.0`
-build compiles with runtime async (ADR-0092; `ElarionRuntimeAsync=false` opts out); when a change touches async hot paths,
-compare both models with `ELARION_BENCH_RUNTIME_ASYNC=compare` (see `tests/Elarion.Benchmarks/Program.cs`). Benchmark
-methods should await the call under test the way application code does: returning a `ValueTask` straight to
-BenchmarkDotNet's harness measures the harness's own continuation.
-When changing the TypeScript generator, generate from a representative `rpc-schema.json` and type-check
-`rpc-types.ts`, `rpc-schemas.ts`, and `rpc-client.ts` under `moduleResolution: NodeNext`.
-
-## Documentation website
-
-Marketing and rendered docs live in `website/`, but top-level `docs/` is the sole content source: Fumadocs
-reads it through `website/source.config.ts`. Put static assets in `docs/public/`, never `website/public/`;
-only `website/public/CNAME` is committed. New pages need a relevant `meta.json` entry, and new MDX components
-beyond the existing standard set need registration in `website/components/mdx.tsx`. `icon:` frontmatter must
-name a valid Lucide icon.
-
-```bash
-cd website && npm install && npm run build && npm run check:links
-```
-
-**Run `check:links` too, not just the build.** `deploy-docs.yml` runs it as a separate step, and it fails the
-deploy on a broken internal route or anchor — which a successful `npm run build` does not catch. Link an ADR by
-its absolute GitHub blob URL (`https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0013-….md`):
-`docs/decisions/` is not published as a site route, so `/docs/decisions/…` is always a broken link.
-
-The static export is `website/out`; `npm run dev` serves localhost. Pushes to `main` that touch `docs/**` or
-`website/**` trigger `deploy-docs.yml`.
-
-## Pull requests
+- Commit messages and pull request titles follow Conventional Commits 1.0.0:
+  `<type>[(scope)][!]: <description>`, for example `feat(auth): add token refresh` or
+  `fix!: reject empty payloads`. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`,
+  `ci`, `chore`, `revert`. The description is imperative, starts lowercase and has no trailing period. The
+  header stays within 100 characters; a pull request title becomes the commit on a squash merge, so write it
+  as the line a reader of the history needs. `release:` is the Release workflow's own type; do not use it.
+- A breaking change gets `!` before the colon and a `BREAKING CHANGE:` footer that says what users must do.
+- The body says why, not what; the diff shows what. Reference the spec
+  (`Refs: specs/0007-export.md, FR-002`) and the issue (`Closes #12`) in footers.
+- One logical change per commit: spec, test and code of one change belong together; unrelated clean-ups go in
+  their own commit.
+- Branches are named `<type>/<short-slug>`, for example `feat/csv-export`; create the branch before
+  implementing, because the `implement` skill commits to the current branch. Never push to `main` directly,
+  never force-push a shared branch.
+- Agents commit only when asked (running the `implement` skill counts), open a pull request or an issue only
+  when asked, and add no tool footers or co-author trailers for themselves, in commits, pull request
+  descriptions and comments alike: the person who commits owns the change and must be able to explain it.
+- `python3 tools/check_commits.py` checks the commits of a branch; `git config core.hooksPath tools/hooks`
+  checks each commit as it is made; CI checks the title and every commit of a pull request.
 
 Prefer stacked PRs when a change is too large for one focused review: each layer is small, single-purpose, and
 green; each PR targets the preceding branch; only the bottom targets `main`; merge bottom-up.
@@ -409,16 +173,130 @@ Avoid stranding a stack:
   manually when necessary.
 - Do not delete or reuse a base branch while an open PR still targets it.
 
-## Publishing
+## Workflow and where artefacts go
 
-Trusted publishing uses OIDC. `<VersionPrefix>` in `Directory.Build.props` is the source of truth for the
-next version; see [`RELEASING.md`](RELEASING.md). Pushes to `main` publish
-`{VersionPrefix}-preview.{run}.{attempt}`. The Release workflow promotes the current version to stable,
-synchronizes doc version literals, rolls the changelog, tags `v<version>`, bumps the next patch, and creates
-the GitHub Release that triggers stable publishing. It uses a GitHub App intentionally to bypass protection
-and trigger the downstream workflow; keep other workflow changes tokenless unless a registry requires
-credentials.
+The flow is clarify, specify, plan, decompose, implement, verify; `docs/workflow.md` describes each step, how
+much of it a change needs, and which skill does what. Skills that produce artefacts write them here, whatever
+location they would otherwise use:
 
-**GitHub Actions:** whenever adding or editing a workflow, look up the latest release of **every** `uses:`
-action first and pin it. Do not rely on remembered versions: stale action pins cause runner deprecation
-warnings and avoidable breakage.
+- Decisions and terms found while clarifying (grilling, domain modeling): `docs/decisions/` and `GLOSSARY.md`,
+  in the formats those files define. Public skills name `docs/adr/` for decisions; that folder does not exist
+  here and `make check` fails when it appears.
+- Specs: one file per feature, `specs/NNNN-slug.md`, in the format of `specs/README.md`, written with the
+  `spec` skill or any skill that produces a spec. A skill that wants to publish a spec to an issue tracker
+  writes the file first and links it from the issue. Features that shipped before `specs/` existed have no
+  spec and get none after the fact; a change to one gets a spec for the change.
+- Implementation and testing decisions: `specs/NNNN-slug.plan.md` next to the spec, or an ADR when they are
+  hard to reverse. Never in the spec.
+- Tickets: in the issue tracker, each linking the spec and naming the FR numbers it covers. Local tickets in
+  `.scratch/<feature>/issues/` are allowed for solo work, but git ignores them, so they are no evidence.
+- Research notes (the `research` skill, or any agent summary of outside material):
+  `docs/research/YYYY-MM-DD-topic.md` with `type: Research note`, listed in `docs/index.md`, citing the URLs
+  they rest on. They are secondary: they synthesise, they are not sources.
+- Material received from outside (notes, mails, requirements): `docs/sources/YYYY-MM-DD-topic.md` with
+  `type: Source`, body as received. Files that cannot carry frontmatter (PDF, HTML, office files) stay outside
+  `docs/`, in `raw/`.
+- ADRs written by `domain-modeling` use its own short format; in this repository they get the format and the
+  frontmatter of `docs/decisions/README.md` (`status: draft` while proposed, `stable` once accepted).
+- Any `.md` page created under `docs/`, by whichever skill: frontmatter with a `type`, an entry in the index
+  of its folder (`docs/index.md`, `docs/decisions/index.md`) and an entry in `docs/log.md`, in the same
+  change. Skills do not know this format. `make check` fails on missing frontmatter or index entries; a
+  missing log entry is caught in review.
+- Any `.mdx` page created under `docs/`: `title` and `description`, and an entry in the `meta.json` of its
+  folder. `make check` fails without them.
+- Reviews check two axes: standards (this file, the pattern rules, ADRs, `GLOSSARY.md`) and spec (the spec
+  file, its FR numbers, a test per acceptance scenario).
+
+### Repository memory
+
+Harness memory is off in the committed settings (`.claude/settings.json`, `.vscode/settings.json`;
+[ADR-0096](docs/decisions/0096-the-repository-is-the-memory.md)). Do not use it, and do not write notes into a
+harness's memory directory. Anything worth remembering goes into a tracked file, in the same change that taught it:
+
+| What you learned | Where it goes |
+| --- | --- |
+| A correction or a working rule that always applies | A rule in this file |
+| A rule for one kind of file | The pattern rule in `.github/instructions/` |
+| A procedure | A skill in `.agents/skills/` |
+| A design decision, its trade-offs, its rejected alternatives | An ADR in [`docs/decisions/`](docs/decisions/), listed in its `index.md` |
+| A term and its meaning | [`GLOSSARY.md`](GLOSSARY.md) |
+| What a new feature must do | A spec in [`specs/`](specs/) |
+| How a feature behaves or is used | [`docs/concepts/`](docs/concepts/), [`docs/capabilities/`](docs/capabilities/), [`docs/reference/`](docs/reference/) |
+| What an outside source says | A research note in [`docs/research/`](docs/research/) |
+| How to build, test, or set up a machine for this repository | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| What changed for consumers | [`CHANGELOG.md`](CHANGELOG.md) |
+| What changed in the knowledge pages, and why | [`docs/log.md`](docs/log.md) |
+
+Working notes, scratch files, and session hand-overs go into `.scratch/`, which git ignores, or into the OS temp
+directory — never into tracked files. Personal preferences and facts about one machine (where an SDK is installed)
+stay in that person's user-level instruction file, outside the repository.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub issues of `swimmesberger/Elarion`, through the `gh` CLI; specs are files in `specs/` that the issue
+links. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` at the root, the ADRs in `docs/decisions/` (not `docs/adr/`), the published
+pages under `docs/`, plus `specs/`. See `docs/agents/domain.md`.
+
+## If a spec framework is added
+
+One per repository. It keeps its own folder outside `docs/` (`.specify/`, `openspec/`, `.kiro/`), because every
+`.md` page under `docs/` must be OKF conformant. Its rules file (constitution, config, steering) points to this
+file and does not repeat it. If it wants a managed block in an agent context file, the block goes here, never
+into a `CLAUDE.md` router. Its skills share `.agents/skills/`; install and update them only with its own
+command. Existing specs move into its layout in one change.
+
+## Pointers: read these when the task calls for it
+
+- How to work on a task, how much process it needs, which skill to use: `docs/workflow.md`.
+- A term is unclear, or you are about to name something: `GLOSSARY.md`.
+- Designing or changing anything under `src/`, `tests/` or `samples/`: read
+  `.github/instructions/framework.instructions.md` first. It holds the package layout and the framework
+  invariants: modules, handlers and transports; serialization and AOT; authorization, feature gates and
+  validation; events and cross-module communication; actors, connections and live updates; persistence, blobs
+  and SQL; the TypeScript client and frontend contributions.
+- Writing or changing a `.cs` file: `.github/instructions/csharp.instructions.md`; mechanical formatting is in
+  `.editorconfig`.
+- Writing or changing a generator, an analyzer or a generator test:
+  `.github/instructions/generators.instructions.md`, then
+  [ADR-0006](docs/decisions/0006-incremental-source-generator-conventions.md).
+- Writing or changing a test or a benchmark: `.github/instructions/tests.instructions.md`.
+- Adding or changing a page under `docs/`, or the website: `.github/instructions/docs.instructions.md`, then
+  `docs/guide.md`.
+- Adding or changing a workflow, or anything about publishing: `.github/instructions/workflows.instructions.md`;
+  operating a release: [`RELEASING.md`](RELEASING.md).
+- Which package to add, and what it may depend on: [`docs/reference/packages.mdx`](docs/reference/packages.mdx).
+- Current behavior and public API: [`docs/concepts/`](docs/concepts/) and
+  [`docs/capabilities/`](docs/capabilities/); attributes, diagnostics and configuration:
+  [`docs/reference/`](docs/reference/).
+- Package boundaries, why the code is shaped as it is, whether something may be added: the architecture
+  boundaries above, `docs/architecture.md`, then the ADRs it cites.
+- A decision seems odd, or you are about to make one that is hard to reverse: `docs/decisions/index.md` and the
+  `adr` skill.
+- What a feature must do: its file in `specs/`, or, for a feature older than `specs/`, its published page; how
+  it is built: the `.plan.md` next to the spec.
+- Build, validation and machine setup: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- What happened before, or why a page says what it says: `CHANGELOG.md` for the packages, `docs/log.md` for
+  the knowledge pages, then `docs/sources/`.
+- Anything you learned about the project and would otherwise remember: put it in one of the files of
+  [Repository memory](#repository-memory), list new pages in their index, and add a log entry in the same change.
+
+## Where the rest lives
+
+- Pattern rules: `.github/instructions/*.instructions.md` (source), mirrored for Claude Code in
+  `.claude/rules/`. `.github/copilot-instructions.md` is a pointer for Copilot surfaces that do not read this
+  file. Copilot code review reads the pattern rules but not this file, so a rule that must reach code review
+  belongs in a pattern rule.
+- Procedures: `.agents/skills/*/SKILL.md`. `elarion` is the skill for building on the framework; `adr`, `spec`
+  and `verify` are this repository's own; the others are installed by `apm.yml` and pinned in `apm.lock.yaml`.
+  Never run `apm compile`: it would generate this file, which is written by hand.
+- Tool servers: none today. When one is needed it goes into `.mcp.json` under `mcpServers`, with
+  `.cursor/mcp.json` as a symlink to it; `make check` requires both together.
+- Tracker: GitHub issues and pull requests of `swimmesberger/Elarion`.
+- Published documentation: <https://elarion.wimmesberger.dev>, deployed from `main` by `deploy-docs.yml`.
+- Packages: NuGet (`Elarion.*`) and npm (`@swimmesberger/elarion-*`), published by `publish.yml`.

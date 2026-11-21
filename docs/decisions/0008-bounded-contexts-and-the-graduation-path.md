@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0008: Bounded contexts and the graduation path"
+description: "Bounded contexts and the graduation path."
+status: draft
+---
 # ADR-0008: Bounded contexts and the graduation path
 
 - Status: Proposed

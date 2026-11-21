@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0078: Settings are declared definitions with one effective-value resolver"
+description: "Settings are declared definitions with one effective-value resolver."
+status: draft
+---
 # ADR-0078: Settings are declared definitions with one effective-value resolver
 
 - Status: Proposed

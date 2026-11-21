@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0017: Elarion core is dependency-light; provider defaults are opt-in packages"
+description: "Elarion core is dependency-light; provider defaults are opt-in packages."
+status: stable
+---
 # ADR-0017: Elarion core is dependency-light; provider defaults are opt-in packages
 
 - Status: Accepted

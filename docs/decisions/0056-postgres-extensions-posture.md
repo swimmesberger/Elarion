@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0056: PostgreSQL extensions are within the one-Postgres positioning; ease the extension-image pain"
+description: "PostgreSQL extensions are within the one-Postgres positioning; ease the extension-image pain."
+status: stable
+---
 # ADR-0056: PostgreSQL extensions are within the one-Postgres positioning; ease the extension-image pain
 
 - Status: Accepted (the posture; the image/composition improvement remains deferred until designed)

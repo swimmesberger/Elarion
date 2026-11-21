@@ -1,7 +1,15 @@
+---
+type: Format
+title: "ADR format"
+description: "When to write an architecture decision record, its format and its statuses."
+generated: { by: claude-code/claude-fable-5-2, at: 2026-11-21T11:30:00Z }
+status: stable
+---
 # Architecture Decision Records
 
 This directory holds Architecture Decision Records (ADRs) for Elarion, in the
 classic [Nygard format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions).
+The list of records is [`index.md`](index.md).
 
 An ADR captures a single architecturally significant decision: the context that
 forced it, the decision itself, and the consequences we accept. ADRs are
@@ -10,109 +18,71 @@ supersedes it over editing the original.
 
 These records are intentionally **not** published on the documentation site. The
 site documents shipped behavior; ADRs document *why* we chose a design, including
-designs that are not yet implemented.
+designs that are not yet implemented. A published page that cites an ADR links it
+by its absolute GitHub URL
+(`https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/NNNN-….md`).
+
+## When to write one
+
+All three must hold:
+
+1. **Hard to reverse.** Changing your mind later costs real effort.
+2. **Surprising without context.** A future reader would look at the code and ask why.
+3. **A real trade-off.** There were genuine alternatives and one was chosen for reasons.
+
+When a feature is in scope and several reasonable designs exist, the ADR records the one that was chosen and
+the alternatives that were rejected, as revisable (`AGENTS.md`, "Decide, do not defer"). An ADR may be
+`Proposed` for a design that is not built yet.
 
 ## Conventions
 
-- File name: `NNNN-kebab-case-title.md` (zero-padded sequence number).
-- Status: `Proposed` | `Accepted` | `Superseded by ADR-NNNN` | `Deprecated`.
-- Sections: Status, Context, Decision, Consequences. Add others (Options,
-  Recommended pattern, References) when they add value.
+- File name: `NNNN-kebab-case-title.md`, a zero-padded sequence number. Take the next free number and never
+  renumber. A number is taken by the first branch that uses it, so look at open pull requests as well as at
+  this folder.
+- First line after the frontmatter: `# ADR-NNNN: Title`, with the number of the file name.
+- Header bullets: `- Status:`, `- Date:` and, when they add value, `- Related:`, `- Amends:`, `- Supersedes:`.
+- Status: `Proposed` | `Accepted` | `Superseded by ADR-NNNN` | `Deprecated`. A qualifier may follow in
+  parentheses (`Accepted (implemented 2026-07-21)`).
+- Sections: Context, Decision, Consequences. Add others (Options, Rejected alternatives, Recommended
+  pattern, References) when they add value.
+- Write in the terms of [`GLOSSARY.md`](../../GLOSSARY.md). If a decision introduces or changes a term,
+  update the glossary in the same change.
 
-## Index
+## Frontmatter
 
-- [ADR-0001: Event dispatch timing and transactional delivery](0001-event-transaction-phase.md)
-- [ADR-0002: Direct cross-module communication](0002-cross-module-communication.md)
-- [ADR-0003: Predicate-based decorator attachment (`AppliesTo`)](0003-decorator-attachment-predicates.md)
-- [ADR-0004: Handler result caching](0004-handler-result-caching.md)
-- [ADR-0005: Cross-module error channel (`Result` vs exceptions) and gRPC mapping](0005-cross-module-error-channel.md)
-- [ADR-0006: Incremental source generator conventions](0006-incremental-source-generator-conventions.md)
-- [ADR-0007: The data layer is application logic — modules as plugins over it](0007-data-is-platform-module-as-plugin.md)
-- [ADR-0008: Bounded contexts and the graduation path — Proposed](0008-bounded-contexts-and-the-graduation-path.md)
-- [ADR-0009: Authorization building blocks](0009-authorization-building-blocks.md)
-- [ADR-0010: The event bus is pub/sub-only; request/reply is unified under dispatch](0010-event-bus-is-pub-sub-only.md)
-- [ADR-0011: Runtime-changeable settings subsystem](0011-runtime-settings-subsystem.md)
-- [ADR-0012: Referencing dynamic variables in attributes — form follows tier](0012-dynamic-variable-references.md)
-- [ADR-0013: Resource-based and data-level authorization](0013-resource-and-data-level-authorization.md)
-- [ADR-0014: Cross-assembly generator composition](0014-cross-assembly-generator-composition.md)
-- [ADR-0015: EF Core stores enlist in the caller's ambient transaction](0015-ef-core-transaction-participation.md)
-- [ADR-0016: Feature-flag gating (`[FeatureGate]` over an OpenFeature-backed seam)](0016-feature-flag-gating.md)
-- [ADR-0017: Elarion core is dependency-light; provider defaults are opt-in packages](0017-dependency-light-core.md)
-- [ADR-0018: Generated infrastructure is framework-named, not user-declared](0018-generated-infrastructure-is-framework-named.md)
-- [ADR-0019: Variant service injection (transparent, via an opt-in async-resolving handler proxy)](0019-variant-service-injection.md)
-- [ADR-0020: PostgreSQL `UNLOGGED` table is the recommended L2 distributed cache](0020-postgres-unlogged-l2-cache.md)
-- [ADR-0021: Idempotency (`[Idempotent]` over a single-transaction, unique-constrained key store)](0021-idempotency.md)
-- [ADR-0022: Inbox pattern for integration-event consumers (idempotent consumers)](0022-inbox-idempotent-event-consumers.md)
-- [ADR-0023: Canonical JSON serialization configuration](0023-canonical-json-serialization.md)
-- [ADR-0024: Cross-instance settings change notification over PostgreSQL LISTEN/NOTIFY](0024-postgres-listen-notify-settings-changes.md)
-- [ADR-0025: Cross-instance scheduler coordination (per-occurrence claims over EF Core/PostgreSQL)](0025-distributed-scheduler-coordination.md)
-- [ADR-0026: OpenAPI for the HTTP transport](0026-openapi-http-transport.md)
-- [ADR-0027: Declarative request validation (DataAnnotations exported to every contract surface; business rules in the handler)](0027-declarative-request-validation.md)
-- [ADR-0028: Configuration-selected service variants (`[ConfigurationVariant]` — synchronous, proxy-free sibling of `[FeatureVariant]`)](0028-configuration-selected-service-variants.md)
-- [ADR-0029: The variant registry (`ElarionVariants`), named defaults, and the host-seeded catalog](0029-variant-registry-and-catalog.md)
-- [ADR-0030: Client capability bootstrap — modules, flags/variants, and grants projected to the frontend over OpenFeature](0030-client-capability-bootstrap.md)
-- [ADR-0031: Imperative handler transport mapping (and why HTTP stays concrete)](0031-imperative-handler-transport-mapping.md)
-- [ADR-0032: Frontend contribution model and the typed capability vocabulary](0032-frontend-contribution-model.md)
-- [ADR-0033: User-context trace and log enrichment](0033-user-context-trace-and-log-enrichment.md)
-- [ADR-0034: Abstractions holds contracts, not implementations](0034-abstractions-holds-contracts-not-implementations.md)
-- [ADR-0035: Protocol-neutral staged-upload seam (`IStagedUploadStore` supersedes `ITusUploadStore`)](0035-protocol-neutral-staged-upload-seam.md)
-- [ADR-0036: Blob listing is prefix + delimiter virtual hierarchy, not directories](0036-blob-listing-virtual-hierarchy.md)
-- [ADR-0037: Read-replica query routing and read-your-writes consistency tokens — Proposed](0037-read-replica-routing-and-consistency-tokens.md)
-- [ADR-0038: Client-assigned entity identity — UUIDv7 and a truthful key model](0038-client-assigned-entity-identity.md)
-- [ADR-0039: File payloads — the in-memory `ElarionFile` tier and the staged-blob tier](0039-binary-file-responses.md)
-- [ADR-0040: Host-declared module endpoint hooks (`[ModuleEndpoints]`)](0040-host-declared-module-endpoints.md)
-- [ADR-0041: Blob streaming connections clone the context connection](0041-blob-streaming-connections-clone-the-context-connection.md)
-- [ADR-0042: In-memory actors — mailbox-protected state machines with generated typed facades](0042-in-memory-actors.md)
-- [ADR-0043: Client events — after-commit facts projected to the browser over SSE](0043-client-events.md)
-- [ADR-0044: Request-driven server-streaming handlers](0044-streaming-requests-and-responses.md)
-- [ADR-0045: Handler-action audit trail — `[Auditable]`, `IAuditScope`, and the transactional EF sink](0045-handler-action-audit-trail.md)
-- [ADR-0046: Actor event consumers — `[ConsumeEvent]` on `[Actor]` methods → generated relay](0046-actor-event-consumers.md)
-- [ADR-0047: Actor state snapshotting — `IActorState<TState>` + `IActorSnapshotStore`, PostgreSQL default](0047-actor-state-snapshotting.md)
-- [ADR-0048: Single-homed actors — a PostgreSQL home lease, not a cluster](0048-single-homed-actors.md)
-- [ADR-0049: Role leases — the leader-election primitive, extracted from the actor home](0049-role-leases.md)
-- [ADR-0050: The role-holder proxy — an in-app ingress rule, not a cluster](0050-role-holder-proxy.md)
-- [ADR-0051: Bulk insert as an EF-shaped seam with a PostgreSQL binary COPY provider](0051-postgresql-bulk-insert.md)
-- [ADR-0052: Ordered streams — a sequencer-owned hub, actor stream methods, and a resumable SSE leg](0052-ordered-streams.md)
-- [ADR-0053: Bidirectional client connections — a transport-neutral connection seam; adapters adopted whole](0053-bidirectional-client-connections.md)
-- [ADR-0054: Device identity and provisioning — pairing codes, device keys, and the HMAC connect-time handshake](0054-device-identity-and-provisioning.md)
-- [ADR-0055: Data-rate shaping helpers — write-behind buffer and keyed conflater](0055-data-rate-shaping-helpers.md)
-- [ADR-0056: PostgreSQL extensions are within the one-Postgres positioning; ease the extension-image pain](0056-postgres-extensions-posture.md)
-- [ADR-0057: A Flyway-shaped PostgreSQL migration runner for EF-free (AOT) hosts](0057-postgresql-sql-migration-runner.md)
-- [ADR-0058: AOT-native SQL row mapping — explicit generated mappers, not call-site interception](0058-aot-sql-row-mapping.md)
-- [ADR-0059: Merge the always-on tracing + context-enrichment decorators into one observability decorator](0059-merged-handler-observability-decorator.md)
-- [ADR-0060: A database-neutral migration core, and a SQLite provider](0060-database-neutral-migration-core.md)
-- [ADR-0061: Virtual-sharded actors — fixed role partitions without a cluster](0061-virtual-sharded-actors.md)
-- [ADR-0062: Role-affine routing and target-group outbox delivery](0062-role-affine-routing-and-outbox-delivery.md)
-- [ADR-0063: gRPC ships as typed unary and server-streaming transport adapters](0063-grpc-unary-transport.md)
-- [ADR-0064: Acknowledgment-gated outbound delivery is a codec-tier helper, adopted on second demand — Proposed](0064-acknowledgment-gated-outbound-delivery.md)
-- [ADR-0065: Self-typed request markers enable inferred dispatch; ConnectionHandlerInvoker binds per connection](0065-self-typed-request-markers-and-bound-connection-invoker.md)
-- [ADR-0066: Opt-in low-allocation dispatch profile for high-rate connections](0066-low-allocation-connection-dispatch.md)
-- [ADR-0067: Per-connection sessions and a single framer emit path](0067-connection-sessions-and-single-framer-emit-path.md)
-- [ADR-0068: Source-generated binary COPY and staged upsert for the AOT SQL tier — Proposed](0068-aot-sql-binary-copy.md)
-- [ADR-0069: Producer-owned hot-state primitives — bounded MPSC queue and staged-batch flusher](0069-producer-owned-hot-state-buffering.md)
-- [ADR-0070: Contract-set registration — unconditional composition of one contract's implementation set](0070-contract-set-registration.md)
-- [ADR-0071: Generator-owned HTTP endpoint binding — RequestDelegate registrations, not RDG](0071-generator-owned-http-endpoint-binding.md)
-- [ADR-0072: Per-endpoint HTTP customization hook and the created-resource envelope](0072-per-endpoint-customization-and-created-envelope.md)
-- [ADR-0073: Leased work rows are a recognized pattern, extracted on second demand](0073-leased-work-rows.md)
-- [ADR-0074: Reactive client capabilities — stores over values, with the registry left pure](0074-reactive-client-capabilities.md)
-- [ADR-0075: Ambient tenant scoping — a model-level filter and a write-time stamp, not a per-call-site rule](0075-ambient-tenant-scoping.md)
-- [ADR-0076: Web Push is a framework package — native crypto, a fail-closed endpoint allow-list, and a pluggable browser transport](0076-web-push.md)
-- [ADR-0077: SQL array parameters are an explicit wrapper, backed by a build-time diagnostic](0077-sql-array-parameters.md)
-- [ADR-0078: Settings are declared definitions with one effective-value resolver — Proposed](0078-settings-definitions-and-effective-value-resolver.md)
-- [ADR-0079: Every feature flag is declared and has exactly one owner — Proposed](0079-every-feature-flag-is-declared-and-has-exactly-one-owner.md)
-- [ADR-0080: Errors are a declared contract with a stable code — Proposed](0080-errors-are-a-declared-contract-with-a-stable-code.md)
-- [ADR-0081: One migration plan — SQL, code and EF steps share a version sequence, a history and a lock — Proposed](0081-one-migration-plan.md)
-- [ADR-0082: Requiredness comes from nullability, in both directions — Proposed](0082-requiredness-comes-from-nullability-in-both-directions.md)
-- [ADR-0083: The installable-app shell is a framework npm package — safe caching rules built in, the privacy choice left to the app — Proposed](0083-installable-app-shell.md)
-- [ADR-0084: Authenticating-proxy identity is an optional package on IdentityModel's ConfigurationManager — Proposed](0084-authenticating-proxy-identity.md)
-- [ADR-0085: Handler declarations are projected to clients and hosts, not copied — Proposed](0085-handler-declarations-are-projected-not-copied.md)
-- [ADR-0086: One framework-owned answer for unexpected exceptions, on every transport — Proposed](0086-one-answer-for-unexpected-errors.md)
-- [ADR-0087: Transaction-scoped locks are a framework helper with one advisory key scheme — Proposed](0087-transaction-scoped-locks-and-one-advisory-key-scheme.md)
-- [ADR-0088: Deletions of marked entities are domain events, published with their database cascades — Superseded by ADR-0090](0088-entity-lifecycle-events-for-soft-references.md)
-- [ADR-0089: Resource authorization composes — hidden-as-missing, owner-derived filters, combinators — Proposed](0089-resource-authorization-composes.md)
-- [ADR-0090: References between records stay in the database — entity lifecycle events are removed](0090-references-between-records-stay-in-the-database.md)
-- [ADR-0091: A query declares its source entities; committed writes to them become re-query hints — Proposed](0091-query-sources-and-requery-hints.md)
-- [ADR-0092: The net11 build compiles with runtime async](0092-runtime-async-on-net11.md)
-- [ADR-0093: Typst PDF rendering is a framework package — the pinned CLI, bundled by the build, one sandboxed workspace per document — Proposed](0093-typst-pdf-rendering.md)
-- [ADR-0094: An in-process Typst engine is an opt-in second implementation of ITypstCompiler — prototype findings — Proposed](0094-in-process-typst-engine.md)
-- [ADR-0095: One resource rule for the list, the point check, the complement and the inverse — Proposed](0095-one-resource-rule-for-list-point-check-and-complement.md)
+Every ADR starts with the Open Knowledge Format envelope that every `.md` page under `docs/` carries
+(see [`../guide.md`](../guide.md)):
+
+```markdown
+---
+type: Architecture Decision Record
+title: "ADR-NNNN: Title"
+description: "One sentence stating the decision."
+status: draft
+---
+# ADR-NNNN: Title
+
+- Status: Proposed
+- Date: YYYY-MM-DD
+```
+
+The frontmatter `status` is the lifecycle word tools read; the `- Status:` bullet is the record's own
+wording. They must agree, and `tools/check_repo.py` fails when they do not:
+
+| `- Status:` starts with | Frontmatter |
+| --- | --- |
+| `Proposed` | `status: draft` |
+| `Accepted` | `status: stable` |
+| `Superseded by ADR-NNNN` | `status: deprecated` and `superseded_by: NNNN` |
+| `Deprecated` | `status: deprecated` |
+
+## Rules
+
+- A new or changed ADR gets its entry in [`index.md`](index.md)
+  (`* [ADR-NNNN](NNNN-….md) - Title`, with `(proposed)` or `(superseded by ADR-NNNN)` after the title while
+  that is its state) and an entry in [`../log.md`](../log.md), in the same change. `make check` fails on a
+  missing index entry.
+- Superseding: the new ADR says `- Supersedes:`; the old one gets `- Status: Superseded by [ADR-NNNN](…)`,
+  `status: deprecated`, `superseded_by: NNNN`, and a note at the top. Nothing else in it changes.
+- Agents write ADRs through the `adr` skill, which follows this file. The `domain-modeling` skill would
+  write to `docs/adr/` in its own short format; in this repository its ADRs go here, in this format.

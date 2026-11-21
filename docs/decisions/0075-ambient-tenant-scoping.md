@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0075: Ambient tenant scoping — a model-level filter and a write-time stamp, not a per-call-site rule"
+description: "Ambient tenant scoping — a model-level filter and a write-time stamp, not a per-call-site rule."
+status: stable
+---
 # ADR-0075: Ambient tenant scoping — a model-level filter and a write-time stamp, not a per-call-site rule
 
 - Status: Accepted
@@ -5,7 +11,7 @@
 - Related: [ADR-0013](0013-resource-and-data-level-authorization.md) (the opt-in point check and list filter
   this sits beside), [ADR-0009](0009-authorization-building-blocks.md) (the handler-pipeline gate),
   [ADR-0007](0007-data-is-platform-module-as-plugin.md) (handlers use the `DbContext` directly),
-  [ADR-0017](0017-seam-in-core-implementation-in-sibling.md) (seam/implementation split), the
+  [ADR-0017](0017-dependency-light-core.md) (seam/implementation split), the
   [multi-tenancy](../capabilities/multi-tenancy.mdx) capability page, and the
   [archive/restore](../capabilities/archive-restore.mdx) recipe, whose argument against global query filters
   this decision is the stated exception to.

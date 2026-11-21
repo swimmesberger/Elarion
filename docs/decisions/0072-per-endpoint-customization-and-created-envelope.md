@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0072: Per-endpoint HTTP customization hook and the created-resource envelope"
+description: "Per-endpoint HTTP customization hook and the created-resource envelope."
+status: stable
+---
 # ADR-0072: Per-endpoint HTTP customization hook and the created-resource envelope
 
 - Status: Accepted

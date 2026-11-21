@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0074: Reactive client capabilities — stores over values, with the registry left pure"
+description: "Reactive client capabilities — stores over values, with the registry left pure."
+status: stable
+---
 # ADR-0074: Reactive client capabilities — stores over values, with the registry left pure
 
 - Status: Accepted

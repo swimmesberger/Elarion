@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0001: Event dispatch timing and transactional delivery"
+description: "Event dispatch timing and transactional delivery."
+status: stable
+---
 # ADR-0001: Event dispatch timing and transactional delivery
 
 - Status: Accepted (amended by [ADR-0010](0010-event-bus-is-pub-sub-only.md))

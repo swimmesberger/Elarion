@@ -1,8 +1,14 @@
+---
+type: Architecture Decision Record
+title: "ADR-0006: Incremental source generator conventions"
+description: "Incremental source generator conventions."
+status: stable
+---
 # ADR-0006: Incremental source generator conventions
 
 - Status: Accepted
 - Date: 2026-06-23
-- Related: [Source generation](../source-generation.mdx) (user-facing reference),
+- Related: [Source generation](../concepts/source-generation.mdx) (user-facing reference),
   [ADR-0003](0003-decorator-attachment-predicates.md) (a generator emits the predicate plumbing),
   the `Elarion.Generators` and `Elarion.EntityFrameworkCore.Generators` generator projects (their
   analyzer DLLs ship bundled inside the `Elarion` and `Elarion.EntityFrameworkCore` runtime packages).

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0069: Producer-owned hot-state primitives — bounded MPSC queue and staged-batch flusher"
+description: "Producer-owned hot-state primitives — bounded MPSC queue and staged-batch flusher."
+status: stable
+---
 # ADR-0069: Producer-owned hot-state primitives — bounded MPSC queue and staged-batch flusher
 
 - Status: Accepted (implemented 2026-07-21)

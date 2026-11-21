@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0046: Actor event consumers (`[ConsumeEvent]` on `[Actor]` methods → generated relay)"
+description: "Actor event consumers (`[ConsumeEvent]` on `[Actor]` methods → generated relay)."
+status: stable
+---
 # ADR-0046: Actor event consumers (`[ConsumeEvent]` on `[Actor]` methods → generated relay)
 
 - Status: Accepted

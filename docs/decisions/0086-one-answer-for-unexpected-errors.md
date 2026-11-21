@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0086: One framework-owned answer for unexpected exceptions, on every transport"
+description: "One framework-owned answer for unexpected exceptions, on every transport."
+status: draft
+---
 # ADR-0086: One framework-owned answer for unexpected exceptions, on every transport
 
 - Status: Proposed

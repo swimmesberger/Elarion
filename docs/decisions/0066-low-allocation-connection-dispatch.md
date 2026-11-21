@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0066: Opt-in low-allocation dispatch profile for high-rate connections"
+description: "Opt-in low-allocation dispatch profile for high-rate connections."
+status: stable
+---
 # ADR-0066: Opt-in low-allocation dispatch profile for high-rate connections
 
 - Status: Accepted

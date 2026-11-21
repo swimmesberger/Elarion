@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0095: One resource rule for the list, the point check, the complement and the inverse"
+description: "One resource rule for the list, the point check, the complement and the inverse."
+status: draft
+---
 # ADR-0095: One resource rule for the list, the point check, the complement and the inverse
 
 - Status: Proposed

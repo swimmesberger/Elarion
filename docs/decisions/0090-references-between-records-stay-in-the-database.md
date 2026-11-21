@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0090: References between records stay in the database — entity lifecycle events are removed"
+description: "References between records stay in the database — entity lifecycle events are removed."
+status: stable
+---
 # ADR-0090: References between records stay in the database — entity lifecycle events are removed
 
 - Status: Accepted

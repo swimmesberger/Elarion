@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0033: User-context trace and log enrichment"
+description: "User-context trace and log enrichment."
+status: stable
+---
 # ADR-0033: User-context trace and log enrichment
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0026: OpenAPI for the HTTP transport"
+description: "OpenAPI for the HTTP transport."
+status: stable
+---
 # ADR-0026: OpenAPI for the HTTP transport
 
 - Status: Accepted

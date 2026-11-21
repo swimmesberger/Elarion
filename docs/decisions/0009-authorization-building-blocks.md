@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0009: Authorization building blocks"
+description: "Authorization building blocks."
+status: stable
+---
 # ADR-0009: Authorization building blocks
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0005: Error channel on cross-module contracts (`Result` vs exceptions) and gRPC mapping"
+description: "Error channel on cross-module contracts (`Result` vs exceptions) and gRPC mapping."
+status: stable
+---
 # ADR-0005: Error channel on cross-module contracts (`Result` vs exceptions) and gRPC mapping
 
 - Status: Accepted

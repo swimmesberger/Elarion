@@ -1,7 +1,13 @@
+---
+type: Research note
+title: "Live dashboards over a relational database: re-query hints, fan-out and load shaping"
+description: "How other systems deliver, fan out and throttle live updates over a relational database; input for ADR-0091."
+status: stable
+---
 # Live dashboards over a relational database: re-query hints, fan-out and load shaping
 
 - Date: 2026-10-25
-- Status: Research input for [ADR-0091](../0091-query-sources-and-requery-hints.md). This is not a decision. Section 8
+- Status: Research input for [ADR-0091](../decisions/0091-query-sources-and-requery-hints.md). This is not a decision. Section 8
   was written against the ADR's first draft (a 30 s backoff cap and a fixed 250 ms jitter); the ADR has since adopted
   most of its recommendations.
 - Method: primary sources only: vendor documentation, source code pinned to a commit, specifications, and engineering

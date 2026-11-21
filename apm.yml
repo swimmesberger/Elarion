@@ -1,0 +1,27 @@
+# Agent Package Manager manifest. `apm install` deploys the skills below into the cross-tool
+# .agents/skills/ folder and writes apm.lock.yaml; both are committed, so a clone works without APM.
+# Claude Code reads them through the .claude/skills symlink. AGENTS.md is written by hand: do not
+# use `apm compile`. Update the pin with care: the skills' paths and file names move upstream.
+# The skills elarion, adr, spec and verify in .agents/skills/ are this repository's own and are not
+# managed by APM. This manifest is not a package of the framework and has no version of its own to keep.
+name: elarion
+version: 0.1.0
+description: Agent skills for working on the Elarion framework repository
+targets:
+  - agent-skills
+dependencies:
+  apm:
+    - mattpocock/skills/skills/productivity/grilling#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/productivity/grill-me#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/engineering/grill-with-docs#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/engineering/domain-modeling#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/engineering/to-spec#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/engineering/to-tickets#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/engineering/implement#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/engineering/tdd#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/engineering/code-review#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/engineering/diagnosing-bugs#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/engineering/research#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/productivity/handoff#5863806dd4e15c63174bee4e7515a4256792ecfa
+    - mattpocock/skills/skills/productivity/writing-for-agents#5863806dd4e15c63174bee4e7515a4256792ecfa
+  mcp: []

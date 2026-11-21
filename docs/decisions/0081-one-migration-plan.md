@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0081: One migration plan — SQL, code and EF steps share a version sequence, a history and a lock"
+description: "One migration plan — SQL, code and EF steps share a version sequence, a history and a lock."
+status: draft
+---
 # ADR-0081: One migration plan — SQL, code and EF steps share a version sequence, a history and a lock
 
 - Status: Proposed

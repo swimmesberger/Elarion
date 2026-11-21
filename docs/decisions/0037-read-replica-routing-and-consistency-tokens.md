@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0037: Read-replica query routing and read-your-writes consistency tokens"
+description: "Read-replica query routing and read-your-writes consistency tokens."
+status: draft
+---
 # ADR-0037: Read-replica query routing and read-your-writes consistency tokens
 
 - Status: Proposed

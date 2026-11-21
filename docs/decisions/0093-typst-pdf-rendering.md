@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0093: Typst PDF rendering is a framework package — the pinned CLI, bundled by the build, one sandboxed workspace per document"
+description: "Typst PDF rendering is a framework package — the pinned CLI, bundled by the build, one sandboxed workspace per document."
+status: draft
+---
 # ADR-0093: Typst PDF rendering is a framework package — the pinned CLI, bundled by the build, one sandboxed workspace per document
 
 - Status: Proposed

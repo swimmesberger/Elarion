@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0011: Runtime-changeable settings subsystem"
+description: "Runtime-changeable settings subsystem."
+status: stable
+---
 # ADR-0011: Runtime-changeable settings subsystem
 
 - Status: Accepted

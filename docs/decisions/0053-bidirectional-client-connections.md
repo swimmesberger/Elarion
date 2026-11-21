@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0053: Bidirectional client connections — a transport-neutral connection seam; adapters adopted whole"
+description: "Bidirectional client connections — a transport-neutral connection seam; adapters adopted whole."
+status: stable
+---
 # ADR-0053: Bidirectional client connections — a transport-neutral connection seam; adapters adopted whole
 
 - Status: Accepted (foundation + WebSocket and TCP adapters + conversation helpers + idle hook shipped;

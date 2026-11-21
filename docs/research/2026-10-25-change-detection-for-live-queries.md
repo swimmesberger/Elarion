@@ -1,10 +1,16 @@
+---
+type: Research note
+title: "Change detection for live queries: where frameworks notice that data changed"
+description: "Where frameworks detect that data changed, what each layer misses, and when it publishes; input for ADR-0091."
+status: stable
+---
 # Change detection for live queries: where frameworks notice that data changed
 
 - Date: 2026-10-25
 - Status: Research input for section 2 ("Producing publications") of
-  [ADR-0091](../0091-query-sources-and-requery-hints.md). This is not a decision.
+  [ADR-0091](../decisions/0091-query-sources-and-requery-hints.md). This is not a decision.
 - Scope: the layer at which a write is detected, what that layer misses, and when it publishes. Delivery, fan-out,
-  throttling and the browser side are in [live-dashboards-and-fan-out.md](live-dashboards-and-fan-out.md) and are not
+  throttling and the browser side are in [live-dashboards-and-fan-out.md](2026-10-25-live-dashboards-and-fan-out.md) and are not
   repeated; "fan-out §n" points to a section of that note.
 - Method: primary sources only: vendor docs, source code pinned to a commit, release notes, and posts by vendors or
   maintainers. Labels resolve in [Sources](#sources). **Inference** marks my reading. Quotes are short phrases.

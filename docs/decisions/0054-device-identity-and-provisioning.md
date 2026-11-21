@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0054: Device identity and provisioning"
+description: "Device identity and provisioning."
+status: stable
+---
 # ADR-0054: Device identity and provisioning
 
 - Status: Accepted (2026-07-13 — originally Proposed as deferred; implemented as `Elarion.Devices` +

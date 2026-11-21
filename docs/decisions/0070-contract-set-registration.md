@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0070: Contract-set registration — unconditional composition of one contract's implementation set"
+description: "Contract-set registration — unconditional composition of one contract's implementation set."
+status: stable
+---
 # ADR-0070: Contract-set registration — unconditional composition of one contract's implementation set
 
 - Status: Accepted

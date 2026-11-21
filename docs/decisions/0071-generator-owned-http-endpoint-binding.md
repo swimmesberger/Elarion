@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0071: Generator-owned HTTP endpoint binding — RequestDelegate registrations, not RDG"
+description: "Generator-owned HTTP endpoint binding — RequestDelegate registrations, not RDG."
+status: stable
+---
 # ADR-0071: Generator-owned HTTP endpoint binding — RequestDelegate registrations, not RDG
 
 - Status: Accepted

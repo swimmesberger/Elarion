@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0038: Client-assigned entity identity — UUIDv7 and a truthful key model"
+description: "Client-assigned entity identity — UUIDv7 and a truthful key model."
+status: stable
+---
 # ADR-0038: Client-assigned entity identity — UUIDv7 and a truthful key model
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0023: Canonical JSON serialization configuration"
+description: "Canonical JSON serialization configuration."
+status: stable
+---
 # ADR-0023: Canonical JSON serialization configuration
 
 - Status: Accepted
