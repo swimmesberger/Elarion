@@ -10,6 +10,7 @@ status: stable
 - Date: 2026-11-21
 - References: the [agentic repository template](https://github.com/swimmesberger/agentic-repo-template)
   (its ADR 0006, "Harness memory is off; the repository is the memory"), whose routing this adopts.
+- Related: [ADR-0097](0097-adopt-the-agentic-repository-layout.md) (adopts the layout this decision left out).
 
 ## Context
 
@@ -41,7 +42,9 @@ tracked files.
 
 The template's routing is adopted, not its layout. Elarion keeps `docs/decisions/` for ADRs in the format its
 `README.md` describes, and `docs/` stays the content source of the documentation website; the template's
-`GLOSSARY.md`, `specs/`, `docs/log.md` and document frontmatter are not introduced by this decision.
+`GLOSSARY.md`, `specs/`, `docs/log.md` and document frontmatter are not introduced by this decision. They were
+introduced afterwards by [ADR-0097](0097-adopt-the-agentic-repository-layout.md), which also extends the routing
+in `AGENTS.md` by a glossary, specs, pattern rules and a log.
 
 ## Consequences
 
@@ -53,8 +56,8 @@ The template's routing is adopted, not its layout. Elarion keeps `docs/decisions
 - The setting applies to sessions started after it is in the checkout. Notes a harness stored earlier are deleted by
   whoever owns them; the two that prompted this decision became the "Decide, do not defer" rule in `AGENTS.md` and
   the machine-failure notes in `CONTRIBUTING.md`.
-- History has no dedicated log: `CHANGELOG.md` and git carry it. If that proves too thin for agents, a log is the
-  next piece of the template to take.
+- When this was decided, history had no dedicated log: `CHANGELOG.md` and git carried it. ADR-0097 added
+  `docs/log.md` for changes to the knowledge pages; `CHANGELOG.md` remains the record of what changes for consumers.
 
 ## Rejected alternatives
 
