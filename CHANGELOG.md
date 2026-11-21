@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-21
+
 ### Added
 - **Streamed files from HTTP-only handlers** (ADR-0098). An `[HttpEndpoint]` without `[Handler]` can respond with
   `Result<ElarionStreamedFile>`: content written to the response body after the pipeline has run, so a stored blob or
@@ -2507,7 +2509,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.2
 [0.4.1]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.1
 [0.4.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.0
 [0.3.2]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.2
