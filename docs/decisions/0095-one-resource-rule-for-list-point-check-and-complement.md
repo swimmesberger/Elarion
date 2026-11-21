@@ -1,4 +1,4 @@
-# ADR-0095: One resource rule for the list, the point check and the complement — and what the inverse needs
+# ADR-0095: One resource rule for the list, the point check, the complement and the inverse
 
 - Status: Proposed
 - Date: 2026-11-21
@@ -73,7 +73,7 @@ another table; the grants point check formatted a numeric id with the current cu
   not parse as `TKey`. `From` stays the unchecked escape hatch and says so.
 - `ForUser` takes the rule as a **relation between a row and a principal id** — one expression with two parameters —
   instead of a delegate that builds a predicate per caller. The id is substituted as a captured value, so it reaches
-  the database as a parameter. The relation form is also what an inverse query can be derived from (below).
+  the database as a parameter. The relation is also what the inverse reads (below).
 - `ForOperations` denies every operation it does not list, which is the fail-safe reading of an open
   `ResourceOperation`.
 - `AnyOf` leaves out alternatives that deny the caller and `AllOf` short-circuits on one, so the SQL holds only the
@@ -92,38 +92,58 @@ null semantics.
 The documented shape is `AllOf(scope, AnyOf(alternatives…))`, in which an unrestricted alternative is neutral. Tenancy
 itself belongs to ambient tenant scoping (ADR-0075), which no composition can lift.
 
-**The inverse is still not a seam; its shape is now known.** ADR-0089 rejected a generated `IResourcePrincipals<T>`
-because it "would return a partial answer that looks complete". A shape that cannot do that:
+**The inverse reads the same rule, and answers completely or not at all.** ADR-0089 rejected a generated
+`IResourcePrincipals<T>` because it "would return a partial answer that looks complete". The shape that cannot do that:
 
-- Every alternative is either *invertible* or not. A relation (`ForUser`) inverts mechanically: for a row set `R`, the
-  principals are `candidates.Where(u => R.Any(row => relation(row, u)))`. A gate inverts through a **principal
-  directory**: `WhenPermission(P, then)` is `directory.Holding(P) ∩ inverse(then)`, `WhenRole` likewise;
-  `Rows(predicate)` is "every candidate, if the row matches"; the generated filter contributes its owner column, its
-  user and role grants and its bypass.
-- A composition is invertible only when **all** its parts are. `From(delegate)` and a hand-written
-  `IQueryAuthorizer<T>` are opaque, so a rule containing one has no inverse and asking for it fails with the name of
-  the opaque part — the answer is complete or refused, never partial.
-- The directory is the missing seam: the stored mirror of how a principal gets its roles and claims
-  (`IQueryable<(userId, role)>`, `IQueryable<(userId, claimType, value)>`, and the candidate set itself).
-  `Elarion.EntityFrameworkCore.Identity` can supply a default over the role-claim tables.
+- A rule is a **relation** between a row and a principal id. `IPrincipalQueryAuthorizer<TEntity>.GetPrincipalRelation`
+  returns `(row, principalId) => …`, true exactly when that principal may access the row. The forward filter is the
+  relation with the principal bound; the inverse is the relation with the row set bound:
+  `principals.WhereAuthorizedFor(rows, authorizer, directory)` is
+  `principals.Where(p => rows.Any(row => relation(row, p)))`, one statement.
+- Relations compose at the relation level — `AnyOf` is OR, `AllOf` is AND, over one pair of parameters — not by
+  uniting or intersecting principal sets. Set algebra is only right for a single row (for several rows "may access one
+  of them **and** is in scope for another" would pass an `AllOf`).
+- **Complete or refused.** Every `QueryAuthorizers` building block and the generated `[ResourceFilter]` implement the
+  interface. `From` and `When` hold an opaque delegate over the live principal and do not, nor does a hand-written
+  `IQueryAuthorizer<T>` unless it implements it. A composition asks every part, so a rule with one opaque part throws
+  `NotSupportedException` naming that part instead of answering for the rest. A generated filter with a
+  `TenantProperty` also refuses: the forward filter *parses* the tenant claim, a stored claim cannot be compared with
+  the column the same way in SQL, and a relation that dropped the scope would list principals of every tenant.
+- Facts the forward direction reads from `ICurrentUser` — roles, permission claims — come from an
+  **`IPrincipalDirectory<TKey>`**: two queries, `Roles` (principal, role) and `Claims` (principal, type, value;
+  *effective* claims, the claims of a principal's roles included). They are relations rather than
+  `Holding(permission)`-style lookups because a role *grant* correlates the role name with a grants row, which a
+  lookup taking a constant cannot express.
 
-It is not shipped because three questions are open, and each decides the contract:
+The three questions that kept this from being a seam, and the answers taken. None is irreversible; each is the
+simplest one that makes the contract coherent.
 
-1. **Who owns the candidate set?** "Every account" is rarely what a caller wants (mention candidates are active staff,
-   not tenant-portal accounts). Is it a parameter of the query, or part of the directory?
-2. **How is agreement with the live principal guaranteed?** A host may add claims per request (an instance owner who
-   is given the administrator role on every request). The directory must mirror that, and only the application can.
-   A conformance test helper may be the honest answer, not a framework guarantee.
-3. **What is an unrestricted alternative's inverse under a tenant scope** — every candidate, or every candidate of the
-   row's tenant? It follows from whether scopes become first-class in the composition.
-
-Until a second consumer answers them, the application composes the inverse itself. `ForUser` is shipped in the
-relation form now so that rules written today need no change when the inverse arrives.
+1. **Who owns the candidate set? The caller.** `WhereAuthorizedFor` filters a set of principal ids the caller passes
+   and returns a subset of it. "Every account" is rarely what is wanted (mention candidates are the staff who can
+   still sign in), eligibility is application data, and a parameter keeps the directory to the two facts a rule reads.
+2. **How does the directory agree with the live principal? By contract, with a default that agrees with the stock
+   host.** The directory must list exactly what `IsInRole`/`HasClaim` answer for a principal that signs in.
+   `IdentityPrincipalDirectory` (`Elarion.EntityFrameworkCore.Identity`) reads `user_roles`, `user_claims` and
+   `role_claims`, which is what Identity's default claims factory puts on a principal. A host that adds roles or
+   claims while it builds the principal registers its own directory (the registration is a `TryAdd`), composing the
+   stored queries with what it adds. The framework cannot verify this — only the application knows how its principals
+   are built — so the contract asks for a test that builds a principal and compares.
+3. **What is an unrestricted alternative under a scope? Every candidate, and the scope narrows it.** `Unrestricted` is
+   the constant `true`; in `AllOf(scope, AnyOf(…))` the AND with the scope's relation applies as it does forward. The
+   tenant scope of a *generated* filter is the one scope with no relation (above); tenancy belongs to ambient tenant
+   scoping, which already narrows the candidates and the rows the caller passes.
 
 ## Consequences
 
 - One `IQueryAuthorizer<T>` per entity is the whole rule, and the list (`WhereAuthorized`), referencing rows
-  (`WhereAuthorizedVia`), the point check (`[RequireResource]`) and the complement (`WhereNotAuthorized`) all read it.
+  (`WhereAuthorizedVia`), the point check (`[RequireResource]`), the complement (`WhereNotAuthorized`) and the inverse
+  (`WhereAuthorizedFor`) all read it.
+- The inverse is as right as the directory. A directory that omits what the host adds to a principal under-reports
+  (an administrator by a per-request role is not listed); one that lists stale facts over-reports. The forward filter
+  stays the authority: a principal the inverse lists is still checked when it actually reads the row.
+- A rule that uses `From`, `When` or a hand-written authorizer has no inverse until that part is restated with the
+  building blocks or implements `IPrincipalQueryAuthorizer<T>`. That is a visible exception at the call, by design.
+- `Elarion.EntityFrameworkCore.Identity` now references `Elarion.Abstractions` (contracts only; it stays web-free).
 - The filter-backed check costs one `EXISTS` before the handler. A handler that loads the row through
   `WhereAuthorized(…).FirstOrDefaultAsync(…)` anyway does both in one statement; that form stays valid and documented.
 - The filter check is registered per entity. A `[RequireResource]` on a type with a filter but no registered check
@@ -157,4 +177,11 @@ relation form now so that rules written today need no change when the inverse ar
   ADR-0089.
 - **Making `WhereAuthorized`'s operation mandatory.** It is the right default-free API and a source break for every
   call site; pre-1.0 allows it, and it is worth doing together with a second breaking change in this area.
-- **Shipping the inverse for invertible parts only.** That is the partial answer ADR-0089 rejected.
+- **Answering the inverse for the invertible parts of a rule.** That is the partial answer ADR-0089 rejected.
+- **A directory of lookups** (`InRole(role)`, `Holding(permission)` returning id sets). Simpler to implement, and it
+  cannot express a role grant, where the role name comes from a grants row.
+- **The directory owning the candidate set** (`Principals`). It would make every inverse answer "all accounts" by
+  default, which is the wrong default for the consumers known so far.
+- **Inverting a tenant-scoped generated filter by comparing the claim text with the column's text.** It agrees with
+  the forward filter only while every stored tenant claim is formatted exactly as the database renders the column; a
+  differently cased claim would silently drop principals.
