@@ -8,10 +8,16 @@ namespace Elarion.Abstractions.Authorization;
 /// write, without a database round-trip.
 /// </summary>
 /// <remarks>
-/// Valid only for predicates that read entity fields (e.g. owner/tenant rules). A predicate that consults
-/// other data (e.g. a shared-grant <c>EXISTS</c> over a grants table) cannot be evaluated in memory — use the
-/// database-backed <c>IResourceAuthorizer</c> for the full, grant-aware check. The predicate is compiled per
-/// call, so this suits occasional pre-write checks, not hot loops.
+/// <para>
+/// Valid only for predicates that read the entity's own scalar fields (owner and tenant rules). A predicate that
+/// consults other data is <b>not</b> answered correctly here: a subquery over another set (a shared-grant
+/// <c>EXISTS</c>, a membership table) runs as a separate synchronous query per call, and a navigation the entity
+/// was loaded without (<c>c.Shares.Any(…)</c>) is simply empty — which denies a positive rule and <b>allows</b> a
+/// negated one. For such a rule check the row in the database instead:
+/// <c>db.Contacts.WhereAuthorized(access, user).AnyAsync(c =&gt; c.Id == id)</c>, or <c>[RequireResource]</c> with the
+/// entity's filter check registered.
+/// </para>
+/// <para>The predicate is compiled per call, so this suits occasional pre-write checks, not hot loops.</para>
 /// </remarks>
 public static class QueryAuthorizerExtensions {
     /// <summary>

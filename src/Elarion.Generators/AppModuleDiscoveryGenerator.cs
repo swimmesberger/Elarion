@@ -66,6 +66,19 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Warning,
         true);
 
+    private static readonly DiagnosticDescriptor DuplicateResourceFilter = new(
+        "ELMOD007",
+        "Entity has more than one registered [ResourceFilter]",
+        "Entity '{0}' has more than one registered [ResourceFilter] ({1}); an injected IQueryAuthorizer and the "
+        + "filter-backed [RequireResource] check resolve only one of them. Set Register = false on the filters that "
+        + "are building blocks and register the composed authorizer.",
+        "Elarion.Modules",
+        DiagnosticSeverity.Warning,
+        true);
+
+    private const string TryAddExtensions =
+        "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions";
+
     private sealed record ClassTarget(string? Namespace, string ClassName);
 
     /// <summary>
@@ -452,6 +465,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
             .Distinct()
             .ToList();
         resourceFilterEntries.Sort(static (a, b) => string.Compare(a.SpecFqn, b.SpecFqn, StringComparison.Ordinal));
+        ReportDuplicateResourceFilters(resourceFilterEntries, diagnostics);
         foreach (var entry in resourceFilterEntries) {
             var module = FindBestModule(entry.Namespace, modules);
             // A filter under no module is registered ungated rather than silently dropped (mirrors transports).
@@ -463,6 +477,26 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
 
         return new TransportMaps(
             httpByModule, unmatchedHttp, rpcByModule, unmatchedRpc, resourceFiltersByModule, unmatchedResourceFilters);
+    }
+
+    // Each registered filter becomes IQueryAuthorizer<TEntity>, and one service resolves to one registration: with two
+    // filters for an entity, an injected authorizer (and the filter-backed point check) would silently be only one of
+    // them. Reported once per entity, naming every filter, in the sorted order the registrations are emitted in.
+    private static void ReportDuplicateResourceFilters(
+        List<ElarionManifest.ResourceFilter> filters, List<DiagnosticInfo> diagnostics) {
+        foreach (var group in filters
+                     .GroupBy(static filter => filter.EntityFqn, StringComparer.Ordinal)
+                     .Where(static group => group.Count() > 1)
+                     .OrderBy(static group => group.Key, StringComparer.Ordinal))
+            diagnostics.Add(DiagnosticInfo.Create(
+                DuplicateResourceFilter,
+                (Location?)null,
+                DisplayName(group.Key),
+                string.Join(", ", group.Select(static filter => DisplayName(filter.SpecFqn)))));
+
+        static string DisplayName(string fqn) {
+            return fqn.StartsWith("global::", StringComparison.Ordinal) ? fqn.Substring("global::".Length) : fqn;
+        }
     }
 
     private static void ReportDuplicateOperationNames(
@@ -1076,14 +1110,16 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         sb.AppendLine("    {");
         foreach (var filter in filters) {
             var serviceType = $"{ElarionGeneratorConventions.QueryAuthorizerTypeFqn}<{filter.EntityFqn}>";
+            // TryAdd: an IQueryAuthorizer<T> the application registered itself (a composed rule, from a module's
+            // ConfigureServices or the host) is the whole rule and must not be replaced by one of its building blocks.
             if (filter.IsShared)
                 // A shared filter consults the grants set (an EXISTS), so it is a scoped service.
                 sb.AppendLine(
-                    $"        global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<{serviceType}, {filter.SpecFqn}>(services);");
+                    $"        {TryAddExtensions}.TryAddScoped<{serviceType}, {filter.SpecFqn}>(services);");
             else
                 // A field-only filter is a stateless singleton exposed as the static Specification.
                 sb.AppendLine(
-                    $"        global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<{serviceType}>(services, {filter.SpecFqn}.{ElarionGeneratorConventions.ResourceFilterSpecificationMember});");
+                    $"        {TryAddExtensions}.TryAddSingleton<{serviceType}>(services, {filter.SpecFqn}.{ElarionGeneratorConventions.ResourceFilterSpecificationMember});");
         }
 
         sb.AppendLine("        return services;");

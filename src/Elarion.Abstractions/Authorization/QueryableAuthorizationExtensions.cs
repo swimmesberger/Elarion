@@ -31,6 +31,42 @@ public static class QueryableAuthorizationExtensions {
     }
 
     /// <summary>
+    /// Restricts <paramref name="source"/> to the rows <paramref name="user"/> may <b>not</b> access for
+    /// <paramref name="operation"/> (defaulting to <see cref="ResourceOperation.Read"/>) — the exact complement of
+    /// <see cref="WhereAuthorized{TEntity}"/>, for callers that subtract hidden rows (<c>WHERE owner_id NOT IN (hidden
+    /// ids)</c>) instead of selecting visible ones. An unrestricted caller hides nothing, so the result is empty; a
+    /// caller denied everything gets <paramref name="source"/> unchanged.
+    /// </summary>
+    /// <remarks>
+    /// The two sets partition <paramref name="source"/> wherever a predicate is either true or false for every row:
+    /// in memory, and under Entity Framework Core's default C# null semantics. With <c>UseRelationalNulls</c> a
+    /// predicate that evaluates to SQL <c>NULL</c> puts its row in neither set.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // The contacts hidden from the caller, as a subquery other tables subtract.
+    /// var hiddenContactIds = db.Contacts.WhereNotAuthorized(contactAccess, currentUser).Select(c =&gt; c.Id);
+    /// var files = db.Files.Where(f =&gt; f.ContactId == null || !hiddenContactIds.Contains(f.ContactId.Value));
+    /// </code>
+    /// </example>
+    public static IQueryable<TEntity> WhereNotAuthorized<TEntity>(
+        this IQueryable<TEntity> source,
+        IQueryAuthorizer<TEntity> authorizer,
+        ICurrentUser user,
+        ResourceOperation? operation = null)
+        where TEntity : class {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(authorizer);
+        ArgumentNullException.ThrowIfNull(user);
+
+        var filter = authorizer.GetFilter(user, operation ?? ResourceOperation.Read);
+        if (filter is null) return source.Where(static _ => false);
+        if (QueryAuthorizers.IsDenyAll(filter)) return source;
+
+        return source.Where(Expression.Lambda<Func<TEntity, bool>>(Expression.Not(filter.Body), filter.Parameters));
+    }
+
+    /// <summary>
     /// Restricts <paramref name="source"/> to the rows whose <b>owner</b> the caller may access — for data that points at
     /// a resource by id (a note's <c>OwnerId</c>, a file's <c>ContactId</c>) and is visible exactly when that resource
     /// is. The owner's filter runs as a subquery in the same SQL statement:

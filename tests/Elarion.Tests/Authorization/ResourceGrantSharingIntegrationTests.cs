@@ -143,6 +143,35 @@ public sealed class ResourceGrantSharingIntegrationTests(ResourceGrantSharingFix
     }
 
     [Fact]
+    public async Task PointCheck_GrantResourceAuthorizer_MatchesANumericIdUnderAnyCulture() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+
+        var services = new ServiceCollection();
+        services.AddDbContext<ContactsDbContext>(options => options.UseNpgsql(fixture.ConnectionString));
+        services.AddElarionResourceAuthorization<ContactsDbContext>();
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var member = new FakeCurrentUser { IsAuthenticated = true, UserId = Guid.NewGuid().ToString() };
+        await scope.ServiceProvider.GetRequiredService<IResourceGrantStore>().GrantAsync(
+            new ResourceGrant("Ledger", "-7", ResourcePrincipal.User(member.UserId), ResourceOperation.Read), ct);
+
+        // A culture whose negative sign is not '-': the id must still be compared in its invariant form.
+        var culture = (System.Globalization.CultureInfo)System.Globalization.CultureInfo.InvariantCulture.Clone();
+        culture.NumberFormat.NegativeSign = "~";
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = culture;
+        try {
+            (await scope.ServiceProvider.GetRequiredService<IResourceAuthorizer>().AuthorizeResourceAsync(
+                    new ResourceAuthorizationContext(member, typeof(Contact), "Ledger", ResourceOperation.Read, -7), ct))
+                .Should().BeTrue();
+        }
+        finally {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    [Fact]
     public async Task NotesOfSharedContacts_AreFilteredInSqlThroughTheirOwnersVisibility() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var ct = TestContext.Current.CancellationToken;

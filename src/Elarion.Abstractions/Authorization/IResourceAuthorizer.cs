@@ -1,4 +1,5 @@
 using Elarion.Abstractions.Identity;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Elarion.Abstractions.Authorization;
 
@@ -9,14 +10,50 @@ namespace Elarion.Abstractions.Authorization;
 /// <see cref="ResourceAuthorizationContext.User"/>, never from an HTTP context.
 /// </summary>
 /// <remarks>
-/// The shipped default (in <c>Elarion.Authorization.EntityFrameworkCore</c>) authorizes via the resource-grants
-/// table (a share with the caller's user or any of their roles). Owner-based access is the handler's concern
-/// via the escape hatch (load the entity and call <c>IQueryAuthorizer&lt;T&gt;.Matches</c>, or model ownership
-/// as a grant). When no implementation is registered, the framework fails closed (denies).
+/// <para>
+/// <b>One check per resource type, then a general backend.</b> A check registered for a resource type answers for
+/// that type: the filter-backed check (<c>AddElarionResourceFilterCheck</c> in
+/// <c>Elarion.Authorization.EntityFrameworkCore</c>) asks the entity's <c>IQueryAuthorizer&lt;T&gt;</c>, so the point
+/// check and the list filter are one rule — owner, sharing, bypass and every composed alternative included. Every
+/// other type goes to the general backend: the resource-grants table (a share with the caller's user or any of their
+/// roles) once <c>AddElarionResourceAuthorization</c> is called, and otherwise a fail-closed denial.
+/// </para>
+/// <para>
+/// A per-type check is a keyed <see cref="IResourceAuthorizer"/> whose service key is the resource
+/// <see cref="Type"/>; the shipped backends route to it through <see cref="ResourceTypeAuthorizer.Find"/>, and a
+/// host-written backend that wants the same routing calls it too.
+/// </para>
 /// </remarks>
 public interface IResourceAuthorizer {
     /// <summary>Returns whether the principal in <paramref name="context"/> is authorized for that resource.</summary>
     ValueTask<bool> AuthorizeResourceAsync(ResourceAuthorizationContext context, CancellationToken ct);
+}
+
+/// <summary>
+/// Finds the point check registered for one resource type — a keyed <see cref="IResourceAuthorizer"/> whose service
+/// key is the resource <see cref="Type"/>.
+/// </summary>
+/// <example>
+/// <code>
+/// // A hand-written check for one resource type.
+/// services.AddKeyedScoped&lt;IResourceAuthorizer, InvoiceAuthorizer&gt;(typeof(Invoice));
+/// </code>
+/// </example>
+public static class ResourceTypeAuthorizer {
+    /// <summary>
+    /// The check registered for <paramref name="resourceType"/>, or <see langword="null"/> when the type has none (the
+    /// general backend then decides). The type is matched exactly; a base type's check does not cover a derived type.
+    /// </summary>
+    /// <param name="services">The scope the check is resolved from.</param>
+    /// <param name="resourceType">The resource type of the point check.</param>
+    public static IResourceAuthorizer? Find(IServiceProvider services, Type resourceType) {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(resourceType);
+        // A container without keyed services has no per-type checks; asking it through the extension would throw.
+        return services is IKeyedServiceProvider keyed
+            ? keyed.GetKeyedService(typeof(IResourceAuthorizer), resourceType) as IResourceAuthorizer
+            : null;
+    }
 }
 
 /// <summary>The context supplied to an <see cref="IResourceAuthorizer"/>.</summary>

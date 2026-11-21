@@ -21,6 +21,11 @@ namespace Elarion.Abstractions.Authorization;
 /// is a <b>scoped service</b> with no static accessor — inject <c>IQueryAuthorizer&lt;TEntity&gt;</c> instead.
 /// Both forms are registered as <c>IQueryAuthorizer&lt;TEntity&gt;</c>, so constructor injection works either way.
 /// </para>
+/// <para>
+/// <b>Composition.</b> A rule the properties cannot express is composed around the generated filter with
+/// <see cref="QueryAuthorizers"/>; mark the filter <see cref="Register"/> <c>= false</c> and register the composed
+/// authorizer, so there is exactly one <c>IQueryAuthorizer&lt;TEntity&gt;</c> and it is the whole rule.
+/// </para>
 /// </remarks>
 /// <typeparam name="TEntity">The entity type being authorized.</typeparam>
 /// <example>
@@ -95,9 +100,10 @@ public sealed class ResourceFilterAttribute<TEntity> : Attribute
     /// <c>[RequirePermission]</c> spells it). <see langword="null"/> grants no bypass.
     /// </summary>
     /// <remarks>
-    /// The bypass shapes this filter only. The default <c>[RequireResource]</c> point check reads the grants table and
-    /// knows neither the owner column nor this permission; see the resource-authorization docs for keeping the two
-    /// in step.
+    /// The bypass is part of this filter, so everything that reads the filter sees it: the list query, and the
+    /// <c>[RequireResource]</c> point check once the entity's filter check is registered
+    /// (<c>AddElarionResourceFilterCheck</c>). The grants-only point check knows neither the owner column nor this
+    /// permission.
     /// </remarks>
     public string? BypassPermission { get; init; }
 
@@ -105,5 +111,28 @@ public sealed class ResourceFilterAttribute<TEntity> : Attribute
     /// The claim type <see cref="BypassPermission"/> is read from. Defaults to <c>"permission"</c>, the default of
     /// <see cref="AuthorizationOptions.PermissionClaimType"/>; set the same value when the host changes it.
     /// </summary>
-    public string PermissionClaimType { get; init; } = "permission";
+    public string PermissionClaimType { get; init; } = AuthorizationOptions.DefaultPermissionClaimType;
+
+    /// <summary>
+    /// A role whose members see every row <b>of their scope</b> — <see cref="BypassPermission"/> for hosts whose
+    /// administrators are a role rather than a permission. The same rules apply: the grant rules are lifted, the
+    /// <see cref="TenantProperty"/> scope stays. With both set, either one bypasses. <see langword="null"/> grants no
+    /// bypass.
+    /// </summary>
+    public string? BypassRole { get; init; }
+
+    /// <summary>
+    /// Whether the host bootstrapper registers the generated filter as <c>IQueryAuthorizer&lt;TEntity&gt;</c>.
+    /// Defaults to <see langword="true"/>. Set it to <see langword="false"/> on a filter that is only a <b>building
+    /// block</b> of a composed rule (<see cref="QueryAuthorizers.AnyOf{TEntity}"/>), and register the composition
+    /// instead — otherwise the building block is what an injected <c>IQueryAuthorizer&lt;TEntity&gt;</c> and the
+    /// filter-backed <c>[RequireResource]</c> check resolve, which is only part of the rule.
+    /// </summary>
+    /// <remarks>
+    /// The generated registration only fills a gap (<c>TryAdd</c>): an <c>IQueryAuthorizer&lt;TEntity&gt;</c> the
+    /// application registers itself — in a module's <c>ConfigureServices</c>, or in the host before or after
+    /// <c>AddElarion</c> — is the one that resolves. <see cref="Register"/> <c>= false</c> says so at the declaration,
+    /// and is required when two filters are declared for one entity (ELMOD007).
+    /// </remarks>
+    public bool Register { get; init; } = true;
 }

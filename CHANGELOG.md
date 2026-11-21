@@ -24,6 +24,35 @@ minor releases may include breaking changes.
   11 the Typst process uses the new process APIs: `KillOnParentExit`, no inherited handles, a null standard input,
   `RunAndCaptureTextAsync`, and the terminating signal in the diagnostics. See
   [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents).
+- **Resource authorization: one rule for the list, the point check and the complement** (ADR-0095).
+  - `AddElarionResourceFilterCheck<TDbContext, TEntity, TKey>(e => e.Id)` (`Elarion.Authorization.EntityFrameworkCore`)
+    makes `[RequireResource(typeof(TEntity))]`, and an injected `IResourceAuthorizer`, check a record through the
+    entity's registered `IQueryAuthorizer<TEntity>`: one `EXISTS` over the predicate the list query uses, for the
+    requirement's operation. Owner, sharing, bypass and composed alternatives apply; a missing row is denied like a
+    hidden one; the grants table is not required. A per-type check is a keyed `IResourceAuthorizer` (key: the resource
+    `Type`, `ResourceTypeAuthorizer.Find`), and the default and grants backends route to it.
+  - `QueryAuthorizers` building blocks that fail closed for unauthenticated callers: `Rows`, `Unrestricted`,
+    `ForUser<TEntity, TKey>((row, userId) => …)` (also denies an id that does not parse; the id is sent as a
+    parameter), the gates `When`, `WhenPermission`, `WhenRole`, and `ForOperations`, which denies every operation it
+    does not list. `AnyOf`/`AllOf` drop alternatives that deny the caller from the predicate.
+  - `WhereNotAuthorized(authorizer, user)`: the rows a caller may **not** access, as a query.
+  - `[ResourceFilter(Register = false)]` marks a generated filter as a building block of a composed rule; it is neither
+    published nor registered. `[ResourceFilter(BypassRole = "…")]` lifts the grant rules for members of a role, with
+    the tenant scope kept, as `BypassPermission` does.
+  - `AuthorizationOptions.DefaultPermissionClaimType`.
+- **`ELMOD007`** (warning): an entity has more than one registered `[ResourceFilter]`, so an injected
+  `IQueryAuthorizer<TEntity>` would be only one of them.
+
+### Changed
+- **The generated `[ResourceFilter]` registration no longer replaces an `IQueryAuthorizer<TEntity>` the application
+  registered** (`TryAdd`). A composed authorizer registered in a module's `ConfigureServices`, or in the host before
+  `AddElarion`, is now the one that resolves; registering it after `AddElarion` keeps working. **Breaking** for an
+  application that registered its own authorizer first and relied on the generated filter replacing it.
+
+### Fixed
+- The grants-backed `[RequireResource]` check formats a numeric resource id with the invariant culture, like the
+  `[ResourceFilter(Shared = true)]` predicate it must agree with; under a culture with another negative sign a
+  negative id matched no grant.
 
 ## [0.4.0] - 2026-11-16
 

@@ -5,8 +5,15 @@ namespace Elarion.Abstractions.Authorization;
 /// package deliberately has no <c>Microsoft.Extensions.Options</c> dependency.
 /// </summary>
 public sealed class AuthorizationOptions {
+    /// <summary>
+    /// The default of <see cref="PermissionClaimType"/> (<c>"permission"</c>) — the claim type the declarative pieces
+    /// that cannot read these options (<c>[ResourceFilter].PermissionClaimType</c>,
+    /// <see cref="QueryAuthorizers.WhenPermission{TEntity}(string, IQueryAuthorizer{TEntity}, string)"/>) fall back to.
+    /// </summary>
+    public const string DefaultPermissionClaimType = "permission";
+
     /// <summary>The claim type <see cref="RequirePermissionAttribute"/> maps to. Defaults to <c>"permission"</c>.</summary>
-    public string PermissionClaimType { get; set; } = "permission";
+    public string PermissionClaimType { get; set; } = DefaultPermissionClaimType;
 
     /// <summary>
     /// Format string for the forbidden message; <c>{0}</c> is the failed requirement. The default is a

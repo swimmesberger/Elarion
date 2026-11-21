@@ -66,7 +66,8 @@ public static class AuthorizationServiceCollectionExtensions {
         // the interface resolves the same scoped instance rather than constructing a second one.
         services.TryAddScoped<ClaimsAuthorizer>();
         services.TryAddScoped<IAuthorizer>(static sp => sp.GetRequiredService<ClaimsAuthorizer>());
-        // Fail-closed default; AddElarionResourceAuthorization replaces it with the grants-backed authorizer.
+        // Fail-closed default for a resource type without its own check; AddElarionResourceAuthorization replaces it
+        // with the grants-backed authorizer. Both route to a per-type check (AddElarionResourceFilterCheck) first.
         services.TryAddScoped<IResourceAuthorizer, DenyResourceAuthorizer>();
         // The generated per-module PermissionCatalogModule contributions (registered via ConfigureDefaultServices)
         // aggregate into this catalog, so seeding/admin code can enumerate every [RequirePermission]/[RequireRole].

@@ -19,7 +19,10 @@ breaks pagination and leaks data).
 | Question | Leg | Mechanism |
 |---|---|---|
 | "Which resources may I read?" (lists/search) | **List filter** | `[ResourceFilter<T>]` → a predicate pushed into SQL **before** paging |
-| "May I read/write *this* resource?" (get-one/write) | **Point check** | `[RequireResource(...)]` → the `IResourceAuthorizer` seam |
+| "May I read/write *this* resource?" (get-one/write) | **Point check** | `[RequireResource(...)]` → the `IResourceAuthorizer` seam, answered from the same filter |
+
+Both legs read **one rule per entity**: the registered `IQueryAuthorizer<T>`. The list composes it into the query,
+the point check asks whether one row is in it, and [the complement](#rows-hidden-from-the-caller) negates it.
 
 ## Leg B — list filtering (push the rule into SQL)
 
@@ -102,15 +105,12 @@ public sealed partial class ContactAccess;
 ```
 
 The permission is read from the `permission` claim, the default of `AuthorizationOptions.PermissionClaimType`; set
-`PermissionClaimType` on the attribute when the host changes it.
+`PermissionClaimType` on the attribute when the host changes it. Where the administrators are a **role** rather than
+a permission, `BypassRole = "Admin"` does the same; with both set, either one bypasses.
 
-<Callout type="warn">
-The bypass shapes the **list filter**. The default `[RequireResource]` point check reads only the grants table: it
-knows neither the owner column nor the bypass permission, so an administrator who sees a contact in the list is
-still denied by a get-one guarded with `[RequireResource]`. Where the filter defines visibility, check the single
-record by the same filter — `db.Contacts.WhereAuthorized(access, currentUser).AnyAsync(c => c.Id == id, ct)` in the
-handler (see [the escape hatch](#the-escape-hatch--validate-before-a-write)) — so list and point check cannot drift.
-</Callout>
+The bypass is part of the filter, so the point check sees it too once the entity's
+[filter check](#one-rule-for-the-list-and-the-point-check) is registered. The grants-only point check knows neither
+the owner column nor the bypass.
 
 ### Data that belongs to a resource
 
@@ -133,25 +133,91 @@ owner and combine the queries (`Concat`) before paging. A nullable pointer works
 
 ### Composing filters: membership tables and computed rules
 
-A rule the attribute cannot express — sharing through an application-owned membership table (contact groups), a
-visibility computed elsewhere — is **added to** the generated filter, not written instead of it.
-`QueryAuthorizers.AnyOf` ORs authorizers (one unrestricted authorizer lifts the restriction), `AllOf` ANDs them,
-and `From` turns a delegate into one; the result is still a single predicate the database evaluates:
+A rule the attribute cannot express — sharing through an application-owned membership table (contact groups), rows
+every holder of a permission may see — is **added to** the generated filter, not written instead of it.
+`QueryAuthorizers` has the building blocks; the result is still a single predicate the database evaluates:
 
 ```csharp
-services.AddScoped<IQueryAuthorizer<Contact>>(sp => {
-    var db = sp.GetRequiredService<AppDbContext>();
-    return QueryAuthorizers.AnyOf(
-        new ContactAccess(sp.GetRequiredService<IResourceGrantSource>()),   // owner, grants, bypass
-        QueryAuthorizers.From<Contact>((user, _) => c => db.ContactGroupShares.Any(share =>
-            share.ContactId == c.Id && db.GroupMembers.Any(m => m.GroupId == share.GroupId && m.UserId == user.UserId))));
-});
+// The owner rule, as a building block: generated, but not registered.
+[ResourceFilter<Contact>(OwnerProperty = nameof(Contact.OwnerId), Register = false)]
+public sealed partial class ContactOwnerFilter;
+
+public static class ContactVisibility {
+    public static readonly IQueryAuthorizer<Contact> Authorizer = QueryAuthorizers.AnyOf(
+        // administrators see every contact
+        QueryAuthorizers.WhenRole("Admin", QueryAuthorizers.Unrestricted<Contact>()),
+        // whoever may read contacts sees the ones nobody restricted
+        QueryAuthorizers.WhenPermission("contacts.read", QueryAuthorizers.Rows<Contact>(c => !c.IsRestricted)),
+        // the owner
+        ContactOwnerFilter.Specification,
+        // members of a group the contact is shared with
+        QueryAuthorizers.ForUser<Contact, Guid>((c, userId) =>
+            c.Shares.Any(share => share.Group.Members.Any(member => member.UserId == userId))));
+}
+
+// A module's ConfigureServices, or the host: this is the IQueryAuthorizer<Contact>.
+services.AddSingleton(ContactVisibility.Authorizer);
 ```
 
-Register the composed authorizer **after** the generated one: the generated filter registers itself as
-`IQueryAuthorizer<Contact>` when the module's services are added, and a single-service resolve takes the last
-registration. Registered before it, the composition is silently replaced by the bare generated filter. For anything else, write the `IQueryAuthorizer<T>` by hand — the logic is ordinary, testable C#, not a
-string expression.
+| Building block | Grants |
+|---|---|
+| `Rows(predicate)` | the rows matching the predicate |
+| `Unrestricted()` | every row (a `null` filter) |
+| `ForUser<TEntity, TKey>((row, userId) => …)` | the rows related to the caller's id — ownership, membership, an assignment |
+| `When(condition, then)` / `WhenPermission(permission, then)` / `WhenRole(role, then)` | `then`, to callers passing the gate |
+| `ForOperations(authorizer, operations…)` | `authorizer`, for the listed operations only |
+| `AnyOf(…)` / `AllOf(…)` | the union / the intersection |
+| `From((user, operation) => …)` | whatever the delegate returns — **unchecked** |
+
+**They fail closed.** Every building block denies a caller who is not authenticated before the rule is consulted,
+and `ForUser` also denies a caller whose id does not parse as `TKey`, so no alternative repeats that preamble.
+`From` is the exception: its delegate is the whole rule, including the authentication check. `ForUser` takes the
+rule as one expression over the row and the caller's id; the id reaches the database as a parameter.
+
+**Register the composition, not its parts.** `Register = false` keeps a building block out of the container. The
+generated registration is a `TryAdd` in any case, so an `IQueryAuthorizer<T>` you register yourself — in a module's
+`ConfigureServices`, or in the host before or after `AddElarion` — is the one an injected authorizer and the point
+check resolve. Two registered `[ResourceFilter]` classes for one entity are reported as
+[`ELMOD007`](/docs/reference/diagnostics). A filter with `Shared` is a scoped service, so compose it in a factory:
+`services.AddScoped<IQueryAuthorizer<Contact>>(sp => QueryAuthorizers.AnyOf(new ContactAccess(sp.GetRequiredService<IResourceGrantSource>()), …))`.
+
+<Callout type="warn">
+  **A scope does not survive an OR.** `AnyOf(tenantScopedFilter, groupRule)` lets `groupRule` reach rows of every
+  tenant, and an `Unrestricted()` alternative lifts the scope for its callers. Keep the scope outside the
+  alternatives — `QueryAuthorizers.AllOf(scope, QueryAuthorizers.AnyOf(…))`, where an unrestricted alternative is
+  neutral — or leave tenancy to [ambient tenant scoping](/docs/capabilities/multi-tenancy), which no composition can
+  lift.
+</Callout>
+
+#### Wider for reading than for writing
+
+`ForOperations` states which operations an alternative grants; every other operation is denied for it:
+
+```csharp
+QueryAuthorizers.AnyOf(
+    QueryAuthorizers.ForOperations(                       // reading only
+        QueryAuthorizers.WhenPermission("contacts.read", QueryAuthorizers.Rows<Contact>(c => !c.IsRestricted)),
+        ResourceOperation.Read),
+    ContactOwnerFilter.Specification)                     // every operation
+```
+
+`WhereAuthorized` asks about **`Read` unless told otherwise**. With a rule like this one, a write handler must pass
+its operation (`WhereAuthorized(access, user, ResourceOperation.Update)`) or declare it on `[RequireResource]`, which
+passes it for you.
+
+### Rows hidden from the caller
+
+A document registry that subtracts the hidden rows of several record kinds needs the **complement** of a filter.
+`WhereNotAuthorized` is that, as a query — nothing for an unrestricted caller, everything for a caller the rule
+denies entirely:
+
+```csharp
+var hiddenContactIds = db.Contacts.WhereNotAuthorized(ContactVisibility.Authorizer, currentUser).Select(c => c.Id);
+var files = db.Files.Where(f => f.ContactId == null || !hiddenContactIds.Contains(f.ContactId.Value));
+```
+
+The two sets partition the source under Entity Framework Core's default null semantics; with `UseRelationalNulls` a
+predicate that evaluates to SQL `NULL` puts its row in neither.
 
 ## Sharing with users and roles
 
@@ -225,8 +291,40 @@ public sealed class GetContact : IHandler<GetContact.Query, Result<ContactDto>> 
 }
 ```
 
-The decorator resolves the id and asks `IResourceAuthorizer`. The shipped default authorizes from the grants
-table (a share with the caller's user or roles); with no backend registered it **fails closed** (a logged 403).
+The decorator resolves the id and asks `IResourceAuthorizer`.
+
+### One rule for the list and the point check
+
+Register a **filter check** for the entity, and its point check asks the same `IQueryAuthorizer<T>` the list uses —
+one `EXISTS` for the row with that key, among the rows the rule lets the caller access for the declared operation:
+
+```csharp
+services.AddElarionResourceFilterCheck<AppDbContext, Contact, Guid>(c => c.Id);
+
+[RequireResource(typeof(Contact), Operation = "update", Id = nameof(Command.Id), DenyAs = ResourceDenial.NotFound)]
+public sealed class UpdateContact : IHandler<UpdateContact.Command, Result> { /* ... */ }
+```
+
+Owner, sharing, bypass and every composed alternative apply, because it is the registered authorizer that is asked —
+an administrator who sees a contact in the list passes its get-one, and a caller who may read but not change a
+record is denied the update. It needs `Elarion.Authorization.EntityFrameworkCore`, but not the grants table.
+
+- **A row that does not exist is denied**, also for an unrestricted caller. With `DenyAs = ResourceDenial.NotFound`
+  a hidden record and a missing one get the same answer.
+- **The set's query filters apply**: a soft-deleted row is denied, and ambient tenant scoping holds. To keep a hidden
+  record authorized for the accounts that could see it (a restore command), shape the set:
+  `AddElarionResourceFilterCheck<AppDbContext, Contact, Guid>(c => c.Id, rows => rows.IgnoreQueryFilters(["SoftDelete"]))`.
+  Name the filter you drop — a bare `IgnoreQueryFilters()` drops the tenant filter with it.
+- **The request's id** may be the key type or, for `Guid`/`int`/`long` keys, its text. An id that cannot be the
+  entity's key is denied.
+- The check is for an **existing** record. Guard a create with `[RequirePermission]`.
+
+A resource type **without** a filter check is authorized from the grants table (a share with the caller's user or
+roles) once `AddElarionResourceAuthorization` is called; with no backend registered the check **fails closed** (a
+logged 403). The filter check is registered per entity: a `[RequireResource]` on a type that has a filter but no
+check is answered by the grants alone — it denies more, never less.
+
+A hand-written check for one type is a keyed service: `services.AddKeyedScoped<IResourceAuthorizer, InvoiceAuthorizer>(typeof(Invoice))`.
 
 ### Hidden, not forbidden
 
@@ -263,22 +361,29 @@ override on all three: `[RequireResource(typeof(Contact), ResourceTypeName = "Co
 
 ## The escape hatch — validate before a write
 
-Inject `IResourceAuthorizer` (or compose the injected `IQueryAuthorizer<T>` with `WhereAuthorized`) to run
-your own check in a handler before writing — this is the deliberate alternative to a hidden write interceptor:
+A handler that loads the record anyway can authorize and load in **one statement**, by the same rule — the
+deliberate alternative to a hidden write interceptor, and one round trip less than `[RequireResource]`:
 
 ```csharp
-// grant-aware check by id (an EXISTS — no full load)
+var contact = await db.Contacts
+    .WhereAuthorized(access, currentUser, ResourceOperation.Update)
+    .FirstOrDefaultAsync(c => c.Id == request.Id, ct);
+if (contact is null)
+    return AppError.NotFound("The requested resource was not found.");   // hidden and missing answer alike
+```
+
+Or inject `IResourceAuthorizer` for a check by id without loading; it routes like `[RequireResource]` does (the
+entity's filter check, else the grants):
+
+```csharp
 if (!await resourceAuth.AuthorizeResourceAsync(
         new ResourceAuthorizationContext(currentUser, typeof(Contact), "Contact", ResourceOperation.Update, request.Id), ct))
     return Result.Failure(AppError.Forbidden("Not allowed to update this contact."));
-
-// or reuse the filter's own predicate for the operation
-var allowed = await db.Contacts
-    .WhereAuthorized(access, currentUser, ResourceOperation.Update)
-    .AnyAsync(c => c.Id == request.Id, ct);
-if (!allowed)
-    return Result.Failure(AppError.Forbidden("Not allowed to update this contact."));
 ```
+
+`IQueryAuthorizer<T>.Matches(entity, user)` evaluates the predicate in memory against a loaded entity. Use it only
+for rules that read the entity's own scalar fields (owner, tenant): a navigation the entity was loaded without is
+empty there, which denies a positive rule and **allows** a negated one.
 
 <Callout type="info">
   `[ResourceFilter]` predicates are a **read** filter; they do not stop a wrong-owner *write*. Enforce writes
@@ -294,8 +399,15 @@ with — while the owner column, tenant membership, bypass-permission holders an
 the application's data. Compose the answer from the same rules the filter declares, so the two cannot drift: the
 grants for X, plus X's owner, intersected with the active users of X's tenant.
 
+There is no framework seam for it yet: a complete answer needs a directory of who holds which role and permission,
+and an answer that covers only part of a composed rule would look complete without being it
+([ADR-0095](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0095-one-resource-rule-for-list-point-check-and-complement.md)).
+`ForUser` states a rule as a relation between a row and a user id for that reason: the same expression reads in both
+directions, so the inverse of such an alternative is `users.Where(u => rows.Any(row => relation(row, u.Id)))`.
+
 ## See also
 
 - [ADR-0013: Resource-based and data-level authorization](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0013-resource-and-data-level-authorization.md)
+- [ADR-0095: One resource rule for the list, the point check and the complement](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0095-one-resource-rule-for-list-point-check-and-complement.md)
 - [ADR-0012: Referencing dynamic variables in attributes](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0012-dynamic-variable-references.md)
 - [Authorization](/docs/concepts/authorization) — the operation-level gate this builds on.
