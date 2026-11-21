@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0044: Request-driven server-streaming handlers"
+description: "Request-driven server-streaming handlers."
+status: stable
+---
 # ADR-0044: Request-driven server-streaming handlers
 
 - Status: Accepted (HTTP/SSE server-streaming foundation; producer-owned live streams remain covered by

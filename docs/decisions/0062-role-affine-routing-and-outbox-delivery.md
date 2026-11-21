@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0062: Role-affine routing and target-group outbox delivery"
+description: "Role-affine routing and target-group outbox delivery."
+status: stable
+---
 # ADR-0062: Role-affine routing and target-group outbox delivery
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0035: Protocol-neutral staged-upload seam (`IStagedUploadStore` supersedes `ITusUploadStore`)"
+description: "Protocol-neutral staged-upload seam (`IStagedUploadStore` supersedes `ITusUploadStore`)."
+status: stable
+---
 # ADR-0035: Protocol-neutral staged-upload seam (`IStagedUploadStore` supersedes `ITusUploadStore`)
 
 - Status: Accepted

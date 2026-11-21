@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0015: EF Core stores enlist in the caller's ambient transaction"
+description: "EF Core stores enlist in the caller's ambient transaction."
+status: stable
+---
 # ADR-0015: EF Core stores enlist in the caller's ambient transaction
 
 - Status: Accepted

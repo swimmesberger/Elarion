@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0021: Idempotency (`[Idempotent]` over a single-transaction, unique-constrained key store)"
+description: "Idempotency (`[Idempotent]` over a single-transaction, unique-constrained key store)."
+status: stable
+---
 # ADR-0021: Idempotency (`[Idempotent]` over a single-transaction, unique-constrained key store)
 
 - Status: Accepted

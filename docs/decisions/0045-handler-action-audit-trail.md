@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0045: Handler-action audit trail (`[Auditable]` + `IAuditScope` + transactional EF sink)"
+description: "Handler-action audit trail (`[Auditable]` + `IAuditScope` + transactional EF sink)."
+status: stable
+---
 # ADR-0045: Handler-action audit trail (`[Auditable]` + `IAuditScope` + transactional EF sink)
 
 - Status: Accepted

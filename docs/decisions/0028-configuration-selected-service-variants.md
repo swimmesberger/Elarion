@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0028: Configuration-selected service variants (`[ConfigurationVariant]`)"
+description: "Configuration-selected service variants (`[ConfigurationVariant]`)."
+status: stable
+---
 # ADR-0028: Configuration-selected service variants (`[ConfigurationVariant]`)
 
 - Status: Accepted

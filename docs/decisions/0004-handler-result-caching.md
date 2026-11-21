@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0004: Handler result caching (`[Cacheable]` / `[CacheInvalidate]`)"
+description: "Handler result caching (`[Cacheable]` / `[CacheInvalidate]`)."
+status: stable
+---
 # ADR-0004: Handler result caching (`[Cacheable]` / `[CacheInvalidate]`)
 
 - Status: Accepted

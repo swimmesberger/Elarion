@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0076: Web Push is a framework package — native crypto, a fail-closed endpoint allow-list, and a pluggable browser transport"
+description: "Web Push is a framework package — native crypto, a fail-closed endpoint allow-list, and a pluggable browser transport."
+status: stable
+---
 # ADR-0076: Web Push is a framework package — native crypto, a fail-closed endpoint allow-list, and a pluggable browser transport
 
 - Status: Accepted

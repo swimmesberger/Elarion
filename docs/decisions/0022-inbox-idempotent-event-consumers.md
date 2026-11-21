@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0022: Inbox pattern for integration-event consumers (idempotent consumers)"
+description: "Inbox pattern for integration-event consumers (idempotent consumers)."
+status: stable
+---
 # ADR-0022: Inbox pattern for integration-event consumers (idempotent consumers)
 
 > **Resolution update (ADR-0062):** the outbox now stores and retries one envelope per distinct target

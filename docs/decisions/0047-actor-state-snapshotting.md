@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0047: Actor state snapshotting (`IActorState<TState>` + `IActorSnapshotStore`, PostgreSQL default)"
+description: "Actor state snapshotting (`IActorState<TState>` + `IActorSnapshotStore`, PostgreSQL default)."
+status: stable
+---
 # ADR-0047: Actor state snapshotting (`IActorState<TState>` + `IActorSnapshotStore`, PostgreSQL default)
 
 - Status: Accepted

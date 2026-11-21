@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0018: Generated infrastructure is framework-named, not user-declared"
+description: "Generated infrastructure is framework-named, not user-declared."
+status: stable
+---
 # ADR-0018: Generated infrastructure is framework-named, not user-declared
 
 - Status: Accepted

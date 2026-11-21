@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0061: Virtual-sharded actors — fixed role partitions without a cluster"
+description: "Virtual-sharded actors — fixed role partitions without a cluster."
+status: stable
+---
 # ADR-0061: Virtual-sharded actors — fixed role partitions without a cluster
 
 - Status: Accepted

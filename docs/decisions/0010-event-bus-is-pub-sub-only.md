@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0010: The event bus is pub/sub-only; request/reply is unified under dispatch"
+description: "The event bus is pub/sub-only; request/reply is unified under dispatch."
+status: stable
+---
 # ADR-0010: The event bus is pub/sub-only; request/reply is unified under dispatch
 
 - Status: Accepted

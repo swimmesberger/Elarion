@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0020: PostgreSQL `UNLOGGED` table is the recommended L2 distributed cache"
+description: "PostgreSQL `UNLOGGED` table is the recommended L2 distributed cache."
+status: stable
+---
 # ADR-0020: PostgreSQL `UNLOGGED` table is the recommended L2 distributed cache
 
 - Status: Accepted

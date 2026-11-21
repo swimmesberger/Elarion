@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0013: Resource-based and data-level authorization"
+description: "Resource-based and data-level authorization."
+status: stable
+---
 # ADR-0013: Resource-based and data-level authorization
 
 - Status: Accepted

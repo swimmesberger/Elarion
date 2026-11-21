@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0014: Cross-assembly generator composition"
+description: "Cross-assembly generator composition."
+status: stable
+---
 # ADR-0014: Cross-assembly generator composition
 
 - Status: Accepted

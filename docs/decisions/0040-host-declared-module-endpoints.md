@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0040: Host-declared module endpoint hooks (`[ModuleEndpoints]`)"
+description: "Host-declared module endpoint hooks (`[ModuleEndpoints]`)."
+status: stable
+---
 # ADR-0040: Host-declared module endpoint hooks (`[ModuleEndpoints]`)
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0002: Direct cross-module communication"
+description: "Direct cross-module communication."
+status: stable
+---
 # ADR-0002: Direct cross-module communication
 
 - Status: Accepted

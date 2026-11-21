@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0003: Predicate-based decorator attachment (`AppliesTo`)"
+description: "Predicate-based decorator attachment (`AppliesTo`)."
+status: stable
+---
 # ADR-0003: Predicate-based decorator attachment (`AppliesTo`)
 
 - Status: Accepted

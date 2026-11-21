@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0087: Transaction-scoped locks are a framework helper with one advisory key scheme"
+description: "Transaction-scoped locks are a framework helper with one advisory key scheme."
+status: draft
+---
 # ADR-0087: Transaction-scoped locks are a framework helper with one advisory key scheme
 
 - Status: Proposed

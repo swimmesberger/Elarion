@@ -1,9 +1,15 @@
+---
+type: Architecture Decision Record
+title: "ADR-0094: An in-process Typst engine is an opt-in second implementation of ITypstCompiler — prototype findings"
+description: "An in-process Typst engine is an opt-in second implementation of ITypstCompiler — prototype findings."
+status: draft
+---
 # ADR-0094: An in-process Typst engine is an opt-in second implementation of ITypstCompiler — prototype findings
 
 - Status: Proposed (prototype; CLI remains the only shipped engine)
 - Date: 2026-11-18
 - Related: [ADR-0093](0093-typst-pdf-rendering.md) (the CLI engine and the request model this reuses),
-  [research: Typst in-process concurrency](research/typst-in-process-concurrency.md) (profiling and the upstream fix),
+  [research: Typst in-process concurrency](../research/2026-11-18-typst-in-process-concurrency.md) (profiling and the upstream fix),
   [ADR-0092](0092-runtime-async-on-net11.md) (the net10/net11 split the CLI engine's process handling follows)
 
 ## Context
@@ -69,7 +75,7 @@ memoization cannot return a cached layout):
   stays parsed between documents.
 - Large documents gain about 25 % one at a time — layout dominates, and that is the same code.
 - **Large documents in parallel scale badly in-process**, peaking at two concurrent compilations and ending 3.5x below
-  the CLI. Profiling and a series of experiments ([research note](research/typst-in-process-concurrency.md)) found:
+  the CLI. Profiling and a series of experiments ([research note](../research/2026-11-18-typst-in-process-concurrency.md)) found:
   - Two process-wide locks in Typst's memoization (comemo) serialize concurrent compilations: one cache lock per
     memoized function, and the tracked-call accelerator, which holds a global read guard during the call and resizes
     under the global write lock. Three small comemo changes remove the waiting (PDFs stay byte-identical) and cut the

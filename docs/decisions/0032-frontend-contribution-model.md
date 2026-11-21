@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0032: Frontend contribution model and the typed capability vocabulary"
+description: "Frontend contribution model and the typed capability vocabulary."
+status: stable
+---
 # ADR-0032: Frontend contribution model and the typed capability vocabulary
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0083: The installable-app shell is a framework npm package — safe caching rules built in, the privacy choice left to the app"
+description: "The installable-app shell is a framework npm package — safe caching rules built in, the privacy choice left to the app."
+status: draft
+---
 # ADR-0083: The installable-app shell is a framework npm package — safe caching rules built in, the privacy choice left to the app
 
 - Status: Proposed

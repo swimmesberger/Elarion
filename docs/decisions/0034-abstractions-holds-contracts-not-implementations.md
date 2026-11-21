@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0034: Abstractions holds contracts, not implementations"
+description: "Abstractions holds contracts, not implementations."
+status: stable
+---
 # ADR-0034: Abstractions holds contracts, not implementations
 
 - Status: Accepted

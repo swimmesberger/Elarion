@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0052: Ordered streams — a sequencer-owned hub, actor stream methods, and a resumable SSE leg"
+description: "Ordered streams — a sequencer-owned hub, actor stream methods, and a resumable SSE leg."
+status: stable
+---
 # ADR-0052: Ordered streams — a sequencer-owned hub, actor stream methods, and a resumable SSE leg
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0016: Feature-flag gating (`[FeatureGate]` over an OpenFeature-backed seam)"
+description: "Feature-flag gating (`[FeatureGate]` over an OpenFeature-backed seam)."
+status: stable
+---
 # ADR-0016: Feature-flag gating (`[FeatureGate]` over an OpenFeature-backed seam)
 
 - Status: Accepted

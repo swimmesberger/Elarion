@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0067: Per-connection sessions and a single framer emit path"
+description: "Per-connection sessions and a single framer emit path."
+status: stable
+---
 # ADR-0067: Per-connection sessions and a single framer emit path
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0006: Incremental source generator conventions"
+description: "Incremental source generator conventions."
+status: stable
+---
 # ADR-0006: Incremental source generator conventions
 
 - Status: Accepted

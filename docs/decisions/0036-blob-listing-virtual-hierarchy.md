@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0036: Blob listing is prefix + delimiter virtual hierarchy, not directories"
+description: "Blob listing is prefix + delimiter virtual hierarchy, not directories."
+status: stable
+---
 # ADR-0036: Blob listing is prefix + delimiter virtual hierarchy, not directories
 
 - Status: Accepted

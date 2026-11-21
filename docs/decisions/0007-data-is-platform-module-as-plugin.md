@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0007: The data layer is application logic — modules as plugins over it"
+description: "The data layer is application logic — modules as plugins over it."
+status: stable
+---
 # ADR-0007: The data layer is application logic — modules as plugins over it
 
 - Status: Accepted

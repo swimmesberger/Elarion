@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0049: Role leases — the leader-election primitive, extracted from the actor home"
+description: "Role leases — the leader-election primitive, extracted from the actor home."
+status: stable
+---
 # ADR-0049: Role leases — the leader-election primitive, extracted from the actor home
 
 - Status: Accepted

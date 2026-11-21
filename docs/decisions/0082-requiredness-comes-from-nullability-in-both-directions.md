@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0082: Requiredness comes from nullability, in both directions"
+description: "Requiredness comes from nullability, in both directions."
+status: draft
+---
 # ADR-0082: Requiredness comes from nullability, in both directions
 
 - Status: Proposed

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0029: The variant registry (`ElarionVariants`), named defaults, and the host-seeded catalog"
+description: "The variant registry (`ElarionVariants`), named defaults, and the host-seeded catalog."
+status: stable
+---
 # ADR-0029: The variant registry (`ElarionVariants`), named defaults, and the host-seeded catalog
 
 - Status: Accepted

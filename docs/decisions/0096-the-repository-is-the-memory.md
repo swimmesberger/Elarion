@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0096: Harness memory is off; the repository is the memory"
+description: "Harness memory is off; the repository is the memory."
+status: stable
+---
 # ADR-0096: Harness memory is off; the repository is the memory
 
 - Status: Accepted

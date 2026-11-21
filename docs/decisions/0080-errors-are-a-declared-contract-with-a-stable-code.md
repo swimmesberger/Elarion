@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0080: Errors are a declared contract with a stable code"
+description: "Errors are a declared contract with a stable code."
+status: draft
+---
 # ADR-0080: Errors are a declared contract with a stable code
 
 - Status: Proposed

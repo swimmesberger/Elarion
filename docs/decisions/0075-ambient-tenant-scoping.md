@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0075: Ambient tenant scoping — a model-level filter and a write-time stamp, not a per-call-site rule"
+description: "Ambient tenant scoping — a model-level filter and a write-time stamp, not a per-call-site rule."
+status: stable
+---
 # ADR-0075: Ambient tenant scoping — a model-level filter and a write-time stamp, not a per-call-site rule
 
 - Status: Accepted
