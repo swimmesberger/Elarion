@@ -9,6 +9,17 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Streamed files from HTTP-only handlers** (ADR-0098). An `[HttpEndpoint]` without `[Handler]` can respond with
+  `Result<ElarionStreamedFile>`: content written to the response body after the pipeline has run, so a stored blob or
+  an archive built on the fly streams without buffering while `[RequirePermission]`, the module's feature gate,
+  validation and the declared errors still apply. `ElarionStreamedFile.FromStream(stream, contentType, owner)` (the
+  stream and its owner, such as a `BlobDownload`, are disposed with the response) and `FromWriter((body, ct) => …)`.
+  The file states `Content-Disposition` (`FileDisposition.Attachment`, the default, or `Inline`, with its UTF-8 file
+  name), a strong `ETag` (`EntityTag`; a matching `If-None-Match` answers `304`), `Last-Modified` and `Cache-Control`.
+  A writer's body holds the few synchronous writes `ZipArchive` makes while disposing an entry, so the async ZIP APIs
+  work without `AllowSynchronousIO`; a failure after the first byte aborts the connection. New errors: `ELRPC005` (a
+  `[Handler]` responds with a streamed file) and `ELHTTP007` (an `[Idempotent]` or `[Cacheable]` handler does). See
+  [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints#streamed-files-http-only-endpoints).
 - **Blob content hash** (ADR-0099). The PostgreSQL and Azure stores compute the SHA-256 of the content while
   `SaveAsync` streams it, exposed as `BlobMetadata.ContentSha256` (64 lower-case hex characters), so duplicate
   detection and entity tags need no second read. `IBlobStore.GetContentSha256Async(blobRef)` answers for every blob,
@@ -26,6 +37,15 @@ minor releases may include breaking changes.
 - **The Azure blob store stages 4 MiB blocks itself** to hash the content on the way: content up to one block is one
   Put Blob, larger content is staged block by block and committed with its hash, using one buffer per save instead of
   the SDK's parallel block upload.
+- **Every framework file response carries `X-Content-Type-Options: nosniff`**: `ElarionFile` and streamed-file
+  responses and the blob upload, cancel and download endpoints. `ElarionHttpResults.ToFileResult` now returns a
+  wrapper around the ASP.NET bytes result.
+- **Blob transfer options go through the options pattern.** `AddElarionBlobUploads` and
+  `AddElarionResumableBlobUploads` register their `configure` action with `services.AddOptions<T>()`, and the plain
+  `BlobUploadEndpointOptions`/`ResumableBlobUploadOptions` singletons the endpoints resolve are the `IOptions<T>`
+  value. An application reading `IOptions<BlobUploadEndpointOptions>` (for the route prefix, say) no longer gets the
+  defaults, and `services.Configure<T>(…)` reaches the endpoints. A second `AddElarion…Uploads` call now adds its
+  configure action instead of being ignored.
 
 ## [0.4.1] - 2026-11-21
 

@@ -2,6 +2,7 @@
 
 ## 2026-11-21
 
+* **Creation**: [ADR-0098](decisions/0098-streamed-files-for-http-only-endpoints.md) — HTTP-only endpoints stream files through ElarionStreamedFile, amending [ADR-0039](decisions/0039-binary-file-responses.md); the [glossary](../GLOSSARY.md) gained *streamed file*.
 * **Creation**: [ADR-0099](decisions/0099-blob-stores-record-a-content-sha256.md) — blob stores record the content's SHA-256 while they save it.
 * **Update**: [ADR-0087](decisions/0087-transaction-scoped-locks-and-one-advisory-key-scheme.md) gained an amendment for locking several rows or advisory keys in one stable order.
 * **Update**: [ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md) now decides the inverse query instead of deferring it (the caller owns the candidate set, the principal directory agrees with the live principal by contract, an unrestricted alternative is every candidate), and [ADR-0089](decisions/0089-resource-authorization-composes.md) points to it; the [glossary](../GLOSSARY.md) gained *principal directory*.

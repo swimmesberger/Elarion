@@ -48,6 +48,7 @@
  ELHTTP004  | Elarion.Http                       | Warning  | Cannot infer HTTP verb
  ELHTTP005  | Elarion.Http                       | Warning  | HTTP endpoint request member cannot be bound
  ELHTTP006  | Elarion.Http                       | Warning  | CustomizeEndpoint hook has an unusable shape
+ ELHTTP007  | Elarion.Http                       | Error    | A streamed file response cannot be cached or replayed
  ELMOD001   | Elarion.Modules                    | Warning  | Multiple app modules share a namespace
  ELMOD002   | Elarion.Modules                    | Warning  | Cross-module reference to a module-internal type
  ELMOD003   | Elarion.Modules                    | Warning  | Referenced assembly advertises an unsupported Elarion manifest schema version
@@ -63,6 +64,7 @@
  ELRPC002   | Elarion.JsonRpc                    | Warning  | RPC handler has no resolvable request/response shape
  ELRPC003   | Elarion.JsonRpc                    | Warning  | Duplicate operation name across the handler bus
  ELRPC004   | Elarion.JsonRpc                    | Error    | Response member is omitted from the wire contract
+ ELRPC005   | Elarion.JsonRpc                    | Error    | A streamed file cannot be carried by a [Handler] transport
  ELERR001   | Elarion.Errors                     | Error    | Invalid error code
  ELERR002   | Elarion.Errors                     | Error    | Conflicting error declaration
  ELRES001   | Elarion.Abstractions.Resilience    | Error    | Invalid resilience policy

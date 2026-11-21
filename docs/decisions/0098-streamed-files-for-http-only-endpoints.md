@@ -1,0 +1,92 @@
+---
+type: Architecture Decision Record
+title: "ADR-0098: HTTP-only endpoints stream files through ElarionStreamedFile"
+description: "An [HttpEndpoint] without [Handler] may respond with ElarionStreamedFile, a file written to the body after the pipeline; JSON surfaces and replaying decorators refuse it at compile time."
+status: draft
+---
+# ADR-0098: HTTP-only endpoints stream files through ElarionStreamedFile
+
+- Status: Proposed
+- Date: 2026-11-21
+- Amends: [ADR-0039](0039-binary-file-responses.md) (file payloads: the in-memory and the staged-blob tier)
+- Related: [ADR-0071](0071-generator-owned-http-endpoint-binding.md) (generated `RequestDelegate` endpoints),
+  [ADR-0040](0040-host-declared-module-endpoints.md) (host-declared module endpoints)
+
+## Context
+
+ADR-0039 split file payloads into two tiers: `ElarionFile`, a block of memory every transport carries, and the
+staged-blob tier, where a handler returns a pointer and the client downloads the blob from the owner-scoped download
+endpoint. A streaming `ElarionFile` had been built and removed, because a stream cannot cross the JSON surfaces or be
+replayed by the idempotency and cache stores.
+
+That objection holds for a handler the JSON surfaces carry. It does not hold for a handler mapped with
+`[HttpEndpoint]` alone, which no JSON-RPC, MCP or connection client can call. Applications with such handlers still
+had no way to stream: a stored document served to its readers (a record-owned file, not the uploader's own pending
+blob), or a ZIP of many documents built per request. The staged-blob tier does not fit either — the download endpoint
+serves only a blob's exact recorded owner, and an archive would first have to be written as a blob of its own — and
+`ElarionFile` buffers the whole file. So applications mapped minimal-API routes in the host. There they lost what the
+handler pipeline gives: `[RequirePermission]`, the module's feature gate, validation and the declared error contract
+had to be repeated by hand in the host, where an application had to keep a second copy of each document's read rule.
+
+Three more things those routes had to solve each time:
+
+- **Presentation.** "Show" a PDF in a browser tab needs `Content-Disposition: inline` with the file name; a preview tile
+  needs an `ETag` and a `Cache-Control`. `ElarionFile` has neither, by ADR-0039's design (no conditional-request
+  knobs).
+- **Sniffing.** A stored upload served from the application's origin must carry `X-Content-Type-Options: nosniff`,
+  or the browser may render a `text/plain` upload as HTML. No framework file response set it, the blob endpoints
+  included.
+- **ZIP and synchronous I/O.** `ZipArchiveEntry.OpenAsync` returns a stream that does not override `DisposeAsync`;
+  `await using` falls back to the synchronous `Dispose`, which writes the entry's trailer synchronously. Kestrel
+  refuses synchronous body writes, and by then the `200` is sent, so the download hangs. Applications turned on
+  `AllowSynchronousIO` for the response. It is a BCL gap, but every application streaming an archive meets it.
+
+## Decision
+
+- **`ElarionStreamedFile`** (`Elarion.Abstractions`, next to `ElarionFile`) is the response of an HTTP-only handler:
+  content type, file name, a `FileDisposition` (`Attachment`, the default, or `Inline`), an entity tag (sent as a
+  strong `ETag`), `LastModified` and `CacheControl`. Its content is either a stream (`FromStream`, with an optional
+  owner disposed after it, such as the `BlobDownload` whose stream it is) or a writer (`FromWriter`) that receives the
+  response body. It owns its content and is `IAsyncDisposable`; the HTTP layer disposes it with the response.
+- **The generator** maps `Result<ElarionStreamedFile>` through `ElarionHttpResults.ToStreamedFileResult`, with the same
+  binary OpenAPI advertisement as `ElarionFile`. The content runs after the pipeline, in the request's scope, after the
+  handler's transaction. It reuses ASP.NET's stream results, so `If-None-Match` and `If-Modified-Since` answer `304`
+  without running the content.
+- **Only HTTP carries it, enforced at compile time.** A `[Handler]` that responds with it is error `ELRPC005` and no
+  operation is registered; an `[Idempotent]` or `[Cacheable]` one is error `ELHTTP007` and the decorator is not
+  attached. That keeps ADR-0039's guarantee for every surface the objection applies to.
+- **Every framework file response carries `nosniff`**: `ElarionFile` and `ElarionStreamedFile` responses and the blob
+  upload, cancel and download endpoints.
+- **A streamed file always states a disposition.** The browser never decides by itself to render it; inline is an
+  explicit choice, documented as safe only for content types the browser renders safely.
+- **The writer's body tolerates small synchronous writes.** It holds them (up to 1 MiB at a time) and sends them with
+  the next asynchronous write, so the async `ZipArchive` APIs work without `AllowSynchronousIO`. A writer that writes
+  everything synchronously fails at the limit instead of buffering the file.
+- **A failure after the first byte aborts the connection**, so a client never takes a truncated file for a complete
+  one; before it, the failure is an ordinary unexpected error.
+
+## Consequences
+
+- An application streams stored documents and on-the-fly archives from handlers again, and deletes the host routes
+  together with their hand-copied authorization.
+- Two transports differ in what a handler can return: a streamed file exists on HTTP only. The diagnostics make that a
+  compile-time fact, not a runtime surprise, and the handler's author chooses it by leaving out `[Handler]`.
+- The generated TypeScript client does not cover these endpoints (they are not in the JSON-RPC schema); a browser
+  downloads them by URL, which is what a file link wants.
+- The content runs outside the handler's transaction. A content that needs a consistent snapshot opens what it reads
+  in the handler; a blob read opened there streams from the database without buffering.
+- The synchronous-write allowance is a workaround for one BCL gap. When `ZipArchiveEntry`'s stream writes its trailer
+  in `DisposeAsync`, the allowance costs nothing and can stay.
+
+## Rejected alternatives
+
+- **A stream on `ElarionFile`.** Rejected again, for ADR-0039's reasons: the type crosses every surface, and a stream
+  cannot. A separate type keeps `ElarionFile` honest and lets the generator refuse the combination.
+- **Host-mapped routes with documented gates.** The status quo. It duplicates authorization and the feature gate per
+  route, which is what handlers exist to avoid.
+- **`Result<IResult>` or another ASP.NET type in handler signatures.** It would pull the shared framework into
+  application assemblies (ADR-0039).
+- **Turning on `AllowSynchronousIO` for streamed-file responses.** It would let a writer block a thread for the whole
+  file. Holding the few synchronous bytes keeps the response asynchronous and bounds the exception.
+- **Opt-in `nosniff`.** A file served with a correct content type loses nothing by it, and the risk it closes is an
+  upload rendered as a page of the application. A default that must be remembered is the wrong default.

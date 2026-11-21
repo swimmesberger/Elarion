@@ -264,6 +264,12 @@ _Avoid_: multipart upload, tus upload (one protocol over the seam), temp file
 The small, in-memory file payload of a handler. Large exports and uploads use the staged-blob tier instead.
 _Avoid_: attachment, stream (for a small file), form file
 
+**Streamed file**:
+The file response of an HTTP-only handler (`ElarionStreamedFile`): content written to the response body after
+the handler pipeline has run, never buffered. Only HTTP carries it; JSON surfaces use an ElarionFile or a
+pending blob.
+_Avoid_: file stream, push stream, download result
+
 **Migration plan**:
 The one ordered sequence in which SQL scripts, C# code steps and EF migrations run, with one version
 sequence, one history and one lock; roll-forward only.

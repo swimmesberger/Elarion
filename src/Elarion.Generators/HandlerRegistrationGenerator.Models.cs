@@ -332,6 +332,15 @@ public sealed partial class HandlerRegistrationGenerator {
         DiagnosticSeverity.Error,
         true);
 
+    private static readonly DiagnosticDescriptor StreamedFileCannotBeReplayedDescriptor = new(
+        "ELHTTP007",
+        "A streamed file response cannot be cached or replayed",
+        "Handler '{0}' responds with ElarionStreamedFile, which is written after the pipeline and cannot be stored; "
+        + "remove {1}, or respond with ElarionFile if the response must be stored",
+        "Elarion.Http",
+        DiagnosticSeverity.Error,
+        true);
+
     private static readonly DiagnosticDescriptor IdempotentAndCacheableDescriptor = new(
         "ELIDEM004",
         "Handler cannot be both idempotent and cacheable",

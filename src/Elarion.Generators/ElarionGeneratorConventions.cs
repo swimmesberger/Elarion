@@ -42,6 +42,13 @@ internal static class ElarionGeneratorConventions {
     public const string FileResponseTypeFqn = "global::Elarion.Abstractions.ElarionFile";
 
     /// <summary>
+    /// The streamed file response payload (<c>Result&lt;ElarionStreamedFile&gt;</c>), fully qualified. Only HTTP can
+    /// carry it: the HTTP emission switches to the streamed translation (<c>ToStreamedFileResult</c>), and a
+    /// <c>[Handler]</c> (ELRPC005) or a cached or idempotent handler (ELHTTP007) responding with it is an error.
+    /// </summary>
+    public const string StreamedFileResponseTypeFqn = "global::Elarion.Abstractions.ElarionStreamedFile";
+
+    /// <summary>
     /// The generic prefix of the created-resource response envelope (<c>Result&lt;ElarionCreated&lt;T&gt;&gt;</c>),
     /// fully qualified. The HTTP emission switches to the created translation (<c>ToCreatedResult</c>,
     /// <c>201</c> + <c>Location</c>, body = inner value) for exactly this construction; the name-routed

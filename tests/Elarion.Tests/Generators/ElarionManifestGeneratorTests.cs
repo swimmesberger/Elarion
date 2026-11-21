@@ -368,6 +368,34 @@ public sealed class ElarionManifestGeneratorTests {
     }
 
     [Fact]
+    public void Manifest_RpcMethod_StreamedFileResponse_IsAnErrorAndRegistersNothing() {
+        const string source =
+            """
+            using System.IO;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+
+            namespace Sample.Manifest;
+
+            public sealed record DownloadQuery(int Id) : IQuery;
+
+            [Handler("documents.download")]
+            public sealed class Download : IHandler<DownloadQuery, Result<ElarionStreamedFile>> {
+                public ValueTask<Result<ElarionStreamedFile>> HandleAsync(DownloadQuery request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<ElarionStreamedFile>>(
+                        ElarionStreamedFile.FromStream(new MemoryStream(), "application/pdf"));
+            }
+            """;
+
+        var generated = RunGenerator(source, out var diagnostics);
+
+        diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "ELRPC005" && diagnostic.Severity == DiagnosticSeverity.Error);
+        generated.Should().NotContain("documents.download");
+    }
+
+    [Fact]
     public void Manifest_ReferencedAssemblyWithUnsupportedSchema_ReportsElmod003AndSkipsEntries() {
         // Regression (M18): a referenced assembly advertising an Elarion manifest whose schema version this
         // generator does not understand must be skipped LOUDLY (ELMOD003) rather than misparsed — silently

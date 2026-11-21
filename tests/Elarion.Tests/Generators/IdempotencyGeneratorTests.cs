@@ -192,6 +192,46 @@ public sealed class IdempotencyGeneratorTests {
     }
 
     [Fact]
+    public void StreamedFileResponse_CannotBeIdempotentOrCacheable() {
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+
+                                  public sealed record ExportCommand(int Id) : ICommand;
+                                  public sealed record ExportQuery(int Id) : IQuery;
+
+                                  [Idempotent]
+                                  public sealed class ExportOnce : IHandler<ExportCommand, Result<ElarionStreamedFile>> {
+                                      public ValueTask<Result<ElarionStreamedFile>> HandleAsync(ExportCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult<Result<ElarionStreamedFile>>(
+                                              ElarionStreamedFile.FromStream(new System.IO.MemoryStream(), "text/csv"));
+                                  }
+
+                                  [Cacheable("exports")]
+                                  public sealed class ExportCached : IHandler<ExportQuery, Result<ElarionStreamedFile>> {
+                                      public ValueTask<Result<ElarionStreamedFile>> HandleAsync(ExportQuery request, CancellationToken ct) =>
+                                          ValueTask.FromResult<Result<ElarionStreamedFile>>(
+                                              ElarionStreamedFile.FromStream(new System.IO.MemoryStream(), "text/csv"));
+                                  }
+                              }
+                              """;
+
+        var (result, diagnostics) = Run(source);
+
+        diagnostics.Where(d => d.Id == "ELHTTP007" && d.Severity == DiagnosticSeverity.Error)
+            .Select(d => d.GetMessage())
+            .Order(StringComparer.Ordinal)
+            .Should().SatisfyRespectively(
+                first => first.Should().Contain("ExportCached").And.Contain("[Cacheable]"),
+                second => second.Should().Contain("ExportOnce").And.Contain("[Idempotent]"));
+        GetGenerated(result, "Sample_App_ExportOnce.g.cs").Should().NotContain("IdempotencyDecorator<");
+        GetGenerated(result, "Sample_App_ExportCached.g.cs").Should().NotContain("CacheDecorator<");
+    }
+
+    [Fact]
     public void IrrelevantEditReusesPipeline() {
         const string source = Preamble +
                               """

@@ -54,6 +54,16 @@ internal static class RpcMethodEmission {
         DiagnosticSeverity.Warning,
         true);
 
+    public static readonly DiagnosticDescriptor StreamedFileOnJsonTransport = new(
+        "ELRPC005",
+        "A streamed file cannot be carried by a [Handler] transport",
+        "Handler '{0}' responds with ElarionStreamedFile, which only HTTP can carry; JSON-RPC, MCP and connections need a "
+        + "payload that serializes. Remove [Handler] and map it with [HttpEndpoint] alone, or respond with ElarionFile "
+        + "(small files) or a pending blob the client downloads (large files).",
+        "Elarion.JsonRpc",
+        DiagnosticSeverity.Error,
+        true);
+
     public sealed record ParameterDescription(string PropertyName, string Description);
 
     /// <summary>One <c>[ClientTag(key, value)]</c> hint.</summary>
@@ -286,6 +296,13 @@ internal static class RpcMethodEmission {
         if (!HandlerShape.TryResolve(type, out var requestType, out var responseInner, out _)) {
             report?.Invoke(DiagnosticInfo.Create(
                 MissingHandlerShape, type.Locations.FirstOrDefault(), type.ToDisplayString()));
+            return false;
+        }
+
+        // A stream cannot cross a JSON surface; registering the operation would only fail at its first call.
+        if (responseInner.ToDisplayString(fmt) == ElarionGeneratorConventions.StreamedFileResponseTypeFqn) {
+            report?.Invoke(DiagnosticInfo.Create(
+                StreamedFileOnJsonTransport, type.Locations.FirstOrDefault(), type.ToDisplayString()));
             return false;
         }
 

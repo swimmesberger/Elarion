@@ -616,6 +616,45 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_MapsStreamedFileResponseEndpointThroughStreamedTranslation() {
+        const string modulesSource =
+            """
+            using System.IO;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Files {
+                [AppModule("Files", Kind = AppModuleKind.Core)]
+                public static class FilesModule { }
+
+                [HttpEndpoint("files/{id}/content")]
+                public sealed class StreamFile : IHandler<StreamFile.Query, Result<ElarionStreamedFile>> {
+                    public sealed record Query : IQuery { public required System.Guid Id { get; init; } }
+                    public ValueTask<Result<ElarionStreamedFile>> HandleAsync(Query request, CancellationToken ct) =>
+                        ValueTask.FromResult<Result<ElarionStreamedFile>>(
+                            ElarionStreamedFile.FromStream(new MemoryStream(), "application/pdf"));
+                }
+            }
+            """;
+
+        var generated = RunGenerator(modulesSource, out var compilationWithGenerated);
+
+        // Streamed to the body after the pipeline, and advertised as binary like the in-memory file tier.
+        generated.Should().Contain("app.MapGet(\"files/{id}/content\",");
+        generated.Should().Contain("global::Elarion.AspNetCore.ElarionHttpResults.ToStreamedFileResult(");
+        generated.Should().Contain(
+            ".WithMetadata(new global::Microsoft.AspNetCore.Http.ProducesResponseTypeMetadata(200, null, new[] { \"application/octet-stream\" }))");
+        generated.Should().Contain(".WithMetadata(global::Elarion.AspNetCore.ElarionFileEndpointMetadata.Instance)");
+        generated.Should().NotContain("typeof(global::Elarion.Abstractions.ElarionStreamedFile)");
+
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Bootstrapper_MapsCreatedResponseEndpointThroughCreatedTranslation() {
         const string modulesSource =
             """

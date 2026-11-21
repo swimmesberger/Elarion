@@ -50,6 +50,7 @@ public static class BlobUploadEndpointsExtensions {
     }
 
     private static async Task UploadAsync(HttpContext context) {
+        BlobEndpointResponses.ForbidSniffing(context.Response);
         var services = context.RequestServices;
         var result = await UploadCoreAsync(
             context.Request,
@@ -62,6 +63,7 @@ public static class BlobUploadEndpointsExtensions {
     }
 
     private static async Task CancelAsync(HttpContext context) {
+        BlobEndpointResponses.ForbidSniffing(context.Response);
         var blobId = context.Request.RouteValues["blobId"]!.ToString()!;
         var services = context.RequestServices;
         var result = await CancelCoreAsync(
