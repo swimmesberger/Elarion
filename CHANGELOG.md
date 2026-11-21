@@ -9,10 +9,23 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **Blob content hash** (ADR-0099). The PostgreSQL and Azure stores compute the SHA-256 of the content while
+  `SaveAsync` streams it, exposed as `BlobMetadata.ContentSha256` (64 lower-case hex characters), so duplicate
+  detection and entity tags need no second read. `IBlobStore.GetContentSha256Async(blobRef)` answers for every blob,
+  hashing the content once when none is recorded (older blobs, Azure staged uploads). See
+  [Blob storage](https://elarion.wimmesberger.dev/docs/capabilities/blob-storage#content-hash).
 - **Several rows or advisory keys in one order.** `db.LockRowsAsync<TEntity, TKey>(ids, options)` and
   `db.AdvisoryLockAllAsync(scope, keys)` lock each member of a set once, in ascending key order (strings ordinally),
   so commands that lock overlapping sets wait for each other instead of deadlocking. See
   [Row and advisory locks](https://elarion.wimmesberger.dev/docs/capabilities/coordination#several-rows-or-keys).
+
+### Changed
+- **Breaking: `stored_blobs` gains a `content_sha256` column.** EF applications using `UseElarionBlobStorage` (or
+  `[GenerateElarionBlobStorage]`) add a migration after upgrading (`dotnet ef migrations add UpgradeBlobStorage`);
+  without it every query of `stored_blobs` fails on the missing column. Existing rows keep `null`.
+- **The Azure blob store stages 4 MiB blocks itself** to hash the content on the way: content up to one block is one
+  Put Blob, larger content is staged block by block and committed with its hash, using one buffer per save instead of
+  the SDK's parallel block upload.
 
 ## [0.4.1] - 2026-11-21
 

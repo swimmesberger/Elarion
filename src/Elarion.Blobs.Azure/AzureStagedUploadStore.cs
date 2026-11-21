@@ -25,7 +25,9 @@ namespace Elarion.Blobs.Azure;
 /// application), stamping the pending-lifecycle metadata that <see cref="AzureBlobStore"/> understands.
 /// The staging blob is then recreated empty with a completion marker, dropping the staged bytes
 /// immediately while the session stays queryable until its retention deadline. Completion is idempotent;
-/// a crash between copy and marker is healed by the retry re-running the (overwriting) copy.
+/// a crash between copy and marker is healed by the retry re-running the (overwriting) copy. Because the bytes never
+/// pass the application, the completed blob has no recorded SHA-256 (<see cref="BlobMetadata.ContentSha256"/> is
+/// <c>null</c>); <see cref="BlobStoreExtensions.GetContentSha256Async"/> computes it with one read.
 /// </para>
 /// <para>
 /// Limits inherited from append blobs: at most 50,000 blocks per session (appends are split into

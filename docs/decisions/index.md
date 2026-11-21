@@ -98,3 +98,4 @@
 * [ADR-0095](0095-one-resource-rule-for-list-point-check-and-complement.md) - One resource rule for the list, the point check, the complement and the inverse (proposed)
 * [ADR-0096](0096-the-repository-is-the-memory.md) - Harness memory is off; the repository is the memory
 * [ADR-0097](0097-adopt-the-agentic-repository-layout.md) - The repository follows the agentic repository template's layout, with docs/ shared between the knowledge bundle and the website
+* [ADR-0099](0099-blob-stores-record-a-content-sha256.md) - Blob stores record the content's SHA-256 while they save it (proposed)

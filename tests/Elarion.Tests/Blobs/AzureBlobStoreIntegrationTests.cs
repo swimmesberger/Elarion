@@ -33,6 +33,29 @@ public sealed class AzureBlobStoreIntegrationTests(AzuriteFixture fixture) : ICl
         (await store.ExistsAsync(blobRef, ct)).Should().BeTrue();
     }
 
+    // The store saves content in 4 MiB blocks: up to one block as one upload, more as staged blocks.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(5)]
+    [InlineData(4 * 1024 * 1024)]
+    [InlineData(2 * 4 * 1024 * 1024 + 123)]
+    public async Task SaveAsync_RecordsTheContentSha256_AsOneUploadOrAsStagedBlocks(int length) {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        var store = CreateStore();
+        var payload = new byte[length];
+        new Random(length).NextBytes(payload);
+        var blobRef = await store.SaveAsync(NewRequest(owner: "user-1"), new MemoryStream(payload), ct);
+
+        var expected = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(payload));
+        var metadata = await store.GetMetadataAsync(blobRef, ct);
+        metadata!.ContentSha256.Should().Be(expected);
+        metadata.Size.Should().Be(length);
+        metadata.ContentType.Should().Be("application/pdf");
+        metadata.OwnerId.Should().Be("user-1");
+        (await store.ReadAllBytesAsync(blobRef, ct)).Should().Equal(payload);
+    }
+
     [Fact]
     public async Task SaveAsync_SameName_OverwritesAndKeepsReference() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);

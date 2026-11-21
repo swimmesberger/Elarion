@@ -104,9 +104,35 @@ them for free:
 | `ReadAllBytesAsync` | Loads just the content bytes. |
 | `DownloadToAsync` | Copies content to a destination stream (for example an HTTP response body). |
 | `ListAllAsync` | Enumerates every blob under a prefix as an `IAsyncEnumerable`, walking `ListAsync` page by page — the flat enumeration migration/backup tooling wants. |
+| `GetContentSha256Async` | The SHA-256 of a blob's content: the [recorded one](#content-hash), or computed by reading the content once when none is recorded. |
 
 The PostgreSQL implementation replaces an existing blob when `container` and `name` match, preserving
 the blob id while updating content type, size, timestamp, and bytes.
+
+### Content hash
+
+The stores compute the SHA-256 of the content while `SaveAsync` streams it and record it with the blob:
+`BlobMetadata.ContentSha256` holds 64 lower-case hex characters. Finding the same file uploaded twice, or
+using the hash as a download's entity tag, then needs no second read of the content:
+
+```csharp
+var metadata = await blobs.GetMetadataAsync(blobRef, ct);
+var duplicate = await db.Documents.AnyAsync(d => d.ContentSha256 == metadata!.ContentSha256, ct);
+```
+
+Copy the hash into your own entity when you query by it, as above: the store is not a query model, and
+`stored_blobs` has no index on the column.
+
+`ContentSha256` is `null` for a blob without a recorded hash: one stored before your Elarion version recorded
+them, one written to an Azure container by another producer, and one the Azure staged-upload store completes
+by a server-side copy (the bytes never pass the application). Where one code path must serve every blob, call
+`blobs.GetContentSha256Async(blobRef, ct)`: it answers from the metadata, and reads the content once only when
+nothing is recorded.
+
+| Store | Where the hash lives |
+| --- | --- |
+| PostgreSQL | `stored_blobs.content_sha256`, written in the same transaction as the content. |
+| Azure Blob Storage | the blob metadata `elarion_content_sha256`. A save reads the content in 4 MiB blocks and hashes them on the way: up to one block is one Put Blob, more is staged block by block and committed with the hash. |
 
 ## Listing: prefixes as virtual directories
 
@@ -248,7 +274,7 @@ class leaks one pool per host until PostgreSQL answers `53300: too many clients 
 
 | Table | Purpose |
 | --- | --- |
-| `stored_blobs` | Metadata: id, container, name, content type, size, created timestamp, and the lifecycle state, expiry, and owner id used by [blob uploads](/docs/capabilities/blob-uploads). |
+| `stored_blobs` | Metadata: id, container, name, content type, size, created timestamp, the [content hash](#content-hash), and the lifecycle state, expiry, and owner id used by [blob uploads](/docs/capabilities/blob-uploads). |
 | `blob_contents` | Content bytes keyed by blob id, with cascade delete from `stored_blobs`. |
 
 `UseElarionBlobStorage` takes optional `tableName` and `contentTableName` parameters to rename either
@@ -280,6 +306,12 @@ The generated migration includes `stored_blobs`, `blob_contents`, the unique `(c
 index, and the cascade foreign key. For throwaway or test databases you can call
 `dbContext.Database.EnsureCreated()` instead of migrating, but use migrations for any schema that
 will evolve.
+
+When an Elarion release adds a column to these tables, the model changes with the package: add a migration after
+upgrading (`dotnet ef migrations add UpgradeBlobStorage`), or every query of `stored_blobs` fails on the missing
+column ([CHANGELOG](https://github.com/swimmesberger/Elarion/blob/main/CHANGELOG.md) names each such change). The
+[content hash](#content-hash) added the nullable `content_sha256 varchar(64)`; existing rows keep `null`, which
+`GetContentSha256Async` covers.
 
 The store talks to PostgreSQL directly for content bytes (it casts the context's connection to
 `NpgsqlConnection`), so the owning context must be configured with `UseNpgsql` — see the

@@ -1,7 +1,12 @@
+using System.Buffers;
 using System.Collections.Concurrent;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Azure;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using Azure.Storage.Blobs.Specialized;
 using Microsoft.Extensions.Logging;
 
 namespace Elarion.Blobs.Azure;
@@ -24,10 +29,19 @@ namespace Elarion.Blobs.Azure;
 /// with metadata, which fits the framework's 1–10 node tier; at larger scale replace the collector with
 /// Azure lifecycle-management policies.
 /// </para>
+/// <para>
+/// A save reads the content in 4 MiB blocks and hashes them on the way, so the content's SHA-256
+/// (<see cref="BlobMetadata.ContentSha256"/>) is written with the blob, in <c>elarion_content_sha256</c>: content up to
+/// one block is one Put Blob, larger content is staged block by block and committed with the hash. A blob that
+/// <see cref="AzureStagedUploadStore"/> completes by a server-side copy has no recorded hash.
+/// </para>
 /// </remarks>
 public sealed class AzureBlobStore(
     BlobServiceClient client,
     ILogger<AzureBlobStore> logger) : IBlobStore, IBlobLifecycle {
+    /// <summary>The block a save reads, hashes and stages at a time; content up to it is one Put Blob.</summary>
+    internal const int BlockSize = 4 * 1024 * 1024;
+
     private readonly ConcurrentDictionary<string, byte> _ensuredContainers = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
@@ -39,7 +53,6 @@ public sealed class AzureBlobStore(
         ArgumentNullException.ThrowIfNull(content);
 
         var container = await EnsureContainerAsync(request.Container, cancellationToken);
-        var blob = container.GetBlobClient(request.Name);
 
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal) {
             [AzureBlobMetadata.StateKey] = request.InitialState == BlobLifecycleState.Pending
@@ -52,12 +65,11 @@ public sealed class AzureBlobStore(
 
         if (request.OwnerId is { } ownerId) metadata[AzureBlobMetadata.OwnerKey] = AzureBlobMetadata.Encode(ownerId);
 
-        await blob.UploadAsync(
+        await UploadHashedAsync(
+            container.GetBlockBlobClient(request.Name),
             content,
-            new BlobUploadOptions {
-                HttpHeaders = new BlobHttpHeaders { ContentType = request.ContentType },
-                Metadata = metadata
-            },
+            new BlobHttpHeaders { ContentType = request.ContentType },
+            metadata,
             cancellationToken);
 
         var location = new AzureBlobLocation(request.Container, request.Name);
@@ -68,6 +80,57 @@ public sealed class AzureBlobStore(
             request.ContentType);
 
         return location.ToBlobRef();
+    }
+
+    /// <summary>
+    /// Writes <paramref name="content"/> in blocks of <see cref="BlockSize"/>, hashing each block as it is read, so the
+    /// content's SHA-256 is part of the metadata the final request writes: one Put Blob for content that fits a block,
+    /// otherwise staged blocks and a block-list commit. Memory stays at one block, whatever the content's size.
+    /// </summary>
+    private static async Task UploadHashedAsync(
+        BlockBlobClient blob,
+        Stream content,
+        BlobHttpHeaders headers,
+        Dictionary<string, string> metadata,
+        CancellationToken cancellationToken) {
+        using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = ArrayPool<byte>.Shared.Rent(BlockSize);
+        try {
+            var read = await content.ReadAtLeastAsync(buffer.AsMemory(0, BlockSize), BlockSize, false, cancellationToken);
+            sha256.AppendData(buffer, 0, read);
+            if (read < BlockSize) {
+                metadata[AzureBlobMetadata.ContentSha256Key] = Convert.ToHexStringLower(sha256.GetHashAndReset());
+                await blob.UploadAsync(
+                    new MemoryStream(buffer, 0, read, false),
+                    new BlobUploadOptions { HttpHeaders = headers, Metadata = metadata },
+                    cancellationToken);
+                return;
+            }
+
+            // Block ids are unique to this save, so a concurrent save of the same name stages its own blocks; all ids
+            // of one blob have the same length, as the service requires.
+            var saveId = Guid.CreateVersion7();
+            var blockIds = new List<string>();
+            while (read > 0) {
+                var blockId = Convert.ToBase64String(
+                    Encoding.ASCII.GetBytes($"{saveId:N}{blockIds.Count.ToString("d6", CultureInfo.InvariantCulture)}"));
+                await blob.StageBlockAsync(
+                    blockId, new MemoryStream(buffer, 0, read, false), cancellationToken: cancellationToken);
+                blockIds.Add(blockId);
+
+                read = await content.ReadAtLeastAsync(buffer.AsMemory(0, BlockSize), BlockSize, false, cancellationToken);
+                sha256.AppendData(buffer, 0, read);
+            }
+
+            metadata[AzureBlobMetadata.ContentSha256Key] = Convert.ToHexStringLower(sha256.GetHashAndReset());
+            await blob.CommitBlockListAsync(
+                blockIds,
+                new CommitBlockListOptions { HttpHeaders = headers, Metadata = metadata },
+                cancellationToken);
+        }
+        finally {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     /// <inheritdoc />
@@ -200,7 +263,8 @@ public sealed class AzureBlobStore(
             State = state,
             OwnerId = item.Metadata is null
                 ? null
-                : AzureBlobMetadata.Decode(item.Metadata, AzureBlobMetadata.OwnerKey)
+                : AzureBlobMetadata.Decode(item.Metadata, AzureBlobMetadata.OwnerKey),
+            ContentSha256 = item.Metadata is null ? null : AzureBlobMetadata.ContentSha256Of(item.Metadata)
         });
     }
 
@@ -312,7 +376,8 @@ public sealed class AzureBlobStore(
             State = AzureBlobMetadata.IsPending(properties.Metadata)
                 ? BlobLifecycleState.Pending
                 : BlobLifecycleState.Committed,
-            OwnerId = AzureBlobMetadata.Decode(properties.Metadata, AzureBlobMetadata.OwnerKey)
+            OwnerId = AzureBlobMetadata.Decode(properties.Metadata, AzureBlobMetadata.OwnerKey),
+            ContentSha256 = AzureBlobMetadata.ContentSha256Of(properties.Metadata)
         };
     }
 
