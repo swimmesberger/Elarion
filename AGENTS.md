@@ -21,6 +21,7 @@ This file states the rules an agent needs while changing the framework. Use the 
 | Build, validation, and contributor workflow | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Release operation | [`RELEASING.md`](RELEASING.md) |
 | Mechanical formatting | [`.editorconfig`](.editorconfig) |
+| Anything you learned and would otherwise remember | A tracked file — see [Repository memory](#repository-memory) |
 
 **Scale positioning.** Elarion targets small-to-mid apps: roughly **1–10 nodes, vertical-first, on the
 one PostgreSQL the application already runs**. Shipped defaults must work at that tier, but need not scale
@@ -94,6 +95,10 @@ it uses. Add `Elarion.Abstractions` only to contract-only assemblies that cannot
 - Design every seam for its strongest intended implementation, never for pre-1.0 compatibility or a weak
   test/single-node implementation. A weaker implementation provides the closest semantics and documents the
   difference. Prefer an optional options bag to repeatedly widening signatures.
+- Decide, do not defer. When a feature is in scope and the only obstacle is that several reasonable designs
+  exist, choose the simplest coherent one, implement it, and record the choice and the rejected alternatives in
+  the ADR as revisable. A pre-1.0 decision can be revisited; an unshipped feature helps nobody. Defer only when
+  no answer makes sense yet, or when the choice would be unsafe (a default that fails open).
 - Prefer compile-time generation over runtime reflection scanning. Framework paths must preserve trimming
   and AOT friendliness; a reflection fallback is an explicit, isolated opt-in, not a quiet default.
 
@@ -394,6 +399,24 @@ its absolute GitHub blob URL (`https://github.com/swimmesberger/Elarion/blob/mai
 
 The static export is `website/out`; `npm run dev` serves localhost. Pushes to `main` that touch `docs/**` or
 `website/**` trigger `deploy-docs.yml`.
+
+## Repository memory
+
+Harness memory is off in the committed settings (`.claude/settings.json`, `.vscode/settings.json`;
+[ADR-0096](docs/decisions/0096-the-repository-is-the-memory.md)). Do not use it, and do not write notes into a
+harness's memory directory. Anything worth remembering goes into a tracked file, in the same change that taught it:
+
+| What you learned | Where it goes |
+| --- | --- |
+| A correction or a working rule for agents and contributors | A rule in this file |
+| A design decision, its trade-offs, its rejected alternatives | An ADR in [`docs/decisions/`](docs/decisions/), listed in its `README.md` |
+| How a feature behaves or is used | [`docs/concepts/`](docs/concepts/), [`docs/capabilities/`](docs/capabilities/), [`docs/reference/`](docs/reference/) |
+| How to build, test, or set up a machine for this repository | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| What changed for consumers | [`CHANGELOG.md`](CHANGELOG.md) |
+
+Working notes, scratch files, and session hand-overs go into `.scratch/`, which git ignores, or into the OS temp
+directory — never into tracked files. Personal preferences and facts about one machine (where an SDK is installed)
+stay in that person's user-level instruction file, outside the repository.
 
 ## Pull requests
 

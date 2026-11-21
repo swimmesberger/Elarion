@@ -116,3 +116,4 @@ designs that are not yet implemented.
 - [ADR-0093: Typst PDF rendering is a framework package — the pinned CLI, bundled by the build, one sandboxed workspace per document — Proposed](0093-typst-pdf-rendering.md)
 - [ADR-0094: An in-process Typst engine is an opt-in second implementation of ITypstCompiler — prototype findings — Proposed](0094-in-process-typst-engine.md)
 - [ADR-0095: One resource rule for the list, the point check and the complement — and what the inverse needs — Proposed](0095-one-resource-rule-for-list-point-check-and-complement.md)
+- [ADR-0096: Harness memory is off; the repository is the memory](0096-the-repository-is-the-memory.md)

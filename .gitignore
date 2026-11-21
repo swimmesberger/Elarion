@@ -63,3 +63,6 @@ coverage/
 
 # OS
 Thumbs.db
+
+# Working notes and session hand-overs of people and agents (AGENTS.md, "Repository memory")
+.scratch/
