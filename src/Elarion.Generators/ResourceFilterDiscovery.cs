@@ -20,8 +20,15 @@ internal static class ResourceFilterDiscovery {
 
         var shared = false;
         foreach (var named in ctx.Attributes[0].NamedArguments)
-            if (named.Key == "Shared" && named.Value.Value is true)
-                shared = true;
+            switch (named.Key) {
+                case "Shared" when named.Value.Value is true:
+                    shared = true;
+                    break;
+                // A building block of a composed rule: the application registers the composition, so the filter is
+                // neither published in the manifest nor registered by the bootstrapper.
+                case "Register" when named.Value.Value is false:
+                    return null;
+            }
 
         return new ElarionManifest.ResourceFilter(
             specType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),

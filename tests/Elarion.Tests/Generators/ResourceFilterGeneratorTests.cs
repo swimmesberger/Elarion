@@ -429,6 +429,99 @@ public sealed class ResourceFilterGeneratorTests {
     }
 
     [Fact]
+    public void ResourceFilter_BypassRole_LiftsTheFilterForItsMembers_AlongsideABypassPermission() {
+        var roleOnly = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class Contact {
+                    public System.Guid Id { get; set; }
+                    public System.Guid OwnerId { get; set; }
+                }
+
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(OwnerProperty = "OwnerId", BypassRole = "Admin")]
+                public sealed partial class ContactAccess { }
+            }
+            """);
+        var both = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class Contact {
+                    public System.Guid Id { get; set; }
+                    public System.Guid OwnerId { get; set; }
+                }
+
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(
+                    OwnerProperty = "OwnerId", BypassRole = "Ad\"min", BypassPermission = "contacts.manage")]
+                public sealed partial class ContactAccess { }
+            }
+            """);
+
+        NoErrors(roleOnly);
+        NoErrors(both);
+        var roleSource = GetGeneratedSource(roleOnly, "Sample_Domain_ContactAccess.ResourceFilter.g.cs");
+        roleSource.Should().Contain("if (user.IsInRole(\"Admin\"))").And.Contain("            return null;");
+        roleSource.IndexOf("IsInRole", StringComparison.Ordinal)
+            .Should().BeGreaterThan(roleSource.IndexOf("IsAuthenticated", StringComparison.Ordinal));
+        // Either one bypasses; the role name is emitted as an escaped literal.
+        GetGeneratedSource(both, "Sample_Domain_ContactAccess.ResourceFilter.g.cs").Should().Contain(
+            "if (user.HasClaim(\"permission\", \"contacts.manage\") || user.IsInRole(\"Ad\\\"min\"))");
+    }
+
+    [Fact]
+    public void ResourceFilter_BypassRole_AtRuntime_SeesEveryRowOfItsTenantOnly() {
+        var result = Generate(
+            """
+            namespace Sample.Domain {
+                public sealed class Contact {
+                    public System.Guid Id { get; set; }
+                    public System.Guid OwnerId { get; set; }
+                    public System.Guid TenantId { get; set; }
+                }
+
+                [Elarion.Abstractions.Authorization.ResourceFilter<Contact>(
+                    OwnerProperty = "OwnerId", TenantProperty = "TenantId", BypassRole = "Admin")]
+                public sealed partial class ContactAccess { }
+            }
+            """);
+        NoErrors(result);
+        var entity =
+            """
+            namespace Sample.Domain {
+                public sealed class Contact {
+                    public System.Guid Id { get; set; }
+                    public System.Guid OwnerId { get; set; }
+                    public System.Guid TenantId { get; set; }
+                }
+            }
+            """;
+        var assembly = LoadCompiled(entity, GetGeneratedSource(result, "Sample_Domain_ContactAccess.ResourceFilter.g.cs"));
+        var contactType = assembly.GetType("Sample.Domain.Contact")!;
+        var authorizer = assembly.GetType("Sample.Domain.ContactAccess")!.GetProperty("Specification")!.GetValue(null)!;
+        var tenant = Guid.CreateVersion7();
+        var admin = new ClaimsUser(Guid.CreateVersion7().ToString(), ("tenant", tenant.ToString())) { Roles = ["Admin"] };
+        var staff = new ClaimsUser(Guid.CreateVersion7().ToString(), ("tenant", tenant.ToString())) { Roles = ["Staff"] };
+        var adminWithoutTenant = new ClaimsUser(Guid.CreateVersion7().ToString()) { Roles = ["Admin"] };
+
+        object Contact(Guid tenantId) {
+            var contact = Activator.CreateInstance(contactType)!;
+            contactType.GetProperty("OwnerId")!.SetValue(contact, Guid.CreateVersion7());
+            contactType.GetProperty("TenantId")!.SetValue(contact, tenantId);
+            return contact;
+        }
+
+        bool Sees(ClaimsUser user, object contact) {
+            var filter = (System.Linq.Expressions.LambdaExpression)authorizer.GetType().GetMethod("GetFilter")!
+                .Invoke(authorizer, [user, Elarion.Abstractions.Authorization.ResourceOperation.Read])!;
+            return (bool)filter.Compile().DynamicInvoke(contact)!;
+        }
+
+        Sees(admin, Contact(tenant)).Should().BeTrue("the bypass lifts the owner grant");
+        Sees(admin, Contact(Guid.CreateVersion7())).Should().BeFalse("the bypass never crosses the tenant");
+        Sees(staff, Contact(tenant)).Should().BeFalse("another role does not bypass");
+        Sees(adminWithoutTenant, Contact(tenant)).Should().BeFalse("a scope that cannot be resolved fails closed");
+    }
+
+    [Fact]
     public void ResourceFilter_GeneratedSource_CompilesAgainstRuntime() {
         var result = Generate(
             """
@@ -537,11 +630,11 @@ public sealed class ResourceFilterGeneratorTests {
 
         public string? Email => null;
 
-        public IReadOnlyList<string> Roles => [];
+        public IReadOnlyList<string> Roles { get; init; } = [];
 
         public bool IsAuthenticated => true;
 
-        public bool IsInRole(string role) => false;
+        public bool IsInRole(string role) => Roles.Contains(role);
 
         public bool HasClaim(string type, string value) => claims.Contains((type, value));
 

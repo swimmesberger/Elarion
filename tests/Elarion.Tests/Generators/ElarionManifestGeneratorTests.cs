@@ -288,6 +288,39 @@ public sealed class ElarionManifestGeneratorTests {
     }
 
     [Fact]
+    public void Manifest_PublishesRegisteredResourceFilters_AndLeavesOutBuildingBlocks() {
+        const string source =
+            """
+            using System;
+            using System.Linq.Expressions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Identity;
+
+            namespace Sample.Manifest;
+
+            public sealed class Contact { public Guid Id { get; set; } public Guid OwnerId { get; set; } }
+
+            [ResourceFilter<Contact>(OwnerProperty = "OwnerId", Register = false)]
+            public sealed class ContactOwnerFilter : IQueryAuthorizer<Contact> {
+                public Expression<Func<Contact, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
+            }
+
+            [ResourceFilter<Contact>(OwnerProperty = "OwnerId", Register = true)]
+            public sealed class ContactAccess : IQueryAuthorizer<Contact> {
+                public Expression<Func<Contact, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
+            }
+            """;
+
+        var generated = RunGenerator(source, out var diagnostics);
+
+        diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        // A building block is composed by the application, so the host bootstrapper never learns of it.
+        generated.Should().Contain("Elarion.Manifest.ResourceFilter.v1")
+            .And.Contain("Sample.Manifest.ContactAccess")
+            .And.NotContain("ContactOwnerFilter");
+    }
+
+    [Fact]
     public void Manifest_ModuleEndpointsWithoutHooks_WarnsElmod005AndPublishesNothing() {
         const string source =
             """

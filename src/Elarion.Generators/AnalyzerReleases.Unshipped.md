@@ -54,6 +54,7 @@
  ELMOD004   | Elarion.Modules                    | Warning  | [ModuleEndpoints] names an unknown module
  ELMOD005   | Elarion.Modules                    | Warning  | [ModuleEndpoints] class declares no endpoint hook
  ELMOD006   | Elarion.Modules                    | Error    | Duplicate [AppModule] name
+ ELMOD007   | Elarion.Modules                    | Warning  | Entity has more than one registered [ResourceFilter]
  ELAPI001   | Elarion.Modules                    | Error    | Module API interface must be partial
  ELAPI002   | Elarion.Modules                    | Error    | Module API interface must be top-level
  ELAPI003   | Elarion.Modules                    | Warning  | Module API interface is not in any module

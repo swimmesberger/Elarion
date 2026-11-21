@@ -115,6 +115,7 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
         var idProperty = "Id";
         string? bypassPermission = null;
         var permissionClaimType = "permission";
+        string? bypassRole = null;
         foreach (var argument in ctx.Attributes[0].NamedArguments)
             switch (argument.Key) {
                 case "OwnerProperty":
@@ -144,6 +145,10 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
                 case "PermissionClaimType":
                     if (argument.Value.Value is string permissionClaim && permissionClaim.Length > 0)
                         permissionClaimType = permissionClaim;
+
+                    break;
+                case "BypassRole":
+                    if (argument.Value.Value is string role && role.Length > 0) bypassRole = role;
 
                     break;
             }
@@ -193,7 +198,8 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
             idParseKind ?? string.Empty,
             diagnostics.ToImmutable(),
             bypassPermission,
-            permissionClaimType);
+            permissionClaimType,
+            bypassRole);
     }
 
     private static void AddPropertyRule(
@@ -409,13 +415,18 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
         return scopeTerms;
     }
 
-    // A caller holding the bypass permission skips the grant rules, never the scope: they see every row of their own
-    // tenant (no restriction at all — null — only when the filter has no scope rule).
+    // A caller holding the bypass permission, or in the bypass role, skips the grant rules, never the scope: they see
+    // every row of their own tenant (no restriction at all — null — only when the filter has no scope rule).
     private static void EmitBypass(StringBuilder sb, ResourceFilterTarget target, List<string> scopeTerms) {
-        if (target.BypassPermission is null) return;
+        var conditions = new List<string>();
+        if (target.BypassPermission is not null)
+            conditions.Add(
+                $"user.HasClaim({Literal(target.PermissionClaimType)}, {Literal(target.BypassPermission)})");
+        if (target.BypassRole is not null)
+            conditions.Add($"user.IsInRole({Literal(target.BypassRole)})");
+        if (conditions.Count == 0) return;
 
-        sb.AppendLine(
-            $"        if (user.HasClaim({Literal(target.PermissionClaimType)}, {Literal(target.BypassPermission)}))");
+        sb.AppendLine($"        if ({string.Join(" || ", conditions)})");
         sb.AppendLine("        {");
         sb.AppendLine(scopeTerms.Count == 0
             ? "            return null;"
@@ -489,7 +500,8 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
         string IdParseKind,
         EquatableArray<DiagnosticModel> Diagnostics,
         string? BypassPermission,
-        string PermissionClaimType);
+        string PermissionClaimType,
+        string? BypassRole);
 
     private sealed record DiagnosticModel(
         DiagnosticDescriptor Descriptor,

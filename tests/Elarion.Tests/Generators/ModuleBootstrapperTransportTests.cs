@@ -968,12 +968,13 @@ public sealed class ModuleBootstrapperTransportTests {
             .Should().Contain("if (IsModuleEnabled(configuration, \"FilterLib\"))")
             .And.Contain("AddFilterLibResourceFilters(services);");
 
-        // A field-only spec registers its static Specification as a singleton; a shared spec registers scoped.
+        // A field-only spec registers its static Specification as a singleton; a shared spec registers scoped. Both
+        // only fill a gap (TryAdd), so an authorizer the application registered itself is not replaced.
         var method = Slice(generated, "IServiceCollection AddFilterLibResourceFilters(");
         method.Should().Contain(
-            "global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<global::Elarion.Abstractions.Authorization.IQueryAuthorizer<global::FilterLib.Contact>>(services, global::FilterLib.ContactAccess.Specification);");
+            "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton<global::Elarion.Abstractions.Authorization.IQueryAuthorizer<global::FilterLib.Contact>>(services, global::FilterLib.ContactAccess.Specification);");
         method.Should().Contain(
-            "global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<global::Elarion.Abstractions.Authorization.IQueryAuthorizer<global::FilterLib.Order>, global::FilterLib.OrderAccess>(services);");
+            "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddScoped<global::Elarion.Abstractions.Authorization.IQueryAuthorizer<global::FilterLib.Order>, global::FilterLib.OrderAccess>(services);");
 
         // The registrations reference the referenced assembly's real types, so the generated code compiles.
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
@@ -1263,6 +1264,69 @@ public sealed class ModuleBootstrapperTransportTests {
         result.Diagnostics.Should().NotContain(d => d.Id == "ELRPC003");
     }
 
+    private const string ResourceFilterBuildingBlockHostSource =
+        """
+        using System;
+        using System.Linq.Expressions;
+        using Elarion.Abstractions.Authorization;
+        using Elarion.Abstractions.Identity;
+        using Elarion.Abstractions.Modules;
+        using Elarion.AspNetCore;
+
+        [assembly: GenerateModuleBootstrapper]
+
+        namespace Host.Contacts {
+            [AppModule("Contacts")]
+            public static class ContactsModule { }
+
+            public sealed class Contact {
+                public Guid Id { get; set; }
+                public Guid OwnerId { get; set; }
+            }
+
+            [ResourceFilter<Contact>(OwnerProperty = "OwnerId"REGISTER_OWNER)]
+            public sealed class ContactOwnerFilter : IQueryAuthorizer<Contact> {
+                public static ContactOwnerFilter Specification { get; } = new();
+                private ContactOwnerFilter() { }
+                public Expression<Func<Contact, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
+            }
+
+            [ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
+            public sealed class ContactAccess : IQueryAuthorizer<Contact> {
+                public static ContactAccess Specification { get; } = new();
+                private ContactAccess() { }
+                public Expression<Func<Contact, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
+            }
+        }
+        """;
+
+    [Fact]
+    public void Bootstrapper_DoesNotRegisterAResourceFilterMarkedAsBuildingBlock() {
+        var hostSource = ResourceFilterBuildingBlockHostSource.Replace("REGISTER_OWNER", ", Register = false");
+
+        var result = RunGeneratorRunWithReferences(hostSource, []);
+
+        var generated = string.Join("\n", result.GeneratedTrees.Select(tree => tree.ToString()));
+        var method = Slice(generated, "IServiceCollection AddContactsResourceFilters(");
+        method.Should().Contain("global::Host.Contacts.ContactAccess.Specification")
+            .And.NotContain("ContactOwnerFilter");
+        result.Diagnostics.Should().NotContain(diagnostic => diagnostic.Id == "ELMOD007");
+    }
+
+    [Fact]
+    public void Bootstrapper_ReportsTwoRegisteredResourceFiltersForOneEntity() {
+        var hostSource = ResourceFilterBuildingBlockHostSource.Replace("REGISTER_OWNER", "");
+
+        var result = RunGeneratorRunWithReferences(hostSource, []);
+
+        var duplicate = result.Diagnostics.Should().ContainSingle(diagnostic => diagnostic.Id == "ELMOD007").Subject;
+        duplicate.Severity.Should().Be(DiagnosticSeverity.Warning);
+        duplicate.GetMessage().Should()
+            .Contain("Host.Contacts.Contact'")
+            .And.Contain("Host.Contacts.ContactAccess, Host.Contacts.ContactOwnerFilter")
+            .And.Contain("Register = false");
+    }
+
     [Fact]
     public void Bootstrapper_RegistersResourceFiltersFromHostCompilation_Gated() {
         const string hostSource =
@@ -1302,7 +1366,7 @@ public sealed class ModuleBootstrapperTransportTests {
             .And.Contain("AddContactsResourceFilters(services);");
         Slice(generated, "IServiceCollection AddContactsResourceFilters(")
             .Should().Contain(
-                "global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<global::Elarion.Abstractions.Authorization.IQueryAuthorizer<global::Host.Contacts.Contact>>(services, global::Host.Contacts.ContactAccess.Specification);");
+                "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton<global::Elarion.Abstractions.Authorization.IQueryAuthorizer<global::Host.Contacts.Contact>>(services, global::Host.Contacts.ContactAccess.Specification);");
 
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
