@@ -21,13 +21,16 @@ You need the **.NET 11 SDK** (see [`global.json`](global.json) for the exact ver
 `-f net10.0`/`-f net11.0`. CI builds both frameworks but runs the tests on `net11.0` only, so run the `net10.0`
 tests locally when a change is framework-specific.
 
-Two failures come from the machine rather than the change:
+Three failures come from the machine rather than the change:
 
 - *A compatible .NET SDK was not found* — another `dotnet` install is first on `PATH`. List the installs with
   `which -a dotnet` (each has its own `--list-sdks`), then point `DOTNET_ROOT` and `PATH` at the one that has the
   SDK `global.json` pins.
 - A test run that ends with a `net10.0` *handshake failure* (exit code 150) after the `net11.0` run passed — the
   install in use has no .NET 10 runtime. Pass `-f net11.0`, or install the runtime to run both.
+- A website build that fails with *Can't resolve '@vercel/turbopack-next/internal/font/google/font'* — an earlier
+  build ran without network access (a sandbox, a dropped connection), could not download the Google fonts, and
+  left that failure in the build cache. Delete `website/.next` and build again with network access.
 
 ## Validation
 
@@ -52,6 +55,25 @@ type-check the emitted `rpc-types.ts`, `rpc-schemas.ts`, and `rpc-client.ts` und
 `moduleResolution: NodeNext`.
 
 `TreatWarningsAsErrors` is enabled, so a warning fails the build. Keep the tree warning-clean.
+
+### Repository layout
+
+The repository's own layout is checked separately from the framework: that every `AGENTS.md` has its
+`CLAUDE.md` router, every pattern rule its mirror, every page under `docs/` its frontmatter and its index or
+`meta.json` entry, every ADR a status that agrees with its frontmatter, and every spec its sections.
+
+```bash
+make check            # the tools' tests and tools/check_repo.py; offline, a second
+make check-commits    # the commits of this branch against the remote's default branch
+```
+
+Both need **Python 3.10+** and nothing else: the tools use the standard library only, and nothing in the
+package build depends on them. Without `make`, run the commands of the `Makefile` directly
+(`python3 -m unittest discover -s tools/tests`, `python3 tools/check_repo.py`,
+`python3 tools/check_commits.py`). CI runs them in `check.yml` and `commits.yml`.
+
+[`AGENTS.md`](AGENTS.md) describes the layout; [`docs/guide.md`](docs/guide.md) says what lives where under
+`docs/`, and [`docs/workflow.md`](docs/workflow.md) how a change gets from idea to merge.
 
 ## Architecture boundaries
 
@@ -107,8 +129,17 @@ Before adding new public API:
 
 ## Commit and PR guidelines
 
-- Use clear, conventional commit messages (e.g. `feat(jsonrpc): …`, `fix(scheduler): …`,
-  `docs: …`).
+- Commit messages and pull request titles follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+  (e.g. `feat(jsonrpc): …`, `fix(scheduler): …`, `docs: …`): imperative, lowercase, no trailing period, the
+  header within 100 characters. The rules are in the "Commits and pull requests" section of
+  [`AGENTS.md`](AGENTS.md); CI checks the title and every commit of a pull request.
+- Check each commit as you make it by enabling the hook once per clone:
+  `git config core.hooksPath tools/hooks`. If the clone already uses a hook manager (husky, lefthook,
+  pre-commit), call `python3 tools/check_commits.py --file "$1"` from its commit-msg hook instead, because
+  `core.hooksPath` would replace it.
+- The checkout holds one symbolic link (`.claude/skills` to `.agents/skills`). On Windows, clone with
+  `git config core.symlinks true` and symlink rights (Developer Mode), or replace the link by a copy of the
+  folder; the layout check accepts an identical copy.
 - Keep pull requests focused; describe the motivation and the user-visible effect.
 - Ensure CI is green and documentation is updated before requesting review.
 

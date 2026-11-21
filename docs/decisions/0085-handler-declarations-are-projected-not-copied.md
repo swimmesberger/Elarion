@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0085: Handler declarations are projected to clients and hosts, not copied"
+description: "Handler declarations are projected to clients and hosts, not copied."
+status: draft
+---
 # ADR-0085: Handler declarations are projected to clients and hosts, not copied
 
 - Status: Proposed

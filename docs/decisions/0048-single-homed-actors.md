@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0048: Single-homed actors — a PostgreSQL home lease, not a cluster"
+description: "Single-homed actors — a PostgreSQL home lease, not a cluster."
+status: stable
+---
 # ADR-0048: Single-homed actors — a PostgreSQL home lease, not a cluster
 
 - Status: Accepted

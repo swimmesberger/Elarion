@@ -1,3 +1,10 @@
+---
+type: Architecture Decision Record
+title: "ADR-0088: Deletions of marked entities are domain events, published with their database cascades"
+description: "Deletions of marked entities are domain events, published with their database cascades."
+status: deprecated
+superseded_by: 0090
+---
 # ADR-0088: Deletions of marked entities are domain events, published with their database cascades
 
 - Status: Superseded by [ADR-0090](0090-references-between-records-stay-in-the-database.md)

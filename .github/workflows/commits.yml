@@ -1,0 +1,40 @@
+name: Commits
+
+# Conventional Commits for the pull request title, which becomes the commit on a squash merge, and for
+# every commit of the pull request (AGENTS.md, "Commits and pull requests").
+on:
+  pull_request:
+    # Every pull request, whatever it targets: in a stack only the bottom one targets main.
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conventional-commits:
+    name: Conventional Commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Pull request title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: python3 tools/check_commits.py --title "$TITLE"
+
+      - name: Commits
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 tools/check_commits.py "$BASE..$HEAD"

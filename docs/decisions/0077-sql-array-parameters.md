@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0077: SQL array parameters are an explicit wrapper, backed by a build-time diagnostic"
+description: "SQL array parameters are an explicit wrapper, backed by a build-time diagnostic."
+status: stable
+---
 # ADR-0077: SQL array parameters are an explicit wrapper, backed by a build-time diagnostic
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0079: Every feature flag is declared and has exactly one owner"
+description: "Every feature flag is declared and has exactly one owner."
+status: draft
+---
 # ADR-0079: Every feature flag is declared and has exactly one owner
 
 - Status: Proposed

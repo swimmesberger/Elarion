@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0041: Blob streaming connections clone the context connection"
+description: "Blob streaming connections clone the context connection."
+status: stable
+---
 # ADR-0041: Blob streaming connections clone the context connection
 
 - Status: Accepted

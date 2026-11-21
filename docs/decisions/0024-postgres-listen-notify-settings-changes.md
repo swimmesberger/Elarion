@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0024: Cross-instance settings change notification over PostgreSQL LISTEN/NOTIFY"
+description: "Cross-instance settings change notification over PostgreSQL LISTEN/NOTIFY."
+status: stable
+---
 # ADR-0024: Cross-instance settings change notification over PostgreSQL LISTEN/NOTIFY
 
 - Status: Accepted

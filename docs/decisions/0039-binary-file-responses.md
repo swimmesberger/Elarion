@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0039: File payloads — the in-memory `ElarionFile` tier and the staged-blob tier"
+description: "File payloads — the in-memory `ElarionFile` tier and the staged-blob tier."
+status: stable
+---
 # ADR-0039: File payloads — the in-memory `ElarionFile` tier and the staged-blob tier
 
 - Status: Accepted

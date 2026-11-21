@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0064: Acknowledgment-gated outbound delivery is a codec-tier helper, adopted on second demand"
+description: "Acknowledgment-gated outbound delivery is a codec-tier helper, adopted on second demand."
+status: draft
+---
 # ADR-0064: Acknowledgment-gated outbound delivery is a codec-tier helper, adopted on second demand
 
 - Status: Proposed

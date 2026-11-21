@@ -1,7 +1,13 @@
+---
+type: Research note
+title: "Typst in-process concurrency: where the cost of compiling in one process comes from"
+description: "Profiling of Typst compiled in-process under concurrent load, and the upstream fix; input for ADR-0094."
+status: stable
+---
 # Typst in-process concurrency: where the cost of compiling in one process comes from
 
 - Date: 2026-11-18
-- Status: Research input for [ADR-0094](../0094-in-process-typst-engine.md). This is not a decision.
+- Status: Research input for [ADR-0094](../decisions/0094-in-process-typst-engine.md). This is not a decision.
 - Scope: Typst 0.15.1 and comemo 0.5.1 compiled into one process, many documents compiled concurrently on different
   threads, as a server rendering PDFs on request does. Editor (incremental) performance is out of scope.
 - Method: the `Elarion.Typst.Native` prototype and `tests/Elarion.Typst.Native.Benchmarks` (its `Program.cs` lists the

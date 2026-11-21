@@ -66,3 +66,8 @@ Thumbs.db
 
 # Working notes and session hand-overs of people and agents (AGENTS.md, "Repository memory")
 .scratch/
+# Agent Package Manager download cache; the deployed skills in .agents/skills/ are committed
+apm_modules/
+
+# Python bytecode of the repository tools (tools/)
+__pycache__/

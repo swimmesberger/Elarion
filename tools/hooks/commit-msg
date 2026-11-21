@@ -1,0 +1,3 @@
+#!/bin/sh
+# Enable with: git config core.hooksPath tools/hooks
+exec python3 "$(git rev-parse --show-toplevel)/tools/check_commits.py" --file "$1"

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0042: In-memory actors — mailbox-protected state machines with generated typed facades"
+description: "In-memory actors — mailbox-protected state machines with generated typed facades."
+status: stable
+---
 # ADR-0042: In-memory actors — mailbox-protected state machines with generated typed facades
 
 - Status: Accepted

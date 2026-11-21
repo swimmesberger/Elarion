@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0027: Declarative request validation"
+description: "Declarative request validation."
+status: stable
+---
 # ADR-0027: Declarative request validation
 
 - Status: Accepted

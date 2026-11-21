@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0059: Merge the always-on tracing + context-enrichment decorators into one observability decorator"
+description: "Merge the always-on tracing + context-enrichment decorators into one observability decorator."
+status: stable
+---
 # ADR-0059: Merge the always-on tracing + context-enrichment decorators into one observability decorator
 
 - Status: Accepted (implemented 2026-07-14)

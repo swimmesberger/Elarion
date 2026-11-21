@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0091: A query declares its source entities; committed writes to them become re-query hints"
+description: "A query declares its source entities; committed writes to them become re-query hints."
+status: draft
+---
 # ADR-0091: A query declares its source entities; committed writes to them become re-query hints
 
 - Status: Proposed
@@ -15,8 +21,8 @@
   [ADR-0049](0049-role-leases.md), [ADR-0050](0050-role-holder-proxy.md) and
   [ADR-0053](0053-bidirectional-client-connections.md) (cited where they
   bound this decision), and two research notes, both from primary sources:
-  [live-dashboards-and-fan-out.md](research/live-dashboards-and-fan-out.md) (how other systems deliver and fan out
-  live updates) and [change-detection-for-live-queries.md](research/change-detection-for-live-queries.md) (where other
+  [live-dashboards-and-fan-out.md](../research/2026-10-25-live-dashboards-and-fan-out.md) (how other systems deliver and fan out
+  live updates) and [change-detection-for-live-queries.md](../research/2026-10-25-change-detection-for-live-queries.md) (where other
   frameworks detect that data changed).
 
 ## Context

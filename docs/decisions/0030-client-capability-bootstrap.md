@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0030: Client capability bootstrap — modules, flags/variants, and grants projected to the frontend over OpenFeature"
+description: "Client capability bootstrap — modules, flags/variants, and grants projected to the frontend over OpenFeature."
+status: stable
+---
 # ADR-0030: Client capability bootstrap — modules, flags/variants, and grants projected to the frontend over OpenFeature
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0068: Source-generated binary COPY and staged upsert for the AOT SQL tier"
+description: "Source-generated binary COPY and staged upsert for the AOT SQL tier."
+status: draft
+---
 # ADR-0068: Source-generated binary COPY and staged upsert for the AOT SQL tier
 
 - Status: Proposed

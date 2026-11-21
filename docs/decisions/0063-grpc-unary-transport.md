@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0063: gRPC ships as typed unary and server-streaming transport adapters"
+description: "gRPC ships as typed unary and server-streaming transport adapters."
+status: stable
+---
 # ADR-0063: gRPC ships as typed unary and server-streaming transport adapters
 
 - Status: Accepted

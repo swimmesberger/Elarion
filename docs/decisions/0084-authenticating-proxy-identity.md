@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0084: Authenticating-proxy identity is an optional package on IdentityModel's ConfigurationManager"
+description: "Authenticating-proxy identity is an optional package on IdentityModel's ConfigurationManager."
+status: draft
+---
 # ADR-0084: Authenticating-proxy identity is an optional package on IdentityModel's ConfigurationManager
 
 - Status: Proposed

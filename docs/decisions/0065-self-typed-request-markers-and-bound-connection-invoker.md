@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0065: Self-typed request markers enable inferred dispatch; ConnectionHandlerInvoker binds per connection"
+description: "Self-typed request markers enable inferred dispatch; ConnectionHandlerInvoker binds per connection."
+status: stable
+---
 # ADR-0065: Self-typed request markers enable inferred dispatch; ConnectionHandlerInvoker binds per connection
 
 - Status: Accepted

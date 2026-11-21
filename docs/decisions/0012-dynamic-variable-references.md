@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0012: Referencing dynamic variables in attributes — form follows tier"
+description: "Referencing dynamic variables in attributes — form follows tier."
+status: stable
+---
 # ADR-0012: Referencing dynamic variables in attributes — form follows tier
 
 - Status: Accepted

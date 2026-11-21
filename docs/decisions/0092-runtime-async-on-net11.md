@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0092: The net11 build compiles with runtime async"
+description: "The net11 build compiles with runtime async."
+status: stable
+---
 # ADR-0092: The net11 build compiles with runtime async
 
 - Status: Accepted

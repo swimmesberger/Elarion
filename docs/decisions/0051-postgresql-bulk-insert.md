@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0051: Bulk insert as an EF-shaped seam with a PostgreSQL binary COPY provider"
+description: "Bulk insert as an EF-shaped seam with a PostgreSQL binary COPY provider."
+status: stable
+---
 # ADR-0051: Bulk insert as an EF-shaped seam with a PostgreSQL binary COPY provider
 
 - Status: Accepted

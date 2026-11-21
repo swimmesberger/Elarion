@@ -1,0 +1,33 @@
+name: Repository check
+
+# The layout of the repository itself (AGENTS.md routers, pattern rules and their mirrors, skills, the
+# knowledge pages and the published pages under docs/, ADRs, specs) and the tests of the tools that check
+# it. Python's standard library only; the framework is built and tested by ci.yml.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  # Every pull request, whatever it targets: in a stack only the bottom one targets main.
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Layout
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Tools' tests and repository check
+        run: make check

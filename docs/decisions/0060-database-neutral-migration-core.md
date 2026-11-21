@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0060: A database-neutral migration core, and a SQLite provider"
+description: "A database-neutral migration core, and a SQLite provider."
+status: stable
+---
 # ADR-0060: A database-neutral migration core, and a SQLite provider
 
 - Status: Accepted

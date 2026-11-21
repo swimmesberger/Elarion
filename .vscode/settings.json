@@ -1,3 +1,5 @@
 {
-  "chat.tools.memory.enabled": false
+  "chat.tools.memory.enabled": false,
+  "chat.useAgentsMdFile": true,
+  "chat.useNestedAgentsMdFiles": true
 }

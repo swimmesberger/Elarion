@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0058: AOT-native SQL row mapping — explicit generated mappers, not call-site interception"
+description: "AOT-native SQL row mapping — explicit generated mappers, not call-site interception."
+status: stable
+---
 # ADR-0058: AOT-native SQL row mapping — explicit generated mappers, not call-site interception
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0025: Cross-instance scheduler coordination (per-occurrence claims over EF Core/PostgreSQL)"
+description: "Cross-instance scheduler coordination (per-occurrence claims over EF Core/PostgreSQL)."
+status: stable
+---
 # ADR-0025: Cross-instance scheduler coordination (per-occurrence claims over EF Core/PostgreSQL)
 
 - Status: Accepted

@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0050: The role-holder proxy — an in-app ingress rule, not a cluster"
+description: "The role-holder proxy — an in-app ingress rule, not a cluster."
+status: stable
+---
 # ADR-0050: The role-holder proxy — an in-app ingress rule, not a cluster
 
 - Status: Accepted

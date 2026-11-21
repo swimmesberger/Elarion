@@ -1,12 +1,18 @@
+---
+type: Architecture Decision Record
+title: "ADR-0052: Ordered streams — a sequencer-owned hub, actor stream methods, and a resumable SSE leg"
+description: "Ordered streams — a sequencer-owned hub, actor stream methods, and a resumable SSE leg."
+status: stable
+---
 # ADR-0052: Ordered streams — a sequencer-owned hub, actor stream methods, and a resumable SSE leg
 
 - Status: Accepted
 - Date: 2026-07-12
 - Related: [ADR-0044](0044-streaming-requests-and-responses.md) (request-driven streaming handlers; this ADR
   realizes the producer-owned half), [ADR-0043](0043-client-events.md) (the at-most-once
-  hint/state tier this deliberately does not replace), [ADR-0042](0042-actors.md) (the mailbox is the
+  hint/state tier this deliberately does not replace), [ADR-0042](0042-in-memory-actors.md) (the mailbox is the
   sequencer), [ADR-0048](0048-single-homed-actors.md)/[ADR-0050](0050-role-holder-proxy.md) (why every
-  node can reach the producer without a distributed protocol), [ADR-0025](0025-scale-positioning.md)
+  node can reach the producer without a distributed protocol), [ADR-0025](0025-distributed-scheduler-coordination.md)
   (single-node semantics, seam-replacement beyond).
 
 ## Context

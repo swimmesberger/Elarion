@@ -1,3 +1,9 @@
+---
+type: Architecture Decision Record
+title: "ADR-0019: Variant service injection (transparent, via an opt-in async-resolving handler proxy)"
+description: "Variant service injection (transparent, via an opt-in async-resolving handler proxy)."
+status: stable
+---
 # ADR-0019: Variant service injection (transparent, via an opt-in async-resolving handler proxy)
 
 - Status: Accepted
