@@ -3,6 +3,7 @@ using Elarion.Abstractions;
 using Elarion.AspNetCore;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Elarion.Tests.AspNetCore;
@@ -45,7 +46,8 @@ public sealed class ElarionHttpResultsTests {
 
         var result = ElarionHttpResults.ToFileResult(Result<ElarionFile>.Success(file));
 
-        var fileResult = result.Should().BeOfType<FileContentHttpResult>().Subject;
+        var fileResult = result.Should().BeOfType<ElarionFileHttpResult>().Which.Inner
+            .Should().BeOfType<FileContentHttpResult>().Subject;
         fileResult.ContentType.Should().Be("application/pdf");
         fileResult.FileDownloadName.Should().Be("report.pdf");
         fileResult.FileContents.ToArray().Should().Equal(1, 2, 3);
@@ -57,7 +59,22 @@ public sealed class ElarionHttpResultsTests {
 
         var result = ElarionHttpResults.ToFileResult(Result<ElarionFile>.Success(file));
 
-        result.Should().BeOfType<FileContentHttpResult>().Which.FileDownloadName.Should().BeNull();
+        result.Should().BeOfType<ElarionFileHttpResult>().Which.Inner
+            .Should().BeOfType<FileContentHttpResult>().Which.FileDownloadName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ToFileResult_ForbidsSniffing() {
+        var context = new DefaultHttpContext {
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
+        };
+        context.Response.Body = new MemoryStream();
+        var file = new ElarionFile("<html>"u8.ToArray(), "text/plain");
+
+        await ElarionHttpResults.ToFileResult(Result<ElarionFile>.Success(file)).ExecuteAsync(context);
+
+        context.Response.Headers.XContentTypeOptions.ToString().Should().Be("nosniff");
+        context.Response.ContentType.Should().Be("text/plain");
     }
 
     [Fact]

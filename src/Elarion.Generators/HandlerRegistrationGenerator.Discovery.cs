@@ -169,6 +169,19 @@ public sealed partial class HandlerRegistrationGenerator {
         var idempotent = ParseIdempotent(
             classDecl, classSymbol, requestType, responseType, compilation, fmt, cacheable, diagnostics);
 
+        // ELHTTP007: a streamed file is written after the pipeline and cannot be stored, so neither decorator could
+        // replay it; attached, both would fail at the first call.
+        if ((cacheable is not null || idempotent is not null)
+            && TryGetResultValueFqn(responseType, fmt) == ElarionGeneratorConventions.StreamedFileResponseTypeFqn) {
+            diagnostics.Add(DiagnosticInfo.Create(
+                StreamedFileCannotBeReplayedDescriptor,
+                classDecl.Identifier.GetLocation(),
+                handlerFqn,
+                cacheable is not null ? "[Cacheable]" : "[Idempotent]"));
+            cacheable = null;
+            idempotent = null;
+        }
+
         // The inbox (ADR-0022): an integration-event consumer without explicit [Idempotent] gets a synthesized
         // Consumer-scoped policy by default, keyed on the delivered message id. [AllowDuplicates] opts out
         // (TransactionDecorator.AppliesTo mirrors this, handing the plain transaction back).

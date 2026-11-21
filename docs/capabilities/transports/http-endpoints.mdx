@@ -53,7 +53,8 @@ The generator reads the request and response from the `IHandler<TRequest, Result
 interface (the success type is unwrapped from `Result<T>`); the types may be nested or top-level. A
 `Response` with no properties returns
 `204 No Content`; a [`Result<ElarionFile>`](#files-downloads-and-uploads) response is served as a binary
-file download; a [`Result<ElarionCreated<T>>`](#creation-responses-201--location) response returns
+file download, a [`Result<ElarionStreamedFile>`](#streamed-files-http-only-endpoints) response is streamed to the
+body; a [`Result<ElarionCreated<T>>`](#creation-responses-201--location) response returns
 `201 Created`; otherwise success returns `200 OK` with the JSON response body.
 
 ## Creation responses: 201 + Location
@@ -359,6 +360,87 @@ In the OpenAPI document a file response advertises `application/octet-stream` wi
 `type: string, format: binary` (the concrete content type is per-payload at run time), so off-the-shelf
 generated clients return a blob.
 
+Every file response of the framework — `ElarionFile`, `ElarionStreamedFile` and the
+[blob transfer endpoints](/docs/capabilities/blob-uploads) — carries `X-Content-Type-Options: nosniff`: a file is often
+somebody's upload served from your own origin, so the browser must take its declared content type and never sniff the
+bytes into a type it renders.
+
+### Streamed files: HTTP-only endpoints
+
+Some files are too large to buffer and only ever reach a browser: a stored document, a ZIP built from many of them, a
+report rendered while it is sent. A handler mapped with `[HttpEndpoint]` alone (no `[Handler]`) returns
+`Result<ElarionStreamedFile>`, and its content is written to the response body after the pipeline has run —
+`[RequirePermission]`, the module's feature gate, validation and the declared errors apply before the first byte, as
+for any handler:
+
+```csharp
+[HttpEndpoint("documents/{id}/content")]
+[RequirePermission("documents", "read")]
+public sealed class DownloadDocument(AppDbContext db, IBlobStore blobs)
+    : IHandler<DownloadDocument.Query, Result<ElarionStreamedFile>> {
+    public sealed record Query : IQuery {
+        public required Guid Id { get; init; }
+        public bool Inline { get; init; }
+    }
+
+    public async ValueTask<Result<ElarionStreamedFile>> HandleAsync(Query query, CancellationToken ct) {
+        var document = await db.Documents.FindAsync([query.Id], ct);
+        var download = document is null ? null : await blobs.OpenReadAsync(document.Blob, ct);
+        if (download is null) return AppError.NotFound("No such document.");
+
+        // The download (its stream and the database reader behind it) is disposed with the response.
+        return ElarionStreamedFile.FromStream(download.Content, download.Metadata.ContentType, owner: download) with {
+            FileName = document!.FileName,
+            Disposition = query.Inline ? FileDisposition.Inline : FileDisposition.Attachment,
+            EntityTag = download.Metadata.ContentSha256,
+            CacheControl = "private, max-age=3600",
+        };
+    }
+}
+```
+
+`FromWriter` builds the content while it is sent; the writer gets the response body and the request's cancellation:
+
+```csharp
+return ElarionStreamedFile.FromWriter(async (body, ct) => {
+    await using var zip = await ZipArchive.CreateAsync(body, ZipArchiveMode.Create, leaveOpen: true, null, ct);
+    foreach (var document in documents) {
+        await using var download = await blobs.OpenReadAsync(document.Blob, ct);
+        if (download is null) continue;
+        var entry = zip.CreateEntry(document.FileName, CompressionLevel.Fastest);
+        await using var entryStream = await entry.OpenAsync(ct);
+        await download.Content.CopyToAsync(entryStream, ct);
+    }
+}, "application/zip") with { FileName = "documents.zip" };
+```
+
+| Property | Response |
+| --- | --- |
+| `ContentType` | `Content-Type` |
+| `FileName`, `Disposition` | `Content-Disposition: attachment` (the default) or `inline`, with the name as UTF-8 and an ASCII fallback. A streamed file always states a disposition. |
+| `EntityTag` | a strong `ETag`; a matching `If-None-Match` answers `304` without writing the content |
+| `LastModified` | `Last-Modified`, honoured for `If-Modified-Since` |
+| `CacheControl` | `Cache-Control`; keep files behind authorization `private` |
+
+What happens around the bytes:
+
+- **When the content runs.** After the pipeline, in the request's service scope but after the handler's transaction has
+  committed. Open what the content needs in the handler, where a missing record still answers `404`; a blob read
+  opened outside a transaction streams from the database without buffering.
+- **Failures.** Before the first byte, an exception is an ordinary unexpected error. After it, the status is already
+  sent, so the connection is aborted: the client sees a failed download, never a truncated file that looks complete.
+- **Synchronous writes.** The server refuses synchronous writes to the body. `ZipArchive` makes a few even through its
+  async API: an entry stream from `OpenAsync` flushes its compressed trailer and data descriptor in the synchronous
+  `Dispose` that `await using` falls back to. The body a writer receives holds such writes (up to 1 MiB at a time) and
+  sends them with the next asynchronous write, so the code above needs no `AllowSynchronousIO`. Write the bulk of the
+  content asynchronously; a writer that writes everything synchronously fails at that limit.
+- **Inline disposition.** Show in place only content types the browser renders safely (PDF, raster images). A
+  user-supplied `text/html` or `image/svg+xml` served inline from your origin runs as part of it; `nosniff` does not
+  change that.
+- **Only HTTP carries it.** The JSON surfaces and the replaying decorators need a payload that serializes: a
+  `[Handler]` responding with `ElarionStreamedFile` is error `ELRPC005`, an `[Idempotent]` or `[Cacheable]` one
+  `ELHTTP007`. A file a JSON-RPC client must receive stays an `ElarionFile` or a pending blob.
+
 ### Large files: the staged-blob tier
 
 `ElarionFile` is deliberately in-memory — the payload is buffered end to end (and base64-inflated on JSON
@@ -373,7 +455,9 @@ transports), which is wrong past a few megabytes. Large files move through the
   downloads expires on its own — the pending state doubles as temp-file semantics.
 
 See [ADR-0039](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0039-binary-file-responses.md)
-for the full two-tier rationale.
+for the full two-tier rationale, and
+[ADR-0098](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0098-streamed-files-for-http-only-endpoints.md)
+for the streamed tier of HTTP-only endpoints.
 
 ## Errors map once, centrally
 

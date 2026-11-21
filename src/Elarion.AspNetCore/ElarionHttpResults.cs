@@ -63,11 +63,30 @@ public static class ElarionHttpResults {
     /// payload's bytes with its content type, and a <c>Content-Disposition: attachment</c> download name when
     /// set), otherwise a ProblemDetails failure. Used when the handler's response type is <see cref="ElarionFile"/>.
     /// </summary>
+    /// <remarks>
+    /// The response carries <c>X-Content-Type-Options: nosniff</c>, like every file response of the framework: the
+    /// browser takes the declared content type and never sniffs the bytes into a type it renders.
+    /// </remarks>
     public static IResult ToFileResult(Result<ElarionFile> result) {
         if (!result.IsSuccess) return ToProblem(result.Error);
 
         var file = result.Value;
-        return TypedResults.Bytes(file.Bytes, file.ContentType, file.FileName);
+        return new ElarionFileHttpResult(TypedResults.Bytes(file.Bytes, file.ContentType, file.FileName));
+    }
+
+    /// <summary>
+    /// Streams the content of a successful <see cref="ElarionStreamedFile"/> result to the response body, otherwise a
+    /// ProblemDetails failure. Used when the handler's response type is <see cref="ElarionStreamedFile"/>.
+    /// </summary>
+    /// <remarks>
+    /// The response states the file's <c>Content-Disposition</c> (attachment or inline, with its file name), its
+    /// <c>ETag</c>, <c>Last-Modified</c> and <c>Cache-Control</c> when set, and <c>X-Content-Type-Options:
+    /// nosniff</c>; a matching <c>If-None-Match</c> or <c>If-Modified-Since</c> answers <c>304</c> without writing the
+    /// content. The file is disposed with the response. A failure after the first byte aborts the connection, so the
+    /// client never mistakes a truncated file for a complete one.
+    /// </remarks>
+    public static IResult ToStreamedFileResult(Result<ElarionStreamedFile> result) {
+        return result.IsSuccess ? new ElarionStreamedFileHttpResult(result.Value) : ToProblem(result.Error);
     }
 
     /// <summary>

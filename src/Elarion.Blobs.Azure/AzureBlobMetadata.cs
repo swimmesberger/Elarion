@@ -17,6 +17,9 @@ internal static class AzureBlobMetadata {
     public const string ExpiresAtKey = "elarion_expires_at";
     public const string OwnerKey = "elarion_owner";
 
+    // The SHA-256 of the content, lower-case hex (ASCII already, so stored as is).
+    public const string ContentSha256Key = "elarion_content_sha256";
+
     // Staging-session keys.
     public const string ContainerKey = "elarion_container";
     public const string NameKey = "elarion_name";
@@ -56,6 +59,10 @@ internal static class AzureBlobMetadata {
 
     public static string FormatLong(long value) {
         return value.ToString(CultureInfo.InvariantCulture);
+    }
+
+    public static string? ContentSha256Of(IDictionary<string, string> metadata) {
+        return metadata.TryGetValue(ContentSha256Key, out var value) ? value : null;
     }
 
     public static bool IsPending(IDictionary<string, string> metadata) {

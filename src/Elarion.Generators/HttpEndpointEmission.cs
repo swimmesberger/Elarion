@@ -97,6 +97,17 @@ internal static partial class HttpEndpointEmission {
         public bool ResponseIsFile => ResponseTypeFqn == ElarionGeneratorConventions.FileResponseTypeFqn;
 
         /// <summary>
+        /// Whether the response is the streamed file payload (<c>Result&lt;ElarionStreamedFile&gt;</c>), written to the
+        /// body through the streamed translation. Derived from <see cref="ResponseTypeFqn"/> like
+        /// <see cref="ResponseIsFile"/>.
+        /// </summary>
+        public bool ResponseIsStreamedFile =>
+            ResponseTypeFqn == ElarionGeneratorConventions.StreamedFileResponseTypeFqn;
+
+        /// <summary>Whether the response is a binary file of either tier, advertised as such to OpenAPI.</summary>
+        public bool ResponseIsBinary => ResponseIsFile || ResponseIsStreamedFile;
+
+        /// <summary>
         /// Whether the response is the created-resource envelope (<c>Result&lt;ElarionCreated&lt;T&gt;&gt;</c>),
         /// mapped through the created translation (<c>201</c> + <c>Location</c>, body = inner value). Derived
         /// from <see cref="ResponseTypeFqn"/> like <see cref="ResponseIsFile"/>, so the manifest encoding is

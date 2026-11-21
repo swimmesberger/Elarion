@@ -186,6 +186,12 @@ content-type allow-list. Ownership is recorded as a dedicated `BlobUploadRequest
 containing the naming separator cannot be forged, and a blob with no recorded owner is denied to everyone.
 The tus transport applies the same owner-exact, fail-closed check to its `HEAD`/`PATCH`/`DELETE`.
 
+`AddElarionBlobUploads` and `AddElarionResumableBlobUploads` register their options through the options pattern, so
+a later `services.Configure<BlobUploadEndpointOptions>(…)` reaches the endpoints too, and code that needs the
+configured values — the route prefix, the container — reads `IOptions<BlobUploadEndpointOptions>` (or
+`IOptions<ResumableBlobUploadOptions>`) and gets exactly what the endpoints use. Every response of the direct upload,
+cancel and download endpoints carries `X-Content-Type-Options: nosniff`.
+
 <Callout type="warn">
 Both transports bake the current user's id into the upload, so the host must register an `ICurrentUser`
 (via `AddElarionCurrentUser` or the optional Identity integration) and opt the route group into
@@ -287,101 +293,62 @@ once, streamed, over the download endpoint.
 
 "Download all of these as one file" is the one export shape the single-blob download endpoint cannot
 serve: the archive is assembled per request from several stored blobs and never exists as a blob of its
-own. Build it in a **host endpoint** that streams straight into `HttpContext.Response.Body`, so no
-intermediate copy is buffered in memory or staged in the database — the handler tier stays out of it,
-because neither `ElarionFile` (buffered, small-file tier) nor a `Result<T>` DTO can express "write bytes
-into the live response".
+own. An HTTP-only handler builds it while it is sent: an `[HttpEndpoint]` without `[Handler]` returns a
+[streamed file](/docs/capabilities/transports/http-endpoints#streamed-files-http-only-endpoints) whose writer gets the
+response body, so nothing is buffered in memory or staged in the database, and authorization and the module's
+feature gate guard it like every handler:
 
-On .NET 10 that endpoint needs **one deliberate opt-out**, and it is worth understanding before you copy
-the recipe. `System.IO.Compression` gained async APIs (`ZipArchive.CreateAsync`,
-`ZipArchiveEntry.OpenAsync`, `ZipArchive.DisposeAsync`), but the entry stream returned by
-`ZipArchiveEntry.OpenAsync` **does not override `DisposeAsync`**. `await using` therefore falls through
-to the synchronous `Dispose()`, which writes the entry's data-descriptor trailer with a synchronous
-write on the response body. Under Kestrel — and under `TestServer`, which is how this usually surfaces
-first — `AllowSynchronousIO` is `false` by default, so that write throws
-`InvalidOperationException: Synchronous operations are disallowed`. There is no way to avoid it from the
-outside: `CompressionLevel.NoCompression` still writes the trailer, and there is no async flush that
-settles the entry before disposal.
-
-The failure mode is nastier than a `500`. By the time the first entry is closed, the `200` and the
-`Content-Type: application/zip` headers have already been flushed, so the exception cannot be turned into
-an error response — the client sees a `application/zip` download that simply never finishes.
-
-The recipe: keep every genuinely async API, and widen the synchronous-I/O permission to **this endpoint
-only**.
-
-```csharp title="MyApp.Api/Program.cs"
-using System.IO.Compression;
-using Elarion.Blobs;
-using Microsoft.AspNetCore.Http.Features;
-
-app.MapGet("/exports/{id:guid}/bundle", async (
-    Guid id,
-    HttpContext http,
-    IBlobStore blobs,
-    IExportParts parts,
-    CancellationToken ct) => {
-    var members = await parts.ListAsync(id, ct);
-    if (members.Count == 0) {
-        return Results.NotFound();
+```csharp
+[HttpEndpoint("exports/{id}/bundle")]
+[RequirePermission("exports", "read")]
+public sealed class DownloadBundle(IExportParts parts, IBlobStore blobs, ILogger<DownloadBundle> logger)
+    : IHandler<DownloadBundle.Query, Result<ElarionStreamedFile>> {
+    public sealed record Query : IQuery {
+        public required Guid Id { get; init; }
     }
 
-    // Scoped to this one endpoint: ZipArchive closes an entry with a synchronous write (see above).
-    // Do not set this globally — the rest of the host keeps Kestrel's async-only default.
-    var bodyControl = http.Features.Get<IHttpBodyControlFeature>();
-    if (bodyControl is not null) {
-        bodyControl.AllowSynchronousIO = true;
-    }
+    public async ValueTask<Result<ElarionStreamedFile>> HandleAsync(Query query, CancellationToken ct) {
+        var members = await parts.ListAsync(query.Id, ct);
+        if (members.Count == 0) return AppError.NotFound("Nothing to bundle.");
 
-    http.Response.ContentType = "application/zip";
-    http.Response.Headers.ContentDisposition = $"attachment; filename=\"bundle-{id}.zip\"";
+        return ElarionStreamedFile.FromWriter(async (body, ct) => {
+            await using var archive = await ZipArchive.CreateAsync(
+                body, ZipArchiveMode.Create, leaveOpen: true, entryNameEncoding: null, ct);
+            foreach (var member in members) {
+                await using var download = await blobs.OpenReadAsync(new BlobRef { Value = member.BlobId }, ct);
+                if (download is null) {
+                    // Expired or reclaimed: leave it out, but say so — a listing may name it.
+                    logger.LogWarning("Bundle member {BlobId} has vanished.", member.BlobId);
+                    continue;
+                }
 
-    var archive = await ZipArchive.CreateAsync(
-        http.Response.Body, ZipArchiveMode.Create, leaveOpen: true, entryNameEncoding: null, ct);
-    try {
-        foreach (var member in members) {
-            await using var download = await blobs.OpenReadAsync(new BlobRef { Value = member.BlobId }, ct);
-            if (download is null) {
-                continue;   // expired or already reclaimed — skip, do not fail the whole archive
+                var entry = archive.CreateEntry(member.FileName, CompressionLevel.Fastest);
+                await using var entryStream = await entry.OpenAsync(ct);
+                await download.Content.CopyToAsync(entryStream, ct);
             }
-
-            var entry = archive.CreateEntry(member.FileName, CompressionLevel.NoCompression);
-            await using var entryStream = await entry.OpenAsync(ct);
-            await download.Content.CopyToAsync(entryStream, ct);
-        }
+        }, "application/zip") with { FileName = $"bundle-{query.Id}.zip" };
     }
-    catch (Exception) {
-        // Headers are already on the wire, so a completed response would hand the client a
-        // truncated archive that looks whole. Kill the connection instead — and deliberately leave
-        // `archive` undisposed, so no central directory is written over a broken stream.
-        http.Abort();
-        throw;
-    }
-
-    await archive.DisposeAsync();   // writes the central directory
-    return Results.Empty;
-});
+}
 ```
 
-Three things carry the design:
+Two things the framework takes care of here:
 
-- **Blob bytes stay async and unbuffered.** Each member is opened with `OpenReadAsync` and copied with
-  `CopyToAsync`, so a large bundle never materializes — only the zip bookkeeping is synchronous.
-- **`AllowSynchronousIO` is per-request, not per-host.** `IHttpBodyControlFeature` is resolved from
-  `HttpContext.Features` and flipped on the way in, so the permission dies with the request. Setting
-  `KestrelServerOptions.AllowSynchronousIO = true` globally to fix one endpoint gives every other
-  endpoint a thread-blocking write path.
-- **A mid-stream failure aborts.** `HttpContext.Abort()` is the only honest signal once the status line
-  is gone; disposing the archive on the way out would append a valid-looking central directory to a
-  partial archive.
+- **The synchronous trailer write.** `System.IO.Compression` has async APIs (`ZipArchive.CreateAsync`,
+  `ZipArchiveEntry.OpenAsync`, `ZipArchive.DisposeAsync`), but the entry stream from `OpenAsync` does not override
+  `DisposeAsync`: `await using` falls through to the synchronous `Dispose()`, which writes the entry's compressed
+  trailer and data descriptor synchronously, even with `CompressionLevel.NoCompression`. Kestrel and `TestServer`
+  refuse synchronous body writes (`AllowSynchronousIO` is `false`), and by then the `200` and its headers are sent,
+  so a host route would hang with a download that never finishes. The body a streamed file's writer receives holds
+  those few synchronous bytes and sends them with the next asynchronous write, so the handler needs no
+  `AllowSynchronousIO`. The member bytes still copy asynchronously and unbuffered. This is a BCL gap, worth an
+  upstream fix in `dotnet/runtime` (the entry stream should write its trailer in `DisposeAsync`).
+- **A mid-stream failure aborts.** Once the status line is sent, an exception in the writer aborts the connection, the
+  only honest signal: the client sees a failed download, not a truncated archive with a valid-looking central
+  directory.
 
-<Callout type="warn">
-This is a **BCL gap, not Elarion behavior** — nothing in the blob contracts or the ASP.NET host forces
-the synchronous write, and no Elarion API can suppress it. It deserves an upstream fix in
-`dotnet/runtime` (have `ZipArchiveEntry.OpenAsync`'s stream override `DisposeAsync` and write its
-trailer asynchronously). Until then the scoped `AllowSynchronousIO` above is the correct workaround;
-revisit it when the runtime closes the hole.
-</Callout>
+A route you map yourself outside the handler tier needs the same care: scope
+`IHttpBodyControlFeature.AllowSynchronousIO = true` to that one response (never `KestrelServerOptions` globally, which
+gives every endpoint a thread-blocking write path), and call `HttpContext.Abort()` on a failure after the headers.
 
 ## Not S3 on the wire
 

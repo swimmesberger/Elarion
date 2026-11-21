@@ -47,6 +47,7 @@ public sealed class BlobDownloadEndpointsTests {
             .Should().Be("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         response.Content.Headers.ContentDisposition!.ToString()
             .Should().Contain("attachment").And.Contain("clients.xlsx");
+        response.Headers.GetValues("X-Content-Type-Options").Should().Equal("nosniff");
         (await response.Content.ReadAsByteArrayAsync(ct)).Should().Equal(1, 2, 3);
     }
 

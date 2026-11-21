@@ -167,6 +167,110 @@ public sealed class DbContextLockIntegrationTests(PostgreSqlUnitOfWorkFixture fi
     }
 
     [Fact]
+    public async Task LockRows_LocksEveryVisibleRowOnceInAscendingKeyOrder() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        string[] ids = [.. (await Task.WhenAll(SeedWidgetAsync(), SeedWidgetAsync(), SeedWidgetAsync()))
+            .Order(StringComparer.Ordinal)];
+        var (low, middle, high) = (ids[0], ids[1], ids[2]);
+
+        // The middle row is held elsewhere, so a contender locking all three in ascending order holds the low row and
+        // waits at the middle one — it never reaches the high one, whatever order the request listed them in.
+        await using var holder = fixture.CreateContext();
+        var held = await holder.Database.BeginTransactionAsync(Ct);
+        (await holder.LockRowAsync<WidgetRow>(middle, RowLockMode.Update, Ct)).Should().BeTrue();
+
+        await using var contender = fixture.CreateContext();
+        await using var contending = await contender.Database.BeginTransactionAsync(Ct);
+        var contenderPid = await BackendPidAsync(contender);
+        var locking = contender.LockRowsAsync<WidgetRow, string>([high, middle, low, high], ct: Ct);
+        await WaitUntilWaitingAsync(contenderPid);
+
+        (await IsRowLockedAsync(low)).Should().BeTrue();
+        (await IsRowLockedAsync(high)).Should().BeFalse();
+
+        await held.CommitAsync(Ct);
+        await held.DisposeAsync();
+        (await locking).Should().Equal(low, middle, high);
+    }
+
+    [Fact]
+    public async Task LockRows_ReportsOnlyTheRowsItFound() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var first = await SeedWidgetAsync();
+        var second = await SeedWidgetAsync();
+
+        await using var context = fixture.CreateContext();
+        await using var transaction = await context.Database.BeginTransactionAsync(Ct);
+        var locked = await context.LockRowsAsync<WidgetRow, string>(
+            [second, "missing", first, second], new RowLockOptions { Mode = RowLockMode.NoKeyUpdate }, Ct);
+
+        locked.Should().Equal(new[] { first, second }.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task AdvisoryLockAll_TakesEachKeyOnceInOrdinalOrder() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var prefix = Guid.CreateVersion7().ToString("N");
+        var (a, b, c) = (prefix + "-a", prefix + "-b", prefix + "-c");
+
+        await using var holder = fixture.CreateContext();
+        var held = await holder.Database.BeginTransactionAsync(Ct);
+        await holder.AdvisoryLockAsync("invoice-family", b, Ct);
+
+        await using var contender = fixture.CreateContext();
+        await using var contending = await contender.Database.BeginTransactionAsync(Ct);
+        var contenderPid = await BackendPidAsync(contender);
+        var locking = contender.AdvisoryLockAllAsync("invoice-family", [c, b, a, c], Ct);
+        await WaitUntilWaitingAsync(contenderPid);
+
+        await using (var observer = fixture.CreateContext()) {
+            await using var observing = await observer.Database.BeginTransactionAsync(Ct);
+            (await observer.TryAdvisoryLockAsync("invoice-family", a, Ct)).Should().BeFalse();
+            (await observer.TryAdvisoryLockAsync("invoice-family", c, Ct)).Should().BeTrue();
+        }
+
+        await held.CommitAsync(Ct);
+        await held.DisposeAsync();
+        await locking;
+    }
+
+    private static async Task<int> BackendPidAsync(UnitOfWorkDbContext context) {
+        return await context.Database.SqlQueryRaw<int>("SELECT pg_backend_pid() AS \"Value\"").SingleAsync(Ct);
+    }
+
+    // A lock that fails ends the transaction's locks at once (PostgreSQL aborts the transaction at the error), so what
+    // a contender holds is observed while it waits.
+    private async Task WaitUntilWaitingAsync(int pid) {
+        await using var observer = fixture.CreateContext();
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < deadline) {
+            var waiting = await observer.Database
+                .SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM pg_locks WHERE pid = {0} AND NOT granted", pid)
+                .SingleAsync(Ct);
+            if (waiting > 0) return;
+
+            await Task.Delay(20, Ct);
+        }
+
+        throw new TimeoutException($"Backend {pid} never waited for a lock.");
+    }
+
+    // Whether another transaction holds a lock on the row: NOWAIT fails at once instead of waiting.
+    private async Task<bool> IsRowLockedAsync(string id) {
+        await using var observer = fixture.CreateContext();
+        await using var transaction = await observer.Database.BeginTransactionAsync(Ct);
+        try {
+            await observer.Database
+                .SqlQueryRaw<int>("SELECT 1 AS \"Value\" FROM widgets WHERE id = {0} FOR UPDATE NOWAIT", id)
+                .ToListAsync(Ct);
+            return false;
+        }
+        catch (Exception exception) when (exception.GetBaseException() is PostgresException { SqlState: "55P03" }) {
+            return true;
+        }
+    }
+
+    [Fact]
     public async Task Locks_OutsideATransaction_AreRefused() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var context = fixture.CreateContext();
@@ -174,8 +278,13 @@ public sealed class DbContextLockIntegrationTests(PostgreSqlUnitOfWorkFixture fi
         var row = async () => await context.LockRowAsync<WidgetRow>("any", RowLockMode.Update, Ct);
         var advisory = async () => await context.AdvisoryLockAsync("billing-account", "1", Ct);
 
+        var rows = async () => await context.LockRowsAsync<WidgetRow, string>([], ct: Ct);
+        var advisories = async () => await context.AdvisoryLockAllAsync("billing-account", [], Ct);
+
         await row.Should().ThrowAsync<InvalidOperationException>().WithMessage("*needs a transaction*");
         await advisory.Should().ThrowAsync<InvalidOperationException>().WithMessage("*needs a transaction*");
+        await rows.Should().ThrowAsync<InvalidOperationException>().WithMessage("*needs a transaction*");
+        await advisories.Should().ThrowAsync<InvalidOperationException>().WithMessage("*needs a transaction*");
     }
 
     [Fact]

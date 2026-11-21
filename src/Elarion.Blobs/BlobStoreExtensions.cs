@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 
 namespace Elarion.Blobs;
 
@@ -159,6 +160,35 @@ public static class BlobStoreExtensions {
 
             continuationToken = page.ContinuationToken;
         } while (continuationToken is not null);
+    }
+
+    /// <summary>
+    /// Gets the SHA-256 of a blob's content, as 64 lower-case hex characters: the one the store recorded while saving
+    /// it (<see cref="BlobMetadata.ContentSha256"/>), or, for a blob without one, computed by reading the content once.
+    /// </summary>
+    /// <remarks>
+    /// Use it where one code path must work for every blob — old blobs, blobs from another producer, Azure staged
+    /// uploads — instead of reading <see cref="BlobMetadata.ContentSha256"/> and falling back by hand. A computed hash
+    /// is not written back: the store's metadata stays what the store recorded.
+    /// </remarks>
+    /// <returns>The hash, or <c>null</c> when the blob does not exist.</returns>
+    public static async Task<string?> GetContentSha256Async(
+        this IBlobStore store,
+        BlobRef blobRef,
+        CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(store);
+
+        var metadata = await store.GetMetadataAsync(blobRef, cancellationToken).ConfigureAwait(false);
+        if (metadata is null) return null;
+        if (metadata.ContentSha256 is { } recorded) return recorded;
+
+        var download = await store.OpenReadAsync(blobRef, cancellationToken).ConfigureAwait(false);
+        if (download is null) return null;
+
+        await using (download) {
+            var hash = await SHA256.HashDataAsync(download.Content, cancellationToken).ConfigureAwait(false);
+            return Convert.ToHexStringLower(hash);
+        }
     }
 
     private static async Task<BlobRef> SaveAndDisposeAsync(

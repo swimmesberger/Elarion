@@ -1,5 +1,6 @@
 using System.Data;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using Elarion.Blobs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -20,7 +21,9 @@ namespace Elarion.Blobs.PostgreSql;
 /// Npgsql binary protocol without buffering. A non-seekable source streams without buffering too when
 /// the caller supplies a <see cref="BlobUploadRequest.ContentLength"/> hint (the protocol requires the
 /// length up front; the actual bytes are verified against the hint so the recorded size stays
-/// truthful); without a hint it is buffered first only to learn its length. Reads <b>stream</b> as
+/// truthful); without a hint it is buffered first only to learn its length. Every write hashes the bytes
+/// as they pass and records their SHA-256 (<see cref="BlobMetadata.ContentSha256"/>) in the same
+/// transaction as the content. Reads <b>stream</b> as
 /// well: <see cref="OpenReadAsync"/> opens a dedicated connection <b>cloned from the context's own
 /// connection</b> and reads through <see cref="CommandBehavior.SequentialAccess"/> +
 /// <c>NpgsqlDataReader.GetStream</c>, with the reader, command, and connection owned by the returned
@@ -49,21 +52,21 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         // The bytea bind needs the exact length up front. A seekable source streams without
         // buffering. A non-seekable source streams without buffering too when the caller supplies a
         // ContentLength hint (verified against the actual bytes); otherwise it is buffered here only
-        // to learn the length. We never dispose the caller's stream — they own it.
+        // to learn the length. Every path reads through a HintedLengthStream, which hashes the bytes as
+        // they pass. We never dispose the caller's stream — they own it.
         if (content.CanSeek)
-            return await WriteAsync(request, content, content.Length - content.Position, null, cancellationToken);
+            return await WriteAsync(request, content, content.Length - content.Position, cancellationToken);
 
         if (request.ContentLength is long hint) {
             ArgumentOutOfRangeException.ThrowIfNegative(hint, nameof(request));
-            var hintedStream = new HintedLengthStream(content, hint);
-            return await WriteAsync(request, hintedStream, hint, hintedStream, cancellationToken);
+            return await WriteAsync(request, content, hint, cancellationToken);
         }
 
         var bufferedStream = new MemoryStream();
         try {
             await content.CopyToAsync(bufferedStream, cancellationToken);
             bufferedStream.Position = 0;
-            return await WriteAsync(request, bufferedStream, bufferedStream.Length, null, cancellationToken);
+            return await WriteAsync(request, bufferedStream, bufferedStream.Length, cancellationToken);
         }
         finally {
             await bufferedStream.DisposeAsync();
@@ -72,16 +75,20 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
 
     private async Task<BlobRef> WriteAsync(
         BlobUploadRequest request,
-        Stream writeStream,
+        Stream content,
         long size,
-        HintedLengthStream? hinted,
         CancellationToken cancellationToken) {
+        using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var blobId = await SaveBlobAsync(
             request,
             size,
-            async id => {
-                await UpsertContentStreamAsync(id, writeStream, cancellationToken);
-                if (hinted is not null) await VerifyHintAsync(hinted, size, cancellationToken);
+            async blob => {
+                var counted = new HintedLengthStream(content, size, sha256);
+                await UpsertContentStreamAsync(blob.Id, counted, cancellationToken);
+                await VerifyLengthAsync(counted, size, cancellationToken);
+                // Taken from the bytes just written, and recorded in the same transaction as them.
+                blob.ContentSha256 = Convert.ToHexStringLower(sha256.GetHashAndReset());
+                await dbContext.SaveChangesAsync(cancellationToken);
             },
             cancellationToken);
 
@@ -95,12 +102,14 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
         return new BlobRef { Value = blobId };
     }
 
-    private static async Task
-        VerifyHintAsync(HintedLengthStream hinted, long hint, CancellationToken cancellationToken) {
-        if (hinted.BytesRead != hint || await hinted.HasUnreadInnerDataAsync(cancellationToken))
+    // The bytes written must be exactly the declared size: a short source, or a ContentLength hint below the real
+    // length, would otherwise record a wrong size and hash.
+    private static async Task VerifyLengthAsync(HintedLengthStream counted, long size, CancellationToken cancellationToken) {
+        if (counted.BytesRead != size || await counted.HasUnreadInnerDataAsync(cancellationToken))
             throw new InvalidOperationException(
-                $"The actual content length did not match the declared " +
-                $"{nameof(BlobUploadRequest)}.{nameof(BlobUploadRequest.ContentLength)} hint of {hint} bytes.");
+                $"The actual content length did not match the expected {size} bytes (the declared " +
+                $"{nameof(BlobUploadRequest)}.{nameof(BlobUploadRequest.ContentLength)} hint, or the remaining " +
+                "length of a seekable stream).");
     }
 
     /// <inheritdoc />
@@ -460,22 +469,23 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
     private async Task<string> SaveBlobAsync(
         BlobUploadRequest request,
         long size,
-        Func<string, Task> saveContent,
+        Func<StoredBlob, Task> saveContent,
         CancellationToken cancellationToken) {
         var ownsTransaction = dbContext.Database.CurrentTransaction is null;
         await using var transaction = ownsTransaction
             ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
             : null;
 
-        var blobId = await UpsertMetadataAsync(request, size, cancellationToken);
-        await saveContent(blobId);
+        var blob = await UpsertMetadataAsync(request, size, cancellationToken);
+        await saveContent(blob);
 
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
 
-        return blobId;
+        return blob.Id;
     }
 
-    private async Task<string> UpsertMetadataAsync(
+    // Returns the tracked metadata row, so the content write can complete it (its hash) in the same transaction.
+    private async Task<StoredBlob> UpsertMetadataAsync(
         BlobUploadRequest request,
         long size,
         CancellationToken cancellationToken) {
@@ -502,6 +512,7 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
 
             existing.ContentType = request.ContentType;
             existing.Size = size;
+            existing.ContentSha256 = null;
             existing.CreatedAt = createdAt;
             existing.State = state;
             existing.ExpiresAt = expiresAt;
@@ -514,11 +525,11 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
                 request.Name);
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            return existing.Id;
+            return existing;
         }
 
         var blobId = Guid.CreateVersion7().ToString();
-        dbContext.Set<StoredBlob>().Add(new StoredBlob {
+        var blob = new StoredBlob {
             Id = blobId,
             Container = request.Container,
             Name = request.Name,
@@ -528,12 +539,13 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             State = state,
             ExpiresAt = expiresAt,
             OwnerId = request.OwnerId
-        });
+        };
+        dbContext.Set<StoredBlob>().Add(blob);
 
         logger.LogDebug("Creating new blob {BlobId} ({Container}/{Name})", blobId, request.Container, request.Name);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return blobId;
+        return blob;
     }
 
     private async Task UpsertContentStreamAsync(
@@ -650,7 +662,8 @@ public sealed class PostgreSqlBlobStore<TDbContext>(
             Size = blob.Size,
             CreatedAt = blob.CreatedAt,
             State = blob.State,
-            OwnerId = blob.OwnerId
+            OwnerId = blob.OwnerId,
+            ContentSha256 = blob.ContentSha256
         };
     }
 

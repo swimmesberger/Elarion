@@ -78,6 +78,22 @@ serialized. A `RowLockOptions` overload now carries the mode and `IgnoreQueryFil
 than a widened signature, per AGENTS.md. It skips every filter, as EF's `IgnoreQueryFilters()` does, so it is for ids
 the handler has already authorized.
 
+## Amendment (2026-11-21): several rows or keys in one order
+
+The helpers took one key per call. Commands that change several records (bulk edits, a change that touches several
+aggregates) must lock all of them, and two transactions that lock overlapping sets in different orders deadlock, which
+PostgreSQL breaks by failing one. A consuming application wrote the loop with its own ordering (distinct, then sorted
+ids) around `AdvisoryLockAsync` for every such command. `LockRowsAsync<TEntity, TKey>` and `AdvisoryLockAllAsync` now
+take a set and lock each member once, in one stable order: ascending `Comparer<TKey>.Default` for row keys (ordinal for
+strings, so the culture of a node cannot change the order), ordinal for advisory keys of one scope. Each member is its
+own statement, through the same path as a single lock, so visibility, modes, the provider and transaction checks and
+the test opt-in apply unchanged; both check for a transaction even for an empty set.
+
+Rejected: **one statement per set** (`… WHERE id = ANY($1) ORDER BY id FOR UPDATE`, or locking over an ordered
+`unnest`). It saves round trips but orders by the database's collation and type order rather than one documented .NET
+order, needs array parameters of the provider type (strongly typed keys with converters), and would bypass the
+visibility lookup through the entity's set. At the scale tier's set sizes, a statement per member is cheap.
+
 ## Rejected alternatives
 
 - **A no-op on non-PostgreSQL providers.** It hides the provider mismatch exactly where locking matters; it also

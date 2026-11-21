@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Elarion.Tests.Blobs;
@@ -21,6 +22,19 @@ namespace Elarion.Tests.Blobs;
 /// offset/content-type validation, ownership, and termination.
 /// </summary>
 public sealed class TusEndpointsTests {
+    [Fact]
+    public void Options_AreOneValueForTheEndpointsAndTheOptionsPattern() {
+        var services = new ServiceCollection();
+        services.AddElarionResumableBlobUploads(options => options.RoutePrefix = "/files/tus");
+        services.Configure<ResumableBlobUploadOptions>(options => options.Container = "inbox");
+        using var provider = services.BuildServiceProvider();
+
+        var fromOptions = provider.GetRequiredService<IOptions<ResumableBlobUploadOptions>>().Value;
+        fromOptions.RoutePrefix.Should().Be("/files/tus");
+        fromOptions.Container.Should().Be("inbox");
+        provider.GetRequiredService<ResumableBlobUploadOptions>().Should().BeSameAs(fromOptions);
+    }
+
     [Fact]
     public async Task Options_AdvertisesCapabilities() {
         var ct = TestContext.Current.CancellationToken;

@@ -150,6 +150,22 @@ public sealed class BlobStoreExtensionsTests {
         names.Should().Equal("f1.bin", "f2.bin", "f3.bin", "f4.bin", "f5.bin");
     }
 
+    [Fact]
+    public async Task GetContentSha256Async_PrefersTheRecordedHash_AndHashesTheContentWithoutOne() {
+        var ct = TestContext.Current.CancellationToken;
+        var store = new FakeBlobStore();
+        var recorded = new BlobRef { Value = "recorded" };
+        var unrecorded = new BlobRef { Value = "unrecorded" };
+        // The recorded hash is deliberately not the content's: it proves the content was not read.
+        store.Seed(recorded, Metadata(recorded, 3) with { ContentSha256 = "recorded-hash" }, [1, 2, 3]);
+        store.Seed(unrecorded, Metadata(unrecorded, 3), [1, 2, 3]);
+
+        (await store.GetContentSha256Async(recorded, ct)).Should().Be("recorded-hash");
+        (await store.GetContentSha256Async(unrecorded, ct))
+            .Should().Be("039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81");
+        (await store.GetContentSha256Async(new BlobRef { Value = "missing" }, ct)).Should().BeNull();
+    }
+
     private static BlobMetadata Metadata(BlobRef blobRef, long size) {
         return new BlobMetadata {
             Id = blobRef.Value,

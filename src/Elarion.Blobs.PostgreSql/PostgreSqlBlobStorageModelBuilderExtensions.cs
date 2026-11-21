@@ -82,6 +82,10 @@ public static class PostgreSqlBlobStorageModelBuilderExtensions {
 
             builder.Property(e => e.OwnerId)
                 .HasColumnName(snakeCase ? "owner_id" : "OwnerId");
+
+            builder.Property(e => e.ContentSha256)
+                .HasColumnName(snakeCase ? "content_sha256" : "ContentSha256")
+                .HasMaxLength(64);
         });
 
         modelBuilder.Entity<BlobContentRow>(builder => {

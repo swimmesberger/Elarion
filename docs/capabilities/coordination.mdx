@@ -395,9 +395,9 @@ The invariants and the extraction history are recorded in
 
 Most concurrency is the database's job — constraints, optimistic concurrency, `ON CONFLICT`. Some rules are not
 expressible as a constraint: "periods of one unit never overlap" across a whole set, a read-then-write that must not
-interleave with another writer of the same aggregate. For those, `Elarion.EntityFrameworkCore.UnitOfWork` adds two
-**transaction-scoped** PostgreSQL locks on `DbContext`, held until the current transaction (a command's pipeline
-transaction, or one you opened) commits or rolls back:
+interleave with another writer of the same aggregate. For those, `Elarion.EntityFrameworkCore.UnitOfWork` adds
+**transaction-scoped** PostgreSQL row and advisory locks on `DbContext`, held until the current transaction (a
+command's pipeline transaction, or one you opened) commits or rolls back:
 
 ```csharp
 using Elarion.EntityFrameworkCore.UnitOfWork;
@@ -434,6 +434,31 @@ if (!await db.LockRowAsync<Tenant>(command.TenantId,
 | `NoKeyUpdate` | `FOR NO KEY UPDATE` | only writers of the row itself must be serialized; inserts referencing it proceed |
 | `Share` | `FOR SHARE` | readers may share; writers wait |
 | `KeyShare` | `FOR KEY SHARE` | only a change of the row's key or its deletion waits |
+
+### Several rows or keys
+
+A command that changes several records — a bulk edit, a merge — locks all of them. Two transactions that take
+overlapping locks in different orders can each wait for the other, a deadlock PostgreSQL breaks by failing one of them.
+`LockRowsAsync` and `AdvisoryLockAllAsync` take a set and lock each member once, in one stable order, so every command
+that locks several members of the same set waits instead of deadlocking:
+
+```csharp
+// Rows: ascending key order (strings ordinally). The result holds the keys found and locked.
+var locked = await db.LockRowsAsync<Invoice, Guid>(
+    command.Ids, new RowLockOptions { Mode = RowLockMode.NoKeyUpdate }, ct);
+if (locked.Count != command.Ids.Distinct().Count())
+    return AppError.NotFound("Some invoices do not exist.");
+
+// Advisory keys of one scope: ordinal order of the key.
+await db.AdvisoryLockAllAsync("invoice-family", familyIds.Select(id => id.ToString()), ct);
+```
+
+The order only protects callers that use it: lock every set of several rows of an entity, or several keys of a scope,
+through these methods rather than one at a time in the order a request lists them. A command that needs locks of
+several entities or scopes takes them in one fixed order of entities and scopes, the same in every command. Each member
+costs one statement (two for a row: the lookup through the entity's set, then the lock); `LockRowsAsync` applies
+`RowLockOptions` to every row, and orders keys with `Comparer<TKey>.Default`, so a strongly typed key implements
+`IComparable<TKey>`.
 
 Both refuse to run **outside a transaction** (PostgreSQL would release the lock at the end of its own statement) and
 on any provider other than PostgreSQL, so a lock never silently protects nothing. An ambient `TransactionScope` counts

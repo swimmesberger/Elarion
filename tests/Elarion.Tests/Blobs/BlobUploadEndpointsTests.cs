@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Elarion.Tests.Blobs;
@@ -33,6 +34,7 @@ public sealed class BlobUploadEndpointsTests {
         var response = await host.Client.PostAsync("/_elarion/blobs", content, ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.GetValues("X-Content-Type-Options").Should().Equal("nosniff");
         var id = await response.Content.ReadAsStringAsync(ct);
         id.Should().NotBeNullOrWhiteSpace();
 
@@ -284,10 +286,35 @@ public sealed class BlobUploadEndpointsTests {
         host.Store.Deleted.Should().NotContain("blob-x");
     }
 
+    [Fact]
+    public void Options_AreOneValueForTheEndpointsAndTheOptionsPattern() {
+        var services = new ServiceCollection();
+        services.AddElarionBlobUploads(options => options.RoutePrefix = "/files");
+        services.Configure<BlobUploadEndpointOptions>(options => options.Container = "inbox");
+        using var provider = services.BuildServiceProvider();
+
+        var fromOptions = provider.GetRequiredService<IOptions<BlobUploadEndpointOptions>>().Value;
+        fromOptions.RoutePrefix.Should().Be("/files");
+        fromOptions.Container.Should().Be("inbox");
+        provider.GetRequiredService<BlobUploadEndpointOptions>().Should().BeSameAs(fromOptions);
+    }
+
+    [Fact]
+    public async Task Upload_HonoursOptionsConfiguredThroughTheOptionsPattern() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct, services: services =>
+            services.Configure<BlobUploadEndpointOptions>(options => options.RoutePrefix = "/files"));
+
+        var response = await host.Client.PostAsync("/files", new ByteArrayContent([1]), ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
     private static async Task<TestHost> StartAsync(
         CancellationToken cancellationToken,
         Action<BlobUploadEndpointOptions>? configure = null,
-        FakeCurrentUser? user = null) {
+        FakeCurrentUser? user = null,
+        Action<IServiceCollection>? services = null) {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
@@ -297,6 +324,7 @@ public sealed class BlobUploadEndpointsTests {
         builder.Services.AddScoped<ICurrentUser>(_ => user ?? new FakeCurrentUser("user-1", true));
         builder.Services.AddProblemDetails();
         builder.Services.AddElarionBlobUploads(configure);
+        services?.Invoke(builder.Services);
 
         var app = builder.Build();
         app.MapElarionBlobUploads();

@@ -57,8 +57,11 @@ it uses. Add `Elarion.Abstractions` only to contract-only assemblies that cannot
   never implement request/reply.
 - HTTP handlers resolve the typed handler directly and translate `Result` through framework HTTP helpers.
   Keep endpoint conventions in the host; do not infer host authorization policy from handler attributes.
-- Small, in-memory files use `ElarionFile`; large exports/uploads use the staged-blob tier. Consult the file
-  and blob capability docs before changing envelope, ownership, lifecycle, or resumable-upload behavior.
+- Small, in-memory files use `ElarionFile`; large exports/uploads use the staged-blob tier; an HTTP-only
+  `[HttpEndpoint]` (no `[Handler]`) may stream a file with `ElarionStreamedFile` (ADR-0098), never a host-mapped
+  route that loses the handler's authorization and feature gate. Every framework file response carries
+  `X-Content-Type-Options: nosniff`. Consult the file and blob capability docs before changing envelope,
+  ownership, lifecycle, or resumable-upload behavior.
 - The schema/client chain is `[Handler]` → `rpc-schema.json` → generated TypeScript. Do not hand-write a
   parallel JSON-RPC fetch client or a second transport registry.
 

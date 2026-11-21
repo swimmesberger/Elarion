@@ -1,19 +1,22 @@
+using System.Security.Cryptography;
+
 namespace Elarion.Blobs.PostgreSql;
 
 /// <summary>
 /// Wraps a forward-only source stream so it presents a caller-declared length, letting the Npgsql
 /// <c>bytea</c> bind stream a non-seekable source straight through the binary protocol (which needs
-/// the value length up front) without buffering it first.
+/// the value length up front) without buffering it first — and hashes the bytes on their way through, so the
+/// store records their SHA-256 without reading the content a second time.
 /// </summary>
 /// <remarks>
 /// The declared length is trusted only as far as the write: reads are capped at it so the protocol
 /// can never be handed more bytes than promised, <see cref="BytesRead"/> exposes how many bytes were
 /// actually consumed, and <see cref="HasUnreadInnerDataAsync"/> lets the caller detect a source that
 /// is longer than the hint. The store uses both to fail the transaction when the actual content does
-/// not match the hint, so the recorded size stays truthful. The wrapped stream is never disposed —
-/// the caller owns it.
+/// not match the hint, so the recorded size stays truthful. Neither the wrapped stream nor the hash is
+/// disposed — the caller owns both (the hash outlives the stream, which the protocol may dispose).
 /// </remarks>
-internal sealed class HintedLengthStream(Stream inner, long length) : Stream {
+internal sealed class HintedLengthStream(Stream inner, long length, IncrementalHash sha256) : Stream {
     private long _position;
 
     /// <summary>Gets the number of bytes read from the source so far.</summary>
@@ -45,6 +48,7 @@ internal sealed class HintedLengthStream(Stream inner, long length) : Stream {
         if (allowed <= 0) return 0;
 
         var read = inner.Read(buffer[..allowed]);
+        sha256.AppendData(buffer[..read]);
         _position += read;
         return read;
     }
@@ -54,6 +58,7 @@ internal sealed class HintedLengthStream(Stream inner, long length) : Stream {
         if (allowed <= 0) return 0;
 
         var read = await inner.ReadAsync(buffer[..allowed], cancellationToken);
+        sha256.AppendData(buffer.Span[..read]);
         _position += read;
         return read;
     }

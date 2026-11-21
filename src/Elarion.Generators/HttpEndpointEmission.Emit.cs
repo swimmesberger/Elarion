@@ -59,7 +59,7 @@ internal static partial class HttpEndpointEmission {
         // unavailable — the equivalent ProducesResponseTypeMetadata is attached directly. A file response
         // advertises the generic binary content type (the concrete type is per-payload at run time); the marker
         // lets the OpenAPI package upgrade the schema to type: string, format: binary.
-        if (entry.ResponseIsFile)
+        if (entry.ResponseIsBinary)
             chain.Add($".WithMetadata(new {ProducesMetadataFqn}(200, null, new[] {{ \"application/octet-stream\" }}))");
         else if (entry.ResponseIsCreated)
             // The created envelope is peeled by the translation, so the advertised 201 body is the inner type.
@@ -73,7 +73,7 @@ internal static partial class HttpEndpointEmission {
         chain.Add(".ProducesElarionErrors()");
         if (entry.IsAllowAnonymous)
             chain.Add(".AllowAnonymous()");
-        if (entry.ResponseIsFile)
+        if (entry.ResponseIsBinary)
             chain.Add($".WithMetadata({FileMarkerFqn})");
         if (entry.IsIdempotent)
             chain.Add($".WithMetadata({IdempotentMarkerFqn})");
@@ -180,6 +180,7 @@ internal static partial class HttpEndpointEmission {
 
     private static void AppendDelegateBody(StringBuilder sb, Model entry, string indent, int index) {
         var resultCall = entry.ResponseIsFile ? "ToFileResult"
+            : entry.ResponseIsStreamedFile ? "ToStreamedFileResult"
             : entry.ResponseIsCreated ? "ToCreatedResult"
             : entry.ResponseIsEmpty ? "ToNoContentResult"
             : "ToResult";

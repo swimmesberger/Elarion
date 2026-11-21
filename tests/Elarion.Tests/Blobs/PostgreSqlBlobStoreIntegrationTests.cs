@@ -37,6 +37,70 @@ public sealed class PostgreSqlBlobStoreIntegrationTests(PostgreSqlBlobStoreFixtu
         (await ReadAllAsync(download, ct)).Should().Equal(content);
     }
 
+    [Theory]
+    [InlineData("seekable")]
+    [InlineData("hinted")]
+    [InlineData("buffered")]
+    public async Task SaveAsync_RecordsTheContentSha256OnEveryWritePath(string path) {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context);
+        var content = Bytes(70_000);
+        var (request, source) = path switch {
+            "seekable" => (NewRequest(), (Stream)new MemoryStream(content)),
+            "hinted" => (NewRequest() with { ContentLength = content.Length },
+                new NonSeekableStream(new MemoryStream(content))),
+            _ => (NewRequest(), new NonSeekableStream(new MemoryStream(content)))
+        };
+
+        var blobRef = await store.SaveAsync(request, source, ct);
+
+        var expected = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content));
+        (await store.GetMetadataAsync(blobRef, ct))!.ContentSha256.Should().Be(expected);
+        await using var download = await store.OpenReadAsync(blobRef, ct);
+        download!.Metadata.ContentSha256.Should().Be(expected);
+        (await store.GetContentSha256Async(blobRef, ct)).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task SaveAsync_Overwrite_RecordsTheNewContentsHash() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context);
+        var request = NewRequest();
+        await store.SaveAsync(request, new MemoryStream(Bytes(512)), ct);
+        var updated = Bytes(4096);
+
+        var blobRef = await store.SaveAsync(request, new MemoryStream(updated), ct);
+
+        await using var fresh = fixture.CreateContext();
+        (await CreateStore(fresh).GetMetadataAsync(blobRef, ct))!.ContentSha256
+            .Should().Be(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(updated)));
+    }
+
+    [Fact]
+    public async Task GetContentSha256Async_BlobWithoutARecordedHash_HashesTheContent() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var context = fixture.CreateContext();
+        var store = CreateStore(context);
+        var content = Bytes(1500);
+        var blobRef = await store.SaveAsync(NewRequest(), new MemoryStream(content), ct);
+        // A blob stored before the store recorded hashes.
+        await context.Set<StoredBlob>().Where(blob => blob.Id == blobRef.Value)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(blob => blob.ContentSha256, (string?)null), ct);
+
+        await using var fresh = fixture.CreateContext();
+        var freshStore = CreateStore(fresh);
+        (await freshStore.GetMetadataAsync(blobRef, ct))!.ContentSha256.Should().BeNull();
+        (await freshStore.GetContentSha256Async(blobRef, ct))
+            .Should().Be(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content)));
+        (await freshStore.GetContentSha256Async(new BlobRef { Value = Guid.CreateVersion7().ToString() }, ct))
+            .Should().BeNull();
+    }
+
     [Fact]
     public async Task SaveAsync_Overwrite_ReplacesContentAndKeepsBlobId() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);

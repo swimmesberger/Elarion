@@ -42,6 +42,7 @@ public static class BlobDownloadEndpointsExtensions {
     }
 
     private static async Task DownloadAsync(HttpContext context) {
+        BlobEndpointResponses.ForbidSniffing(context.Response);
         var blobId = context.Request.RouteValues["blobId"]!.ToString()!;
         var services = context.RequestServices;
         var result = await DownloadCoreAsync(

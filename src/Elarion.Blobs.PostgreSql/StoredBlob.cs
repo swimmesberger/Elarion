@@ -54,4 +54,11 @@ public sealed class StoredBlob {
     /// <see cref="BlobMetadata.OwnerId"/>.
     /// </summary>
     public string? OwnerId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the SHA-256 of the content, as 64 lower-case hex characters, computed while the content was
+    /// written; <c>null</c> for a blob stored before the store recorded hashes. Surfaced as
+    /// <see cref="BlobMetadata.ContentSha256"/>.
+    /// </summary>
+    public string? ContentSha256 { get; set; }
 }
