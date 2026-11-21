@@ -1,3 +1,4 @@
+using System.Globalization;
 using Elarion.Abstractions.Authorization;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,7 +25,9 @@ internal sealed class GrantResourceAuthorizer(IResourceGrantSource grants) : IRe
         if (!user.IsAuthenticated || context.ResourceId is null) return false;
 
         var resourceType = context.ResourceTypeName;
-        var resourceId = context.ResourceId.ToString();
+        // Invariant, like the id the [ResourceFilter] Shared rule compares in SQL: the current culture can format a
+        // number differently (another negative sign), and such an id would match no stored grant.
+        var resourceId = Convert.ToString(context.ResourceId, CultureInfo.InvariantCulture);
         var operation = context.Operation.Name;
         var userId = user.UserId;
         var roles = user.Roles;
