@@ -170,6 +170,12 @@ _Avoid_: A/B implementation, strategy flag
 A service implementation selected once per process by configuration.
 _Avoid_: feature variant (a different thing), environment switch
 
+**Principal directory**:
+The stored side of who a principal is: which roles and which effective claims each principal holds, as
+queries. It lets a resource rule list the principals a record is visible to, and it must agree with the
+principal the host builds at sign-in.
+_Avoid_: user directory, permission holders, role store
+
 **Client capability**:
 The read-only projection of modules, flags and grants a frontend receives to adapt its user interface. It
 hides and adapts; it never enforces.
