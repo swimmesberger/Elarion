@@ -8,6 +8,12 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **Several rows or advisory keys in one order.** `db.LockRowsAsync<TEntity, TKey>(ids, options)` and
+  `db.AdvisoryLockAllAsync(scope, keys)` lock each member of a set once, in ascending key order (strings ordinally),
+  so commands that lock overlapping sets wait for each other instead of deadlocking. See
+  [Row and advisory locks](https://elarion.wimmesberger.dev/docs/capabilities/coordination#several-rows-or-keys).
+
 ## [0.4.1] - 2026-11-21
 
 ### Added

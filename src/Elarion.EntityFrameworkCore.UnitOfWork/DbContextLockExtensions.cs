@@ -51,7 +51,8 @@ public sealed record RowLockOptions {
 /// <summary>
 /// Transaction-scoped PostgreSQL locks on a <see cref="DbContext"/>: one row of an entity
 /// (<see cref="LockRowAsync{TEntity}(DbContext, object, RowLockMode, CancellationToken)"/>) or an advisory key (<see cref="AdvisoryLockAsync"/>,
-/// <see cref="TryAdvisoryLockAsync"/>). Both are held until the current transaction commits or rolls back — a
+/// <see cref="TryAdvisoryLockAsync"/>), or several of them in one stable order (<see cref="LockRowsAsync{TEntity, TKey}"/>,
+/// <see cref="AdvisoryLockAllAsync"/>). All are held until the current transaction commits or rolls back — a
 /// command's pipeline transaction, or one the caller opened — and never across it.
 /// </summary>
 /// <remarks>
@@ -167,6 +168,62 @@ public static class DbContextLockExtensions {
     }
 
     /// <summary>
+    /// Locks the rows of <typeparamref name="TEntity"/> whose primary keys are <paramref name="ids"/>, each once and in
+    /// ascending key order, as <see cref="LockRowAsync{TEntity}(DbContext, object, RowLockOptions, CancellationToken)"/>
+    /// locks one: through the entity's set first, so a row the context cannot see is skipped and never locked.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two transactions that lock overlapping sets of rows in different orders can each wait for the other — a
+    /// deadlock PostgreSQL breaks by failing one of them. Ascending order is the one order every caller of this method
+    /// takes, so two of them never wait for each other: lock every set of several rows of an entity through it, not
+    /// one by one in the order a request lists them. Keys are ordered by <see cref="Comparer{T}.Default"/>, strings
+    /// ordinally; a strongly typed key implements <see cref="IComparable{T}"/>. A command that locks rows of several entities, or rows and
+    /// advisory keys, takes them in one fixed order of entities and scopes, the same in every command.
+    /// </para>
+    /// <para>One lookup and one lock statement run per key.</para>
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // A bulk change of invoices: lock them all, in the one order every bulk command uses.
+    /// var locked = await db.LockRowsAsync&lt;Invoice, Guid&gt;(command.Ids, new RowLockOptions { Mode = RowLockMode.NoKeyUpdate }, ct);
+    /// if (locked.Count != command.Ids.Distinct().Count())
+    ///     return AppError.NotFound("Some invoices do not exist.");
+    /// </code>
+    /// </example>
+    /// <param name="db">The context.</param>
+    /// <param name="ids">The keys; duplicates are locked once.</param>
+    /// <param name="options">The lock strength and whether the lookup skips query filters; <see langword="null"/> for
+    /// <see cref="RowLockMode.Update"/> through the filters.</param>
+    /// <param name="ct">Cancels the locking.</param>
+    /// <returns>The keys of the rows found and now locked, in the order they were locked.</returns>
+    /// <exception cref="ArgumentException">A key is not of the entity's key type.</exception>
+    /// <exception cref="InvalidOperationException">The context has no transaction, the entity has no single-column table
+    /// key, or two keys cannot be compared.</exception>
+    /// <exception cref="NotSupportedException">The provider is not PostgreSQL.</exception>
+    public static async Task<IReadOnlyList<TKey>> LockRowsAsync<TEntity, TKey>(
+        this DbContext db, IEnumerable<TKey> ids, RowLockOptions? options = null, CancellationToken ct = default)
+        where TEntity : class
+        where TKey : notnull {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(ids);
+        options ??= new RowLockOptions();
+        // Checked up front, so an empty set outside a transaction fails like a full one instead of passing silently.
+        EnsureLockable(db);
+
+        // Strings compare ordinally: the culture-sensitive default could order differently on another node.
+        var order = typeof(TKey) == typeof(string)
+            ? (IComparer<TKey>)(object)StringComparer.Ordinal
+            : Comparer<TKey>.Default;
+        var locked = new List<TKey>();
+        foreach (var id in ids.Distinct().Order(order))
+            if (await db.LockRowAsync<TEntity>(id, options, ct).ConfigureAwait(false))
+                locked.Add(id);
+
+        return locked;
+    }
+
+    /// <summary>
     /// Takes the transaction-scoped advisory lock on <c>(<paramref name="scope"/>, <paramref name="key"/>)</c>
     /// (<c>pg_advisory_xact_lock</c>), waiting for a holder in another transaction. The scope names what is
     /// serialized (<c>"billing-account"</c>) and the key which one (usually an id).
@@ -181,6 +238,44 @@ public static class DbContextLockExtensions {
 
         await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(hashtextextended({0}, 0))", [text], ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Takes the advisory locks of <see cref="AdvisoryLockAsync"/> on <paramref name="scope"/> and each of
+    /// <paramref name="keys"/>, each once and in ordinal order of the key, waiting for each holder in turn.
+    /// </summary>
+    /// <remarks>
+    /// The fixed order is what makes several locks safe: two transactions that take overlapping sets in different
+    /// orders can each wait for the other, a deadlock PostgreSQL breaks by failing one of them. Take every set of
+    /// several keys of a scope through this method, not one by one in the order a request lists them; a command that
+    /// needs keys of several scopes takes the scopes in one fixed order, the same in every command. One statement runs
+    /// per key.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // Every command that touches several invoice families serializes on all of them, in the one order.
+    /// await db.AdvisoryLockAllAsync("invoice-family", familyIds.Select(id => id.ToString()), ct);
+    /// </code>
+    /// </example>
+    /// <exception cref="ArgumentException">The scope is empty, contains <c>:</c>, or starts with the reserved <c>elarion.</c>.</exception>
+    /// <exception cref="InvalidOperationException">The context has no transaction.</exception>
+    /// <exception cref="NotSupportedException">The provider is not PostgreSQL.</exception>
+    public static async Task AdvisoryLockAllAsync(
+        this DbContext db, string scope, IEnumerable<string> keys, CancellationToken ct = default) {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(keys);
+        // Every key shares the scope prefix, so ordering the texts orders the keys; an empty set still checks the scope.
+        var texts = keys
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .Select(key => AdvisoryLockKey.Text(scope, key))
+            .ToList();
+        if (texts.Count == 0) AdvisoryLockKey.Text(scope, string.Empty);
+        if (!EnsureLockable(db)) return;
+
+        foreach (var text in texts)
+            await db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(hashtextextended({0}, 0))", [text], ct)
+                .ConfigureAwait(false);
     }
 
     /// <summary>
