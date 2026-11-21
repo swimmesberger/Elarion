@@ -589,7 +589,7 @@ Handler requirements are class attributes the handler-registration generator rea
 ### `[RequireResource]`
 
 - **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class (`AllowMultiple`, inherited)
-- **Triggers:** the per-resource point check (the BOLA-class "may I touch *this* one?" gate). The decorator reads the resource id from the request by a **compile-checked path** (no reflection) and calls the `IResourceAuthorizer` seam; the shipped default authorizes from the grants table and **fails closed** when no backend is registered. An unresolvable `Id` path is `ELAUTH002`.
+- **Triggers:** the per-resource point check (the BOLA-class "may I touch *this* one?" gate). The decorator reads the resource id from the request by a **compile-checked path** (no reflection) and calls the `IResourceAuthorizer` seam. A resource type with a registered filter check (`AddElarionResourceFilterCheck`) is checked through its `IQueryAuthorizer<T>` — the same rule as the list filter, for the declared `Operation`; every other type is authorized from the grants table, and the check **fails closed** when no backend is registered. An unresolvable `Id` path is `ELAUTH002`.
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -615,11 +615,15 @@ Handler requirements are class attributes the handler-registration generator rea
 | `IdProperty` | `string` (init) | `"Id"` | The entity key property whose stringified value matches the grant's resource id. Type Guid/string/int/long. |
 | `BypassPermission` | `string?` (init) | `null` | A permission (`"{resource}.{verb}"`) whose holders see every row of their scope: the owner and grant rules are lifted, the `TenantProperty` scope still applies (unrestricted only without one). |
 | `PermissionClaimType` | `string` (init) | `"permission"` | The claim type `BypassPermission` is read from; match `AuthorizationOptions.PermissionClaimType`. |
+| `BypassRole` | `string?` (init) | `null` | A role whose members see every row of their scope, with the same rules as `BypassPermission`; with both set, either one bypasses. |
+| `Register` | `bool` (init) | `true` | Whether the host bootstrapper registers the filter as `IQueryAuthorizer<TEntity>`. Set `false` on a **building block** of a composed rule and register the composition; two registered filters for one entity are `ELMOD007`. |
 
 <Callout type="info">
   Consume the filter by injecting `IQueryAuthorizer<TEntity>` (the form that works for `Shared`). A field-only
   filter (`OwnerProperty`/`TenantProperty`, no `Shared`) is stateless, so the generator *also* exposes a static
-  `Specification` singleton. Both are auto-registered as `IQueryAuthorizer<TEntity>`, module-feature-gated.
+  `Specification` singleton. Both are auto-registered as `IQueryAuthorizer<TEntity>`, module-feature-gated — with
+  `TryAdd`, so an `IQueryAuthorizer<TEntity>` the application registers itself (a composed rule) is the one that
+  resolves.
 </Callout>
 
 See [Authorization](/docs/concepts/authorization) and [Resource authorization](/docs/concepts/resource-authorization).

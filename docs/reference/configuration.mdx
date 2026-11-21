@@ -194,7 +194,7 @@ builder.Services.AddElarionAuthorization(o => o.ResourceNotFoundMessage = "Not f
 
 | Option | Default |
 | --- | --- |
-| `PermissionClaimType` | `"permission"` — the claim `[RequirePermission]` (and `[ResourceFilter].BypassPermission`) reads |
+| `PermissionClaimType` | `"permission"` (`AuthorizationOptions.DefaultPermissionClaimType`) — the claim `[RequirePermission]` reads. `[ResourceFilter].BypassPermission` and `QueryAuthorizers.WhenPermission` cannot read the options and take the claim type themselves; pass the same value when you change it |
 | `ForbiddenMessageFormat` | `"Access denied."` — `{0}` echoes the unmet requirement when included |
 | `UnauthorizedMessage` | `"Authentication required."` |
 | `ResourceNotFoundMessage` | `"The requested resource was not found."` — the answer of `[RequireResource(DenyAs = ResourceDenial.NotFound)]`; keep it identical to your handlers' own not-found message |
