@@ -180,7 +180,7 @@ while the core primitives and everything in this ADR up to the slot component st
   its sidebar item can never gate differently. `@tanstack/react-router` is an optional peer; everything else
   routing-related remains TanStack's own API composed by the app. A TanStack **Start** integration is
   deliberately deferred until the sample itself runs Start (sample-first).
-- **Docs:** the [frontend-modules concept doc](../concepts/frontend-modules.mdx) documents the model and the
+- **Docs:** the [frontend-modules concept doc](../concepts/frontend-modules/index.mdx) documents the model and the
   import-vs-own boundary.
 
 ## Addendum (2026-07-05): revisions from the first production adoptions

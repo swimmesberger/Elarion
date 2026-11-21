@@ -10,7 +10,7 @@ status: stable
 - Date: 2026-06-23
 - Related: [decorator pipelines](../concepts/decorator-pipelines.mdx),
   [ADR-0003](0003-decorator-attachment-predicates.md) (decorators are composed by the same generator),
-  the [caching concept doc](../concepts/caching.mdx) (usage).
+  the [caching concept doc](../capabilities/caching.mdx) (usage).
 
 ## Context
 
@@ -159,4 +159,4 @@ The generator reports misuse at build time (`HandlerRegistrationGenerator.Cache.
   (`AppendCacheDecorator`, `AppendCacheInvalidationDecorator`, `AppendCachePolicy`,
   `AppendCreateKeyMethod`, `AppendPayloadMethods`).
 - Usage and runtime backing (`HybridCache`) are documented in
-  [the caching concept doc](../concepts/caching.mdx).
+  [the caching concept doc](../capabilities/caching.mdx).
