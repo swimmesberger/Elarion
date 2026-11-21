@@ -1,13 +1,8 @@
-# Elarion — Copilot instructions
+The agent instructions for this repository live in [`AGENTS.md`](../AGENTS.md) at the repository root. Read it
+first; this file exists only so Copilot surfaces that do not read `AGENTS.md` still find the way.
 
-The canonical agent and contributor guidance for this repository lives in
-[`AGENTS.md`](../AGENTS.md) at the repository root. Follow it for the project
-overview, package layout, architecture boundaries, the JSON-RPC model, the
-TypeScript client generator, C# coding standards, testing, validation, and
-publishing.
-
-C# coding standards are additionally scoped to `**/*.cs` via
-[`.github/instructions/csharp.instructions.md`](instructions/csharp.instructions.md),
-which points back to the C# section of `AGENTS.md`.
-
-Keep `AGENTS.md` the single source of truth: add or change guidance there, not here.
+Rules for one kind of file are pattern rules in [`.github/instructions/`](instructions/), each scoped by its
+`applyTo`: C# coding standards (`csharp`), package layout and framework invariants (`framework`), source
+generator conventions (`generators`), tests (`tests`), documentation (`docs`), workflows and publishing
+(`workflows`). They are the source of those rules; add or change guidance in `AGENTS.md` or in a pattern rule,
+not here.
