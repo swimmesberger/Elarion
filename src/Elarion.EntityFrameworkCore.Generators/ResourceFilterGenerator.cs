@@ -22,6 +22,12 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
     private const string OperationType = "global::Elarion.Abstractions.Authorization.ResourceOperation";
     private const string QueryAuthorizerType = ElarionGeneratorConventions.QueryAuthorizerTypeFqn;
     private const string GrantSourceType = "global::Elarion.Authorization.EntityFrameworkCore.IResourceGrantSource";
+
+    private const string PrincipalQueryAuthorizerType =
+        "global::Elarion.Abstractions.Authorization.IPrincipalQueryAuthorizer";
+
+    private const string PrincipalDirectoryType = "global::Elarion.Abstractions.Authorization.IPrincipalDirectory";
+    private const string QueryableType = "global::System.Linq.Queryable";
     private const string ServiceCollectionType = "global::Microsoft.Extensions.DependencyInjection.IServiceCollection";
 
     private const string ServiceCollectionExtensions =
@@ -278,7 +284,8 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
 
         // Complete the user's partial filter class as the authorizer; the entity is referenced by its
         // fully-qualified name, so it can live in any namespace and stays free of authorization attributes.
-        sb.AppendLine($"partial class {className} : {QueryAuthorizerType}<{entity}>");
+        sb.AppendLine(
+            $"partial class {className} : {QueryAuthorizerType}<{entity}>, {PrincipalQueryAuthorizerType}<{entity}>");
         sb.AppendLine("{");
 
         if (target.Shared) {
@@ -302,6 +309,8 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
             EmitGetFilter(sb, target, entity);
         }
 
+        sb.AppendLine();
+        EmitPrincipalRelation(sb, target, entity);
         sb.AppendLine("}");
 
         // Hint name keys on the filter class (not the entity), mirroring the keyset generator.
@@ -396,6 +405,124 @@ public sealed class ResourceFilterGenerator : IIncrementalGenerator {
 
         sb.AppendLine($"        return __e => {ComposeBody(scopeTerms, grantTerms)};");
         sb.AppendLine("    }");
+    }
+
+    // The same rule with the principal left open: (row, principalId) => owner || bypass holder || grant. A principal's
+    // roles and claims come from the directory instead of the live ICurrentUser. One strongly typed method per
+    // principal id type the filter can relate rows to, so every comparison is an ordinary typed expression.
+    private static void EmitPrincipalRelation(StringBuilder sb, ResourceFilterTarget target, string entity) {
+        const string relationType = "global::System.Linq.Expressions.Expression<global::System.Func<";
+        sb.AppendLine($"    public {relationType}{entity}, TKey, bool>> GetPrincipalRelation<TKey>(");
+        sb.AppendLine($"        {PrincipalDirectoryType}<TKey> directory,");
+        sb.AppendLine($"        {OperationType} operation)");
+        sb.AppendLine("        where TKey : notnull");
+        sb.AppendLine("    {");
+
+        RuleModel? scope = null;
+        RuleModel? owner = null;
+        foreach (var rule in target.Rules)
+            if (rule.Kind == RuleKindScope) scope ??= rule;
+            else owner ??= rule;
+
+        if (scope is not null) {
+            // The tenant is a claim the forward filter parses; a stored claim cannot be compared with the column the
+            // same way in SQL, and an answer that drops the scope would list principals of every tenant.
+            sb.AppendLine("        throw new global::System.NotSupportedException(");
+            sb.AppendLine(
+                $"            {Literal($"'{target.ClassName}' scopes rows by the tenant claim ({scope.PropertyName}), which has no relation over stored principals. Keep tenancy in ambient tenant scoping and declare the rule without TenantProperty to list the principals a row is visible to.")});");
+            sb.AppendLine("    }");
+            return;
+        }
+
+        // The owner column fixes the principal id type; a filter without one (sharing only) relates through the
+        // grants' textual principal id and accepts every supported id type.
+        var kinds = owner is not null ? new[] { owner.ParseKind } : new[] { "guid", "string", "int", "long" };
+        foreach (var kind in kinds) {
+            var key = KeyType(kind);
+            sb.AppendLine($"        if (typeof(TKey) == typeof({key}))");
+            sb.AppendLine("        {");
+            sb.AppendLine(
+                $"            return ({relationType}{entity}, TKey, bool>>)(object)__PrincipalRelation_{kind}(({PrincipalDirectoryType}<{key}>)(object)directory, operation);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+        }
+
+        var supported = string.Join(", ", kinds.Select(KeyDisplayName));
+        sb.AppendLine("        throw new global::System.NotSupportedException(");
+        sb.AppendLine(
+            $"            {Literal($"'{target.ClassName}' relates rows to {supported} principal ids, but the principal directory lists ")} + typeof(TKey).Name + \" ids.\");");
+        sb.AppendLine("    }");
+
+        foreach (var kind in kinds) {
+            sb.AppendLine();
+            EmitTypedPrincipalRelation(sb, target, entity, owner, kind);
+        }
+    }
+
+    private static void EmitTypedPrincipalRelation(
+        StringBuilder sb, ResourceFilterTarget target, string entity, RuleModel? owner, string kind) {
+        var key = KeyType(kind);
+        sb.AppendLine(
+            $"    private global::System.Linq.Expressions.Expression<global::System.Func<{entity}, {key}, bool>> __PrincipalRelation_{kind}(");
+        sb.AppendLine($"        {PrincipalDirectoryType}<{key}> directory,");
+        sb.AppendLine($"        {OperationType} operation)");
+        sb.AppendLine("    {");
+
+        var terms = new List<string>();
+        if (owner is not null) terms.Add($"__e.{owner.PropertyName} == __p");
+
+        if (target.BypassPermission is not null) {
+            sb.AppendLine(
+                $"        var __bypassPermission = {QueryableType}.Select({QueryableType}.Where(directory.Claims, __c => __c.Type == {Literal(target.PermissionClaimType)} && __c.Value == {Literal(target.BypassPermission)}), __c => __c.PrincipalId);");
+            terms.Add($"{QueryableType}.Contains(__bypassPermission, __p)");
+        }
+
+        if (target.BypassRole is not null) {
+            sb.AppendLine(
+                $"        var __bypassRole = {QueryableType}.Select({QueryableType}.Where(directory.Roles, __r => __r.Role == {Literal(target.BypassRole)}), __r => __r.PrincipalId);");
+            terms.Add($"{QueryableType}.Contains(__bypassRole, __p)");
+        }
+
+        if (target.Shared) {
+            sb.AppendLine("        var __op = operation.Name;");
+            sb.AppendLine("        var __grantsQuery = __grants.Grants;");
+            sb.AppendLine("        var __rolesQuery = directory.Roles;");
+            var idExpression = target.IdParseKind == "string"
+                ? $"__e.{target.IdProperty}"
+                : $"__e.{target.IdProperty}.ToString()";
+            var principalText = kind == "string" ? "__p" : "__p.ToString()";
+            terms.Add(
+                $"{QueryableType}.Any(__grantsQuery, __g => __g.ResourceType == {Literal(target.ResourceTypeName)}"
+                + $" && __g.ResourceId == {idExpression}"
+                + " && __g.Operation == __op"
+                + $" && ((__g.PrincipalKind == \"user\" && __g.PrincipalId == {principalText})"
+                + $" || (__g.PrincipalKind == \"role\" && {QueryableType}.Any(__rolesQuery, __r => __r.PrincipalId == __p && __r.Role == __g.PrincipalId))))");
+        }
+
+        if (target.BypassPermission is not null || target.BypassRole is not null || target.Shared) sb.AppendLine();
+
+        sb.AppendLine($"        return (__e, __p) => {string.Join(" || ", terms)};");
+        sb.AppendLine("    }");
+    }
+
+    private static string KeyType(string parseKind) {
+        return parseKind switch {
+            "guid" => "global::System.Guid",
+            "string" => "string",
+            "int" => "int",
+            "long" => "long",
+            _ => "global::System.Guid"
+        };
+    }
+
+    private static string KeyDisplayName(string parseKind) {
+        return parseKind switch {
+            "guid" => "Guid",
+            "string" => "String",
+            "int" => "Int32",
+            "long" => "Int64",
+            _ => "Guid"
+        };
     }
 
     // Resolves every scope (tenant) rule first: a scope that cannot be resolved means no access at all (AND), so it
