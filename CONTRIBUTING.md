@@ -21,13 +21,16 @@ You need the **.NET 11 SDK** (see [`global.json`](global.json) for the exact ver
 `-f net10.0`/`-f net11.0`. CI builds both frameworks but runs the tests on `net11.0` only, so run the `net10.0`
 tests locally when a change is framework-specific.
 
-Two failures come from the machine rather than the change:
+Three failures come from the machine rather than the change:
 
 - *A compatible .NET SDK was not found* — another `dotnet` install is first on `PATH`. List the installs with
   `which -a dotnet` (each has its own `--list-sdks`), then point `DOTNET_ROOT` and `PATH` at the one that has the
   SDK `global.json` pins.
 - A test run that ends with a `net10.0` *handshake failure* (exit code 150) after the `net11.0` run passed — the
   install in use has no .NET 10 runtime. Pass `-f net11.0`, or install the runtime to run both.
+- A website build that fails with *Can't resolve '@vercel/turbopack-next/internal/font/google/font'* — an earlier
+  build ran without network access (a sandbox, a dropped connection), could not download the Google fonts, and
+  left that failure in the build cache. Delete `website/.next` and build again with network access.
 
 ## Validation
 
