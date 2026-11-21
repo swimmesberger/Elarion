@@ -10,8 +10,8 @@ status: draft
 - Date: 2026-10-25
 - Related: [ADR-0013](0013-resource-and-data-level-authorization.md) (the two legs: list filter and point check).
 - Followed by: [ADR-0095](0095-one-resource-rule-for-list-point-check-and-complement.md), which adds the
-  filter-backed point check and the registration rule that the consequences below ask for, and records the shape an
-  inverse query needs.
+  filter-backed point check and the registration rule that the consequences below ask for, and the inverse query
+  ("who may see record X") as a complete-or-refused reading of the same rule.
 
 ## Context
 

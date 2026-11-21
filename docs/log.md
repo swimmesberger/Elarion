@@ -2,6 +2,7 @@
 
 ## 2026-11-21
 
+* **Update**: [ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md) now decides the inverse query instead of deferring it (the caller owns the candidate set, the principal directory agrees with the live principal by contract, an unrestricted alternative is every candidate), and [ADR-0089](decisions/0089-resource-authorization-composes.md) points to it; the [glossary](../GLOSSARY.md) gained *principal directory*.
 * **Update**: fixed seven relative links that pointed at files that no longer exist under those names, in [ADR-0004](decisions/0004-handler-result-caching.md), [ADR-0006](decisions/0006-incremental-source-generator-conventions.md), [ADR-0032](decisions/0032-frontend-contribution-model.md), [ADR-0052](decisions/0052-ordered-streams.md) and [ADR-0075](decisions/0075-ambient-tenant-scoping.md).
 * **Update**: [ADR-0096](decisions/0096-the-repository-is-the-memory.md) now says that its two statements about the layout and the missing log were overtaken by [ADR-0097](decisions/0097-adopt-the-agentic-repository-layout.md).
 * **Creation**: the [glossary](../GLOSSARY.md) with the framework's terms, the [spec format](../specs/README.md) with the specs of the two check tools, and the [issue tracker](agents/issue-tracker.md) and [domain docs](agents/domain.md) pages that configure the engineering skills.

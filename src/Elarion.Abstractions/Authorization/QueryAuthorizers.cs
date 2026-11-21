@@ -17,6 +17,13 @@ namespace Elarion.Abstractions.Authorization;
 /// <see cref="From{TEntity}"/> hands the caller to a delegate unchecked.
 /// </para>
 /// <para>
+/// <b>They read in both directions.</b> Every building block is also an
+/// <see cref="IPrincipalQueryAuthorizer{TEntity}"/>, so the rule that filters rows for a caller also lists the
+/// principals for a row (<c>WhereAuthorizedFor</c>). <see cref="From{TEntity}"/> and <see cref="When{TEntity}"/> hold an
+/// opaque delegate and are the exceptions: a rule that contains one refuses to be inverted rather than answering for
+/// the rest.
+/// </para>
+/// <para>
 /// A <see langword="null"/> filter means "no restriction": it wins an <see cref="AnyOf{TEntity}"/> and is neutral in an
 /// <see cref="AllOf{TEntity}"/>. The combined predicate is one expression over one parameter, so it still translates to
 /// a single SQL <c>WHERE</c>.
@@ -49,7 +56,7 @@ public static class QueryAuthorizers {
         Func<ICurrentUser, ResourceOperation, Expression<Func<TEntity, bool>>?> filter)
         where TEntity : class {
         ArgumentNullException.ThrowIfNull(filter);
-        return new DelegateAuthorizer<TEntity>(filter);
+        return new DelegateAuthorizer<TEntity>(filter, "QueryAuthorizers.From");
     }
 
     /// <summary>The rows matching <paramref name="predicate"/>, for every authenticated caller; nothing for anyone else.</summary>
@@ -58,7 +65,9 @@ public static class QueryAuthorizers {
     public static IQueryAuthorizer<TEntity> Rows<TEntity>(Expression<Func<TEntity, bool>> predicate)
         where TEntity : class {
         ArgumentNullException.ThrowIfNull(predicate);
-        return new DelegateAuthorizer<TEntity>((user, _) => user.IsAuthenticated ? predicate : Deny<TEntity>.Filter);
+        return new InvertibleAuthorizer<TEntity>(
+            (user, _) => user.IsAuthenticated ? predicate : Deny<TEntity>.Filter,
+            new RowsRelation<TEntity>(predicate));
     }
 
     /// <summary>
@@ -71,7 +80,9 @@ public static class QueryAuthorizers {
     /// </remarks>
     public static IQueryAuthorizer<TEntity> Unrestricted<TEntity>()
         where TEntity : class {
-        return new DelegateAuthorizer<TEntity>((user, _) => user.IsAuthenticated ? null : Deny<TEntity>.Filter);
+        return new InvertibleAuthorizer<TEntity>(
+            (user, _) => user.IsAuthenticated ? null : Deny<TEntity>.Filter,
+            new RowsRelation<TEntity>(null));
     }
 
     /// <summary>
@@ -96,29 +107,34 @@ public static class QueryAuthorizers {
         where TEntity : class
         where TKey : IParsable<TKey> {
         ArgumentNullException.ThrowIfNull(relation);
-        return new DelegateAuthorizer<TEntity>((user, _) => {
-            if (!user.IsAuthenticated || !TKey.TryParse(user.UserId, CultureInfo.InvariantCulture, out var userId))
-                return Deny<TEntity>.Filter;
+        return new InvertibleAuthorizer<TEntity>(
+            (user, _) => {
+                if (!user.IsAuthenticated || !TKey.TryParse(user.UserId, CultureInfo.InvariantCulture, out var userId))
+                    return Deny<TEntity>.Filter;
 
-            // A captured local, so a query provider sends the id as a parameter instead of inlining a literal.
-            Expression<Func<TKey>> id = () => userId;
-            var body = new Rebinder(relation.Parameters[1], id.Body).Visit(relation.Body);
-            return Expression.Lambda<Func<TEntity, bool>>(body, relation.Parameters[0]);
-        });
+                // A captured local, so a query provider sends the id as a parameter instead of inlining a literal.
+                Expression<Func<TKey>> id = () => userId;
+                var body = new Rebinder(relation.Parameters[1], id.Body).Visit(relation.Body);
+                return Expression.Lambda<Func<TEntity, bool>>(body, relation.Parameters[0]);
+            },
+            new UserRelation<TEntity, TKey>(relation));
     }
 
     /// <summary>
     /// <paramref name="then"/> for an authenticated caller satisfying <paramref name="condition"/>; nothing for anyone
-    /// else. The general gate behind <see cref="WhenPermission{TEntity}(string, IQueryAuthorizer{TEntity}, string)"/>
-    /// and <see cref="WhenRole{TEntity}"/>.
+    /// else. The general gate, for a condition <see cref="WhenPermission{TEntity}(string, IQueryAuthorizer{TEntity}, string)"/>
+    /// and <see cref="WhenRole{TEntity}"/> cannot state.
     /// </summary>
+    /// <remarks>
+    /// The condition is a delegate over the live principal, so a rule gated this way cannot be asked which principals
+    /// it admits (<see cref="IPrincipalQueryAuthorizer{TEntity}"/>). Prefer the permission and role gates, which can.
+    /// </remarks>
     public static IQueryAuthorizer<TEntity> When<TEntity>(
         Func<ICurrentUser, bool> condition, IQueryAuthorizer<TEntity> then)
         where TEntity : class {
         ArgumentNullException.ThrowIfNull(condition);
         ArgumentNullException.ThrowIfNull(then);
-        return new DelegateAuthorizer<TEntity>((user, operation) =>
-            user.IsAuthenticated && condition(user) ? then.GetFilter(user, operation) : Deny<TEntity>.Filter);
+        return new DelegateAuthorizer<TEntity>(Gate(condition, then), "QueryAuthorizers.When");
     }
 
     /// <summary>
@@ -140,14 +156,20 @@ public static class QueryAuthorizers {
         where TEntity : class {
         ArgumentException.ThrowIfNullOrEmpty(permission);
         ArgumentException.ThrowIfNullOrEmpty(claimType);
-        return When(user => user.HasClaim(claimType, permission), then);
+        ArgumentNullException.ThrowIfNull(then);
+        return new InvertibleAuthorizer<TEntity>(
+            Gate(user => user.HasClaim(claimType, permission), then),
+            new ClaimGateRelation<TEntity>(claimType, permission, then));
     }
 
     /// <summary><paramref name="then"/> for callers in <paramref name="role"/>; nothing for anyone else.</summary>
     public static IQueryAuthorizer<TEntity> WhenRole<TEntity>(string role, IQueryAuthorizer<TEntity> then)
         where TEntity : class {
         ArgumentException.ThrowIfNullOrEmpty(role);
-        return When(user => user.IsInRole(role), then);
+        ArgumentNullException.ThrowIfNull(then);
+        return new InvertibleAuthorizer<TEntity>(
+            Gate(user => user.IsInRole(role), then),
+            new RoleGateRelation<TEntity>(role, then));
     }
 
     /// <summary>
@@ -174,8 +196,10 @@ public static class QueryAuthorizers {
         if (Array.Exists(allowed, static operation => operation.Name is null))
             throw new ArgumentException("An operation is the invalid default value.", nameof(operations));
 
-        return new DelegateAuthorizer<TEntity>((user, operation) =>
-            Array.IndexOf(allowed, operation) >= 0 ? authorizer.GetFilter(user, operation) : Deny<TEntity>.Filter);
+        return new InvertibleAuthorizer<TEntity>(
+            (user, operation) =>
+                Array.IndexOf(allowed, operation) >= 0 ? authorizer.GetFilter(user, operation) : Deny<TEntity>.Filter,
+            new OperationsRelation<TEntity>(allowed, authorizer));
     }
 
     /// <summary>A row is visible when <b>any</b> authorizer makes it visible (OR); one unrestricted authorizer lifts the restriction.</summary>
@@ -183,19 +207,21 @@ public static class QueryAuthorizers {
     public static IQueryAuthorizer<TEntity> AnyOf<TEntity>(params IQueryAuthorizer<TEntity>[] authorizers)
         where TEntity : class {
         var snapshot = Snapshot(authorizers);
-        return new DelegateAuthorizer<TEntity>((user, operation) => {
-            Expression<Func<TEntity, bool>>? combined = null;
-            foreach (var authorizer in snapshot) {
-                var filter = authorizer.GetFilter(user, operation);
-                if (filter is null) return null;
-                // An alternative that denies everyone adds nothing; leaving it out keeps the SQL to the live rules.
-                if (IsDenyAll(filter)) continue;
+        return new InvertibleAuthorizer<TEntity>(
+            (user, operation) => {
+                Expression<Func<TEntity, bool>>? combined = null;
+                foreach (var authorizer in snapshot) {
+                    var filter = authorizer.GetFilter(user, operation);
+                    if (filter is null) return null;
+                    // An alternative that denies everyone adds nothing; leaving it out keeps the SQL to the live rules.
+                    if (IsDenyAll(filter)) continue;
 
-                combined = combined is null ? filter : Combine(combined, filter, Expression.OrElse);
-            }
+                    combined = combined is null ? filter : Combine(combined, filter, Expression.OrElse);
+                }
 
-            return combined ?? Deny<TEntity>.Filter;
-        });
+                return combined ?? Deny<TEntity>.Filter;
+            },
+            new CombinedRelation<TEntity>(snapshot, any: true));
     }
 
     /// <summary>A row is visible when <b>every</b> authorizer makes it visible (AND); an unrestricted authorizer adds nothing.</summary>
@@ -208,22 +234,51 @@ public static class QueryAuthorizers {
         if (snapshot.Length == 0)
             throw new ArgumentException("AllOf needs at least one authorizer; an empty AND would restrict nothing.",
                 nameof(authorizers));
-        return new DelegateAuthorizer<TEntity>((user, operation) => {
-            Expression<Func<TEntity, bool>>? combined = null;
-            foreach (var authorizer in snapshot) {
-                if (authorizer.GetFilter(user, operation) is not { } filter) continue;
-                if (IsDenyAll(filter)) return filter;
+        return new InvertibleAuthorizer<TEntity>(
+            (user, operation) => {
+                Expression<Func<TEntity, bool>>? combined = null;
+                foreach (var authorizer in snapshot) {
+                    if (authorizer.GetFilter(user, operation) is not { } filter) continue;
+                    if (IsDenyAll(filter)) return filter;
 
-                combined = combined is null ? filter : Combine(combined, filter, Expression.AndAlso);
-            }
+                    combined = combined is null ? filter : Combine(combined, filter, Expression.AndAlso);
+                }
 
-            return combined;
-        });
+                return combined;
+            },
+            new CombinedRelation<TEntity>(snapshot, any: false));
+    }
+
+    /// <summary>
+    /// The relation <c>(row, principalId) =&gt; …</c> of <paramref name="authorizer"/> — its rule with the principal
+    /// left open — or a refusal naming the part that has none.
+    /// </summary>
+    /// <exception cref="NotSupportedException"><paramref name="authorizer"/>, or a part of it, is not an
+    /// <see cref="IPrincipalQueryAuthorizer{TEntity}"/>.</exception>
+    internal static Expression<Func<TEntity, TKey, bool>> RelationOf<TEntity, TKey>(
+        IQueryAuthorizer<TEntity> authorizer, IPrincipalDirectory<TKey> directory, ResourceOperation operation)
+        where TEntity : class
+        where TKey : notnull {
+        if (authorizer is IPrincipalQueryAuthorizer<TEntity> invertible)
+            return invertible.GetPrincipalRelation(directory, operation);
+
+        var name = authorizer is DelegateAuthorizer<TEntity> opaque ? opaque.Description : authorizer.GetType().Name;
+        throw new NotSupportedException(
+            $"'{name}' is not an IPrincipalQueryAuthorizer<{typeof(TEntity).Name}>, so the principals this rule admits "
+            + "cannot be listed completely. State the alternative with ForUser, WhenPermission, WhenRole, Rows or a "
+            + "[ResourceFilter], or implement IPrincipalQueryAuthorizer on it.");
     }
 
     /// <summary>Whether <paramref name="filter"/> is the constant deny-all predicate (<c>_ =&gt; false</c>).</summary>
     internal static bool IsDenyAll<TEntity>(Expression<Func<TEntity, bool>> filter) {
         return filter.Body is ConstantExpression { Value: false };
+    }
+
+    private static Func<ICurrentUser, ResourceOperation, Expression<Func<TEntity, bool>>?> Gate<TEntity>(
+        Func<ICurrentUser, bool> condition, IQueryAuthorizer<TEntity> then)
+        where TEntity : class {
+        return (user, operation) =>
+            user.IsAuthenticated && condition(user) ? then.GetFilter(user, operation) : Deny<TEntity>.Filter;
     }
 
     // A copy, so a caller reusing the params array cannot change the composition afterwards; a null element is refused
@@ -252,11 +307,150 @@ public static class QueryAuthorizers {
         public static readonly Expression<Func<TEntity, bool>> Filter = _ => false;
     }
 
+    // An authorizer whose rule is an opaque delegate over the live principal: it has no relation to offer.
     private sealed class DelegateAuthorizer<TEntity>(
-        Func<ICurrentUser, ResourceOperation, Expression<Func<TEntity, bool>>?> filter) : IQueryAuthorizer<TEntity>
+        Func<ICurrentUser, ResourceOperation, Expression<Func<TEntity, bool>>?> filter,
+        string description) : IQueryAuthorizer<TEntity>
+        where TEntity : class {
+        public string Description => description;
+
+        public Expression<Func<TEntity, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) {
+            return filter(user, operation);
+        }
+    }
+
+    // A building block: the filter for a bound caller, and the same rule as a relation with the principal left open.
+    private sealed class InvertibleAuthorizer<TEntity>(
+        Func<ICurrentUser, ResourceOperation, Expression<Func<TEntity, bool>>?> filter,
+        Relation<TEntity> relation) : IQueryAuthorizer<TEntity>, IPrincipalQueryAuthorizer<TEntity>
         where TEntity : class {
         public Expression<Func<TEntity, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) {
             return filter(user, operation);
+        }
+
+        public Expression<Func<TEntity, TKey, bool>> GetPrincipalRelation<TKey>(
+            IPrincipalDirectory<TKey> directory, ResourceOperation operation)
+            where TKey : notnull {
+            ArgumentNullException.ThrowIfNull(directory);
+            return relation.Build(directory, operation);
+        }
+    }
+
+    // The principal id type is only known when the relation is asked for, hence a generic method rather than a delegate.
+    private abstract class Relation<TEntity>
+        where TEntity : class {
+        public abstract Expression<Func<TEntity, TKey, bool>> Build<TKey>(
+            IPrincipalDirectory<TKey> directory, ResourceOperation operation)
+            where TKey : notnull;
+
+        protected static Expression<Func<TEntity, TKey, bool>> Constant<TKey>(bool value) {
+            return value ? static (_, _) => true : static (_, _) => false;
+        }
+
+        protected static bool IsConstant<TKey>(Expression<Func<TEntity, TKey, bool>> relation, bool value) {
+            return relation.Body is ConstantExpression constant && Equals(constant.Value, value);
+        }
+
+        // A predicate over the principal alone (membership of a holder set), widened to a relation and AND-ed with
+        // what the gate lets its holders access.
+        protected static Expression<Func<TEntity, TKey, bool>> Gated<TKey>(
+            IQueryable<TKey> holders, Expression<Func<TEntity, TKey, bool>> then) {
+            if (IsConstant(then, false)) return then;
+
+            Expression<Func<TKey, bool>> holds = principal => holders.Contains(principal);
+            var principalParameter = then.Parameters[1];
+            var holdsBody = new Rebinder(holds.Parameters[0], principalParameter).Visit(holds.Body);
+            var body = IsConstant(then, true) ? holdsBody : Expression.AndAlso(holdsBody, then.Body);
+            return Expression.Lambda<Func<TEntity, TKey, bool>>(body, then.Parameters);
+        }
+    }
+
+    // Rows(predicate): every principal, for the matching rows. A null predicate is Unrestricted.
+    private sealed class RowsRelation<TEntity>(Expression<Func<TEntity, bool>>? predicate) : Relation<TEntity>
+        where TEntity : class {
+        public override Expression<Func<TEntity, TKey, bool>> Build<TKey>(
+            IPrincipalDirectory<TKey> directory, ResourceOperation operation) {
+            return predicate is null
+                ? Constant<TKey>(true)
+                : Expression.Lambda<Func<TEntity, TKey, bool>>(
+                    predicate.Body, predicate.Parameters[0], Expression.Parameter(typeof(TKey), "principal"));
+        }
+    }
+
+    // ForUser: the declared relation itself, when the directory speaks of the same id type.
+    private sealed class UserRelation<TEntity, TUserKey>(Expression<Func<TEntity, TUserKey, bool>> relation)
+        : Relation<TEntity>
+        where TEntity : class {
+        public override Expression<Func<TEntity, TKey, bool>> Build<TKey>(
+            IPrincipalDirectory<TKey> directory, ResourceOperation operation) {
+            return relation as Expression<Func<TEntity, TKey, bool>>
+                   ?? throw new NotSupportedException(
+                       $"A ForUser rule relates {typeof(TEntity).Name} rows to {typeof(TUserKey).Name} ids, but the "
+                       + $"principal directory lists {typeof(TKey).Name} ids.");
+        }
+    }
+
+    private sealed class ClaimGateRelation<TEntity>(string claimType, string value, IQueryAuthorizer<TEntity> then)
+        : Relation<TEntity>
+        where TEntity : class {
+        public override Expression<Func<TEntity, TKey, bool>> Build<TKey>(
+            IPrincipalDirectory<TKey> directory, ResourceOperation operation) {
+            var holders = directory.Claims
+                .Where(claim => claim.Type == claimType && claim.Value == value)
+                .Select(claim => claim.PrincipalId);
+            return Gated(holders, RelationOf(then, directory, operation));
+        }
+    }
+
+    private sealed class RoleGateRelation<TEntity>(string role, IQueryAuthorizer<TEntity> then) : Relation<TEntity>
+        where TEntity : class {
+        public override Expression<Func<TEntity, TKey, bool>> Build<TKey>(
+            IPrincipalDirectory<TKey> directory, ResourceOperation operation) {
+            var members = directory.Roles.Where(membership => membership.Role == role)
+                .Select(membership => membership.PrincipalId);
+            return Gated(members, RelationOf(then, directory, operation));
+        }
+    }
+
+    private sealed class OperationsRelation<TEntity>(ResourceOperation[] allowed, IQueryAuthorizer<TEntity> authorizer)
+        : Relation<TEntity>
+        where TEntity : class {
+        public override Expression<Func<TEntity, TKey, bool>> Build<TKey>(
+            IPrincipalDirectory<TKey> directory, ResourceOperation operation) {
+            return Array.IndexOf(allowed, operation) >= 0
+                ? RelationOf(authorizer, directory, operation)
+                : Constant<TKey>(false);
+        }
+    }
+
+    // AnyOf / AllOf: the parts' relations OR-ed / AND-ed over one pair of parameters. Every part is asked, so a part
+    // without a relation refuses the whole composition instead of being left out of it.
+    private sealed class CombinedRelation<TEntity>(IQueryAuthorizer<TEntity>[] parts, bool any) : Relation<TEntity>
+        where TEntity : class {
+        public override Expression<Func<TEntity, TKey, bool>> Build<TKey>(
+            IPrincipalDirectory<TKey> directory, ResourceOperation operation) {
+            var relations = new Expression<Func<TEntity, TKey, bool>>[parts.Length];
+            for (var i = 0; i < parts.Length; i++) relations[i] = RelationOf(parts[i], directory, operation);
+
+            Expression<Func<TEntity, TKey, bool>>? combined = null;
+            foreach (var relation in relations) {
+                // true decides an OR and false an AND; the other constant is neutral.
+                if (IsConstant(relation, any)) return relation;
+                if (IsConstant(relation, !any)) continue;
+                if (combined is null) {
+                    combined = relation;
+                    continue;
+                }
+
+                var body = new Rebinder(relation.Parameters[0], combined.Parameters[0]).Visit(relation.Body);
+                body = new Rebinder(relation.Parameters[1], combined.Parameters[1]).Visit(body);
+                combined = Expression.Lambda<Func<TEntity, TKey, bool>>(
+                    any ? Expression.OrElse(combined.Body, body) : Expression.AndAlso(combined.Body, body),
+                    combined.Parameters);
+            }
+
+            // Nothing left: an OR of alternatives that admit nobody, or an AND of parts that restrict nothing.
+            return combined ?? Constant<TKey>(!any);
         }
     }
 

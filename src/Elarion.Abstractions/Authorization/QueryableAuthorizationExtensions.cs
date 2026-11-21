@@ -133,6 +133,71 @@ public static class QueryableAuthorizationExtensions {
         return source.Where(Expression.Lambda<Func<TEntity, bool>>(body, ownerKey.Parameters));
     }
 
+    /// <summary>
+    /// Restricts <paramref name="principals"/> to those who may access <b>at least one</b> of <paramref name="rows"/>
+    /// for <paramref name="operation"/> (defaulting to <see cref="ResourceOperation.Read"/>) — the inverse of
+    /// <see cref="WhereAuthorized{TEntity}"/>: "who may see this record" for mention candidates, notification
+    /// recipients or an access overview, answered by the rule the list filter applies. Pass one row
+    /// (<c>db.Contacts.Where(c =&gt; c.Id == id)</c>) to ask about one record.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The candidates are the caller's.</b> The result is a subset of <paramref name="principals"/>, so the caller
+    /// decides who is eligible at all — the accounts that can still sign in, the staff of one tenant — and the rule
+    /// decides who among them may access the rows. A principal the rule would admit but the candidates leave out is not
+    /// returned, and no principal is returned that the rule would deny.
+    /// </para>
+    /// <para>
+    /// <b>Complete or refused.</b> Every part of the rule must be an <see cref="IPrincipalQueryAuthorizer{TEntity}"/>;
+    /// otherwise the call throws instead of answering for the parts that are. Roles and claims are read from
+    /// <paramref name="directory"/>, whose contract is agreement with the live principal (see
+    /// <see cref="IPrincipalDirectory{TKey}"/>).
+    /// </para>
+    /// <para>
+    /// <paramref name="rows"/> is used as given: its query filters decide which rows exist for this question, exactly
+    /// as they do for <see cref="WhereAuthorized{TEntity}"/>. The whole answer is one statement.
+    /// </para>
+    /// </remarks>
+    /// <param name="principals">The candidate principal ids.</param>
+    /// <param name="rows">The rows asked about, typically one.</param>
+    /// <param name="authorizer">The entity's rule.</param>
+    /// <param name="directory">Who holds which role and claim.</param>
+    /// <param name="operation">The operation; defaults to <see cref="ResourceOperation.Read"/>.</param>
+    /// <typeparam name="TKey">The principal id type.</typeparam>
+    /// <typeparam name="TEntity">The entity type.</typeparam>
+    /// <exception cref="NotSupportedException">The rule, or a part of it, cannot be asked which principals it admits.</exception>
+    /// <example>
+    /// <code>
+    /// // The active staff accounts that may read this contact.
+    /// var readers = users.ActiveStaff(now)
+    ///     .WhereAuthorizedFor(db.Contacts.Where(c =&gt; c.Id == contactId), contactAccess, directory);
+    /// </code>
+    /// </example>
+    public static IQueryable<TKey> WhereAuthorizedFor<TKey, TEntity>(
+        this IQueryable<TKey> principals,
+        IQueryable<TEntity> rows,
+        IQueryAuthorizer<TEntity> authorizer,
+        IPrincipalDirectory<TKey> directory,
+        ResourceOperation? operation = null)
+        where TKey : notnull
+        where TEntity : class {
+        ArgumentNullException.ThrowIfNull(principals);
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(authorizer);
+        ArgumentNullException.ThrowIfNull(directory);
+
+        var relation = QueryAuthorizers.RelationOf(authorizer, directory, operation ?? ResourceOperation.Read);
+
+        // principal => rows.Any(row => relation(row, principal)). The Any call comes from a compiler-built template, so
+        // the generic method is closed at compile time (no MakeGenericMethod).
+        Expression<Func<IQueryable<TEntity>, Expression<Func<TEntity, bool>>, bool>> template =
+            static (candidates, predicate) => candidates.Any(predicate);
+        var any = ((MethodCallExpression)template.Body).Method;
+        var admits = Expression.Lambda<Func<TEntity, bool>>(relation.Body, relation.Parameters[0]);
+        var body = Expression.Call(any, rows.Expression, Expression.Quote(admits));
+        return principals.Where(Expression.Lambda<Func<TKey, bool>>(body, relation.Parameters[1]));
+    }
+
     private sealed class Substitution(Dictionary<ParameterExpression, Expression> replacements) : ExpressionVisitor {
         protected override Expression VisitParameter(ParameterExpression node) {
             return replacements.TryGetValue(node, out var replacement) ? replacement : base.VisitParameter(node);

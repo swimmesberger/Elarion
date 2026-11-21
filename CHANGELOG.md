@@ -40,6 +40,17 @@ minor releases may include breaking changes.
     published nor registered. `[ResourceFilter(BypassRole = "…")]` lifts the grant rules for members of a role, with
     the tenant scope kept, as `BypassPermission` does.
   - `AuthorizationOptions.DefaultPermissionClaimType`.
+- **Who may access a record: `WhereAuthorizedFor`** (ADR-0095).
+  `candidates.WhereAuthorizedFor(rows, authorizer, directory)` restricts a set of principal ids to those who may
+  access at least one of the rows — mention candidates, notification recipients — from the rule the list filter
+  applies, in one statement. A rule is read as a relation between a row and a principal id
+  (`IPrincipalQueryAuthorizer<TEntity>`), which every `QueryAuthorizers` building block and the generated
+  `[ResourceFilter]` (owner, bypass permission and role, user and role grants) provide. The answer is complete or
+  refused: a rule containing `QueryAuthorizers.From`, `QueryAuthorizers.When`, a hand-written authorizer or a
+  tenant-scoped generated filter throws `NotSupportedException` naming that part. Roles and claims come from an
+  `IPrincipalDirectory<TKey>`; `AddElarionIdentityPrincipalDirectory<TDbContext, TRole, TKey>()`
+  (`Elarion.EntityFrameworkCore.Identity`) reads them from the Identity tables, and a host that adds roles or claims
+  while it builds the principal registers its own.
 - **`ELMOD007`** (warning): an entity has more than one registered `[ResourceFilter]`, so an injected
   `IQueryAuthorizer<TEntity>` would be only one of them.
 
@@ -48,6 +59,9 @@ minor releases may include breaking changes.
   registered** (`TryAdd`). A composed authorizer registered in a module's `ConfigureServices`, or in the host before
   `AddElarion`, is now the one that resolves; registering it after `AddElarion` keeps working. **Breaking** for an
   application that registered its own authorizer first and relied on the generated filter replacing it.
+
+- `Elarion.EntityFrameworkCore.Identity` references `Elarion.Abstractions` (for `IPrincipalDirectory`); it stays free
+  of the ASP.NET shared framework.
 
 ### Fixed
 - The grants-backed `[RequireResource]` check formats a numeric resource id with the invariant culture, like the

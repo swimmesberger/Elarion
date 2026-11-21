@@ -393,17 +393,65 @@ empty there, which denies a positive rule and **allows** a negated one.
 
 ## Who may see a record?
 
-Mentions and notifications ask the inverse question: *which* principals may see record X. Elarion answers the part it
-owns — `IResourceGrantStore.GetGrantsAsync(resourceType, resourceId)` lists the users and roles a record is shared
-with — while the owner column, tenant membership, bypass-permission holders and application membership tables are
-the application's data. Compose the answer from the same rules the filter declares, so the two cannot drift: the
-grants for X, plus X's owner, intersected with the active users of X's tenant.
+Mentions, notifications and an access overview ask the inverse question: *which* principals may access record X.
+`WhereAuthorizedFor` answers it from the same rule the list filter applies, in one statement:
 
-There is no framework seam for it yet: a complete answer needs a directory of who holds which role and permission,
-and an answer that covers only part of a composed rule would look complete without being it
-([ADR-0095](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0095-one-resource-rule-for-list-point-check-and-complement.md)).
-`ForUser` states a rule as a relation between a row and a user id for that reason: the same expression reads in both
-directions, so the inverse of such an alternative is `users.Where(u => rows.Any(row => relation(row, u.Id)))`.
+```csharp
+// The active staff accounts that may read this contact.
+var readers = await users.ActiveStaff(now)                       // the candidates: your eligibility rule
+    .WhereAuthorizedFor(db.Contacts.Where(c => c.Id == contactId), contactAccess, directory)
+    .ToListAsync(ct);
+```
+
+- **The candidates are yours.** The result is a subset of the principal ids you pass, so you decide who is eligible at
+  all (the accounts that can still sign in, the staff of one department) and the rule decides who among them may
+  access the rows. With several rows, a principal is returned when it may access at least one.
+- **The rule is read as a relation** between a row and a principal id. `ForUser` already is one; `Rows`,
+  `Unrestricted`, `WhenPermission`, `WhenRole`, `ForOperations`, `AnyOf`, `AllOf` and the generated `[ResourceFilter]`
+  (owner, bypass permission and role, user and role grants) translate to one. Pass the operation to ask who may
+  *change* the record.
+- **Complete or refused.** A rule that contains `QueryAuthorizers.From`, `QueryAuthorizers.When`, a hand-written
+  authorizer or a generated filter with a `TenantProperty` throws `NotSupportedException` naming that part — it
+  never answers for the rest and leaves an alternative out. Restate the part with the building blocks, or implement
+  `IPrincipalQueryAuthorizer<T>` on your authorizer.
+
+### The principal directory
+
+A gate such as "holds `contacts.read`" is read from the live `ICurrentUser` when a caller lists contacts. For the
+inverse there is no caller, so the same fact comes from an `IPrincipalDirectory<TKey>`: two queries, the roles and
+the **effective** claims (a role's claims listed for each member) of every principal.
+
+```csharp
+// ASP.NET Core Identity tables: user_roles, user_claims and the role_claims of a principal's roles.
+services.AddElarionIdentityPrincipalDirectory<AppDbContext, ApplicationRole, Guid>();
+```
+
+<Callout type="warn">
+  **The directory must agree with the principal your host builds.** The Identity-backed directory mirrors Identity's
+  default claims factory. If the host adds a role or a claim at sign-in or per request — an instance owner who is made
+  an administrator on every request — register your own directory that adds the same fact, or those principals are
+  missing from the answer:
+
+  ```csharp
+  public sealed class AppPrincipalDirectory(AppDbContext db) : IPrincipalDirectory<Guid> {
+      private readonly IdentityPrincipalDirectory<AppDbContext, ApplicationRole, Guid> _stored = new(db);
+
+      public IQueryable<PrincipalRole<Guid>> Roles => _stored.Roles.Concat(
+          db.Users.Where(u => u.IsOwner).Select(u => new PrincipalRole<Guid> { PrincipalId = u.Id, Role = "Admin" }));
+
+      public IQueryable<PrincipalClaim<Guid>> Claims => _stored.Claims;
+  }
+
+  services.AddScoped<IPrincipalDirectory<Guid>, AppPrincipalDirectory>();   // kept: the default is a TryAdd
+  ```
+
+  Pin the agreement with a test that builds a principal the way the host does and compares its roles and claims with
+  the directory. The forward filter stays the authority: a principal the inverse lists is still checked when it reads
+  the record.
+</Callout>
+
+For shares alone, `IResourceGrantStore.GetGrantsAsync(resourceType, resourceId)` still lists the users and roles a
+record is shared with.
 
 ## See also
 

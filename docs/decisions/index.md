@@ -95,6 +95,6 @@
 * [ADR-0092](0092-runtime-async-on-net11.md) - The net11 build compiles with runtime async
 * [ADR-0093](0093-typst-pdf-rendering.md) - Typst PDF rendering is a framework package — the pinned CLI, bundled by the build, one sandboxed workspace per document (proposed)
 * [ADR-0094](0094-in-process-typst-engine.md) - An in-process Typst engine is an opt-in second implementation of ITypstCompiler — prototype findings (proposed)
-* [ADR-0095](0095-one-resource-rule-for-list-point-check-and-complement.md) - One resource rule for the list, the point check and the complement — and what the inverse needs (proposed)
+* [ADR-0095](0095-one-resource-rule-for-list-point-check-and-complement.md) - One resource rule for the list, the point check, the complement and the inverse (proposed)
 * [ADR-0096](0096-the-repository-is-the-memory.md) - Harness memory is off; the repository is the memory
 * [ADR-0097](0097-adopt-the-agentic-repository-layout.md) - The repository follows the agentic repository template's layout, with docs/ shared between the knowledge bundle and the website
