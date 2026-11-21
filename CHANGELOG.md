@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-21
+
 ### Added
 - **`Elarion.Typst`: PDF documents with Typst** (ADR-0093). `ITypstCompiler` runs the pinned Typst CLI in a fresh,
   sandboxed workspace per document. The workspace holds a generated `main.typ` that calls an entry point of the
@@ -2466,7 +2468,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.1
 [0.4.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.0
 [0.3.2]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.2
 [0.3.1]: https://github.com/swimmesberger/Elarion/releases/tag/v0.3.1
