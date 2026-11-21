@@ -100,3 +100,6 @@
 * [ADR-0097](0097-adopt-the-agentic-repository-layout.md) - The repository follows the agentic repository template's layout, with docs/ shared between the knowledge bundle and the website
 * [ADR-0098](0098-streamed-files-for-http-only-endpoints.md) - HTTP-only endpoints stream files through ElarionStreamedFile (proposed)
 * [ADR-0099](0099-blob-stores-record-a-content-sha256.md) - Blob stores record the content's SHA-256 while they save it (proposed)
+* [ADR-0100](0100-the-schema-exports-constants-presets-and-limits.md) - The schema exports declared constants, request presets and typed limits (proposed)
+* [ADR-0101](0101-a-decision-required-answer.md) - A request that needs the caller's decision answers DecisionRequired (proposed)
+* [ADR-0102](0102-rules-are-expressions-composed-once.md) - A rule is one expression, composed into queries and compiled for memory (proposed)

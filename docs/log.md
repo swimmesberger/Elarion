@@ -2,6 +2,7 @@
 
 ## 2026-11-21
 
+* **Creation**: proposed [ADR-0100](decisions/0100-the-schema-exports-constants-presets-and-limits.md) (constants, request presets and typed limits in the schema), [ADR-0101](decisions/0101-a-decision-required-answer.md) (a DecisionRequired answer with typed options and a client helper that resends) and [ADR-0102](decisions/0102-rules-are-expressions-composed-once.md) (one expression per rule, composed into queries and compiled for memory), from gaps a consuming application hand-rolled.
 * **Creation**: [ADR-0098](decisions/0098-streamed-files-for-http-only-endpoints.md) — HTTP-only endpoints stream files through ElarionStreamedFile, amending [ADR-0039](decisions/0039-binary-file-responses.md); the [glossary](../GLOSSARY.md) gained *streamed file*.
 * **Creation**: [ADR-0099](decisions/0099-blob-stores-record-a-content-sha256.md) — blob stores record the content's SHA-256 while they save it.
 * **Update**: [ADR-0087](decisions/0087-transaction-scoped-locks-and-one-advisory-key-scheme.md) gained an amendment for locking several rows or advisory keys in one stable order.
