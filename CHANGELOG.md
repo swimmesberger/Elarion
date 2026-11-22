@@ -98,6 +98,12 @@ minor releases may include breaking changes.
   [TypeScript client](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#limits-presets-sort-keys-and-constants).
 
 ### Fixed
+- **No actor call runs on an activation after its snapshot conflict.** After a turn failed with
+  `ActorSnapshotConcurrencyException`, its activation still ran the calls queued behind that turn, and could run the
+  caller's own next call, from memory that held the failed write: they read state that was never committed, and a
+  store that reported a conflict without moving its version let the next write commit it. Those calls now run on the
+  fresh activation, which reloads the snapshot. See
+  [Conflict recovery](https://elarion.wimmesberger.dev/docs/concepts/actors/state-and-placement#conflict-recovery).
 - **Schemas of uploaded files and file lists.** The OpenAPI document described an `UploadedFile` member as an opaque
   schema; it is now a string marked `x-elarion-upload: true`, as in `rpc-schema.json`. A list of `ElarionFile` exported
   to `rpc-schema.json` without `items`; it now carries the file envelope, so the generated client converts each item. A

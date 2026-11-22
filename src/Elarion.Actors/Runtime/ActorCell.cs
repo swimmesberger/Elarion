@@ -17,7 +17,7 @@ namespace Elarion.Actors.Runtime;
 /// shutdown. A closed cell rejects enqueues with <see langword="false"/> so the host retries
 /// against a fresh activation.
 /// </remarks>
-internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor : class {
+internal sealed class ActorCell<TActor> : IActorActivation where TActor : class {
     private readonly Channel<ActorWorkItem<TActor>> _mailbox;
     private readonly string _actorName;
     private readonly string _keyText;
@@ -49,8 +49,10 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
     // successor (waiting on this very task) activates.
     private readonly TaskCompletionSource _lifecycleCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    // Items whose turn conflicted and still owe their retry; drained after _onClosed. Guarded by
-    // its own lock only because reentrant completions can race (rare path, no hot-path cost).
+    // Items that still owe a run on the fresh activation — turns that conflicted (their one retry)
+    // and items that reached this activation after it went stale (their first run); drained after
+    // _onClosed, in the order they got here. Guarded by its own lock only because reentrant
+    // completions can race (rare path, no hot-path cost).
     private List<ActorWorkItem<TActor>>? _retryItems;
 
     // Mailbox coordination packed into one word so enqueue, completion, and idle passivation
@@ -65,10 +67,12 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
 
     private int _started;
 
-    // Set when a turn fails with ActorSnapshotConcurrencyException (ADR-0047): the activation's
-    // in-memory state and ETag are stale, so it drain-closes once pending work reaches zero — the
-    // next activation reloads the latest snapshot (the Orleans deactivate-on-InconsistentState
-    // recovery). Int for Interlocked; only the 0 → 1 transition logs.
+    // Set when a turn fails with ActorSnapshotConcurrencyException (ADR-0047), by the turn itself
+    // before its caller can observe the outcome: the activation's in-memory state and ETag are stale.
+    // From then on no turn starts here — every item that still reaches this activation moves, unrun,
+    // to the next one — and the cell drain-closes once pending work reaches zero, so the next
+    // activation reloads the latest snapshot (the Orleans deactivate-on-InconsistentState recovery).
+    // Int for Interlocked; only the 0 → 1 transition logs.
     private int _snapshotConflicted;
 
     private Task? _loop;
@@ -307,8 +311,9 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
             // activates.
             _lifecycleCompleted.TrySetResult();
 
-            // After the host forgot this cell: conflicted turns re-enter the mailbox path and land
-            // on a fresh activation that loads the winning snapshot (their single retry).
+            // After the host forgot this cell: conflicted turns (their single retry) and the items that
+            // reached this activation after it went stale (their first run) re-enter the mailbox path
+            // and land on a fresh activation that loads the winning snapshot.
             await ReEnqueueConflictedItemsAsync().ConfigureAwait(false);
         }
     }
@@ -334,9 +339,20 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
 
     private async Task RunSequentialAsync(TActor instance, ActorStateTracker? states) {
         await foreach (var item in _mailbox.Reader.ReadAllAsync().ConfigureAwait(false)) {
-            OnTurnFinished(item, await item.RunAsync(instance, this, states, _stoppingCts.Token).ConfigureAwait(false));
+            OnTurnFinished(item, await RunTurnAsync(item, instance, states).ConfigureAwait(false));
             OnItemCompleted();
         }
+    }
+
+    // Checked where the turn would start (on the pump for a sequential cell, on the exclusive
+    // scheduler for a reentrant one), not at dequeue: no turn that starts after a conflicting turn's
+    // mark runs on the stale activation, whose state may hold the failed write's mutation (a dirty
+    // read) and whose ETag, when the store did not move, would even let that mutation commit.
+    private ValueTask<ActorTurnOutcome> RunTurnAsync(
+        ActorWorkItem<TActor> item, TActor instance, ActorStateTracker? states) {
+        return Volatile.Read(ref _snapshotConflicted) != 0
+            ? ValueTask.FromResult(ActorTurnOutcome.NotRunOnStaleActivation)
+            : item.RunAsync(instance, this, states, _stoppingCts.Token);
     }
 
     private async Task RunReentrantAsync(TActor instance, ActorStateTracker? states) {
@@ -347,7 +363,7 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
         var inFlight = new List<Task>();
         await foreach (var item in _mailbox.Reader.ReadAllAsync().ConfigureAwait(false)) {
             var run = Task.Factory.StartNew(
-                () => item.RunAsync(instance, this, states, _stoppingCts.Token).AsTask(),
+                () => RunTurnAsync(item, instance, states).AsTask(),
                 CancellationToken.None,
                 TaskCreationOptions.DenyChildAttach,
                 schedulerPair.ExclusiveScheduler).Unwrap();
@@ -422,7 +438,7 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
         TryCloseWhenIdle();
     }
 
-    IDisposable IActorActivationRetainer.Retain() {
+    IDisposable IActorActivation.Retain() {
         Interlocked.Increment(ref _streamRetentions);
         return new StreamRetention(this);
     }
@@ -471,20 +487,22 @@ internal sealed class ActorCell<TActor> : IActorActivationRetainer where TActor 
         _mailbox.Writer.TryComplete();
     }
 
-    private void OnTurnFinished(ActorWorkItem<TActor> item, ActorTurnOutcome outcome) {
-        if (outcome == ActorTurnOutcome.Completed) return;
-
-        if (outcome == ActorTurnOutcome.SnapshotConflictRetry)
-            lock (_mailbox) {
-                (_retryItems ??= []).Add(item);
-            }
-
+    void IActorActivation.MarkSnapshotConflicted() {
         if (Interlocked.Exchange(ref _snapshotConflicted, 1) == 0)
             _logger.LogWarning(
                 "Actor {Actor} ({ActorKey}) hit a snapshot concurrency conflict; passivating this "
-                + "activation and re-running the conflicted turn on a fresh one that reloads the "
-                + "latest snapshot.",
+                + "activation; the conflicted turn's retry and every later call run on a fresh one that "
+                + "reloads the latest snapshot.",
                 _actorName, _keyText);
+    }
+
+    private void OnTurnFinished(ActorWorkItem<TActor> item, ActorTurnOutcome outcome) {
+        if (outcome == ActorTurnOutcome.Completed) return;
+
+        // SnapshotConflictRetry or NotRunOnStaleActivation: the item runs on the fresh activation.
+        lock (_mailbox) {
+            (_retryItems ??= []).Add(item);
+        }
     }
 
     private void OnItemCompleted() {

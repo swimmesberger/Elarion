@@ -17,10 +17,11 @@ internal enum ActorTurnOutcome {
     SnapshotConflictRetry,
 
     /// <summary>
-    /// The retried turn conflicted again (live contention / sustained double-hosting): the caller
-    /// got the exception; the cell still passivates so the next activation reloads.
+    /// The item reached an activation that an earlier turn had already marked snapshot-conflicted, so
+    /// it did not run there: its state may hold that turn's failed write and its ETag is stale. The cell
+    /// re-enqueues it with the retries, and it runs for the first time on the fresh activation.
     /// </summary>
-    SnapshotConflictFailed
+    NotRunOnStaleActivation
 }
 
 /// <summary>
@@ -53,7 +54,7 @@ public abstract class ActorWorkItem<TActor> where TActor : class {
     internal abstract CancellationToken InvocationToken { get; }
 
     internal abstract ValueTask<ActorTurnOutcome> RunAsync(
-        TActor actor, IActorActivationRetainer? retainer, ActorStateTracker? states, CancellationToken stopping);
+        TActor actor, IActorActivation? activation, ActorStateTracker? states, CancellationToken stopping);
 
     internal abstract void TryFail(Exception exception);
 
@@ -110,7 +111,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
 
     // Set for the duration of RunAsync (the cell); null outside a turn. Turn-scoped on purpose: the
     // retention IDisposable it hands out outlives the turn, this reference must not (pooled reuse).
-    private IActorActivationRetainer? _retainer;
+    private IActorActivation? _activation;
 
     internal Task<TResult> Completion => _completion.Task;
 
@@ -128,7 +129,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     /// Correctness passivations (snapshot conflict) and shutdown ignore retention by design.
     /// </summary>
     protected IDisposable? RetainActivation() {
-        return _retainer?.Retain();
+        return _activation?.Retain();
     }
 
     internal override void Initialize(
@@ -179,8 +180,8 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     }
 
     internal override async ValueTask<ActorTurnOutcome> RunAsync(
-        TActor actor, IActorActivationRetainer? retainer, ActorStateTracker? states, CancellationToken stopping) {
-        _retainer = retainer;
+        TActor actor, IActorActivation? activation, ActorStateTracker? states, CancellationToken stopping) {
+        _activation = activation;
         // Canceled or timed out while queued: skip execution entirely.
         if (_completion.Task.IsCompleted) {
             Cleanup();
@@ -248,6 +249,10 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
             if (ex is ActorSnapshotConcurrencyException conflict
                 && states is not null && ReferenceEquals(conflict.Origin, states)) {
                 ActorTelemetry.RecordSnapshotConflict(_actorName);
+                // Mark the activation stale BEFORE the caller can observe this turn's outcome: once a
+                // caller has seen the conflict, its next call must reach a fresh activation, never this
+                // one, whose memory still holds the failed write.
+                activation?.MarkSnapshotConflicted();
                 if (!_snapshotRetryAttempted && !_completion.Task.IsCompleted) {
                     // Greenfield conflict semantics (ADR-0047): the caller is NOT completed. The
                     // cell passivates this stale activation and re-enqueues the item, so the turn
@@ -261,7 +266,6 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
                     // Second consecutive conflict: live contention or sustained double-hosting —
                     // now the caller sees it.
                     outcome = "error";
-                    turnOutcome = ActorTurnOutcome.SnapshotConflictFailed;
                     _completion.TrySetException(ex);
                 }
             }
@@ -317,7 +321,7 @@ public abstract class ActorWorkItem<TActor, TResult> : ActorWorkItem<TActor> whe
     }
 
     private void Cleanup() {
-        _retainer = null;
+        _activation = null;
         // Registration disposal blocks until an in-flight callback finishes, so after these three
         // disposals nothing can touch the source anymore and it is safe to recycle.
         _callerRegistration.Dispose();

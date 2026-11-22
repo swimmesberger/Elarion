@@ -113,6 +113,63 @@ public sealed class ActorStateTests {
         (await vault.Deposit(1, TestToken)).Should().Be(6);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CallMadeTheMomentASustainedConflictSurfaces_ActivatesFresh(bool reentrant) {
+        var store = new FakeSnapshotStore();
+        var observed = new ActivationObservations();
+        await using var provider = CreateProvider(store, observed, reentrant: reentrant);
+        var vault = provider.GetRequiredService<IActorSystem>().Get<IVault>("a");
+
+        await vault.Deposit(5, TestToken);
+        store.FailWritesWithConflict = true;
+
+        // The follow-up call starts from the failed call's completion hook: right after the caller can
+        // observe the conflict, before the cell's own after-turn bookkeeping. That is the interleaving a
+        // preempted pump thread produces, and the follow-up must still not reach the activation whose
+        // memory holds the failed deposit.
+        var followUp = new TaskCompletionSource<Task<int>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var act = async () => await vault.DepositThen(1, () => {
+            store.FailWritesWithConflict = false;
+            followUp.TrySetResult(vault.Deposit(1, TestToken).AsTask());
+        }, TestToken);
+        await act.Should().ThrowAsync<ActorSnapshotConcurrencyException>();
+
+        (await await followUp.Task.WaitAsync(WaitTimeout, TestToken)).Should().Be(6);
+        observed.BalancesOnActivate.Should().Equal(0, 5, 5);
+    }
+
+    [Fact]
+    public async Task CallQueuedBehindAConflictedTurn_RunsOnTheFreshActivation() {
+        var store = new FakeSnapshotStore();
+        var observed = new ActivationObservations();
+        await using var provider = CreateProvider(store, observed);
+        var vault = provider.GetRequiredService<IActorSystem>().Get<IVault>("a");
+
+        await vault.Deposit(5, TestToken);
+        store.Replace(new ActorSnapshotKey("Vault", "a"), """{"balance":50}""");
+
+        // Hold the deposit's write until a read is queued behind it on the same, soon stale, activation.
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        store.BeforeNextWrite = async () => {
+            writeStarted.TrySetResult();
+            await releaseWrite.Task;
+        };
+
+        var deposit = vault.Deposit(1, TestToken).AsTask();
+        await writeStarted.Task.WaitAsync(WaitTimeout, TestToken);
+        var describe = vault.Describe(TestToken).AsTask();
+        releaseWrite.TrySetResult();
+
+        // The deposit conflicts and re-runs on a fresh activation that loaded 50. The queued read runs
+        // there too, never on the stale activation whose memory holds the failed write's 6.
+        (await deposit).Should().Be(51);
+        (await describe).Should().Be("51");
+        observed.BalancesOnActivate.Should().Equal(0, 50);
+    }
+
     [Fact]
     public async Task ForeignSnapshotConflict_FromANestedActorCall_FaultsTheOuterTurn_WithoutRetry() {
         var store = new FakeSnapshotStore();
@@ -227,7 +284,8 @@ public sealed class ActorStateTests {
     private static ServiceProvider CreateProvider(
         FakeSnapshotStore store,
         ActivationObservations? observations = null,
-        FakeTimeProvider? timeProvider = null) {
+        FakeTimeProvider? timeProvider = null,
+        bool reentrant = false) {
         var services = new ServiceCollection();
         services.AddSingleton<TimeProvider>(timeProvider ?? TimeProvider.System);
         services.AddSingleton(observations ?? new ActivationObservations());
@@ -236,7 +294,7 @@ public sealed class ActorStateTests {
         services.AddElarionJson();
         services.ConfigureElarionJson(options => options.TypeInfoResolvers.Add(ActorStateTestContext.Default));
         services.AddElarionActorSystem();
-        AddVaultActor(services);
+        AddVaultActor(services, reentrant);
         services.AddElarionActor(new ActorRegistration<OrchestratorActor, string, IOrchestrator> {
             Name = "Orchestrator",
             Options = new ActorOptions(),
@@ -250,10 +308,10 @@ public sealed class ActorStateTests {
 
     // Mirrors the generated activator: the state parameter is created through ActorStateFactory,
     // bound to this activation's identity.
-    private static void AddVaultActor(IServiceCollection services) {
+    private static void AddVaultActor(IServiceCollection services, bool reentrant = false) {
         services.AddElarionActor(new ActorRegistration<VaultActor, string, IVault> {
             Name = "Vault",
-            Options = new ActorOptions(),
+            Options = new ActorOptions { Reentrant = reentrant },
             Activator = static (serviceProvider, context) => new VaultActor(
                 ActorStateFactory.Create<VaultState, string>(serviceProvider, context),
                 serviceProvider.GetRequiredService<ActivationObservations>()),
@@ -294,6 +352,11 @@ public sealed class ActorStateTests {
 
     public interface IVault : IActorFacade<string> {
         ValueTask<int> Deposit(int amount, CancellationToken cancellationToken = default);
+
+        // A deposit that runs afterCompletion once its call is done: the probe for what a caller can do
+        // the moment it observes the outcome.
+        ValueTask<int> DepositThen(int amount, Action afterCompletion, CancellationToken cancellationToken = default);
+
         ValueTask<string> Describe(CancellationToken cancellationToken = default);
         ValueTask<int> Reload(CancellationToken cancellationToken = default);
         ValueTask Reset(CancellationToken cancellationToken = default);
@@ -343,6 +406,11 @@ public sealed class ActorStateTests {
             return handle.InvokeAsync(new DepositItem(amount), cancellationToken);
         }
 
+        public ValueTask<int> DepositThen(int amount, Action afterCompletion,
+            CancellationToken cancellationToken = default) {
+            return handle.InvokeAsync(new DepositThenItem(amount, afterCompletion), cancellationToken);
+        }
+
         public ValueTask<string> Describe(CancellationToken cancellationToken = default) {
             return handle.InvokeAsync(new DescribeItem(), cancellationToken);
         }
@@ -364,6 +432,20 @@ public sealed class ActorStateTests {
 
             protected override async ValueTask<int> InvokeAsync(VaultActor actor, CancellationToken cancellationToken) {
                 return await actor.Deposit(amount, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        // Recycle runs once the item is fully done: after its caller's completion was published, on the
+        // thread that finished the turn, before the cell's own after-turn bookkeeping.
+        private sealed class DepositThenItem(int amount, Action afterCompletion) : ActorWorkItem<VaultActor, int> {
+            public override string MethodName => "Deposit";
+
+            protected override async ValueTask<int> InvokeAsync(VaultActor actor, CancellationToken cancellationToken) {
+                return await actor.Deposit(amount, cancellationToken).ConfigureAwait(false);
+            }
+
+            protected override void Recycle() {
+                afterCompletion();
             }
         }
 
@@ -451,10 +533,21 @@ public sealed class ActorStateTests {
     internal sealed class FakeSnapshotStore : IActorSnapshotStore {
         private readonly ConcurrentDictionary<ActorSnapshotKey, (string Payload, long Version)> _rows = new();
         private int _writeAttempts;
+        private volatile bool _failWritesWithConflict;
+        private Func<Task>? _beforeNextWrite;
 
         public int WriteAttempts => Volatile.Read(ref _writeAttempts);
 
-        public bool FailWritesWithConflict { get; set; }
+        // Set by the test thread, read by the actor's pump thread.
+        public bool FailWritesWithConflict {
+            get => _failWritesWithConflict;
+            set => _failWritesWithConflict = value;
+        }
+
+        // Awaited by the next write only (one-shot), before it decides its outcome.
+        public Func<Task>? BeforeNextWrite {
+            set => Volatile.Write(ref _beforeNextWrite, value);
+        }
 
         public (string Payload, long Version)? Get(ActorSnapshotKey key) {
             return _rows.TryGetValue(key, out var row) ? row : null;
@@ -488,16 +581,18 @@ public sealed class ActorStateTests {
                 : null);
         }
 
-        public ValueTask<string> WriteAsync(
+        public async ValueTask<string> WriteAsync(
             ActorSnapshotKey key, string payload, string? expectedETag, CancellationToken cancellationToken = default) {
             Interlocked.Increment(ref _writeAttempts);
+            if (Interlocked.Exchange(ref _beforeNextWrite, null) is { } beforeWrite) await beforeWrite();
+
             if (FailWritesWithConflict) throw new ActorSnapshotConcurrencyException(key, expectedETag);
 
             if (expectedETag is null) {
                 var version = MintLineageVersion();
                 if (!_rows.TryAdd(key, (payload, version))) throw new ActorSnapshotConcurrencyException(key, null);
 
-                return ValueTask.FromResult(version.ToString(CultureInfo.InvariantCulture));
+                return version.ToString(CultureInfo.InvariantCulture);
             }
 
             var expectedVersion = long.Parse(expectedETag, CultureInfo.InvariantCulture);
@@ -505,7 +600,7 @@ public sealed class ActorStateTests {
                 !_rows.TryUpdate(key, (payload, expectedVersion + 1), row))
                 throw new ActorSnapshotConcurrencyException(key, expectedETag);
 
-            return ValueTask.FromResult((expectedVersion + 1).ToString(CultureInfo.InvariantCulture));
+            return (expectedVersion + 1).ToString(CultureInfo.InvariantCulture);
         }
 
         public ValueTask ClearAsync(ActorSnapshotKey key, string expectedETag,
