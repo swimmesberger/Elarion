@@ -19,7 +19,7 @@ It always emits the three core files, plus conditional outputs when the schema c
 | File | Purpose |
 | --- | --- |
 | `rpc-types.ts` | `RpcMethods` interface mapping method names to params/result types. |
-| `rpc-schemas.ts` | `rpcParamsSchemas` and `rpcResultSchemas` Zod maps for runtime params/result validation. |
+| `rpc-schemas.ts` | `rpcParamsSchemas` and `rpcResultSchemas` Zod maps for runtime params/result validation, plus the [limits, presets, sort keys and constants](#limits-presets-sort-keys-and-constants) the schema declares. |
 | `rpc-client.ts` | Typed fetch client for single calls and batches. |
 | `session-client.ts` | Client-capability snapshot client and OpenFeature provider — emitted **only** when the schema exposes the `elarion.session` operation (rename it with `--session-client <file>`). |
 | `events-client.ts` | Topic-typed [client-event subscription client](#client-event-subscriptions) — emitted **only** when the schema declares client-event topics. |
@@ -168,7 +168,11 @@ const rpc = createRpcApi({
 ```
 
 `$uploadFile(file, { fileName, signal })` (also `$client.uploadFile`) names a `Blob` that has no name of its own. Params
-validation accepts a `Blob` or a string at an upload position, before the upload. A failed upload rejects the call with
+validation accepts a `Blob` or a string at an upload position, before the upload. When the member declares
+[`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member), the `Blob` must also fit them:
+a larger file or another media type fails params validation with the server's message (`RpcParamsValidationError`)
+and is never uploaded. The media type is compared as the server compares it — case-insensitively, parameters ignored,
+an untyped `Blob` as `application/octet-stream`. A reference passes; the server checks the file it names. A failed upload rejects the call with
 `RpcTransportError` and the method is not called. A retry that passes the `File` again uploads it again and sends a new
 reference, so for an `[Idempotent]` operation upload once with `$uploadFile` and retry with the reference — otherwise
 the retried request differs from the first one and answers `idempotency.key_reused`. Schemas without upload members
@@ -454,6 +458,41 @@ const decision = canCall(rpcMethodInfo['invoices.approve'], capabilities)   // t
 `permission`, `role`), or `{ allowed: true, serverChecks }`. Like a contribution's `when`, it is a UX projection:
 the server authorizes every call. The same map answers other per-method questions — `rpcMethodInfo[m].tags.timeout`
 for a slow operation's client timeout, `readOnly` for which actions a read-only session may still use.
+
+## Limits, presets, sort keys and constants
+
+Four more exports at the end of `rpc-schemas.ts` carry values the server declares, so a page shows or sends them
+instead of copying them. Each is emitted only when the schema has an entry for it; `rpc-types.ts` and
+`rpc-client.ts` never change.
+
+| Export | What it holds | Declared by |
+| --- | --- | --- |
+| `rpcLimits` | Every params member's limits by method and member path, as literal types: `minLength`, `maxLength`, `minimum`, `exclusiveMinimum`, `maximum`, `exclusiveMaximum`, `minItems`, `maxItems`, and an upload member's `maxBytes` and `contentTypes`. A nested member is reached through its parent, a list's elements through `items`. | The DataAnnotations the schema already exports, and [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) |
+| `rpcPresets` | Named request values per method, each typed as the method's params. | [`[RequestPreset]`](/docs/reference/attributes#requestpreset) on the handler |
+| `rpcSortKeys` | The keys the handler's sort map allows, in declaration order, with the direction a bare key applies and which one is the default. | The handler's [`SortMap`](/docs/capabilities/pagination#offset-pagination) |
+| `rpcConstants` | Each module's exported constants, as literal types. | [`[ClientConstants]`](/docs/reference/attributes#clientconstants) |
+
+```ts
+import { rpcConstants, rpcLimits, rpcPresets, rpcSortKeys } from './generated/rpc-schemas'
+
+// "up to 10 receipts" and the disabled button read the server's [MaxLength(10)], typed as 10.
+const maxReceipts = rpcLimits['documents.upload'].receipts.maxItems
+const maxReceiptBytes = rpcLimits['documents.upload'].receipts.items.maxBytes
+
+// A chip opens exactly the request the server counted.
+const page = await rpc.invoices.list({ ...rpcPresets['invoices.list'].toTransfer, page: 2 })
+
+// A column header toggles between +key and -key for the keys the handler allows.
+const sortable = rpcSortKeys['invoices.list'].map((sortKey) => sortKey.key)
+
+const currencies = rpcConstants.billing.currencies   // readonly ["EUR", "CHF"]
+```
+
+A preset carries the members the server needs to see that request: every required member, and every other member
+whose value differs from the request's default — `null` where the preset clears a default. Spread it into the params
+and add the page, size or search the UI owns. Labels stay in the client's language files; the schema carries values
+only. A server change to any of these reaches the client as a type change, so a page that relied on the old value
+fails to compile instead of drifting.
 
 ## Params validation
 

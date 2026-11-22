@@ -9,21 +9,40 @@ namespace Elarion.Blobs;
 /// upload container whose recorded owner is exactly the current user, and anything else is answered as missing.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Ownership is compared against <see cref="BlobMetadata.OwnerId"/>, never parsed from the stored name, like the upload
 /// endpoints' own cancel and download checks. The reason a reference was refused is logged at debug level only; the
 /// caller sees one error for every cause.
+/// </para>
+/// <para>
+/// It is also the scope's <see cref="IDeclaredUploadConstraints"/>: the limits the request's <c>[UploadLimits]</c>
+/// members declare apply to every read and keep of those files, on top of the constraints a call passes.
+/// </para>
 /// </remarks>
 internal sealed class UploadedFiles(
     IBlobStore blobStore,
     ICurrentUser currentUser,
     UploadedFilesOptions options,
     ILogger<UploadedFiles> logger,
-    IBlobLifecycle? lifecycle = null) : IUploadedFiles {
+    IBlobLifecycle? lifecycle = null) : IUploadedFiles, IDeclaredUploadConstraints {
     // Longer than any id a store mints; a longer value is not an id, and is refused before it reaches the store.
     private const int MaxIdLength = 1024;
 
     private static readonly AppError NotFound = AppError.Validation(
         "The uploaded file was not found or has expired. Upload it again.", ErrorCodes.UploadNotFound);
+
+    // The limits declared for the files of this scope's requests, by blob id. A scope is one call, so this stays small;
+    // a file declared twice keeps both declarations, and every one must hold.
+    private Dictionary<string, List<UploadConstraints>>? _declared;
+
+    public void Declare(UploadedFile? file, UploadConstraints constraints) {
+        ArgumentNullException.ThrowIfNull(constraints);
+        if (file is null) return;
+
+        _declared ??= new Dictionary<string, List<UploadConstraints>>(StringComparer.Ordinal);
+        if (!_declared.TryGetValue(file.Id, out var list)) _declared[file.Id] = list = [];
+        if (!list.Contains(constraints)) list.Add(constraints);
+    }
 
     public async ValueTask<Result<UploadedFileContent>> OpenAsync(
         UploadedFile file,
@@ -38,7 +57,7 @@ internal sealed class UploadedFiles(
         if (download is null) return Refused(blobRef, "it does not exist");
 
         var metadata = download.Metadata;
-        if (Check(blobRef, metadata, constraints) is { } error) {
+        if ((Check(blobRef, metadata, constraints) ?? CheckDeclared(blobRef, metadata)) is { } error) {
             await download.DisposeAsync().ConfigureAwait(false);
             return error;
         }
@@ -65,7 +84,7 @@ internal sealed class UploadedFiles(
         var metadata = await blobStore.GetMetadataAsync(blobRef, cancellationToken).ConfigureAwait(false);
         if (metadata is null) return Refused(blobRef, "it does not exist");
 
-        if (Check(blobRef, metadata, constraints) is { } error) return error;
+        if ((Check(blobRef, metadata, constraints) ?? CheckDeclared(blobRef, metadata)) is { } error) return error;
 
         // Joins the caller's unit of work where the store supports it; false means the collector removed the blob
         // between the check and the commit.
@@ -103,6 +122,17 @@ internal sealed class UploadedFiles(
 
         blobRef = new BlobRef { Value = id };
         return true;
+    }
+
+    // The limits the request's [UploadLimits] members declared for this file, after the call's own.
+    private AppError? CheckDeclared(BlobRef blobRef, BlobMetadata metadata) {
+        if (_declared is null || !_declared.TryGetValue(blobRef.Value, out var declared)) return null;
+
+        foreach (var constraints in declared)
+            if (Check(blobRef, metadata, constraints) is { } error)
+                return error;
+
+        return null;
     }
 
     private AppError? Check(BlobRef blobRef, BlobMetadata metadata, UploadConstraints? constraints) {

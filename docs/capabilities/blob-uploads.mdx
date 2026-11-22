@@ -246,14 +246,12 @@ app.MapElarionBlobUploads().RequireAuthorization();
 public sealed class AnalyzeStatement(IUploadedFiles uploads, StatementParser parser)
     : IHandler<AnalyzeStatement.Command, Result<StatementAnalysis>> {
     public sealed record Command : ICommand {
+        [UploadLimits(MaxBytes = 50L * 1024 * 1024, ContentTypes = ["text/csv", "application/xml"])]
         public required UploadedFile Statement { get; init; }
     }
 
     public async ValueTask<Result<StatementAnalysis>> HandleAsync(Command command, CancellationToken ct) {
-        var opened = await uploads.OpenAsync(command.Statement, new UploadConstraints {
-            MaxBytes = 50L * 1024 * 1024,
-            ContentTypes = ["text/csv", "application/xml"],
-        }, ct);
+        var opened = await uploads.OpenAsync(command.Statement, cancellationToken: ct);   // the declared limits apply
         if (!opened.IsSuccess) return opened.Error;
 
         await using var file = opened.Value;   // Content, ContentType, FileName, Length, ContentSha256
@@ -284,7 +282,7 @@ reference no longer opens it.
 | `upload.content_type` | The declared content type is not in `UploadConstraints.ContentTypes` (exact, case-insensitive, parameters such as `; charset` ignored). |
 
 All three are `Validation` errors (JSON-RPC `-32602`, HTTP `400`) the handler returns, so it declares the ones it can
-produce with `[ProducesError]`, as above. The constraints are the handler's per operation; the endpoints'
+produce with `[ProducesError]`, as above. The limits are the handler's per operation; the endpoints'
 `MaxContentLength`/`MaxSize` and `AllowedContentTypes` still cap what can be uploaded at all. The content type is the
 one the client declared, not sniffed: treat the content as untrusted input.
 
@@ -292,10 +290,41 @@ An upload lives until it is committed, deleted, or collected after the endpoint'
 `ResumableBlobUploadOptions.Ttl`, default 30 minutes). A multi-step flow (analyze, preview, commit) passes the same
 `UploadedFile` to every step, so raise the `Ttl` to the longest time a user may spend in it.
 
-The exported schema marks the member `x-elarion-upload` (a string), and the
-[generated TypeScript client](/docs/capabilities/transports/typescript-client#uploaded-files) takes a `File` there and
-uploads it before the call; `rpc.$uploadFile(file)` uploads once for a multi-step flow. An MCP tool caller passes the
-id. See [ADR-0105](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0105-uploaded-files-are-handler-parameters.md).
+### Declaring the limits on the member
+
+`[UploadLimits(MaxBytes = …, ContentTypes = […])]` on the request member declares the limits once, where every side
+reads them. Before the handler runs, the pipeline declares them for the request's files to the scoped
+`IDeclaredUploadConstraints` (the same `AddElarionUploadedFiles` registration), and every `OpenAsync` and `CommitAsync`
+of those files checks them — the handler passes no constraints. The schema exports them next to the marker, and the
+generated client rejects a file that breaks them before uploading it.
+
+```csharp
+public sealed record Command : ICommand {
+    [UploadLimits(MaxBytes = 50L * 1024 * 1024, ContentTypes = ["text/csv", "application/xml"])]
+    public required UploadedFile Statement { get; init; }
+
+    // On a collection the limits apply to every file; [MaxLength] bounds how many there are.
+    [MaxLength(10), UploadLimits(MaxBytes = 5L * 1024 * 1024, ContentTypes = ["application/pdf"])]
+    public IReadOnlyList<UploadedFile> Receipts { get; init; } = [];
+}
+```
+
+| Rule | |
+| --- | --- |
+| Members | `UploadedFile`, `UploadedFile?`, or a collection of them (array, list, read-only collection), on the handler's request type, its own or inherited. On a positional record, target the property (`[property: UploadLimits(…)]`) or the parameter. |
+| Limits | `MaxBytes` (`0` = none) and `ContentTypes` (empty = any), compared as `UploadConstraints` compares them. At least one. |
+| Several | Constraints a call still passes to `IUploadedFiles` apply too; a file declared by two members must satisfy both. Declarations only tighten. |
+| Build errors | `ELUPL001` for a member that holds no uploaded file or a declaration without a valid limit; `ELUPL002` for a member of a type that is not a handler's request in the assembly — a declaration the pipeline would not enforce is never accepted. |
+| Fail closed | A handler with declared limits needs an `IDeclaredUploadConstraints` (registered by `AddElarionUploadedFiles`); without one its pipeline does not build. A singleton handler cannot declare limits (`ELSG013`). |
+
+The exported schema marks the member `x-elarion-upload` (a string), with the declared limits as
+`x-elarion-max-bytes` and `x-elarion-content-types` (on the items of a collection), and the
+[generated TypeScript client](/docs/capabilities/transports/typescript-client#uploaded-files) takes a `File` there,
+checks it against those limits and uploads it before the call; `rpc.$uploadFile(file)` uploads once for a multi-step
+flow, and `rpcLimits` shows the limits to the user. An MCP tool caller passes the id. The OpenAPI document marks the
+member but does not carry its declared limits. See
+[ADR-0105](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0105-uploaded-files-are-handler-parameters.md)
+and [ADR-0100](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0100-the-schema-exports-constants-presets-and-limits.md).
 
 ## Streaming downloads and temp-file flows
 

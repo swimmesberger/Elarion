@@ -21,7 +21,7 @@ The generated files are:
 | File             | Purpose                                                                                                                                           |
 |------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `rpc-types.ts`   | `RpcMethods` interface mapping method names to params/result types.                                                                               |
-| `rpc-schemas.ts` | `rpcParamsSchemas` and `rpcResultSchemas` Zod maps for runtime params/result validation.                                                          |
+| `rpc-schemas.ts` | `rpcParamsSchemas` and `rpcResultSchemas` Zod maps for runtime params/result validation, plus `rpcLimits`, `rpcPresets`, `rpcSortKeys` and `rpcConstants` when the schema declares them. |
 | `rpc-client.ts`  | Browser/Node.js fetch client with typed single calls, batching, headers, `AbortSignal`, JSON-RPC errors, and Zod-backed params/result validation. |
 
 The generated schema and client files import `zod`, so consuming applications should install `zod` as a runtime

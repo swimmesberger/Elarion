@@ -23,6 +23,16 @@ export interface JsonSchema {
    * results carry the reference.
    */
   'x-elarion-upload'?: boolean
+  /**
+   * The largest size in bytes an `x-elarion-upload` member accepts (`[UploadLimits(MaxBytes = …)]`, ADR-0100). The
+   * generated params schema rejects a larger `File`/`Blob` before uploading it; the server enforces it regardless.
+   */
+  'x-elarion-max-bytes'?: number
+  /**
+   * The media types an `x-elarion-upload` member accepts (`[UploadLimits(ContentTypes = …)]`), compared
+   * case-insensitively with parameters ignored, as the server compares them.
+   */
+  'x-elarion-content-types'?: string[]
   // Constraint keywords (JSON Schema 2020-12). exclusiveMinimum/exclusiveMaximum are numbers, not booleans.
   minLength?: number
   maxLength?: number
@@ -81,6 +91,21 @@ export interface RpcMethodSchema {
   readOnly?: boolean
   /** The handler's [ClientTag] hints by key; omitted when it declares none. */
   tags?: Record<string, string>
+  /**
+   * Named request presets (`[RequestPreset]`, ADR-0100): each a params value in the wire form, carrying the required
+   * members and every member that differs from the request's defaults. Omitted when the handler declares none.
+   */
+  presets?: Record<string, Record<string, unknown>>
+  /** The keys of the sort map the handler declares, in declaration order; omitted when it declares none. */
+  sortKeys?: RpcSortKeySchema[]
+}
+
+/** One allowed sort key: a bare key sorts in `direction`; `+key`/`-key` force ascending/descending. */
+export interface RpcSortKeySchema {
+  key: string
+  direction: 'ascending' | 'descending'
+  /** Set on the key applied when the request names none. */
+  default?: boolean
 }
 
 /**
@@ -127,6 +152,11 @@ export interface RpcSchema {
   capabilities?: RpcSchemaCapabilities
   /** Client-event topics by name, emitted by the server exporter when the host declares any (ADR-0043). */
   events?: Record<string, RpcEventSchema>
+  /**
+   * The constants each enabled module exports (`[ClientConstants]`, ADR-0100), by camel-cased module and member name:
+   * numbers, strings, booleans, enum values in their wire form, and arrays of them.
+   */
+  constants?: Record<string, Record<string, unknown>>
 }
 
 export interface GenerateRpcClientOptions {

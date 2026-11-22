@@ -65,6 +65,13 @@
  ELRPC003   | Elarion.JsonRpc                    | Warning  | Duplicate operation name across the handler bus
  ELRPC004   | Elarion.JsonRpc                    | Error    | Response member is omitted from the wire contract
  ELRPC005   | Elarion.JsonRpc                    | Error    | A streamed file cannot be carried by a [Handler] transport
+ ELRPC006   | Elarion.JsonRpc                    | Error    | Invalid request preset
+ ELRPC007   | Elarion.JsonRpc                    | Error    | Duplicate request preset name
+ ELRPC008   | Elarion.JsonRpc                    | Error    | Request preset of a handler that is not on JSON-RPC
+ ELRPC009   | Elarion.JsonRpc                    | Error    | Invalid client constants class
+ ELRPC010   | Elarion.JsonRpc                    | Error    | Client constant cannot be exported
+ ELRPC011   | Elarion.JsonRpc                    | Error    | Duplicate client constant name
+ ELRPC012   | Elarion.JsonRpc                    | Warning  | Handler declares more than one sort map
  ELERR001   | Elarion.Errors                     | Error    | Invalid error code
  ELERR002   | Elarion.Errors                     | Error    | Conflicting error declaration
  ELERR003   | Elarion.Errors                     | Error    | Decision options are not an enum
@@ -111,6 +118,8 @@
  ELIDEM004  | Elarion.Abstractions.Idempotency   | Warning  | Handler cannot be both idempotent and cacheable
  ELINBX001  | Elarion.Abstractions.Messaging     | Warning  | [AllowDuplicates] handler is not an integration-event consumer
  ELPREV001  | Elarion.Abstractions.Previews      | Error    | Previewable command handler does not return a preview outcome
+ ELUPL001   | Elarion.Abstractions               | Error    | Invalid [UploadLimits] declaration
+ ELUPL002   | Elarion.Abstractions               | Error    | [UploadLimits] is not on a handler request
  ELCEV001   | Elarion.Abstractions.ClientEvents  | Warning  | Client event is not in any module
  ELCEV002   | Elarion.Abstractions.ClientEvents  | Error    | Duplicate client-event topic name
  ELCEV003   | Elarion.Abstractions.ClientEvents  | Warning  | Client events are not registered without Elarion.ClientEvents

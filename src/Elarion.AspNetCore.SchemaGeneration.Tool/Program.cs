@@ -2,8 +2,11 @@ using System.Text;
 using Elarion.Abstractions.Features;
 using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.ClientEvents;
+using Elarion.Abstractions.Dispatch;
 using Elarion.Abstractions.Modules;
+using Elarion.Abstractions.Pipeline;
 using Elarion.JsonRpc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Elarion.AspNetCore.SchemaGeneration.Tool;
 
@@ -60,7 +63,12 @@ internal static class Program {
             FeatureFlags = host.Services.GetService(typeof(IFeatureFlagCatalog)) as IFeatureFlagCatalog,
             PermissionCatalog = host.Services.GetService(typeof(IPermissionCatalog)) as IPermissionCatalog,
             // Present when the host calls AddElarionClientEvents; absent, the schema carries no events block.
-            ClientEventTopics = host.Services.GetService(typeof(ClientEventTopicManifest)) as ClientEventTopicManifest
+            ClientEventTopics = host.Services.GetService(typeof(ClientEventTopicManifest)) as ClientEventTopicManifest,
+            // ADR-0100: the enabled modules' [ClientConstants], and each method's handler type, whose [RequestPreset]
+            // fields and sort map the export reads. Absent, the schema carries neither.
+            ClientConstants = (host.Services.GetService(typeof(IEnumerable<ModuleClientConstants>))
+                as IEnumerable<ModuleClientConstants>)?.ToList(),
+            HandlerTypes = ResolveHandlerTypes(dispatcher, host.Services)
         };
 
         var schemaJson = JsonRpcSchemaExporter.Generate(dispatcher, dispatcher.JsonOptions, exportOptions);
@@ -75,5 +83,26 @@ internal static class Program {
         }
 
         Console.WriteLine($"Elarion JSON-RPC schema written to {outputPath} ({dispatcher.MethodNames.Count} methods)");
+    }
+
+    // Each handler registers its HandlerMetadata keyed by its request type; a hand-wired route has none.
+    private static Dictionary<Type, Type>? ResolveHandlerTypes(JsonRpcDispatcher dispatcher, IServiceProvider services) {
+        if (services is not IKeyedServiceProvider keyed) return null;
+
+        IReadOnlyList<HandlerRoute> routes;
+        try {
+            routes = dispatcher.GetRegisteredRoutes();
+        }
+        catch (InvalidOperationException) {
+            // Not frozen: the export itself reports that, with the fix.
+            return null;
+        }
+
+        var handlerTypes = new Dictionary<Type, Type>();
+        foreach (var route in routes)
+            if (keyed.GetKeyedService(typeof(HandlerMetadata), route.RequestType) is HandlerMetadata metadata)
+                handlerTypes[route.RequestType] = metadata.HandlerType;
+
+        return handlerTypes;
     }
 }

@@ -92,6 +92,25 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
                 EmitHandlerRegistration(spc, handler);
         });
 
+        // Every [UploadLimits] written in this compilation, checked against the request members the handlers enforce
+        // (ELUPL002): a declaration no pipeline applies is an error, never a silently unchecked file.
+        var uploadLimitsSites = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                UploadLimitsAttributeMetadataName,
+                static (node, _) => node is PropertyDeclarationSyntax or ParameterSyntax,
+                static (ctx, _) => CreateUploadLimitsSite(ctx))
+            .Where(static site => site is not null)
+            .Select(static (site, _) => site!)
+            .Collect()
+            .Select(static (sites, _) => sites
+                .OrderBy(static s => s.Display, StringComparer.Ordinal)
+                .ToEquatableArray())
+            .WithTrackingName("UploadLimitsSites");
+
+        context.RegisterSourceOutput(
+            handlerProvider.Combine(uploadLimitsSites).WithTrackingName("UploadLimitsCheck"),
+            static (spc, source) => ReportMisplacedUploadLimits(spc, source.Left, source.Right));
+
         var moduleAggregationProvider = handlerProvider
             .Combine(modules)
             .Combine(ModuleProviders.HasTrigger(context, TriggerAttributeMetadataName))

@@ -26,6 +26,13 @@ JSON-RPC method emission for `[Handler]` handlers. See
 | ELRPC003 | Warning | Two handlers resolve to the same operation name on the shared bus (e.g. an inferred name colliding with another inferred or explicit one); one would silently win at runtime. | Give one handler an explicit `[Handler("...")]` name so every operation name is unique across the bus. |
 | ELRPC004 | Error | A non-nullable member of a handler's response graph is annotated `[JsonIgnore(Condition = WhenWritingDefault)]` (or `WhenWritingNull` on a non-nullable reference). Non-nullable members are required on the wire, so the serializer must always write them. | Make the member nullable to declare it optional, or remove the ignore condition. |
 | ELRPC005 | Error | A `[Handler]` responds with `ElarionStreamedFile`, which only HTTP can carry: JSON-RPC, MCP and connections need a payload that serializes. No operation is registered. | Remove `[Handler]` and map the handler with `[HttpEndpoint]` alone, or respond with `ElarionFile` (small files) or a pending blob the client downloads (large files). |
+| ELRPC006 | Error | A `[RequestPreset]` field is not exported: its name is blank, it is not `static readonly`, it is not declared on a handler class, or its type is not that handler's request type. | Declare the preset as a `static readonly` field of the `[Handler]` class, holding a value of its request type, with a non-blank name. |
+| ELRPC007 | Error | A handler declares one request-preset name more than once. | Give each `[RequestPreset]` of a handler its own name. |
+| ELRPC008 | Error | A `[RequestPreset]` belongs to a handler that is not on JSON-RPC, so the preset has no method to belong to. | Expose the handler on JSON-RPC (its `[Handler]` `Transports`), or remove the preset. |
+| ELRPC009 | Error | A `[ClientConstants]` class exports nothing: it is not a static class, it is generic, it (or a type containing it) is private or protected, or its namespace is not under an `[AppModule]` of its assembly. | Make it a non-generic `static` class, at least `internal`, under a module's namespace. |
+| ELRPC010 | Error | A public member of a `[ClientConstants]` class cannot be exported: its type is not a number, string, boolean or enum (or an array, `IReadOnlyList<T>`, `IReadOnlyCollection<T>` or `ImmutableArray<T>` of one), or it is mutable (a non-readonly static field, a property with a setter). | Use an exportable type and a `const`, `static readonly` field or get-only property, or make the member non-public so it is not exported. |
+| ELRPC011 | Error | Two members of one module's `[ClientConstants]` classes export the same (camel-cased) name. | Rename one; a constant name is unique per module. |
+| ELRPC012 | Warning | A JSON-RPC handler declares more than one static `SortMap` field, so the schema cannot tell which one its sort parameter uses and exports no `sortKeys` for it. | Keep one sort map per handler. |
 | ELERR001 | Error | A `[ProducesError]` code is not lower-case ASCII letters, digits and underscores in dot-separated segments. | Use a code such as `token.malformed`. |
 | ELERR002 | Error | One error code is declared more than once on a handler (with its base classes), a decorator, a module or an assembly with a different kind or payload type. | Declare each code once per place; a code has exactly one kind and one payload. A narrower place may declare a code again to override a wider one. |
 | ELERR003 | Error | A `[RequiresDecision]` declares `Options` that are not an enum with members. | Pass `typeof` an enum whose members are the choices, or omit `Options` for a confirmation. |
@@ -365,6 +372,16 @@ Preview-decorator attachment for handlers whose request implements `IPreviewable
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELPREV001 | Error | A handler's request implements `IPreviewableRequest`, but its response is not `Result<T>` with `T : IPreviewOutcome<T>`, so the preview decorator cannot stamp and compare the outcome's fingerprint and the request's `Preview`/`PreviewFingerprint` would be silently ignored. | Return `Result<TOutcome>` whose outcome implements `IPreviewOutcome<TOutcome>`, or stop implementing `IPreviewableRequest`. |
+
+## ELUPL — Declared upload limits
+
+`[UploadLimits]` declarations on handler request members, which the pipeline enforces through `IUploadedFiles`. See
+[Declaring the limits on the member](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELUPL001 | Error | An `[UploadLimits]` on a handler request member is not enforced: the member holds no `UploadedFile` (nor a collection of them), `MaxBytes` is negative, a content type is blank, it declares no limit, or the member's getter is not accessible to the generated pipeline. | Declare it on an `UploadedFile`, `UploadedFile?` or collection member with `MaxBytes > 0` or at least one content type. See [Declaring the limits on the member](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member). |
+| ELUPL002 | Error | An `[UploadLimits]` is on a member of a type that is not the request type of a handler in the assembly (a nested DTO, a method parameter), where no pipeline applies it. | Declare the limits on a member of the handler's request type itself. |
 
 ## ELIDEMEF — Idempotency keys (EF Core)
 

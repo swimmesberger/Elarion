@@ -47,6 +47,37 @@ block lists.
 }
 ```
 
+The schema also carries **values** the server declares, so the client stops copying them (ADR-0100). Each is omitted
+when nothing declares it, so a schema without declarations is byte-identical:
+
+| Where | What | Declared by |
+| --- | --- | --- |
+| `methods.{m}.presets.{name}` | A named params value: every required member, and every other member that differs from the request's default (`null` where the preset clears one), in the wire form. | [`[RequestPreset]`](/docs/reference/attributes#requestpreset) on a static readonly field of the handler |
+| `methods.{m}.sortKeys` | The keys of the handler's sort map in declaration order: `key`, `direction` (`ascending`/`descending`, what a bare key applies) and `default: true` on the default key. | One static [`SortMap`](/docs/capabilities/pagination#offset-pagination) field on the handler |
+| `constants.{module}.{name}` | A module's exported constants, module and member camel-cased (`Billing.MaxAmount` → `constants.billing.maxAmount`). | [`[ClientConstants]`](/docs/reference/attributes#clientconstants) on a static class of the module |
+| an upload member's `x-elarion-max-bytes`, `x-elarion-content-types` | Its declared limits, next to `x-elarion-upload` (on the items of a collection). | [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) |
+
+```json
+"invoices.list": {
+  "params": { "…": "…" },
+  "result": { "…": "…" },
+  "presets": {
+    "notExported": { "status": "Approved", "exported": false },
+    "toTransfer": { "toTransfer": true }
+  },
+  "sortKeys": [
+    { "key": "createdAt", "direction": "descending", "default": true },
+    { "key": "number", "direction": "ascending" }
+  ]
+}
+```
+
+The export reads presets and sort keys from each method's handler type, which the schema tool takes from the host's
+handler registrations, and constants from the enabled modules' registrations; values are written with the canonical
+JSON configuration, so names and enum spellings match calls. The generated client gives them typed accessors —
+`rpcPresets`, `rpcSortKeys`, `rpcConstants` — and turns every member's limit keywords into `rpcLimits` (see
+[Limits, presets, sort keys and constants](/docs/capabilities/transports/typescript-client#limits-presets-sort-keys-and-constants)).
+
 ### Requiredness
 
 One rule, in both directions ([ADR-0082](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0082-requiredness-comes-from-nullability-in-both-directions.md)):

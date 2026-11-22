@@ -37,9 +37,9 @@ export function jsonSchemaToZod(
   }
 
   // Params validate before the upload, so they take the file itself (File extends Blob) or a reference; results
-  // carry the reference.
+  // carry the reference. Declared limits reject a file before it is uploaded; a reference was checked when it was.
   if (resolved['x-elarion-upload'] === true) {
-    return nullish(uploadInput ? 'z.union([z.instanceof(Blob), z.string()])' : 'z.string()', nullable)
+    return nullish(uploadInput ? `z.union([${uploadFileSchema(resolved)}, z.string()])` : 'z.string()', nullable)
   }
 
   if (resolved.enum) {
@@ -110,6 +110,26 @@ export function jsonSchemaToZod(
   }
 
   return 'z.unknown()'
+}
+
+// The File/Blob arm of an upload member, refined by its declared limits (ADR-0100) with the server's messages. The media
+// type is compared as the server compares it: case-insensitively, parameters ignored, and an untyped blob as the
+// application/octet-stream the uploader sends for it.
+function uploadFileSchema(schema: JsonSchema): string {
+  let expression = 'z.instanceof(Blob)'
+  const maxBytes = schema['x-elarion-max-bytes']
+  if (maxBytes !== undefined) {
+    const message = `The file is larger than the accepted ${maxBytes} bytes.`
+    expression += `.refine((file) => file.size <= ${maxBytes}, ${JSON.stringify(message)})`
+  }
+  const contentTypes = schema['x-elarion-content-types']
+  if (contentTypes !== undefined && contentTypes.length > 0) {
+    const accepted = contentTypes.map((type) => type.split(';')[0].trim().toLowerCase())
+    const message = `Files of this type are not accepted here; expected ${contentTypes.join(', ')}.`
+    expression += `.refine((file) => ${JSON.stringify(accepted)}.includes((file.type || 'application/octet-stream')`
+      + `.split(';')[0].trim().toLowerCase()), ${JSON.stringify(message)})`
+  }
+  return expression
 }
 
 function nullish(expression: string, nullable: boolean): string {

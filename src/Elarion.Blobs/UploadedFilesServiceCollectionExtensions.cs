@@ -10,7 +10,8 @@ namespace Elarion.Blobs;
 /// </summary>
 public static class UploadedFilesServiceCollectionExtensions {
     /// <summary>
-    /// Registers <see cref="IUploadedFiles"/> (scoped, via <c>TryAdd</c>) and its <see cref="UploadedFilesOptions"/>.
+    /// Registers <see cref="IUploadedFiles"/> and <see cref="IDeclaredUploadConstraints"/> (one scoped instance, via
+    /// <c>TryAdd</c>) and its <see cref="UploadedFilesOptions"/>.
     /// Idempotent: an explicit <paramref name="configure"/> replaces previously registered options, while <c>null</c>
     /// keeps them.
     /// </summary>
@@ -45,8 +46,11 @@ public static class UploadedFilesServiceCollectionExtensions {
             services.TryAddSingleton(new UploadedFilesOptions());
         }
 
-        // Scoped like the current user and the blob store it reads through.
-        services.TryAddScoped<IUploadedFiles, UploadedFiles>();
+        // Scoped like the current user and the blob store it reads through. One instance per scope serves both
+        // contracts, so the limits the pipeline declares ([UploadLimits]) are the ones the handler's reads check.
+        services.TryAddScoped<UploadedFiles>();
+        services.TryAddScoped<IUploadedFiles>(static sp => sp.GetRequiredService<UploadedFiles>());
+        services.TryAddScoped<IDeclaredUploadConstraints>(static sp => sp.GetRequiredService<UploadedFiles>());
 
         return services;
     }

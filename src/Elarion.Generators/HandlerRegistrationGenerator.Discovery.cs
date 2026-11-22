@@ -230,12 +230,17 @@ public sealed partial class HandlerRegistrationGenerator {
         var previewOutcomeFqn = ParsePreviewable(
             classDecl, classSymbol, requestType, responseType, compilation, fmt, diagnostics);
 
+        // Declared upload limits (ADR-0100) get the upload-limits decorator; an event is never an upload request.
+        var uploadLimits = isEventConsumer ? null : ParseUploadLimits(requestType, compilation, diagnostics);
+        VerifySortMaps(classDecl, classSymbol, diagnostics);
+
         var scopeValue = ParseHandlerScope(classSymbol);
         if (scopeValue == 1) {
             VerifySingletonHandler(
                 classDecl, classSymbol, handlerFqn, fmt, serviceScopeFacts,
                 decorators, cacheable, cacheInvalidation, hasAuthorization, hasFeatureGates, hasValidation,
-                idempotent, audit, variantContractDeps, diagnostics, visibility is not null);
+                idempotent, audit, variantContractDeps, diagnostics, visibility is not null,
+                uploadLimits is { Members.IsEmpty: false });
             VerifySingletonPreview(classDecl, handlerFqn, previewOutcomeFqn, diagnostics);
         }
 
@@ -265,7 +270,8 @@ public sealed partial class HandlerRegistrationGenerator {
             scopeValue,
             diagnostics.ToImmutable(),
             visibility,
-            previewOutcomeFqn);
+            previewOutcomeFqn,
+            uploadLimits);
     }
 
     // Decides whether the framework ValidationDecorator attaches to this handler (ADR-0027). Attachment is a
@@ -431,7 +437,8 @@ public sealed partial class HandlerRegistrationGenerator {
         AuditInfo? audit,
         EquatableArray<string> variantContractDeps,
         ImmutableArray<DiagnosticInfo>.Builder diagnostics,
-        bool hasVisibility) {
+        bool hasVisibility,
+        bool hasUploadLimits) {
         var location = classDecl.Identifier.GetLocation();
 
         // ELSG013: every pipeline feature whose decorator resolves per-dispatch services when the chain is
@@ -451,6 +458,7 @@ public sealed partial class HandlerRegistrationGenerator {
         if (hasFeatureGates) ScopedPipelineFeature("a [FeatureGate]");
         if (hasValidation) ScopedPipelineFeature("request validation");
         if (hasVisibility) ScopedPipelineFeature("a response member visible by permission ([VisibleWith])");
+        if (hasUploadLimits) ScopedPipelineFeature("declared upload limits ([UploadLimits])");
         if (!variantContractDeps.IsEmpty) ScopedPipelineFeature("a feature-variant dependency");
 
         foreach (var decorator in decorators)

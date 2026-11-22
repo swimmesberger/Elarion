@@ -44,6 +44,7 @@ public sealed partial class HandlerRegistrationGenerator {
         AppendRegistrationMethod(sb, handler);
         AppendBuildPipelineMethods(sb, handler);
         AppendVisibilityMembers(sb, handler);
+        AppendUploadLimitsMembers(sb, handler);
 
         if (handler.Cacheable is not null)
             AppendCachePolicy(sb, handler);
@@ -195,6 +196,8 @@ public sealed partial class HandlerRegistrationGenerator {
             "                    ? new global::System.Collections.Generic.List<global::Elarion.Abstractions.Pipeline.PipelineStep>()");
         sb.AppendLine("                    : null;");
 
+        // Declared upload limits (ADR-0100) are declared innermost, right before the handler reads its files.
+        AppendUploadLimitsDecorator(sb, handler);
         AppendCacheDecorator(sb, handler);
         // The audit success recorder sits inside the transaction owners (the [DecoratorList] TransactionDecorator
         // and IdempotencyDecorator below), so its RecordAsync write enlists in the caller's unit of work and the

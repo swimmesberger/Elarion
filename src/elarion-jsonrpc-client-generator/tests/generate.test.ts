@@ -2773,3 +2773,195 @@ async function loadGeneratedUploadClient(clientSource: string): Promise<UploadCl
 
   return await import(pathToFileURL(join(dir, 'rpc-client.mjs')).href) as UploadClientModule
 }
+
+describe('client exports (ADR-0100)', () => {
+  function exportsSchema(): RpcSchema {
+    return {
+      methods: {
+        'invoices.list': {
+          params: {
+            type: 'object',
+            properties: {
+              toTransfer: {type: ['boolean', 'null']},
+              status: {enum: ['Draft', 'Approved', null]},
+              size: {type: 'integer', minimum: 1, maximum: 100},
+              search: {type: ['string', 'null'], maxLength: 200},
+              address: {
+                type: 'object',
+                properties: {street: {type: 'string', minLength: 1, maxLength: 80}, city: {type: 'string'}},
+                required: ['street', 'city'],
+              },
+            },
+          },
+          result: {type: 'integer'},
+          presets: {
+            toTransfer: {toTransfer: true},
+            notExported: {status: 'Approved', size: 50},
+          },
+          sortKeys: [
+            {key: 'createdAt', direction: 'descending', default: true},
+            {key: 'number', direction: 'ascending'},
+          ],
+        },
+        'documents.upload': {
+          params: {
+            type: 'object',
+            properties: {
+              statement: {
+                type: 'string',
+                'x-elarion-upload': true,
+                'x-elarion-max-bytes': 1024,
+                'x-elarion-content-types': ['text/csv', 'Application/XML; charset=utf-8'],
+              },
+              receipts: {
+                type: 'array',
+                maxItems: 10,
+                items: {type: 'string', 'x-elarion-upload': true, 'x-elarion-max-bytes': 2048},
+              },
+            },
+            required: ['statement', 'receipts'],
+          },
+          result: {type: 'integer'},
+        },
+        'math.ping': {
+          params: {type: 'object', properties: {}},
+          result: {type: 'string'},
+        },
+      },
+      constants: {
+        billing: {maxReceipts: 10, currencies: ['EUR', 'CHF'], defaultStatus: 'Approved'},
+        archive: {enabled: true},
+      },
+    }
+  }
+
+  it('exports every params limit by member path, with upload limits on the upload member', () => {
+    const generated = generateRpcClientFiles(exportsSchema())
+
+    expect(generated.schemasSource).toContain([
+      'export const rpcLimits = {',
+      '  "documents.upload": {',
+      '    statement: {',
+      '      maxBytes: 1024,',
+      '      contentTypes: ["text/csv", "Application/XML; charset=utf-8"],',
+      '    },',
+      '    receipts: {',
+      '      maxItems: 10,',
+      '      items: {',
+      '        maxBytes: 2048,',
+      '      },',
+      '    },',
+      '  },',
+      '  "invoices.list": {',
+      '    size: {',
+      '      minimum: 1,',
+      '      maximum: 100,',
+      '    },',
+      '    search: {',
+      '      maxLength: 200,',
+      '    },',
+      '    address: {',
+      '      street: {',
+      '        minLength: 1,',
+      '        maxLength: 80,',
+      '      },',
+      '    },',
+      '  },',
+      '} as const',
+      '',
+      'export type RpcLimits = typeof rpcLimits',
+    ].join('\n'))
+    expect(generated.schemasSource).not.toContain('"math.ping": {\n    ')
+  })
+
+  it('exports presets typed as the method params, sort keys and module constants', () => {
+    const generated = generateRpcClientFiles(exportsSchema())
+
+    expect(generated.schemasSource).toContain("import { z } from 'zod'\nimport type { RpcMethods } from './rpc-types.js'\n")
+    expect(generated.schemasSource).toContain([
+      'export const rpcPresets: {',
+      '  readonly "invoices.list": {',
+      '    readonly notExported: RpcMethods["invoices.list"][\'params\']',
+      '    readonly toTransfer: RpcMethods["invoices.list"][\'params\']',
+      '  }',
+      '} = {',
+      '  "invoices.list": {',
+      '    notExported: {',
+      '      status: "Approved",',
+      '      size: 50,',
+      '    },',
+      '    toTransfer: {',
+      '      toTransfer: true,',
+      '    },',
+      '  },',
+      '}',
+    ].join('\n'))
+    expect(generated.schemasSource).toContain([
+      'export const rpcSortKeys = {',
+      '  "invoices.list": [',
+      '    {',
+      '      key: "createdAt",',
+      '      direction: "descending",',
+      '      default: true,',
+      '    },',
+      '    {',
+      '      key: "number",',
+      '      direction: "ascending",',
+      '      default: false,',
+      '    },',
+      '  ],',
+      '} as const',
+    ].join('\n'))
+    expect(generated.schemasSource).toContain([
+      'export const rpcConstants = {',
+      '  archive: {',
+      '    enabled: true,',
+      '  },',
+      '  billing: {',
+      '    currencies: ["EUR", "CHF"],',
+    ].join('\n'))
+    expect(generated.schemasSource).toContain('    defaultStatus: "Approved",\n    maxReceipts: 10,\n  },\n} as const')
+  })
+
+  it('rejects a file that breaks the declared upload limits before uploading it', () => {
+    const generated = generateRpcClientFiles(exportsSchema())
+
+    expect(generated.schemasSource).toContain(
+      'statement: z.union([z.instanceof(Blob)'
+      + '.refine((file) => file.size <= 1024, "The file is larger than the accepted 1024 bytes.")'
+      + '.refine((file) => ["text/csv","application/xml"].includes((file.type || \'application/octet-stream\')'
+      + '.split(\';\')[0].trim().toLowerCase()), "Files of this type are not accepted here; expected text/csv, '
+      + 'Application/XML; charset=utf-8."), z.string()]),')
+    expect(generated.schemasSource).toContain(
+      'receipts: z.array(z.union([z.instanceof(Blob).refine((file) => file.size <= 2048, '
+      + '"The file is larger than the accepted 2048 bytes."), z.string()])).max(10),')
+  })
+
+  it('leaves the types and the client byte-identical, and emits no block for a schema without any', () => {
+    const declared = generateRpcClientFiles(exportsSchema())
+    const plain = exportsSchema()
+    for (const method of Object.values(plain.methods)) {
+      delete method.presets
+      delete method.sortKeys
+    }
+    delete plain.constants
+    const statement = plain.methods['documents.upload'].params.properties?.statement as JsonSchema
+    delete statement['x-elarion-max-bytes']
+    delete statement['x-elarion-content-types']
+    const undeclared = generateRpcClientFiles(plain)
+
+    expect(declared.typesSource).toBe(undeclared.typesSource)
+    expect(declared.clientSource).toBe(undeclared.clientSource)
+    expect(undeclared.schemasSource).not.toContain('rpcPresets')
+    expect(undeclared.schemasSource).not.toContain('rpcSortKeys')
+    expect(undeclared.schemasSource).not.toContain('rpcConstants')
+    expect(undeclared.schemasSource).not.toContain('import type')
+    expect(undeclared.schemasSource).toContain('statement: z.union([z.instanceof(Blob), z.string()]),')
+
+    const limitFree = generateRpcClientFiles({
+      methods: {'math.ping': {params: {type: 'object', properties: {name: {type: 'string'}}}, result: {type: 'string'}}},
+    })
+    expect(limitFree.schemasSource).not.toContain('rpcLimits')
+    expect(limitFree.schemasSource.endsWith('export type RpcErrorDataSchemas = typeof rpcErrorDataSchemas\n')).toBe(true)
+  })
+})

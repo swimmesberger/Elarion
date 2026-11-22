@@ -37,4 +37,17 @@ public sealed record JsonRpcSchemaExportOptions {
     /// Absent or empty, the block is omitted and the schema stays byte-identical.
     /// </summary>
     public ClientEventTopicManifest? ClientEventTopics { get; init; }
+
+    /// <summary>
+    /// The constants the enabled modules export (<c>[ClientConstants]</c>, registered by each module's generated
+    /// services), written as the schema's <c>constants</c> block (ADR-0100). Absent or empty, the block is omitted.
+    /// </summary>
+    public IReadOnlyList<ModuleClientConstants>? ClientConstants { get; init; }
+
+    /// <summary>
+    /// The handler type of each method, keyed by its request type (the registered <c>HandlerMetadata</c>). The export
+    /// reads a method's <c>[RequestPreset]</c> fields and the sort keys of the <c>SortMap</c> its handler declares from
+    /// it (ADR-0100). Absent, or without an entry for a method, the method exports neither.
+    /// </summary>
+    public IReadOnlyDictionary<Type, Type>? HandlerTypes { get; init; }
 }

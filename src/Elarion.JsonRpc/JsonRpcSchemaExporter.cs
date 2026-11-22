@@ -67,6 +67,9 @@ public static class JsonRpcSchemaExporter {
             throw new InvalidOperationException(
                 "Cannot export the JSON-RPC schema because the dispatcher has no registered methods.");
 
+        // Constants, presets and sort keys are values, not schemas: they are written with the canonical options, plus a
+        // reflection fallback for value types no source-generated context lists (an int[] constant, say).
+        var valueOptions = CreateValueOptions(options);
         var methodsObj = new JsonObject();
         foreach (var route in methods) {
             var requestSchema = BuildSchemaNode(
@@ -92,6 +95,13 @@ public static class JsonRpcSchemaExporter {
             if (typeof(IQuery).IsAssignableFrom(route.RequestType)) method["readOnly"] = true;
             if (BuildTagsNode(route.Client) is { } tagsNode) method["tags"] = tagsNode;
 
+            // Declared next to the handler (ADR-0100): named request presets and the sort keys of its sort map.
+            if (exportOptions?.HandlerTypes?.TryGetValue(route.RequestType, out var handlerType) == true) {
+                if (BuildPresetsNode(route, handlerType, requestSchema, valueOptions) is { } presetsNode)
+                    method["presets"] = presetsNode;
+                if (BuildSortKeysNode(handlerType) is { } sortKeysNode) method["sortKeys"] = sortKeysNode;
+            }
+
             methodsObj[route.Name] = method;
         }
 
@@ -107,7 +117,185 @@ public static class JsonRpcSchemaExporter {
         var events = BuildEventsNode(exportOptions, options);
         if (events is not null) schema["events"] = events;
 
+        var constants = BuildConstantsNode(exportOptions, valueOptions);
+        if (constants is not null) schema["constants"] = constants;
+
         return schema.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
+    private static JsonSerializerOptions CreateValueOptions(JsonSerializerOptions options) {
+        var valueOptions = new JsonSerializerOptions(options);
+        valueOptions.TypeInfoResolverChain.Add(new DefaultJsonTypeInfoResolver());
+        return valueOptions;
+    }
+
+    /// <summary>
+    /// Builds the <c>constants</c> block — per enabled module (camel-cased, as method names are), its
+    /// <c>[ClientConstants]</c> members with their values in the canonical JSON form — or <see langword="null"/> when no
+    /// module exports any, keeping constant-free schemas byte-identical. Modules and names are in ordinal order.
+    /// </summary>
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
+    private static JsonObject? BuildConstantsNode(
+        JsonRpcSchemaExportOptions? exportOptions, JsonSerializerOptions valueOptions) {
+        if (exportOptions?.ClientConstants is not { Count: > 0 } sets) return null;
+
+        var constants = new JsonObject();
+        foreach (var group in sets
+                     .GroupBy(static set => CamelCase(set.Module), StringComparer.Ordinal)
+                     .OrderBy(static group => group.Key, StringComparer.Ordinal)) {
+            var module = new JsonObject();
+            foreach (var constant in group
+                         .SelectMany(static set => set.Constants)
+                         .DistinctBy(static constant => constant.Name, StringComparer.Ordinal)
+                         .OrderBy(static constant => constant.Name, StringComparer.Ordinal)) {
+                object? value;
+                try {
+                    value = constant.GetValue();
+                }
+                catch (Exception ex) {
+                    throw new InvalidOperationException(
+                        $"Cannot export client constant '{constant.Name}' of module '{group.Key}': reading it threw: {ex.Message}",
+                        ex);
+                }
+
+                module[constant.Name] = JsonSerializer.SerializeToNode(value, constant.Type, valueOptions);
+            }
+
+            if (module.Count > 0) constants[group.Key] = module;
+        }
+
+        return constants.Count > 0 ? constants : null;
+    }
+
+    /// <summary>
+    /// Builds a method's <c>presets</c> object — each <see cref="RequestPresetAttribute"/> field of its handler, in
+    /// ordinal name order — or <see langword="null"/> when the handler declares none. A preset carries the members a
+    /// client must send to make the server see exactly the field's value: every required member, and every other member
+    /// whose value differs from what the server assumes when it is left out (an explicit <c>null</c> where that
+    /// default is not null). Values are written with the canonical options, so names and enum spellings match calls.
+    /// </summary>
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
+    private static JsonObject? BuildPresetsNode(
+        HandlerRoute route, Type handlerType, JsonNode requestSchema, JsonSerializerOptions valueOptions) {
+        var fields = handlerType
+            .GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+            .Select(static field => (Field: field, Preset: field.GetCustomAttribute<RequestPresetAttribute>()))
+            .Where(static pair => pair.Preset is not null)
+            .OrderBy(static pair => pair.Preset!.Name, StringComparer.Ordinal)
+            .ToList();
+        if (fields.Count == 0) return null;
+
+        var required = (requestSchema as JsonObject)?["required"] is JsonArray names
+            ? names.Select(static name => name?.GetValue<string>()).OfType<string>().ToHashSet(StringComparer.Ordinal)
+            : [];
+        var typeInfo = valueOptions.GetTypeInfo(route.RequestType);
+
+        var presets = new JsonObject();
+        foreach (var (field, preset) in fields) {
+            var value = field.GetValue(null);
+            if (value is null || !route.RequestType.IsInstanceOfType(value))
+                throw new InvalidOperationException(
+                    $"Cannot export request preset '{preset!.Name}' of method '{route.Name}': field '{handlerType}.{field.Name}' "
+                    + $"must hold a '{route.RequestType}' value.");
+
+            presets[preset!.Name] = PresetNode(route, preset.Name, value, typeInfo, required);
+        }
+
+        return presets;
+    }
+
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
+    private static JsonObject PresetNode(
+        HandlerRoute route, string name, object value, JsonTypeInfo typeInfo, HashSet<string> required) {
+        if (JsonSerializer.SerializeToNode(value, typeInfo) is not JsonObject written)
+            throw new InvalidOperationException(
+                $"Cannot export request preset '{name}' of method '{route.Name}': its request does not serialize as an object.");
+
+        // What the server reads when only the required members are sent: deserialize them alone, so constructor
+        // parameter defaults and initializers apply exactly as they do for a call, and write that instance back.
+        var defaults = new JsonObject();
+        foreach (var member in required)
+            if (written.TryGetPropertyValue(member, out var memberValue))
+                defaults[member] = memberValue?.DeepClone();
+            else
+                throw new InvalidOperationException(
+                    $"Cannot export request preset '{name}' of method '{route.Name}': it leaves the required member "
+                    + $"'{member}' null. Give it a value; a preset is a complete request.");
+
+        JsonObject? assumed;
+        try {
+            assumed = JsonSerializer.SerializeToNode(defaults.Deserialize(typeInfo), typeInfo) as JsonObject;
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or InvalidOperationException) {
+            // A request that cannot be built from its required members alone: every written member is the preset.
+            assumed = null;
+        }
+
+        var node = new JsonObject();
+        foreach (var (member, memberValue) in written) {
+            if (required.Contains(member)
+                || assumed is null
+                || !assumed.TryGetPropertyValue(member, out var assumedValue)
+                || !JsonNode.DeepEquals(memberValue, assumedValue))
+                node[member] = memberValue?.DeepClone();
+        }
+
+        // A member the preset leaves null (so it was not written) whose default is not null: the client must send null.
+        if (assumed is not null)
+            foreach (var (member, assumedValue) in assumed)
+                if (assumedValue is not null && !written.ContainsKey(member))
+                    node[member] = null;
+
+        return node;
+    }
+
+    private const string SortMapTypeName = "Elarion.Paging.SortMap`1";
+
+    /// <summary>
+    /// Builds a method's <c>sortKeys</c> array from the one <c>SortMap</c> static field its handler declares — each key
+    /// in declaration order with the direction a bare key applies and, on the default key, <c>default: true</c> — or
+    /// <see langword="null"/> when the handler declares none or more than one (the generator warns, ELRPC012).
+    /// </summary>
+    /// <remarks>
+    /// The map is read by reflection because this build-time export references no paging package; the shape read
+    /// (<c>Keys</c> with <c>Key</c>, <c>Direction</c>, <c>IsDefault</c>) is <c>SortMap&lt;T&gt;.Keys</c>.
+    /// </remarks>
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    private static JsonArray? BuildSortKeysNode(Type handlerType) {
+        var maps = handlerType
+            .GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+            .Where(static field => field.FieldType is { IsGenericType: true } type
+                                   && type.GetGenericTypeDefinition().FullName == SortMapTypeName)
+            .ToList();
+        if (maps is not [var map] || map.GetValue(null) is not { } sortMap) return null;
+
+        if (sortMap.GetType().GetProperty("Keys")?.GetValue(sortMap) is not System.Collections.IEnumerable keys)
+            return null;
+
+        var array = new JsonArray();
+        foreach (var key in keys) {
+            var type = key.GetType();
+            var entry = new JsonObject {
+                ["key"] = (string?)type.GetProperty("Key")?.GetValue(key),
+                ["direction"] = type.GetProperty("Direction")?.GetValue(key)?.ToString() == "Descending"
+                    ? "descending"
+                    : "ascending"
+            };
+            if (type.GetProperty("IsDefault")?.GetValue(key) is true) entry["default"] = true;
+            array.Add((JsonNode)entry);
+        }
+
+        return array.Count > 0 ? array : null;
+    }
+
+    // A module name as a method-name prefix ("Billing" -> "billing"); RpcMethodEmission.CamelCaseModule's counterpart.
+    private static string CamelCase(string name) {
+        return name.Length > 0 && char.IsUpper(name[0]) ? char.ToLowerInvariant(name[0]) + name[1..] : name;
     }
 
     /// <summary>
@@ -474,26 +662,53 @@ public static class JsonRpcSchemaExporter {
     /// </summary>
     private static JsonNode MapUploadPayload(JsonSchemaExporterContext ctx, JsonNode schema, SchemaDirection direction) {
         if (ctx.TypeInfo.Type == typeof(Abstractions.UploadedFile))
-            return UploadNode(ctx.PropertyInfo is { } property
-                              && (direction == SchemaDirection.Request ? property.IsSetNullable : property.IsGetNullable));
+            return UploadNode(
+                ctx.PropertyInfo is { } property
+                && (direction == SchemaDirection.Request ? property.IsSetNullable : property.IsGetNullable),
+                FindUploadLimits(ctx.PropertyInfo));
 
         // The exporter leaves out the "items" of a collection whose element schema accepts anything, which is what a
-        // converter-backed element exports as, before this transform ever sees the element: put it back.
+        // converter-backed element exports as, before this transform ever sees the element: put it back. The member's
+        // declared limits apply to every file of the collection.
         if (ctx.TypeInfo is { Kind: JsonTypeInfoKind.Enumerable } collection
             && collection.ElementType == typeof(Abstractions.UploadedFile)
             && schema is JsonObject array
             && !array.ContainsKey("items"))
-            array["items"] = UploadNode(false);
+            array["items"] = UploadNode(false, FindUploadLimits(ctx.PropertyInfo));
 
         return schema;
     }
 
-    private static JsonObject UploadNode(bool nullable) {
-        return new JsonObject {
+    /// <summary>The vendor keyword carrying an upload member's declared largest size in bytes (<see cref="UploadLimitsAttribute"/>).</summary>
+    internal const string MaxBytesKeyword = "x-elarion-max-bytes";
+
+    /// <summary>The vendor keyword carrying an upload member's declared accepted media types (<see cref="UploadLimitsAttribute"/>).</summary>
+    internal const string ContentTypesKeyword = "x-elarion-content-types";
+
+    private static JsonObject UploadNode(bool nullable, UploadLimitsAttribute? limits) {
+        var node = new JsonObject {
             ["type"] = nullable ? new JsonArray("string", "null") : "string",
             ["x-elarion-upload"] = true,
             ["description"] = "A file staged through the upload endpoint; the value is the blob id it answered with."
         };
+
+        // Declared limits (ADR-0100) travel next to the marker, so a client that predates them still sees an upload.
+        if (limits?.MaxBytes > 0) node[MaxBytesKeyword] = limits.MaxBytes;
+        if (limits?.ContentTypes is { Length: > 0 } contentTypes)
+            node[ContentTypesKeyword] = new JsonArray(contentTypes.Select(static t => (JsonNode?)JsonValue.Create(t)).ToArray());
+
+        return node;
+    }
+
+    // [UploadLimits] on the member, or on the positional record's constructor parameter.
+    private static UploadLimitsAttribute? FindUploadLimits(JsonPropertyInfo? property) {
+        return FindUploadLimits(property?.AttributeProvider) ?? FindUploadLimits(property?.AssociatedParameter?.AttributeProvider);
+    }
+
+    private static UploadLimitsAttribute? FindUploadLimits(ICustomAttributeProvider? provider) {
+        return provider?.GetCustomAttributes(typeof(UploadLimitsAttribute), true) is [UploadLimitsAttribute found, ..]
+            ? found
+            : null;
     }
 
     /// <summary>

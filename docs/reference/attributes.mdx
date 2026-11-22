@@ -123,6 +123,47 @@ See [Telemetry](/docs/capabilities/telemetry) and [Connections — the low-alloc
 | `key` | `string` | The tag key. |
 | `value` | `string` | The tag value. |
 
+### `[RequestPreset]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** field
+- **Triggers:** a named request preset: a `static readonly` field of a `[Handler]` class holding a value of its request type — a list's quick filter. The schema export writes it under the method's `presets` (the required members and every member that differs from the request's defaults, in the wire form) and the generated client exposes it as `rpcPresets['{method}'].{name}`, typed as the method's params. The server counts with the same field, so a chip opens exactly what it counted. The handler must be on JSON-RPC; anything else is `ELRPC006`–`ELRPC008`. See [TypeScript client › Limits, presets, sort keys and constants](/docs/capabilities/transports/typescript-client#limits-presets-sort-keys-and-constants).
+
+| Parameter | Type | Meaning |
+| --- | --- | --- |
+| `name` | `string` | The preset's name, as the client reads it. Unique per handler. |
+
+```csharp
+[Handler]
+public sealed class ListInvoices(AppDbContext db) : IHandler<ListInvoices.Query, Result<Page<InvoiceRow>>> {
+    [RequestPreset("toTransfer")]
+    public static readonly Query ToTransfer = new() { ToTransfer = true };
+    // …
+}
+```
+
+### `[ClientConstants]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** class
+- **Triggers:** exports the public `const` fields, `static readonly` fields and static get-only properties of a static class (not private) under a module's namespace — numbers, strings, booleans, enums, and arrays, `IReadOnlyList<T>`, `IReadOnlyCollection<T>` or `ImmutableArray<T>` of them — as `constants.{module}.{name}` in the schema and `rpcConstants.{module}.{name}` (a literal type) in the generated client, module and member camel-cased. The module's generated services register them, so they exist exactly when the module is enabled; non-public members are not exported. An unexportable or mutable public member, a class its module cannot register, or a duplicate name is `ELRPC009`–`ELRPC011`.
+
+```csharp
+[ClientConstants]
+public static class BillingLimits {
+    public const decimal MaxTransferAmount = 999_999.99m;     // rpcConstants.billing.maxTransferAmount
+    public static readonly IReadOnlyList<string> Currencies = ["EUR", "CHF"];
+}
+```
+
+### `[UploadLimits]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** property, parameter (positional record)
+- **Triggers:** declares the size and content-type limits of an `UploadedFile` request member (or a collection of them). The pipeline declares them for the request's files before the handler runs, and `IUploadedFiles` checks them on every open and commit of those files, on top of any constraints the call passes; the schema exports them as `x-elarion-max-bytes` / `x-elarion-content-types`, and the generated client rejects a file that breaks them before uploading it. Needs `AddElarionUploadedFiles`; a declaration the pipeline would not enforce is `ELUPL001`/`ELUPL002`. See [Declaring the limits on the member](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `MaxBytes` | `long` | `0` | The largest accepted size in bytes; `0` for no limit (`upload.too_large`). |
+| `ContentTypes` | `string[]?` | `null` | The accepted media types, compared case-insensitively with parameters ignored; empty for any (`upload.content_type`). |
+
 ### `[McpHandler]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** class

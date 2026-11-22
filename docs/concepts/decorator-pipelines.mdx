@@ -261,7 +261,9 @@ its trigger applies:
 11. **Your `[DecoratorList]` decorators**, in list order.
 12. [Audit](/docs/concepts/auditing) success recorder — `[Auditable]`, inside your transaction decorator.
 13. [Cache](/docs/capabilities/caching) — `[Cacheable]`.
-14. The handler.
+14. [Upload limits](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) — a request with
+    `[UploadLimits]` members (declares them for the request's files right before the handler reads them).
+15. The handler.
 
 So a denied, gated, or invalid request never reaches your decorators or opens a transaction, a member only some
 callers may see is hidden from a cached or replayed answer too, a denied attempt is still audited, a replayed idempotent request never claims a key, a success audit record commits

@@ -93,7 +93,10 @@ public sealed partial class HandlerRegistrationGenerator {
         VisibilityInfo? Visibility = null,
         // The outcome type (the T of Result<T>) when the request implements IPreviewableRequest and T is an
         // IPreviewOutcome<T>: the preview decorator attaches (ADR-0104). Null for every other handler.
-        string? PreviewOutcomeFqn = null
+        string? PreviewOutcomeFqn = null,
+        // The request's [UploadLimits] members (ADR-0100); the upload-limits decorator attaches when any is valid. Null
+        // when the request declares none.
+        UploadLimitsInfo? UploadLimits = null
     );
 
     // One in-compilation [Service(Scope = …)] fact: a contract (or implementation) FQN and its declared scope.

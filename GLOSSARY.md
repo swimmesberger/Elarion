@@ -287,6 +287,12 @@ the wire. The handler reads, keeps or discards it only through `IUploadedFiles`,
 pending upload and nothing else.
 _Avoid_: blob ref, file id, attachment id (for the parameter), upload token
 
+**Upload limits**:
+The size and content-type limits an uploaded-file member declares (`[UploadLimits]`). The pipeline applies them to
+every read and keep of that file, the schema exports them, and the generated client checks a file against them
+before uploading it. Constraints passed when reading the file apply on top.
+_Avoid_: upload validation, file rules, upload policy
+
 **Streamed file**:
 The file response of an HTTP-only handler (`ElarionStreamedFile`): content written to the response body after
 the handler pipeline has run, never buffered. Only HTTP carries it; JSON surfaces use an ElarionFile or a
@@ -320,6 +326,18 @@ _Avoid_: plugin, widget, slot content
 **Extension point**:
 A typed place in the frontend shell that modules contribute to.
 _Avoid_: slot, seam (a backend term here), hook
+
+**Request preset**:
+A named value of a handler's request type (`[RequestPreset]` on a static readonly field of the handler), exported
+under its method and offered to the client as typed params: a list's quick filter that the server counts with and the
+client opens with the same instance.
+_Avoid_: saved filter, quick filter (for the declaration), view, chip (the UI that shows it)
+
+**Client constants**:
+The constants a module exports to clients (`[ClientConstants]` on a static class): values both sides read from one
+declaration, exported per module and given to the generated client as literal types. Export is a declaration, never
+every public constant.
+_Avoid_: shared constants, config values, enums (for the export)
 
 ### Repository
 

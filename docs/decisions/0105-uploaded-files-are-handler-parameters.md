@@ -116,7 +116,17 @@ not upload a file for the caller; each frontend hand-wrote an upload call before
   container but not the state, so the uploader can still delete or download a blob after it was committed to a
   record.
 - Constraints are passed when the file is read, not declared on the member, so the schema does not carry them. When
-  ADR-0100's typed limits land, an upload limit can be exported the same way.
+  ADR-0100's typed limits land, an upload limit can be exported the same way. (Done: see the amendment below.)
+
+## Amendment (2026-11-22): limits are declared on the member
+
+[ADR-0100](0100-the-schema-exports-constants-presets-and-limits.md) gives the constraints a declared form:
+`[UploadLimits(MaxBytes = …, ContentTypes = […])]` on the `UploadedFile` member. The pipeline declares them to the
+scoped `IDeclaredUploadConstraints` before the handler runs, and the `Elarion.Blobs` reader checks them on every open
+and commit of that file, on top of the constraints a call passes; the schema exports them next to `x-elarion-upload`,
+and the generated client rejects a file that breaks them before uploading it. Constraints passed at read time still
+work and still apply. The rejected alternative "per-member limit attributes" below was rejected for as long as no
+schema support existed; ADR-0100 supplies it with one attribute for both limits.
 
 ## Rejected alternatives
 

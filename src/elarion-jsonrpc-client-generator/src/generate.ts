@@ -1,8 +1,9 @@
+import {generateClientExportsLines} from './client-exports-source.js'
 import {generateEventsClientSource} from './events-client-source.js'
 import {jsonSchemaToTypeScript} from './json-schema-to-ts.js'
 import {jsonSchemaToZod} from './json-schema-to-zod.js'
 import {collectFilePaths, collectUploadPaths, stripNullable, type SchemaContext} from './json-schema.js'
-import {generateRpcClientSource, type RpcMethodInfoLiteral} from './rpc-client-source.js'
+import {generateRpcClientSource, moduleSpecifier, type RpcMethodInfoLiteral} from './rpc-client-source.js'
 import {generateSessionClientSource} from './session-client-source.js'
 import {generateStartAdapterSource} from './start-adapter-source.js'
 import type {GeneratedRpcClientFiles, GenerateRpcClientOptions, JsonSchema, RpcSchema} from './schema.js'
@@ -195,6 +196,14 @@ export function generateRpcClientFiles(
     schemasLines.push('')
     schemasLines.push('export type RpcEventPayloadSchemas = typeof rpcEventPayloadSchemas')
     schemasLines.push('')
+  }
+
+  // Limits, presets, sort keys and constants (ADR-0100), each emitted only when the schema carries one, so a schema
+  // without any keeps producing byte-identical output.
+  const clientExports = generateClientExportsLines(schema, methods, moduleSpecifier(typesFileName))
+  schemasLines.push(...clientExports.lines)
+  if (clientExports.importLines.length > 0) {
+    schemasLines.splice(schemasLines.indexOf("import { z } from 'zod'") + 1, 0, ...clientExports.importLines)
   }
 
   const errorCodesByMethod: Record<string, string[]> = {}

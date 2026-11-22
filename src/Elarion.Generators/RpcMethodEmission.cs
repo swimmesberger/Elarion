@@ -393,7 +393,7 @@ internal static class RpcMethodEmission {
     // HandlerTransports flags: JsonRpc = 1, Mcp = 2, Connection = 4, All = 7 (default when the named
     // argument is absent). A constant baked by an older Elarion (All = 3) decodes as JSON-RPC + MCP only —
     // correct: that compilation never opted into the connection surface.
-    private static (bool OnJsonRpc, bool OnMcp, bool OnConnection) ReadTransports(AttributeData attr) {
+    internal static (bool OnJsonRpc, bool OnMcp, bool OnConnection) ReadTransports(AttributeData attr) {
         var transports = 7;
         foreach (var named in attr.NamedArguments)
             if (named.Key == "Transports" && named.Value.Value is int value) {

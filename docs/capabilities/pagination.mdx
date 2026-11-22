@@ -244,7 +244,10 @@ public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, Cancellation
 
 `Sort.Keys` lists every allowed key in declaration order with its declared direction and which one is the default —
 what a client needs to build sort parameters (a column header toggling between `+key` and `-key`) without mirroring
-the declarations by hand.
+the declarations by hand. The [JSON-RPC schema](/docs/capabilities/transports/schema-generation) exports them under the
+method's `sortKeys` when the handler declares one static `SortMap` field (with several it exports none and the build
+warns, `ELRPC012`), and the generated TypeScript client gives them as `rpcSortKeys['{method}']`, so a frontend reads
+the allowed keys instead of copying them.
 
 ### Mapping a page
 
