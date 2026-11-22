@@ -63,6 +63,9 @@ of that `AddElarionOpenApi()` contributes the parts that make it *Elarion's* con
   Colliding names keep their original id, so ids stay unique.
 - **The error contract's `code` and `data`.** The ProblemDetails schemas declare the stable `code` every Elarion
   failure carries and its optional `data` payload, so generated clients can [branch on the code](#typed-errors).
+- **Uploaded files.** An [`UploadedFile`](/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler) member is
+  documented as what it is on the wire, a string (the staged upload's id) marked `x-elarion-upload: true` like in the
+  JSON-RPC schema, instead of an opaque schema.
 - **The idempotency contract** (below).
 
 ## Idempotency parity

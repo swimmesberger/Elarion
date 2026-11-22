@@ -96,6 +96,28 @@ public sealed class JsonRpcSchemaExporterTests {
         public required UploadedFile Statement { get; init; }
     }
 
+    private sealed record AttachmentsResponse {
+        public required IReadOnlyList<ElarionFile> Files { get; init; }
+    }
+
+    [Fact]
+    public void Generate_AListOfFiles_ExportsTheFileEnvelopeAsItsItems() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<PingRequest, AttachmentsResponse>(
+                "attachments.list",
+                (_, _, _) => ValueTask.FromResult<Result<AttachmentsResponse>>(new AttachmentsResponse { Files = [] }))
+            .Freeze();
+
+        using var doc = JsonDocument.Parse(JsonRpcSchemaExporter.Generate(dispatcher, options));
+
+        // The exporter drops the items of a converter-backed element; the file envelope is put back.
+        var items = doc.RootElement.GetProperty("methods").GetProperty("attachments.list").GetProperty("result")
+            .GetProperty("properties").GetProperty("files").GetProperty("items");
+        items.GetProperty("x-elarion-file").GetBoolean().Should().BeTrue();
+        items.GetProperty("properties").GetProperty("data").GetProperty("format").GetString().Should().Be("byte");
+    }
+
     [Fact]
     public void Generate_UploadedFileMembers_ExportAsMarkedStrings() {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };

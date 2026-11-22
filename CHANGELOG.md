@@ -72,6 +72,11 @@ minor releases may include breaking changes.
   `IBlobLifecycle`, which check no owner. `Elarion.Blobs` now references `Elarion.Abstractions`. See
   [Blob uploads](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler).
 
+### Fixed
+- **Schemas of uploaded files and file lists.** The OpenAPI document described an `UploadedFile` member as an opaque
+  schema; it is now a string marked `x-elarion-upload: true`, as in `rpc-schema.json`. A list of `ElarionFile` exported
+  to `rpc-schema.json` without `items`; it now carries the file envelope, so the generated client converts each item.
+
 ### Changed
 - **The direct-upload cancel and download routes answer `404` for a committed blob.** `DELETE {prefix}/{id}` and
   `GET {prefix}/{id}` (`MapElarionBlobUploads`, `MapElarionBlobDownloads`) checked the owner but not the state, so an

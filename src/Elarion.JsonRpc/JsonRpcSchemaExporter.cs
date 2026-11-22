@@ -438,8 +438,20 @@ public static class JsonRpcSchemaExporter {
     /// of a plain envelope interface.
     /// </summary>
     private static JsonNode MapFilePayload(JsonSchemaExporterContext ctx, JsonNode schema) {
-        if (ctx.TypeInfo.Type != typeof(Abstractions.ElarionFile)) return schema;
+        // A collection of files: the exporter leaves out the "items" of a converter-backed element (see
+        // MapUploadPayload), so the list would export as an array of anything; put the envelope back.
+        if (ctx.TypeInfo is { Kind: JsonTypeInfoKind.Enumerable } collection
+            && collection.ElementType == typeof(Abstractions.ElarionFile)
+            && schema is JsonObject array
+            && !array.ContainsKey("items")) {
+            array["items"] = FileNode();
+            return schema;
+        }
 
+        return ctx.TypeInfo.Type == typeof(Abstractions.ElarionFile) ? FileNode() : schema;
+    }
+
+    private static JsonObject FileNode() {
         return new JsonObject {
             ["type"] = "object",
             ["x-elarion-file"] = true,
