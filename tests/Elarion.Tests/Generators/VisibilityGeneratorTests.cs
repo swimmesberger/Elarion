@@ -191,6 +191,47 @@ public sealed class VisibilityGeneratorTests {
     }
 
     [Fact]
+    public void APreviewOfAnOutcomeWithMarkedMembersIsFingerprintedAsTheCallerSeesIt() {
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  using Elarion.Abstractions.Previews;
+
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+
+                                  public sealed record Outcome : IPreviewOutcome<Outcome> {
+                                      public int Imported { get; init; }
+                                      [VisibleWith("banking.read")] public decimal? Opening { get; init; }
+                                      public string? PreviewFingerprint { get; init; }
+                                      public Outcome WithPreviewFingerprint(string? fingerprint) => this with { PreviewFingerprint = fingerprint };
+                                  }
+
+                                  public sealed record Import(bool Preview = false, string? PreviewFingerprint = null) : IPreviewableRequest;
+
+                                  public sealed class ImportHandler : IHandler<Import, Result<Outcome>> {
+                                      public ValueTask<Result<Outcome>> HandleAsync(Import request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<Outcome>.Success(new Outcome()));
+                                  }
+                              }
+                              """;
+
+        var (result, diagnostics) = Run(source);
+
+        diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        var generated = GetGenerated(result, "Sample_App_ImportHandler.g.cs");
+        generated.Should().Contain(
+            "global::Elarion.Pipeline.PreviewDecorator<global::Sample.App.Import, global::Sample.App.Outcome>(\n"
+            + "                    handler,\n"
+            + "                    sp.GetService<global::Elarion.Abstractions.Pipeline.IUnitOfWork>(),\n"
+            + "                    sp.GetRequiredService<global::Elarion.Abstractions.Serialization.IElarionJsonSerialization>(),\n"
+            + "                    sp.GetService<global::Elarion.Abstractions.Authorization.IPermissionChecker>(),\n"
+            + "                    __Hide0);");
+        Compile(source);
+    }
+
+    [Fact]
     public void ReusesOutputsAfterAnIrrelevantEdit() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(new HandlerRegistrationGenerator(), PreviewSample,
             "Handlers");

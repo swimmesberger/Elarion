@@ -43,7 +43,7 @@ public sealed class VisibilityDecorator<TRequest, TValue> : IHandler<TRequest, R
         ArgumentNullException.ThrowIfNull(usedPermissions);
         ArgumentNullException.ThrowIfNull(hide);
         _inner = inner;
-        _permissions = permissions ?? HoldsNothing.Instance;
+        _permissions = permissions ?? NoPermissions.Instance;
         _usedPermissions = usedPermissions;
         _hide = hide;
     }
@@ -67,12 +67,13 @@ public sealed class VisibilityDecorator<TRequest, TValue> : IHandler<TRequest, R
 
         return true;
     }
+}
 
-    private sealed class HoldsNothing : IPermissionChecker {
-        public static readonly HoldsNothing Instance = new();
+/// <summary>The decision of a host without an <see cref="IPermissionChecker"/>: nothing is held (fail closed).</summary>
+internal sealed class NoPermissions : IPermissionChecker {
+    public static readonly NoPermissions Instance = new();
 
-        public bool Holds(string permission) {
-            return false;
-        }
+    public bool Holds(string permission) {
+        return false;
     }
 }

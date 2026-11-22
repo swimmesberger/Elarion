@@ -330,7 +330,7 @@ internal static class RpcMethodEmission {
         var description = GetDescription(type, descriptionType);
         var parameters = CollectParameterDescriptions(requestType, descriptionType);
         var isIdempotent = HasIdempotentAttribute(type);
-        var errors = ErrorContractDiscovery.Collect(type, requestType, compilation, isIdempotent, report);
+        var errors = ErrorContractDiscovery.Collect(type, requestType, compilation, isIdempotent, report, responseInner);
         if (report is not null)
             ErrorContractDiscovery.VerifyResponseContract(type, responseInner, report);
 

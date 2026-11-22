@@ -22,11 +22,12 @@ override it for individual modules or handlers.
 
 The framework **does** ship built-in decorators for the common cross-cutting concerns —
 [transactions](/docs/concepts/persistence-and-transactions), [request validation](/docs/concepts/validation),
-[idempotency](/docs/concepts/idempotency),
+[idempotency](/docs/concepts/idempotency), [previews](/docs/concepts/previewable-commands),
 [authorization](/docs/concepts/authorization), [feature gating](/docs/concepts/feature-flags),
 [caching](/docs/capabilities/caching), [resilience](/docs/capabilities/resilience), tracing, and the
 async-resolved handler proxy — and the generator auto-attaches them from the handler's own attributes
-(validation from the attributes on the handler's *request* type). The one exception is the
+(validation from the attributes on the handler's *request* type, previews from the request implementing
+`IPreviewableRequest`). The one exception is the
 [transaction decorator](#transaction-decorator), which you list once in your `[DecoratorList]`.
 You still add your own for app-specific behavior (your logging, your tenancy model): define your
 decorators in the application and expose named pipeline attributes with `[DecoratorList]`:
@@ -174,6 +175,7 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
 | Integration-event handler (`IIntegrationEvent`, fresh post-commit scope) | false | not attached — the default-on inbox (idempotency decorator) owns the unit of work |
 | `[AllowDuplicates]` integration-event handler | true | opens its own transaction |
 | `[Idempotent]` command | false | not attached — the idempotency decorator owns the unit of work |
+| Previewable command (`IPreviewableRequest`) | true | opens a transaction nested in the preview decorator's scope (a savepoint), so a preview still rolls it back |
 
 No runtime check, no empty transaction on a query, and domain-event handlers get no decorator at all —
 the chains show exactly what attached. (The one residual wart: a *read-only* `[AllowDuplicates]` integration
@@ -252,10 +254,12 @@ its trigger applies:
 7. [Resilience](/docs/capabilities/resilience) — `[Resilient]`.
 8. [Idempotency](/docs/concepts/idempotency) — `[Idempotent]` commands (owns the unit of work), or the
    inbox for integration-event consumers.
-9. **Your `[DecoratorList]` decorators**, in list order.
-10. [Audit](/docs/concepts/auditing) success recorder — `[Auditable]`, inside your transaction decorator.
-11. [Cache](/docs/capabilities/caching) — `[Cacheable]`.
-12. The handler.
+9. [Preview](/docs/concepts/previewable-commands) — commands whose request implements `IPreviewableRequest` (owns
+   the unit of work of a preview or a fingerprinted commit; a savepoint under idempotency).
+10. **Your `[DecoratorList]` decorators**, in list order.
+11. [Audit](/docs/concepts/auditing) success recorder — `[Auditable]`, inside your transaction decorator.
+12. [Cache](/docs/capabilities/caching) — `[Cacheable]`.
+13. The handler.
 
 So a denied, gated, or invalid request never reaches your decorators or opens a transaction, a denied
 attempt is still audited, a replayed idempotent request never claims a key, a success audit record commits

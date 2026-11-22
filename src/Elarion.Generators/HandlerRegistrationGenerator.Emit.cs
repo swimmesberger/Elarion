@@ -202,6 +202,10 @@ public sealed partial class HandlerRegistrationGenerator {
         // an [Auditable] cached query still records the read on a cache hit.
         AppendAuditCommitDecorator(sb, handler);
         AppendPipelineDecorators(sb, handler.Decorators);
+        // A previewable command's preview decorator (ADR-0104) owns the unit of work of a preview or a fingerprinted
+        // commit: outside the custom decorators (an application transaction decorator nests in it), inside
+        // idempotency (whose transaction it joins with a savepoint, so a preview rolls back only its own writes).
+        AppendPreviewDecorator(sb, handler);
         // Idempotency owns the unit-of-work transaction for [Idempotent] commands, so it wraps the handler and
         // the inner custom decorators — inside validation/resilience/cache-invalidation/feature-gate/authorization
         // (a denied/gated/invalid/replayed request never claims a key) and outside the handler's own work.

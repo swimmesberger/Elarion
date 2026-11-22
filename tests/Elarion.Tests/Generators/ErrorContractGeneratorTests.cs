@@ -81,6 +81,49 @@ public sealed class ErrorContractGeneratorTests {
     }
 
     [Fact]
+    public void PreviewableCommand_ImpliesThePreviewErrors_WithTheOutcomeAsTheChangedPayload() {
+        const string source =
+            """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+            using Elarion.Abstractions.Previews;
+
+            namespace Sample.Errors;
+
+            [Handler("imports.commit")]
+            public sealed class Import : IHandler<Import.Command, Result<Import.Outcome>> {
+                public sealed record Command(bool Preview = false, string? PreviewFingerprint = null) : IPreviewableRequest;
+
+                public sealed record Outcome(int NewRows) : IPreviewOutcome<Outcome> {
+                    public string? PreviewFingerprint { get; init; }
+                    public Outcome WithPreviewFingerprint(string? fingerprint) => this with { PreviewFingerprint = fingerprint };
+                }
+
+                public ValueTask<Result<Outcome>> HandleAsync(Command request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<Outcome>>(new Outcome(1));
+            }
+
+            // A previewable request whose response cannot carry a fingerprint gets no decorator (ELPREV001, reported
+            // by the handler generator), so no preview errors either.
+            [Handler("imports.plain")]
+            public sealed class Plain : IHandler<Plain.Command, Result<string>> {
+                public sealed record Command(bool Preview = false, string? PreviewFingerprint = null) : IPreviewableRequest;
+
+                public ValueTask<Result<string>> HandleAsync(Command request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<string>>("x");
+            }
+            """;
+
+        var generated = Run(source, out var diagnostics);
+
+        diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        ContractOf(generated, "imports.commit").Should().Equal(
+            "preview.changed:Conflict:global::Sample.Errors.Import.Outcome", "preview.unsupported:Internal:");
+        ContractOf(generated, "imports.plain").Should().BeEmpty();
+    }
+
+    [Fact]
     public void RequirePermission_ImpliesUnauthorizedAndForbidden() {
         var generated = Run(Handler("[Elarion.Abstractions.Authorization.RequirePermission(\"a\", \"read\")]"), out _);
 

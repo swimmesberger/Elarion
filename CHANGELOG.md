@@ -49,6 +49,18 @@ minor releases may include breaking changes.
   times: join it once and pass it as the rule's second input. See
   [Rules](https://elarion.wimmesberger.dev/docs/concepts/rules).
 
+- **Previewable commands** (ADR-0104). A command whose request implements `IPreviewableRequest` (`bool Preview`,
+  `string? PreviewFingerprint`) is its own preview: with `Preview` set it runs fully, its outcome is returned stamped
+  with a fingerprint, and every database write is rolled back. A commit that sends the fingerprint back commits only
+  when its outcome is unchanged; otherwise it rolls back and fails with `409`/`Conflict`, code `preview.changed`,
+  carrying the new outcome as `data`. The outcome implements `IPreviewOutcome<T>` and must be deterministic for the
+  same decision. The generator attaches the new `PreviewDecorator` just inside idempotency and outside the
+  `[DecoratorList]`, implies `preview.changed` and `preview.unsupported` on the operation's error contract, and reports
+  `ELPREV001` when the response is not a `Result<T>` with `T : IPreviewOutcome<T>`. `IUnitOfWork.SupportsRollback` (a
+  default interface member, `false`; `true` for the EF Core and SQL-tier units of work) gates it: without a unit of
+  work that rolls back, a preview answers `preview.unsupported` and the handler never runs. Ordinary calls pass
+  straight through. See
+  [Previewable commands](https://elarion.wimmesberger.dev/docs/concepts/previewable-commands).
 ### Changed
 - **Breaking: `ErrorKind` gains `DecisionRequired`** (ADR-0101). The existing kinds keep their values; an exhaustive
   `switch` over `ErrorKind` in an application gets a new case (it maps to HTTP `409` and JSON-RPC `-32006`).

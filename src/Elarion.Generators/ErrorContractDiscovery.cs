@@ -7,8 +7,8 @@ namespace Elarion.Generators;
 /// <summary>
 /// Collects a handler's declared error contract (ADR-0080): the <c>[ProducesError]</c> declarations on the handler
 /// plus the failures the framework pipeline adds where they are statically knowable (request validation,
-/// authorization requirements, feature gates, idempotency); <see cref="ErrorContractScopes"/> later adds the
-/// declarations the operation inherits from its pipeline decorators, its module and its assembly. The result is
+/// authorization requirements, feature gates, idempotency, previews); <see cref="ErrorContractScopes"/> later adds
+/// the declarations the operation inherits from its pipeline decorators, its module and its assembly. The result is
 /// published with the operation, so the schema export and the generated clients describe every failure the
 /// operation can report. Also verifies that the response graph does not opt members out of the serializer contract
 /// (ADR-0082).
@@ -98,20 +98,23 @@ internal static class ErrorContractDiscovery {
     /// <remarks>
     /// Declarations inherited from outside the handler class (pipeline decorators, the module, the assembly) are
     /// added by a later stage, <see cref="ErrorContractScopes"/>, because they live in other files.
+    /// <paramref name="responseValueType"/> is the handler's success type (the <c>T</c> of <c>Result&lt;T&gt;</c>): the
+    /// preview errors are implied only when it is a preview outcome, and <c>preview.changed</c> carries it as payload.
     /// </remarks>
     public static EquatableArray<ErrorDeclaration> Collect(
         INamedTypeSymbol handler,
         INamedTypeSymbol requestType,
         Compilation compilation,
         bool isIdempotent,
-        Action<DiagnosticInfo>? report) {
+        Action<DiagnosticInfo>? report,
+        ITypeSymbol? responseValueType = null) {
         var byCode = new Dictionary<string, ErrorDeclaration>(System.StringComparer.Ordinal);
         var owner = handler.ToDisplayString();
         var location = handler.Locations.FirstOrDefault();
         for (var current = handler; current is not null; current = current.BaseType)
             ReadDeclarations(current.GetAttributes(), owner, _ => location, byCode, report);
 
-        foreach (var implied in ImpliedErrors(handler, requestType, compilation, isIdempotent))
+        foreach (var implied in ImpliedErrors(handler, requestType, compilation, isIdempotent, responseValueType))
             if (!byCode.ContainsKey(implied.Code))
                 byCode[implied.Code] = implied;
 
@@ -173,7 +176,8 @@ internal static class ErrorContractDiscovery {
     // attributes and request graph: assembly/module authorization defaults are not visible per handler, which is
     // why the runtime check always admits the default unauthorized/forbidden codes.
     private static IEnumerable<ErrorDeclaration> ImpliedErrors(
-        INamedTypeSymbol handler, INamedTypeSymbol requestType, Compilation compilation, bool isIdempotent) {
+        INamedTypeSymbol handler, INamedTypeSymbol requestType, Compilation compilation, bool isIdempotent,
+        ITypeSymbol? responseValueType) {
         if (compilation.GetTypeByMetadataName(ElarionValidationExtensionsMetadataName) is not null
             && ValidatableTypeWalker.IsValidatable(
                 requestType, new ValidatableTypeWalker.Context(compilation.Assembly)))
@@ -207,6 +211,16 @@ internal static class ErrorContractDiscovery {
             yield return new ErrorDeclaration("idempotency.key_required", "Validation", null);
             yield return new ErrorDeclaration("idempotency.in_progress", "Conflict", null);
             yield return new ErrorDeclaration("idempotency.key_reused", "BusinessRule", null);
+        }
+
+        // A previewable command (ADR-0104): exactly where the preview decorator attaches, it can refuse a stale
+        // commit (carrying the new outcome) and refuse a preview on a host whose unit of work cannot roll back.
+        if (responseValueType is not null
+            && HandlerRegistrationGenerator.IsPreviewableRequest(requestType, compilation)
+            && HandlerRegistrationGenerator.IsPreviewOutcome(responseValueType, compilation)) {
+            yield return new ErrorDeclaration(
+                "preview.changed", "Conflict", responseValueType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+            yield return new ErrorDeclaration("preview.unsupported", "Internal", null);
         }
     }
 

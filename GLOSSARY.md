@@ -298,6 +298,12 @@ query, where `Expand()` inlines it for the provider to translate, and run in mem
 that decide a command still live in the handler; a rule is how the handler and its queries share a definition.
 _Avoid_: specification, computed property, predicate helper, expression snippet
 
+**Previewable command**:
+A command whose request implements `IPreviewableRequest`: the same handler previews (runs, reports its outcome
+stamped with a preview fingerprint, rolls back) and commits, and a commit sent with the fingerprint commits only if
+its outcome is unchanged, otherwise it fails with `preview.changed`.
+_Avoid_: dry-run handler, preview endpoint, simulate mode, separate preview and commit operations
+
 ### Frontend
 
 **Contribution**:

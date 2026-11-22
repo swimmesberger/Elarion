@@ -110,6 +110,7 @@
  ELIDEM003  | Elarion.Abstractions.Idempotency   | Error    | [Idempotent] retention is invalid
  ELIDEM004  | Elarion.Abstractions.Idempotency   | Warning  | Handler cannot be both idempotent and cacheable
  ELINBX001  | Elarion.Abstractions.Messaging     | Warning  | [AllowDuplicates] handler is not an integration-event consumer
+ ELPREV001  | Elarion.Abstractions.Previews      | Error    | Previewable command handler does not return a preview outcome
  ELCEV001   | Elarion.Abstractions.ClientEvents  | Warning  | Client event is not in any module
  ELCEV002   | Elarion.Abstractions.ClientEvents  | Error    | Duplicate client-event topic name
  ELCEV003   | Elarion.Abstractions.ClientEvents  | Warning  | Client events are not registered without Elarion.ClientEvents

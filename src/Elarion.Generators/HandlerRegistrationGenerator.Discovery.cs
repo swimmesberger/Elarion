@@ -225,12 +225,19 @@ public sealed partial class HandlerRegistrationGenerator {
             ? null
             : ParseVisibility(classDecl, classSymbol, responseType, visibilityWalk, diagnostics);
 
+        // A previewable command (ADR-0104) gets the preview decorator; ELPREV001 when its response cannot carry a
+        // fingerprint.
+        var previewOutcomeFqn = ParsePreviewable(
+            classDecl, classSymbol, requestType, responseType, compilation, fmt, diagnostics);
+
         var scopeValue = ParseHandlerScope(classSymbol);
-        if (scopeValue == 1)
+        if (scopeValue == 1) {
             VerifySingletonHandler(
                 classDecl, classSymbol, handlerFqn, fmt, serviceScopeFacts,
                 decorators, cacheable, cacheInvalidation, hasAuthorization, hasFeatureGates, hasValidation,
                 idempotent, audit, variantContractDeps, diagnostics, visibility is not null);
+            VerifySingletonPreview(classDecl, handlerFqn, previewOutcomeFqn, diagnostics);
+        }
 
         return new HandlerInfo(
             handlerFqn,
@@ -257,7 +264,8 @@ public sealed partial class HandlerRegistrationGenerator {
             ResolveTelemetryMode(classSymbol, compilation, moduleTelemetryDefaults) == 0,
             scopeValue,
             diagnostics.ToImmutable(),
-            visibility);
+            visibility,
+            previewOutcomeFqn);
     }
 
     // Decides whether the framework ValidationDecorator attaches to this handler (ADR-0027). Attachment is a

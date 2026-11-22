@@ -47,6 +47,18 @@ public static class ErrorCodes {
     /// <summary>The idempotency key was already used with a different request (<see cref="ErrorKind.BusinessRule"/>).</summary>
     public const string IdempotencyKeyReused = "idempotency.key_reused";
 
+    /// <summary>
+    /// A previewable command's outcome no longer matches the preview the caller confirmed; nothing was committed and
+    /// the error's data is the new outcome (<see cref="ErrorKind.Conflict"/>).
+    /// </summary>
+    public const string PreviewChanged = "preview.changed";
+
+    /// <summary>
+    /// A previewable command was asked to preview, or to commit against a preview, but the host has no unit of work
+    /// that can roll back; the handler did not run (<see cref="ErrorKind.Internal"/>).
+    /// </summary>
+    public const string PreviewUnsupported = "preview.unsupported";
+
     /// <summary>Returns the default code of <paramref name="kind"/>.</summary>
     public static string ForKind(ErrorKind kind) {
         return kind switch {

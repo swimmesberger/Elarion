@@ -100,7 +100,9 @@ services.AddElarionUnitOfWork<AppDbContext>();
 
 [Idempotency](/docs/concepts/idempotency) composes this same `IUnitOfWork` boundary — the
 `[Idempotent]` handler claims its key inside the transaction it owns, which is why
-`TransactionDecorator` steps aside for it.
+`TransactionDecorator` steps aside for it. A [previewable command](/docs/concepts/previewable-commands) uses it to
+run the command and roll it back; it relies on the rollback, so it checks `IUnitOfWork.SupportsRollback` (true for
+the EF Core and SQL-tier units of work, false for the in-memory default) and refuses to preview without it.
 
 ## What enlists, and how
 

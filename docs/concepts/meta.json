@@ -15,6 +15,7 @@
     "client-capabilities",
     "frontend-modules",
     "idempotency",
+    "previewable-commands",
     "auditing",
     "settings",
     "persistence-and-transactions",

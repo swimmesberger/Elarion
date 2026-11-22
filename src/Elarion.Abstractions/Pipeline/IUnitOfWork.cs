@@ -27,6 +27,17 @@ public readonly record struct UnitOfWorkOptions {
 /// dev/test.
 /// </remarks>
 public interface IUnitOfWork {
+    /// <summary>
+    /// Whether <see cref="IUnitOfWorkScope.RollbackAsync"/> really discards the scope's writes. A feature that relies
+    /// on the rollback for correctness, rather than only for cleanup, checks it first: a previewable command
+    /// (<c>IPreviewableRequest</c>) refuses to preview without it instead of committing what it reports as a preview.
+    /// </summary>
+    /// <remarks>
+    /// Fail-closed: the default is <see langword="false"/>, so an implementation claims the capability explicitly. The
+    /// EF Core and SQL-tier units of work return <see langword="true"/>; the in-memory (no-op) default does not.
+    /// </remarks>
+    bool SupportsRollback => false;
+
     /// <summary>Opens a new unit-of-work scope.</summary>
     ValueTask<IUnitOfWorkScope> BeginAsync(UnitOfWorkOptions options, CancellationToken ct);
 }

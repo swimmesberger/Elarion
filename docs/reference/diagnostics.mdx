@@ -357,6 +357,15 @@ See [Handling duplicates](/docs/capabilities/events/consuming-events#handling-du
 | --- | --- | --- | --- |
 | ELINBX001 | Warning | A handler declares `[AllowDuplicates]` but its request type is not an `IIntegrationEvent`; only handler-form integration-event consumers have a default-on inbox to opt out of (domain events are exactly-once by atomicity), so the attribute has no effect. | Remove `[AllowDuplicates]`, or make the handler consume an `IIntegrationEvent`. |
 
+## ELPREV — Previewable commands
+
+Preview-decorator attachment for handlers whose request implements `IPreviewableRequest`. See
+[Previewable commands](/docs/concepts/previewable-commands).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELPREV001 | Error | A handler's request implements `IPreviewableRequest`, but its response is not `Result<T>` with `T : IPreviewOutcome<T>`, so the preview decorator cannot stamp and compare the outcome's fingerprint and the request's `Preview`/`PreviewFingerprint` would be silently ignored. | Return `Result<TOutcome>` whose outcome implements `IPreviewOutcome<TOutcome>`, or stop implementing `IPreviewableRequest`. |
+
 ## ELIDEMEF — Idempotency keys (EF Core)
 
 Idempotency-keys generation for `[GenerateElarionIdempotencyKeys]`. See [Idempotency](/docs/concepts/idempotency).

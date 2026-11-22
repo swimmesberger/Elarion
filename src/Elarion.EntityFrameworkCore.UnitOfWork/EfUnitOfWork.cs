@@ -27,6 +27,10 @@ public sealed class EfUnitOfWork<TDbContext>(TDbContext dbContext) : IUnitOfWork
     private int _nestingDepth;
 
     /// <inheritdoc />
+    /// <remarks>A real database transaction: rolling back (or back to a savepoint) discards the scope's writes.</remarks>
+    public bool SupportsRollback => true;
+
+    /// <inheritdoc />
     public async ValueTask<IUnitOfWorkScope> BeginAsync(UnitOfWorkOptions options, CancellationToken ct) {
         if (dbContext.Database.CurrentTransaction is { } ambient) {
             // A transaction is already open on this DbContext (a nested transactional handler invoked through

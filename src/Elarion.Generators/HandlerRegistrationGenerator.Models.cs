@@ -90,7 +90,10 @@ public sealed partial class HandlerRegistrationGenerator {
         EquatableArray<DiagnosticInfo> Diagnostics,
         // The response members shown only to holders of a permission ([VisibleWith], ADR-0103) and the copy
         // functions that hide them; null when the response has none (the decorator is then not emitted at all).
-        VisibilityInfo? Visibility = null
+        VisibilityInfo? Visibility = null,
+        // The outcome type (the T of Result<T>) when the request implements IPreviewableRequest and T is an
+        // IPreviewOutcome<T>: the preview decorator attaches (ADR-0104). Null for every other handler.
+        string? PreviewOutcomeFqn = null
     );
 
     // One in-compilation [Service(Scope = …)] fact: a contract (or implementation) FQN and its declared scope.
