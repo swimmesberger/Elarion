@@ -57,7 +57,8 @@ principle for authorization requirements — a declaration is projected into the
    on the member or on the items of a collection, so a generator that predates them still sees an upload. The
    generated params schema refines the `File`/`Blob` arm with the server's messages, comparing media types as the
    server does (case-insensitive, parameters ignored, an untyped blob as `application/octet-stream`), so the client
-   rejects a file before uploading it. A declaration the pipeline would not enforce — on a member that holds no
+   rejects a file before uploading it. The OpenAPI document carries the same keywords on the member's own schema. A
+   declaration the pipeline would not enforce — on a member that holds no
    uploaded file, on a type that is not a handler's request in the assembly, without a limit — is a build error
    (`ELUPL001`, `ELUPL002`).
 
@@ -108,8 +109,11 @@ which imports the `RpcMethods` type only when it has presets.
 - Presets and sort keys are read by the build-time exporter through reflection on the handler type, like the
   DataAnnotations it already reads; constants are registered by generated code. Neither costs anything at run time
   beyond one registration per module that declares constants.
-- The OpenAPI document does not carry declared upload limits: OpenAPI describes `UploadedFile` as one shared
-  component schema, and a per-member limit needs a property-level extension. Left for a later change.
+- The OpenAPI document carries declared upload limits with the same keywords. OpenAPI describes `UploadedFile` as one
+  shared component schema, which a per-member limit must never change, so a member with declared limits keeps its own
+  inline schema (its component id is dropped before references are made); a list of `UploadedFile` gets its `items`
+  back there too. This relies on the metadata key under which `Microsoft.AspNetCore.OpenApi` records a component id,
+  which a test pins.
 - The schema-generation tool needs the host's services for presets and sort keys (it already loads the host).
 
 ## Rejected alternatives

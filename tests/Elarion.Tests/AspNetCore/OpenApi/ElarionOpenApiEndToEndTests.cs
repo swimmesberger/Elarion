@@ -52,7 +52,17 @@ public sealed partial class ElarionOpenApiEndToEndTests {
 
         [Range(1, 120)] public required int Age { get; init; }
 
+        // Declared before the unlimited members, so a limit that leaked into the shared UploadedFile schema would show.
+        [UploadLimits(MaxBytes = 1024, ContentTypes = ["application/pdf"])]
+        public required UploadedFile Contract { get; init; }
+
         public UploadedFile? Passport { get; init; }
+
+        [UploadLimits(ContentTypes = ["image/png"])] public UploadedFile? Photo { get; init; }
+
+        [MaxLength(3), UploadLimits(MaxBytes = 2048)] public IReadOnlyList<UploadedFile> Receipts { get; init; } = [];
+
+        public IReadOnlyList<UploadedFile> Scans { get; init; } = [];
     }
 
     private sealed record RegisterCustomerResponse(Guid Id);
@@ -332,6 +342,36 @@ public sealed partial class ElarionOpenApiEndToEndTests {
                 : ResolveSchema(doc.RootElement, passport);
             uploaded.GetProperty("type").GetString().Should().Be("string");
             uploaded.GetProperty("x-elarion-upload").GetBoolean().Should().BeTrue();
+            // The shared schema carries no member's limits.
+            uploaded.TryGetProperty("x-elarion-max-bytes", out _).Should().BeFalse();
+            uploaded.TryGetProperty("x-elarion-content-types", out _).Should().BeFalse();
+
+            // Declared [UploadLimits] (ADR-0100), as rpc-schema.json carries them: the member keeps its own schema.
+            var contract = properties.GetProperty("contract");
+            contract.TryGetProperty("$ref", out _).Should().BeFalse();
+            contract.GetProperty("type").GetString().Should().Be("string");
+            contract.GetProperty("x-elarion-upload").GetBoolean().Should().BeTrue();
+            contract.GetProperty("x-elarion-max-bytes").GetInt64().Should().Be(1024);
+            contract.GetProperty("x-elarion-content-types").EnumerateArray().Select(static t => t.GetString())
+                .Should().Equal("application/pdf");
+
+            var photo = properties.GetProperty("photo").GetProperty("oneOf").EnumerateArray()
+                .Single(static a => a.TryGetProperty("x-elarion-upload", out _));
+            photo.TryGetProperty("$ref", out _).Should().BeFalse();
+            photo.GetProperty("x-elarion-content-types").EnumerateArray().Select(static t => t.GetString())
+                .Should().Equal("image/png");
+            photo.TryGetProperty("x-elarion-max-bytes", out _).Should().BeFalse();
+
+            // A list gets its items back (the element serializes through a converter), with the member's limits.
+            var receipts = properties.GetProperty("receipts");
+            receipts.GetProperty("maxItems").GetInt32().Should().Be(3);
+            receipts.TryGetProperty("x-elarion-max-bytes", out _).Should().BeFalse();
+            receipts.GetProperty("items").GetProperty("x-elarion-upload").GetBoolean().Should().BeTrue();
+            receipts.GetProperty("items").GetProperty("x-elarion-max-bytes").GetInt64().Should().Be(2048);
+            var scans = properties.GetProperty("scans").GetProperty("items");
+            scans.GetProperty("type").GetString().Should().Be("string");
+            scans.GetProperty("x-elarion-upload").GetBoolean().Should().BeTrue();
+            scans.TryGetProperty("x-elarion-max-bytes", out _).Should().BeFalse();
         }
         finally {
             await app.StopAsync(ct);

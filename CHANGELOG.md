@@ -78,8 +78,8 @@ minor releases may include breaking changes.
   declares them for the request's files before the handler runs, and `IUploadedFiles` (now also
   `IDeclaredUploadConstraints`, from the same `AddElarionUploadedFiles`) checks them on every open and commit, on top of
   any constraints the call passes. `rpc-schema.json` exports them as `x-elarion-max-bytes` and `x-elarion-content-types`
-  next to `x-elarion-upload`, and the generated params schema rejects a `File`/`Blob` that breaks them before uploading
-  it, with the server's message. New errors: `ELUPL001` (a declaration on a member that holds no uploaded file, or
+  next to `x-elarion-upload` (the OpenAPI document too, on the member's own schema), and the generated params schema
+  rejects a `File`/`Blob` that breaks them before uploading it, with the server's message. New errors: `ELUPL001` (a declaration on a member that holds no uploaded file, or
   without a valid limit) and `ELUPL002` (a declaration outside a handler's request). See
   [Blob uploads](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member).
 - **Typed limits, request presets, sort keys and constants in the generated client** (ADR-0100). The TypeScript
@@ -100,7 +100,8 @@ minor releases may include breaking changes.
 ### Fixed
 - **Schemas of uploaded files and file lists.** The OpenAPI document described an `UploadedFile` member as an opaque
   schema; it is now a string marked `x-elarion-upload: true`, as in `rpc-schema.json`. A list of `ElarionFile` exported
-  to `rpc-schema.json` without `items`; it now carries the file envelope, so the generated client converts each item.
+  to `rpc-schema.json` without `items`; it now carries the file envelope, so the generated client converts each item. A
+  list of `UploadedFile` had no `items` in the OpenAPI document; it now has the marked string.
 
 ### Changed
 - **The direct-upload cancel and download routes answer `404` for a committed blob.** `DELETE {prefix}/{id}` and

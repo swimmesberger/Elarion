@@ -321,8 +321,8 @@ The exported schema marks the member `x-elarion-upload` (a string), with the dec
 `x-elarion-max-bytes` and `x-elarion-content-types` (on the items of a collection), and the
 [generated TypeScript client](/docs/capabilities/transports/typescript-client#uploaded-files) takes a `File` there,
 checks it against those limits and uploads it before the call; `rpc.$uploadFile(file)` uploads once for a multi-step
-flow, and `rpcLimits` shows the limits to the user. An MCP tool caller passes the id. The OpenAPI document marks the
-member but does not carry its declared limits. See
+flow, and `rpcLimits` shows the limits to the user. An MCP tool caller passes the id. The
+[OpenAPI document](/docs/capabilities/transports/openapi) carries the same marker and limits. See
 [ADR-0105](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0105-uploaded-files-are-handler-parameters.md)
 and [ADR-0100](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0100-the-schema-exports-constants-presets-and-limits.md).
 
