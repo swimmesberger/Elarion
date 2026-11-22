@@ -90,6 +90,18 @@ public sealed class RequireResourceGeneratorTests {
         Run(privateGetter).Diagnostics.Should().Contain(diagnostic => diagnostic.Id == "ELAUTH002");
     }
 
+    [Theory]
+    [InlineData("Operation = \"read\"", "Operation = Generated.Operations.Delete")]
+    [InlineData("typeof(Contact)", "typeof(Generated.Contact)")]
+    public void RequireResource_AnArgumentTheGeneratorCannotRead_ReportsElauth006(string written, string unreadable) {
+        // A constant or type another generator emits into this compilation does not bind for this generator; the
+        // check must not be dropped, nor applied to the default operation.
+        var result = Run(Source.Replace(written, unreadable));
+
+        result.Diagnostics.Should().Contain(d => d.Id == "ELAUTH006" && d.Severity == DiagnosticSeverity.Error);
+        GetGenerated(result, "Sample_App_GetContact.g.cs").Should().NotContain("ResourceOperation(\"read\")");
+    }
+
     private static GeneratorDriverRunResult Run(string source) {
         var compilation = CSharpCompilation.Create(
             "RequireResourceGeneratorTests",

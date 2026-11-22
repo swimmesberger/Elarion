@@ -487,6 +487,10 @@ Rules the generator enforces, as build errors rather than a member silently disc
   dictionary holding marked members is reported, not passed through.
 - The handler must answer `Result<T>` (`ELAUTH004`), and a singleton handler cannot use it (`ELSG013`), because the
   checker is per caller.
+- The generator must be able to read the permission (`ELAUTH005`): a string constant, `(resource, verb)`, or
+  `ElarionPermissions.Resource.Verb`. The catalog of the handler's own assembly is emitted by another generator, which
+  the handler generator cannot see, so it recognises that form by its shape and refers to the generated constant from
+  its output; any other argument it cannot read is an error.
 
 A member declared as a base type follows the derived types its `[JsonDerivedType]` attributes declare — exactly the
 types System.Text.Json writes with their own members — and the copy dispatches on the runtime type, most-derived

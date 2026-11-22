@@ -286,6 +286,18 @@ public sealed partial class HandlerRegistrationGenerator {
         DiagnosticSeverity.Error,
         true);
 
+    // An argument no generator can read (a constant another generator emits into this compilation) would drop the
+    // check or check another operation: ELAUTH006, never a skip.
+    internal static readonly DiagnosticDescriptor ResourceRequirementUnreadable = new(
+        "ELAUTH006",
+        "[RequireResource] argument cannot be read",
+        "Handler '{0}' declares [RequireResource] with an argument the generator cannot read, so it cannot apply the "
+        + "check; write the resource type, the operation and the id path as literals, nameof or constants declared in "
+        + "source",
+        "Elarion.Abstractions.Authorization",
+        DiagnosticSeverity.Error,
+        true);
+
     private static readonly DiagnosticDescriptor FeatureGateResponseNotFailureCapable = new(
         "ELFEAT001",
         "Feature-gated handler response cannot represent failure",

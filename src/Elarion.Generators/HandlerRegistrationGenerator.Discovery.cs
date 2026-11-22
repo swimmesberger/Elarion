@@ -18,6 +18,7 @@ public sealed partial class HandlerRegistrationGenerator {
         EquatableArray<string> variantContracts,
         EquatableArray<string> noRetryPolicies,
         EquatableArray<ServiceScopeFact> serviceScopeFacts,
+        string rootNamespace,
         Compilation compilation,
         CancellationToken ct) {
         if (candidates.IsEmpty)
@@ -44,7 +45,7 @@ public sealed partial class HandlerRegistrationGenerator {
         // [VisibleWith] response members (ADR-0103): one memoized type walk for every handler of this pass, and none
         // at all when the compilation cannot see the attribute.
         var visibilityWalk = compilation.GetTypeByMetadataName(VisibleWithAttributeMetadataName) is { } visibleWith
-            ? new VisibilityWalk(visibleWith, compilation.Assembly)
+            ? new VisibilityWalk(visibleWith, compilation.Assembly, rootNamespace)
             : null;
         var builder = ImmutableArray.CreateBuilder<HandlerInfo>();
         foreach (var metadataName in candidates) {
@@ -768,6 +769,14 @@ public sealed partial class HandlerRegistrationGenerator {
         var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
         var builder = ImmutableArray.CreateBuilder<ResourceBindingInfo>();
         foreach (var attribute in resourceAttributes) {
+            if (AttributeBinding.HasUnboundArgument(attribute)) {
+                diagnostics.Add(DiagnosticInfo.Create(
+                    ResourceRequirementUnreadable,
+                    classDecl.Identifier.GetLocation(),
+                    classSymbol.ToDisplayString(fmt)));
+                continue;
+            }
+
             if (attribute.ConstructorArguments.Length == 0 ||
                 attribute.ConstructorArguments[0].Value is not INamedTypeSymbol resourceType)
                 continue;
@@ -1020,7 +1029,14 @@ public sealed partial class HandlerRegistrationGenerator {
 
     // The feature names are the trailing `params string[]` constructor argument, which Roslyn surfaces as a single
     // array-kind TypedConstant regardless of which [FeatureGate] constructor was used.
+    //
+    // A gate whose argument did not bind names a constant another generator emits into this compilation (the
+    // ElarionFeatureFlags.Names accessors): no generator sees it, but the compiled attribute holds the names, and the
+    // decorator reads them from it at run time. Such a gate is effective, never blank — dropping it would fail open.
     internal static bool HasBlankFeatureName(AttributeData attribute) {
+        if (AttributeBinding.HasUnboundArgument(attribute))
+            return false;
+
         if (attribute.ConstructorArguments.Length == 0)
             return true;
 
@@ -1036,6 +1052,9 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     internal static bool HasEffectiveFeatureName(AttributeData attribute) {
+        if (AttributeBinding.HasUnboundArgument(attribute))
+            return true;
+
         if (attribute.ConstructorArguments.Length == 0)
             return false;
 

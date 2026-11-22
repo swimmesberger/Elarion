@@ -162,6 +162,59 @@ public sealed class FeatureGateGeneratorTests {
     }
 
     [Fact]
+    public void AttachesAGateNamedByTheFlagConstantsOfTheSameCompilation() {
+        // ElarionFeatureFlags is emitted by another generator into the same compilation, so the gate's argument does
+        // not bind for this generator. The decorator reads the names off the compiled attribute at run time, so the
+        // gate must still be attached — dropping it would run the handler with the flag off.
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+
+                                  [BackendFeatureFlag("new-billing")]
+                                  public static class AppFlags { }
+
+                                  public sealed record DoThingCommand(int Id) : ICommand;
+                                  public sealed record DoThingResponse(string Name);
+
+                                  [FeatureGate(ElarionFeatureFlags.Names.NewBilling)]
+                                  public sealed class GatedHandler : IHandler<DoThingCommand, Result<DoThingResponse>> {
+                                      public ValueTask<Result<DoThingResponse>> HandleAsync(DoThingCommand request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<DoThingResponse>.Success(new DoThingResponse("x")));
+                                  }
+                              }
+                              """;
+
+        var (result, diagnostics) = Run(source);
+
+        diagnostics.Should().NotContain(d => d.Id == "ELFEAT002");
+        GetGenerated(result, "Sample_App_GatedHandler.g.cs").Should()
+            .Contain("global::Elarion.Pipeline.FeatureGateDecorator<");
+
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var compilation = CSharpCompilation.Create(
+            "FeatureGateGeneratorCatalog",
+            [CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken)],
+            CreateMetadataReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [
+                new HandlerRegistrationGenerator().AsSourceGenerator(),
+                new ModuleDefaultServicesGenerator().AsSourceGenerator(),
+                new FeatureFlagGenerator().AsSourceGenerator()
+            ],
+            parseOptions: parseOptions,
+            optionsProvider: new RootNamespaceOptions("Sample.App"));
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _,
+            TestContext.Current.CancellationToken);
+        output.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void AttachesFeatureGateFromBaseHandlerClass() {
         // [FeatureGate] is Inherited = true, so a gate declared on a BASE handler must attach the decorator to the
         // derived handler — otherwise the derived handler ships ungated (C5).

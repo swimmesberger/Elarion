@@ -71,6 +71,15 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
         "Variant service '{0}' declares a blank configuration key",
         "Elarion.Abstractions.Features", DiagnosticSeverity.Warning, true);
 
+    // A selector key or value naming a constant another generator emits into this compilation (the
+    // ElarionFeatureFlags.Names accessors) does not bind here; reporting it as blank would hide the cause.
+    private static readonly DiagnosticDescriptor UnreadableArgument = new(
+        "ELVAR011", "Variant attribute argument cannot be read",
+        "{1} on '{0}' has an argument the generator cannot read, so the variant is not registered; a constant another "
+        + "source generator emits into this compilation (such as ElarionFeatureFlags.Names) is not visible to it, so "
+        + "write the value as a string literal or a constant declared in source",
+        "Elarion.Abstractions.Features", DiagnosticSeverity.Error, true);
+
     // Value is the declared variant key ("office365", lower-cased for the configuration axis), or null for an
     // unnamed default (registered under the collision-proof sentinel key). IsDefault is true for an unnamed
     // default AND for a named default (Value + IsDefault = true), which stays selectable by its own value.
@@ -160,6 +169,11 @@ public sealed class VariantServiceRegistrationGenerator : IIncrementalGenerator 
 
         if (IsGenericOrNested(classSymbol)) {
             diagnostics.Add(DiagnosticInfo.Create(GenericImplementation, location, implFqn));
+            return new VariantResult(EquatableArray<VariantImpl>.Empty, diagnostics.ToImmutable());
+        }
+
+        if (AttributeBinding.HasUnboundArgument(attribute)) {
+            diagnostics.Add(DiagnosticInfo.Create(UnreadableArgument, location, implFqn, attributeDisplay));
             return new VariantResult(EquatableArray<VariantImpl>.Empty, diagnostics.ToImmutable());
         }
 

@@ -88,6 +88,8 @@
  ELAUTH002  | Elarion.Abstractions.Authorization | Error    | RequireResource id path does not resolve
  ELAUTH003  | Elarion.Abstractions.Authorization | Error    | [VisibleWith] member is not nullable
  ELAUTH004  | Elarion.Abstractions.Authorization | Error    | Response member visible by permission cannot be hidden
+ ELAUTH005  | Elarion.Abstractions.Authorization | Error    | [VisibleWith] permission cannot be read
+ ELAUTH006  | Elarion.Abstractions.Authorization | Error    | [RequireResource] argument cannot be read
  ELPOL001   | Elarion.Abstractions.Authorization | Error    | [AuthorizationPolicy] must be on an IAuthorizationPolicy
  ELPOL002   | Elarion.Abstractions.Authorization | Warning  | Authorization policy is not in any module
  ELPERM001  | Elarion.Abstractions.Authorization | Warning  | Authorization requirement is not in any module
@@ -109,6 +111,7 @@
  ELVAR008   | Elarion.Abstractions.Features      | Error    | Variant contract mixes selection axes
  ELVAR009   | Elarion.Abstractions.Features      | Warning  | Variant service declares a blank configuration key
  ELVAR010   | Elarion.Abstractions.Features      | Warning  | Variant registry accessor collision
+ ELVAR011   | Elarion.Abstractions.Features      | Error    | Variant attribute argument cannot be read
  ELVAL001   | Elarion.Abstractions.Validation    | Error    | Validated handler response cannot represent failure
  ELVAL002   | Elarion.Abstractions.Validation    | Warning  | Validation attributes are not enforced without Elarion.Validation
  ELVAL003   | Elarion.Abstractions.Validation    | Warning  | Asynchronous request validation runs before the transaction

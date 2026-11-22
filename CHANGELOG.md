@@ -8,6 +8,19 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **`[VisibleWith(ElarionPermissions.X.Y)]` hid nothing in the assembly that generates `ElarionPermissions`.** The
+  catalog is emitted by another source generator, which the handler-registration generator cannot see, so the
+  argument did not bind there, no `VisibilityDecorator` was attached and the member reached every caller with a green
+  build. The generator now recognises `ElarionPermissions.Resource.Verb` and checks the generated constant, and reports
+  any other permission it cannot read as the new error `ELAUTH005` instead of skipping the member. Rebuild to pick it
+  up; `[VisibleWith("resource", Verbs.Read)]` was not affected.
+- **`[FeatureGate(ElarionFeatureFlags.Names.X)]` was dropped in the assembly that declares the flag**, for the same
+  reason, with only the `ELFEAT002` "no feature name" warning: the handler ran with the flag off. The gate is attached
+  now; the decorator reads the names from the compiled attribute at run time.
+- A `[RequireResource]` or `[FeatureVariant]`/`[ConfigurationVariant]` argument the generator cannot read is now an
+  error (`ELAUTH006`, `ELVAR011`) instead of a skipped check or a misleading "blank" warning.
+
 ## [0.4.3] - 2026-11-22
 
 ### Added

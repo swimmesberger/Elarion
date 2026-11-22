@@ -80,11 +80,13 @@ public sealed partial class HandlerRegistrationGenerator : IIncrementalGenerator
             .Combine(variantContracts)
             .Combine(noRetryPolicies)
             .Combine(serviceScopeFacts)
+            .Combine(ModuleProviders.RootNamespace(context))
             .Combine(context.CompilationProvider)
             .Select(static (source, ct) =>
                 ResolveHandlers(
-                    source.Left.Left.Left.Left.Left, source.Left.Left.Left.Left.Right,
-                    source.Left.Left.Left.Right, source.Left.Left.Right, source.Left.Right, source.Right, ct))
+                    source.Left.Left.Left.Left.Left.Left, source.Left.Left.Left.Left.Left.Right,
+                    source.Left.Left.Left.Left.Right, source.Left.Left.Left.Right, source.Left.Left.Right,
+                    source.Left.Right, source.Right, ct))
             .WithTrackingName("Handlers");
 
         context.RegisterSourceOutput(handlerProvider, static (spc, handlers) => {

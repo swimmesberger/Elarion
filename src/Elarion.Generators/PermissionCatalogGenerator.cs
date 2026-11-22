@@ -110,11 +110,9 @@ public sealed class PermissionCatalogGenerator : IIncrementalGenerator {
         var manifests = context.MetadataReferencesProvider
             .Select(static (reference, ct) => ElarionManifestReader.Read(reference, ct))
             .Collect();
-        var rootNamespace = context.CompilationProvider
-            .Select(static (compilation, _) => compilation.AssemblyName ?? string.Empty)
-            .Combine(context.AnalyzerConfigOptionsProvider.Select(static (options, _) =>
-                options.GlobalOptions.TryGetValue("build_property.RootNamespace", out var ns) ? ns : null))
-            .Select(static (pair, _) => string.IsNullOrEmpty(pair.Right) ? pair.Left : pair.Right!);
+        // The handler-registration generator references these accessors from its own output under the same root
+        // namespace ([VisibleWith(ElarionPermissions.X.Y)] in this compilation), so both read it from one provider.
+        var rootNamespace = ModuleProviders.RootNamespace(context);
 
         var staticInput = permissions.Combine(roles).Combine(modules).Combine(manifests).Combine(rootNamespace)
             .Combine(trigger)
