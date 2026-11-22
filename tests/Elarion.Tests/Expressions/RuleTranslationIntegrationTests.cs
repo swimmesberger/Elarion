@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
+using Elarion.EntityFrameworkCore;
 using Elarion.Expressions;
 using Elarion.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -117,6 +118,35 @@ public sealed class RuleTranslationIntegrationTests(PostgreSqlRulesFixture fixtu
             .ToListAsync(Ct);
 
         open.Should().Equal(100m, 100m, 50m, 80m, 200m);
+    }
+
+    [Fact]
+    public async Task RuleCheck_RefusesAnUnexpandedRule_WhereEfWouldRunItOnTheClient() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var db = fixture.CreateContext(ruleCheck: true);
+        var openAmount = OpenAmount;
+
+        // The silent case without the check: the final projection, rule in a captured local.
+        var projection = () => db.Invoices.OrderBy(invoice => invoice.Number)
+            .Select(invoice => new OpenInvoiceRow(invoice.Number, openAmount.Invoke(invoice), false))
+            .ToListAsync(Ct);
+        // And a filter, which EF refuses anyway, now with the fix in the message.
+        var filter = () => db.Invoices.Where(invoice => IsSettled.Invoke(invoice)).ToListAsync(Ct);
+
+        await projection.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not expanded*Expand()*");
+        await filter.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not expanded*Expand()*");
+    }
+
+    [Fact]
+    public async Task RuleCheck_LetsAnExpandedQueryThrough() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var db = fixture.CreateContext(ruleCheck: true);
+
+        var settled = await db.Invoices.Where(invoice => IsSettled.Invoke(invoice)).OrderBy(invoice => invoice.Number)
+            .Select(invoice => invoice.Number).Expand().ToListAsync(Ct);
+
+        var loaded = await LoadInvoicesAsync(db);
+        settled.Should().Equal(loaded.Where(IsSettled.Invoke).Select(invoice => invoice.Number)).And.NotBeEmpty();
     }
 
     [Fact]
@@ -313,11 +343,12 @@ public sealed class PostgreSqlRulesFixture : IAsyncLifetime {
         await TestContainerLifecycle.Shared.DisposeAsync(_container);
     }
 
-    /// <summary>Creates a fresh context bound to the container.</summary>
-    public RulesDbContext CreateContext() {
-        return new RulesDbContext(new DbContextOptionsBuilder<RulesDbContext>()
-            .UseNpgsql(_connectionString)
-            .Options);
+    /// <summary>Creates a fresh context bound to the container, optionally with the unexpanded-rule check.</summary>
+    public RulesDbContext CreateContext(bool ruleCheck = false) {
+        var options = new DbContextOptionsBuilder<RulesDbContext>().UseNpgsql(_connectionString);
+        if (ruleCheck) options.UseElarionRuleCheck();
+
+        return new RulesDbContext(options.Options);
     }
 
     private static RuleInvoice Invoice(string number, decimal gross, params decimal[] payments) {

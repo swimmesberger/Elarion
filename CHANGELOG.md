@@ -46,7 +46,9 @@ minor releases may include breaking changes.
   `Expr.Captured(value)` makes a value a parameter instead of a literal, `Expr.Inline(lambda, arguments)` inlines a
   lambda into a tree built at run time, and `Expr.AnyOf`/`AllOf`/`Not` combine predicates over one row (no predicates:
   `AnyOf` is always false, `AllOf` always true). The page also gives the recipe for an aggregate a rule uses several
-  times: join it once and pass it as the rule's second input. See
+  times: join it once and pass it as the rule's second input. `UseElarionRuleCheck()` (in `Elarion.EntityFrameworkCore`,
+  on the context options) makes EF Core refuse a query that still invokes a rule because `Expand()` was forgotten,
+  instead of running the rule on the client against an entity whose navigations were not loaded. See
   [Rules](https://elarion.wimmesberger.dev/docs/concepts/rules).
 - **Previewable commands** (ADR-0104). A command whose request implements `IPreviewableRequest` (`bool Preview`,
   `string? PreviewFingerprint`) is its own preview: with `Preview` set it runs fully, its outcome is returned stamped

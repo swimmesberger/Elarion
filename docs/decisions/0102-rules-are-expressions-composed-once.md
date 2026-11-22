@@ -72,7 +72,10 @@ Using one inside another needs expression-tree surgery, so applications write it
   translation with EF's "could not be translated" naming `Invoke` in a filter, an ordering or a join, and in the final
   projection when the rule is in a static field (EF refuses to capture the rule instance as a constant). For a rule in a
   captured local, EF evaluates the final projection on the client, on an entity without the navigations SQL would have
-  joined, and the result is silently wrong; the docs point this out and recommend static fields.
+  joined, and the result is silently wrong. `Elarion.EntityFrameworkCore` therefore ships `UseElarionRuleCheck()`, an
+  EF Core query interceptor that refuses any query still invoking a rule when EF compiles it (once per query shape),
+  so a forgotten `Expand()` always fails loudly. It is an options-builder opt-in rather than a default, because the
+  EF package does not reference the core package that defines rules; it recognizes the `Invoke` methods by name.
 - Performance of a rule-heavy predicate depends on the join recipe, not on the helper; the helper makes the recipe
   writable.
 - In memory a rule sees only what is loaded: a rule over a navigation needs it included.

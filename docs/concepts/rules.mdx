@@ -79,7 +79,18 @@ other rules, call `Expand()` on the query as well. `Expand()` also works on any 
 | The final projection, rule in a static field or property | Fails: "The client projection contains a reference to a constant expression of 'Elarion.Expressions.Rule…' through the instance method 'Invoke'". |
 | The final projection, rule in a captured local | **Runs the rule on the client**, on an entity whose navigations were not loaded: the result is silently wrong. |
 
-Keep rules in static fields, as above, and the last row cannot happen.
+Keep rules in static fields, as above, and turn on the rule check, so no row can pass silently:
+
+```csharp
+builder.Services.AddDbContext<AppDbContext>(options => options
+    .UseNpgsql(connectionString)
+    .UseElarionRuleCheck());   // Elarion.EntityFrameworkCore
+```
+
+`UseElarionRuleCheck()` adds an EF Core query interceptor that refuses every query still invoking a rule, with the
+expression and the fix in the message. It runs when EF Core compiles a query shape, not on every execution. A
+projection that should run a rule in memory on purpose ends the query first (`ToListAsync()`) and invokes the rule on
+the loaded entities.
 
 ### Where a rule can live
 
