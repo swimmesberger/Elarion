@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-22
+
 ### Added
 - **A synchronous permission check** (ADR-0103). Inject `IPermissionChecker` and ask
   `permissions.Holds(ElarionPermissions.Banking.Read)` (or `Holds("banking", Verbs.Read)`, `HoldsAny`, `HoldsAll`)
@@ -2619,7 +2621,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.3
 [0.4.2]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.2
 [0.4.1]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.1
 [0.4.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.0
