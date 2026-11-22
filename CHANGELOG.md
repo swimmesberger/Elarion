@@ -46,6 +46,28 @@ minor releases may include breaking changes.
   `Confirming(code, item)` and `Choosing(code, item, option)`, build an answer in one line for a test or an in-process
   caller; `Choosing` spells the enum member as `Decision<TOption>` reads it (`OnlyHere` → `onlyHere`) and rejects a
   value the enum does not declare.
+- **Upload refusals carry the limit as typed data** (ADR-0105). `upload.too_large` now answers with
+  `UploadTooLargeData` (`maxBytes`, `length`), `upload.content_type` with `UploadContentTypeData` (`contentTypes`,
+  `contentType`), so a client words the refusal in its own language and unit instead of showing the English message
+  with the limit in bytes. A request that declares `[UploadLimits]` has `upload.not_found` and the code of each
+  declared limit, with its payload, in its error contract without declaring them; the schema and the generated client
+  type `error.data` per code. Drop your own `[ProducesError]` for those codes, or give it the payload type: a
+  declaration of an upload code with another payload (or none) is the new warning `ELERR004`, because it would hide the
+  typed data. See [Uploaded files](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler).
+- **Accepted file extensions for uploads.** `[UploadLimits(FileExtensions = [".xlsx", ".xls"])]` (and
+  `UploadConstraints.FileExtensions`) accepts a file by the end of its stored name, case-insensitively, for formats
+  whose content type a browser declares differently per system or not at all (`.xlsx`, `.vcf`, `.ics`). A file with
+  another name answers the new code `upload.file_extension` with `UploadFileExtensionData` (`fileExtensions`,
+  `fileName`). The extensions are exported as `x-elarion-file-extensions` (JSON-RPC schema, OpenAPI, `rpcLimits`) and
+  checked by the generated client before the upload; an extension without its leading dot is `ELUPL001`.
+- **`uploadFile(file, { method, member })` in the generated TypeScript client** checks a file against the declared
+  limits of that method's upload member before uploading it, and throws `RpcUploadLimitError`, an `RpcError` with the
+  code, message and data the server would answer. The method/member pair is typed from the new `rpcUploadLimits`
+  export, which lists every upload member with its limits. The params schema's refinements carry the same code and
+  limit as Zod issue `params`, for an error map in the application's language. See
+  [Upload limits in the user's language](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#upload-limits-in-the-users-language).
+- `IUploadedFiles.DeleteAsync` now documents that the PostgreSQL store saves the `DbContext` it shares with the
+  handler, so it also writes the handler's tracked changes: call it after the handler's own save.
 
 ### Fixed
 - **`[VisibleWith(ElarionPermissions.X.Y)]` hid nothing in the assembly that generates `ElarionPermissions`.** The

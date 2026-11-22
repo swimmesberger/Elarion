@@ -55,7 +55,7 @@ when nothing declares it, so a schema without declarations is byte-identical:
 | `methods.{m}.presets.{name}` | A named params value: every required member, and every other member that differs from the request's default (`null` where the preset clears one), in the wire form. | [`[RequestPreset]`](/docs/reference/attributes#requestpreset) on a static readonly field of the handler |
 | `methods.{m}.sortKeys` | The keys of the handler's sort map in declaration order: `key`, `direction` (`ascending`/`descending`, what a bare key applies) and `default: true` on the default key. | One static [`SortMap`](/docs/capabilities/pagination#offset-pagination) field on the handler |
 | `constants.{module}.{name}` | A module's exported constants, module and member camel-cased (`Billing.MaxAmount` → `constants.billing.maxAmount`). | [`[ClientConstants]`](/docs/reference/attributes#clientconstants) on a static class of the module |
-| an upload member's `x-elarion-max-bytes`, `x-elarion-content-types` | Its declared limits, next to `x-elarion-upload` (on the items of a collection). | [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) |
+| an upload member's `x-elarion-max-bytes`, `x-elarion-content-types`, `x-elarion-file-extensions` | Its declared limits, next to `x-elarion-upload` (on the items of a collection). The method's `errors` then list `upload.not_found` and, per declared limit, `upload.too_large`, `upload.content_type` or `upload.file_extension` with the limit as typed `data`. | [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) |
 
 ```json
 "invoices.list": {

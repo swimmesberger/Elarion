@@ -1,11 +1,19 @@
-import {childContext, formatPropertyName, resolveSchema, stripNullable, type SchemaContext} from './json-schema.js'
+import {
+  childContext,
+  collectUploadNodes,
+  formatPropertyName,
+  resolveSchema,
+  stripNullable,
+  type SchemaContext,
+} from './json-schema.js'
 import type {JsonSchema, RpcSchema} from './schema.js'
 
 /**
  * The values the server exports next to the method schemas (ADR-0100), rendered as typed constants at the end of the
- * schemas file: `rpcLimits` (every params member's limits, by path), `rpcPresets` (named params values, typed by the
- * method), `rpcSortKeys` and `rpcConstants`. Each block is emitted only when it has an entry, so a schema without any
- * produces byte-identical output.
+ * schemas file: `rpcLimits` (every params member's limits, by path), `rpcUploadLimits` (every upload member with its
+ * limits, which the client's uploadFile checks), `rpcPresets` (named params values, typed by the method), `rpcSortKeys`
+ * and `rpcConstants`. Each block is emitted only when it has an entry, so a schema without any produces byte-identical
+ * output.
  */
 export function generateClientExportsLines(schema: RpcSchema, methods: readonly string[], typesImport: string): {
   importLines: string[]
@@ -25,12 +33,35 @@ export function generateClientExportsLines(schema: RpcSchema, methods: readonly 
     lines.push(
       '/**',
       ' * The limits each method\'s params declare — the schema\'s constraint keywords (`maxLength`, `maxItems`, `minimum`, …)',
-      ' * and an upload member\'s `maxBytes`/`contentTypes` — by member path (`items` for the elements of a list), as literal',
-      ' * types. Show a limit from here instead of copying it; params validation already enforces each one.',
+      ' * and an upload member\'s `maxBytes`/`contentTypes`/`fileExtensions` — by member path (`items` for the elements of a',
+      ' * list), as literal types. Show a limit from here instead of copying it; params validation already enforces each one.',
       ' */',
       `export const rpcLimits = ${literal(limits, 0)} as const`,
       '',
       'export type RpcLimits = typeof rpcLimits',
+      '',
+    )
+  }
+
+  // Every upload member, with or without limits: the generated client imports it whenever params take uploaded files,
+  // so its uploadFile can check a file against the member it is for and type the method/member pair.
+  const uploads: Record<string, Record<string, LimitsNode>> = {}
+  for (const method of methods) {
+    const members = collectUploadMembers(schema.methods[method].params, `methods.${method}.params`)
+    if (Object.keys(members).length > 0) {
+      uploads[method] = members
+    }
+  }
+  if (Object.keys(uploads).length > 0) {
+    lines.push(
+      '/**',
+      ' * Every upload member of each method\'s params by member path (a list by its own path, its limits applying to each',
+      ' * file), with its declared `maxBytes`/`contentTypes`/`fileExtensions` — `{}` when it declares none. The client\'s',
+      ' * `uploadFile(file, { method, member })` checks a file against them before uploading it.',
+      ' */',
+      `export const rpcUploadLimits = ${literal(uploads, 0)} as const`,
+      '',
+      'export type RpcUploadLimits = typeof rpcUploadLimits',
       '',
     )
   }
@@ -129,12 +160,7 @@ function collectLimits(schema: JsonSchema, ctx: SchemaContext): LimitsNode | und
     }
   }
   if (resolved['x-elarion-upload'] === true) {
-    if (resolved['x-elarion-max-bytes'] !== undefined) {
-      node.maxBytes = resolved['x-elarion-max-bytes']
-    }
-    if (resolved['x-elarion-content-types'] !== undefined && resolved['x-elarion-content-types'].length > 0) {
-      node.contentTypes = [...resolved['x-elarion-content-types']]
-    }
+    Object.assign(node, uploadLimits(resolved))
   }
   if (resolved.items !== undefined) {
     const items = collectLimits(stripNullable(resolved.items), childContext(resolvedCtx, 'items'))
@@ -151,6 +177,31 @@ function collectLimits(schema: JsonSchema, ctx: SchemaContext): LimitsNode | und
     }
   }
   return Object.keys(node).length > 0 ? node : undefined
+}
+
+// An upload member's declared limits (ADR-0100, ADR-0105), under the names rpcLimits and rpcUploadLimits use.
+function uploadLimits(schema: JsonSchema): LimitsNode {
+  const node: LimitsNode = {}
+  if (schema['x-elarion-max-bytes'] !== undefined) {
+    node.maxBytes = schema['x-elarion-max-bytes']
+  }
+  if (schema['x-elarion-content-types'] !== undefined && schema['x-elarion-content-types'].length > 0) {
+    node.contentTypes = [...schema['x-elarion-content-types']]
+  }
+  if (schema['x-elarion-file-extensions'] !== undefined && schema['x-elarion-file-extensions'].length > 0) {
+    node.fileExtensions = [...schema['x-elarion-file-extensions']]
+  }
+  return node
+}
+
+// Every upload member of a params schema by member path, the list levels ('*') left out, with its declared limits.
+function collectUploadMembers(params: JsonSchema, path: string): Record<string, LimitsNode> {
+  const members: Record<string, LimitsNode> = {}
+  const nodes = collectUploadNodes(stripNullable(params), {root: params, path, resolvingRefs: new Set()})
+  for (const node of nodes) {
+    members[node.path.filter((segment) => segment !== '*').join('.')] = uploadLimits(node.schema)
+  }
+  return members
 }
 
 // A deterministic TypeScript literal of JSON data: objects one property per line, arrays of scalars on one line.

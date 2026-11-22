@@ -1,5 +1,9 @@
 # Update log
 
+## 2026-11-23
+
+* **Update**: [ADR-0105](decisions/0105-uploaded-files-are-handler-parameters.md) gained an amendment: upload refusals carry the limit as typed data and are implied by `[UploadLimits]`, a member accepts file extensions, the generated `uploadFile` checks the limits of a named method member, and `DeleteAsync` on the PostgreSQL store is documented to save the shared `DbContext`, after an application that moved its imports to uploaded files reported these gaps; the glossary's *upload limits* include file extensions and typed refusals.
+
 ## 2026-11-22
 
 * **Update**: [ADR-0102](decisions/0102-rules-are-expressions-composed-once.md) gained an amendment: a rule takes one to four inputs, the expander and the rule check recognize every arity without a list, and Expr.Expand takes a lambda directly so a helper needs no typed local.

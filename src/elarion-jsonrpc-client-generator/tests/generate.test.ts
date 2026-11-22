@@ -2644,8 +2644,23 @@ describe('uploaded files (ADR-0105)', () => {
     expect(generated.schemasSource).toContain('attachments: z.array(z.union([z.instanceof(Blob), z.string()])),')
     expect(generated.schemasSource).toContain('echo: z.string(),')
     expect(generated.clientSource).toContain("import type { RpcMethods, UploadedFileRef } from './rpc-types.js'")
-    expect(generated.clientSource).toContain('uploadFile(file: Blob, options?: RpcUploadOptions): Promise<UploadedFileRef>')
+    expect(generated.clientSource).toContain(
+      "import { rpcErrorDataSchemas, rpcParamsSchemas, rpcResultSchemas, rpcUploadLimits } from './rpc-schemas.js'")
+    expect(generated.clientSource).toContain('uploadFile(file: Blob, options?: RpcUploadFileOptions): Promise<UploadedFileRef>')
     expect(generated.clientSource).toContain("readonly $uploadFile: RpcClient['uploadFile']")
+    // Every upload member, with or without declared limits, so the method/member pair of uploadFile is typed.
+    expect(generated.schemasSource).toContain([
+      'export const rpcUploadLimits = {',
+      '  "statements.analyze": {',
+      '    statement: {},',
+      '    signature: {},',
+      '    attachments: {},',
+      '  },',
+      '  "statements.commit": {',
+      '    statement: {},',
+      '  },',
+      '} as const',
+    ].join('\n'))
   })
 
   it('emits no upload runtime and stays byte-identical when the schema has no upload members', () => {
@@ -2662,6 +2677,8 @@ describe('uploaded files (ADR-0105)', () => {
     expect(without.clientSource).not.toContain('UploadedFileRef')
     expect(without.clientSource).not.toContain('stageUploadParams')
     expect(without.clientSource).not.toContain('uploadFile')
+    expect(without.clientSource).not.toContain('RpcUploadLimitError')
+    expect(without.schemasSource).not.toContain('rpcUploadLimits')
   })
 
   it('rejects an upload member inside a union case', () => {
@@ -2839,9 +2856,13 @@ interface UploadClientModule {
     fetch?: FetchLike
     headers?: HeadersInit
     idGenerator?: () => string | number
+    validateParams?: boolean
     uploadFile?: (file: Blob, options: {fileName?: string; signal?: AbortSignal}) => Promise<string>
     uploadUrl?: string | URL
   }): UploadApiForTests
+
+  RpcError: abstract new (...args: never[]) => Error
+  RpcUploadLimitError: abstract new (...args: never[]) => Error
 }
 
 interface UploadApiForTests {
@@ -2856,7 +2877,10 @@ interface UploadApiForTests {
     }
   }
   $batch(items: readonly {method: string; params: unknown}[]): Promise<readonly BatchItemResultForTests[]>
-  $uploadFile(file: Blob, options?: {fileName?: string; signal?: AbortSignal}): Promise<string>
+  $uploadFile(
+    file: Blob,
+    options?: {fileName?: string; signal?: AbortSignal; method?: string; member?: string}
+  ): Promise<string>
 }
 
 interface RecordedUpload {
@@ -2955,22 +2979,28 @@ function uploadClientTestSchema(): RpcSchema {
   }
 }
 
-async function loadGeneratedUploadClient(clientSource: string): Promise<UploadClientModule> {
+// Loads the generated client over pass-through Zod schemas (params validation runs before the upload, so it sees the
+// File/Blob values) and the generated rpcUploadLimits of `schemasSource`, the one block of it that needs no Zod.
+async function loadGeneratedUploadClient(clientSource: string, schemasSource?: string): Promise<UploadClientModule> {
   const dir = mkdtempSync(join(tmpdir(), 'elarion-rpc-upload-client-'))
-  const jsSource = ts.transpileModule(clientSource, {
+  const transpile = (source: string) => ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.ES2022,
       target: ts.ScriptTarget.ES2022,
     },
   }).outputText
 
-  writeFileSync(join(dir, 'rpc-client.mjs'), jsSource, 'utf-8')
-  // Pass-through schemas: params validation runs before the upload, so it sees the File/Blob values.
+  const uploadLimits = schemasSource === undefined
+    ? 'export const rpcUploadLimits = {}'
+    : transpile(/export const rpcUploadLimits = [\s\S]*?\n} as const\n/.exec(schemasSource)?.[0] ?? '')
+  writeFileSync(join(dir, 'rpc-client.mjs'), transpile(clientSource), 'utf-8')
   writeFileSync(join(dir, 'rpc-schemas.js'), [
     'const passThrough = { parse: (value) => value }',
-    "export const rpcParamsSchemas = { 'statements.analyze': passThrough, 'statements.commit': passThrough }",
-    "export const rpcResultSchemas = { 'statements.analyze': passThrough, 'statements.commit': passThrough }",
+    'const methods = new Proxy({}, { get: () => passThrough })',
+    'export const rpcParamsSchemas = methods',
+    'export const rpcResultSchemas = methods',
     'export const rpcErrorDataSchemas = {}',
+    uploadLimits,
     '',
   ].join('\n'), 'utf-8')
 
@@ -3021,6 +3051,7 @@ describe('client exports (ADR-0100)', () => {
                 maxItems: 10,
                 items: {type: 'string', 'x-elarion-upload': true, 'x-elarion-max-bytes': 2048},
               },
+              workbook: {type: ['string', 'null'], 'x-elarion-upload': true, 'x-elarion-file-extensions': ['.xlsx', '.XLS']},
             },
             required: ['statement', 'receipts'],
           },
@@ -3054,6 +3085,9 @@ describe('client exports (ADR-0100)', () => {
       '        maxBytes: 2048,',
       '      },',
       '    },',
+      '    workbook: {',
+      '      fileExtensions: [".xlsx", ".XLS"],',
+      '    },',
       '  },',
       '  "invoices.list": {',
       '    size: {',
@@ -3075,6 +3109,25 @@ describe('client exports (ADR-0100)', () => {
       'export type RpcLimits = typeof rpcLimits',
     ].join('\n'))
     expect(generated.schemasSource).not.toContain('"math.ping": {\n    ')
+    // The upload members alone, a list by its own path, for uploadFile(file, { method, member }).
+    expect(generated.schemasSource).toContain([
+      'export const rpcUploadLimits = {',
+      '  "documents.upload": {',
+      '    statement: {',
+      '      maxBytes: 1024,',
+      '      contentTypes: ["text/csv", "Application/XML; charset=utf-8"],',
+      '    },',
+      '    receipts: {',
+      '      maxBytes: 2048,',
+      '    },',
+      '    workbook: {',
+      '      fileExtensions: [".xlsx", ".XLS"],',
+      '    },',
+      '  },',
+      '} as const',
+      '',
+      'export type RpcUploadLimits = typeof rpcUploadLimits',
+    ].join('\n'))
   })
 
   it('exports presets typed as the method params, sort keys and module constants', () => {
@@ -3129,15 +3182,79 @@ describe('client exports (ADR-0100)', () => {
   it('rejects a file that breaks the declared upload limits before uploading it', () => {
     const generated = generateRpcClientFiles(exportsSchema())
 
+    // The issue params carry the server's error code and the limit, for a Zod error map in the application's language.
     expect(generated.schemasSource).toContain(
       'statement: z.union([z.instanceof(Blob)'
-      + '.refine((file) => file.size <= 1024, "The file is larger than the accepted 1024 bytes.")'
+      + '.refine((file) => file.size <= 1024, { message: "The file is larger than the accepted 1024 bytes.", '
+      + 'params: {"code":"upload.too_large","maxBytes":1024} })'
       + '.refine((file) => ["text/csv","application/xml"].includes((file.type || \'application/octet-stream\')'
-      + '.split(\';\')[0].trim().toLowerCase()), "Files of this type are not accepted here; expected text/csv, '
-      + 'Application/XML; charset=utf-8."), z.string()]),')
+      + '.split(\';\')[0].trim().toLowerCase()), { message: "Files of this type are not accepted here; expected text/csv, '
+      + 'Application/XML; charset=utf-8.", '
+      + 'params: {"code":"upload.content_type","contentTypes":["text/csv","Application/XML; charset=utf-8"]} }), z.string()]),')
     expect(generated.schemasSource).toContain(
       'receipts: z.array(z.union([z.instanceof(Blob).refine((file) => file.size <= 2048, '
-      + '"The file is larger than the accepted 2048 bytes."), z.string()])).max(10),')
+      + '{ message: "The file is larger than the accepted 2048 bytes.", '
+      + 'params: {"code":"upload.too_large","maxBytes":2048} }), z.string()])).max(10),')
+    // Extensions are compared lower-cased against the end of the name the uploader sends; a Blob has none.
+    expect(generated.schemasSource).toContain(
+      'workbook: z.union([z.instanceof(Blob).refine((file) => { const name = (file instanceof File ? file.name : \'\')'
+      + '.toLowerCase(); return [".xlsx",".xls"].some((extension) => name.length > extension.length '
+      + '&& name.endsWith(extension)) }, { message: "The file does not have an accepted extension; expected .xlsx, .XLS.", '
+      + 'params: {"code":"upload.file_extension","fileExtensions":[".xlsx",".XLS"]} }), z.string()]).nullish().optional(),')
+  })
+
+  it('checks uploadFile against the declared limits of the method member it names, before uploading', async () => {
+    const generated = generateRpcClientFiles(exportsSchema())
+    const clientModule = await loadGeneratedUploadClient(generated.clientSource, generated.schemasSource)
+    const server = uploadServer()
+    const rpc = clientModule.createRpcApi({url: 'https://example.test/rpc', fetch: server.fetch})
+    const refusal = async (upload: Promise<string>) => {
+      const error = await upload.then(() => undefined, (rejected: unknown) => rejected)
+      expect(error).toBeInstanceOf(clientModule.RpcUploadLimitError)
+      expect(error).toBeInstanceOf(clientModule.RpcError)
+      return error as {code: string; data: unknown; message: string; method: string; member: string; isInvalidParams: boolean}
+    }
+
+    const tooLarge = await refusal(rpc.$uploadFile(new File(['x'.repeat(1025)], 'a.csv', {type: 'text/csv'}),
+      {method: 'documents.upload', member: 'statement'}))
+    expect(tooLarge).toMatchObject({
+      code: 'upload.too_large',
+      data: {maxBytes: 1024, length: 1025},
+      message: 'The file is larger than the accepted 1024 bytes.',
+      method: 'documents.upload',
+      member: 'statement',
+      isInvalidParams: true,
+    })
+    // An untyped Blob is the application/octet-stream the uploader sends.
+    const untyped = await refusal(rpc.$uploadFile(new Blob(['a']), {method: 'documents.upload', member: 'statement'}))
+    expect(untyped).toMatchObject({
+      code: 'upload.content_type',
+      data: {contentTypes: ['text/csv', 'Application/XML; charset=utf-8'], contentType: 'application/octet-stream'},
+    })
+    // A list member's limits apply to each of its files.
+    expect(await refusal(rpc.$uploadFile(new Blob(['x'.repeat(2049)]), {method: 'documents.upload', member: 'receipts'})))
+      .toMatchObject({code: 'upload.too_large', data: {maxBytes: 2048, length: 2049}})
+    // The extension of the name the endpoint will store: the fileName option, else File.name, else "upload".
+    expect(await refusal(rpc.$uploadFile(new File(['x'], 'book.csv'), {method: 'documents.upload', member: 'workbook'})))
+      .toMatchObject({
+        code: 'upload.file_extension',
+        data: {fileExtensions: ['.xlsx', '.XLS'], fileName: 'book.csv'},
+        message: 'The file \'book.csv\' does not have an accepted extension; expected .xlsx, .XLS.',
+      })
+    expect(await refusal(rpc.$uploadFile(new Blob(['x']), {method: 'documents.upload', member: 'workbook'})))
+      .toMatchObject({code: 'upload.file_extension', data: {fileName: 'upload'}})
+    expect(server.uploads).toHaveLength(0)
+
+    // Fitting files upload: the media type case-insensitive with parameters ignored, the extension case-insensitive.
+    await rpc.$uploadFile(new File(['a'], 'a.xml', {type: 'application/xml;charset=utf-8'}),
+      {method: 'documents.upload', member: 'statement'})
+    await rpc.$uploadFile(new File(['a'], 'Q3.XLSX'), {method: 'documents.upload', member: 'workbook'})
+    await rpc.$uploadFile(new Blob(['a']), {method: 'documents.upload', member: 'workbook', fileName: 'named.xls'})
+    // Without a method nothing is checked; validateParams: false turns the check off.
+    await rpc.$uploadFile(new Blob(['x'.repeat(4096)]))
+    await clientModule.createRpcApi({url: 'https://example.test/rpc', fetch: server.fetch, validateParams: false})
+      .$uploadFile(new Blob(['x'.repeat(4096)]), {method: 'documents.upload', member: 'statement'})
+    expect(server.uploads.map((upload) => upload.fileName)).toEqual(['a.xml', 'Q3.XLSX', 'named.xls', null, null])
   })
 
   it('leaves the types and the client byte-identical, and emits no block for a schema without any', () => {

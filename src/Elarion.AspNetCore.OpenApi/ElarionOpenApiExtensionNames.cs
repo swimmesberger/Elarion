@@ -26,4 +26,10 @@ public static class ElarionOpenApiExtensionNames {
     /// <see cref="Elarion.Abstractions.UploadLimitsAttribute"/> (ADR-0100); the JSON-RPC schema uses the same keyword.
     /// </summary>
     public const string ContentTypes = "x-elarion-content-types";
+
+    /// <summary>
+    /// The file-name extensions an <see cref="Upload"/> member accepts (for example <c>".xlsx"</c>), from its
+    /// <see cref="Elarion.Abstractions.UploadLimitsAttribute"/> (ADR-0105); the JSON-RPC schema uses the same keyword.
+    /// </summary>
+    public const string FileExtensions = "x-elarion-file-extensions";
 }

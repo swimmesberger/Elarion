@@ -183,8 +183,10 @@ Pipeline codes: `idempotency.key_required` (`Validation`), `idempotency.in_progr
 `idempotency.key_reused` (`BusinessRule`), `preview.changed` (`Conflict`, the new outcome as payload) and
 `preview.unsupported` (`Internal`). Package codes: `paging.sort_key_unknown` (`Validation`, from
 `SortMap.Validate`), `settings.pinned`, `settings.concurrency_conflict`, and the `IUploadedFiles` codes
-`upload.not_found`, `upload.too_large`, `upload.content_type` (`Validation`, returned by the handler that reads an
-[uploaded file](/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler), which declares them). Every
+`upload.not_found`, `upload.too_large` (`UploadTooLargeData`), `upload.content_type` (`UploadContentTypeData`) and
+`upload.file_extension` (`UploadFileExtensionData`) — `Validation`, returned by the handler that reads an
+[uploaded file](/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler), and implied by the `[UploadLimits]`
+its request declares. Every
 framework answer carries its specific code, so a client never matches the message text. `ErrorCodes.IsValid(code)`
 checks the format.
 
@@ -217,6 +219,7 @@ list (sorted by code) with the operation, in the assembly manifest and the `Hand
 | `[FeatureGate]` | `not_found` |
 | `[Idempotent]` | `idempotency.key_required`, `idempotency.in_progress`, `idempotency.key_reused` |
 | an `IPreviewableRequest` with a `Result<T>`, `T : IPreviewOutcome<T>` | `preview.changed` with `T`, `preview.unsupported` |
+| a request member with [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) | `upload.not_found`, and per declared limit `upload.too_large` with `UploadTooLargeData`, `upload.content_type` with `UploadContentTypeData`, `upload.file_extension` with `UploadFileExtensionData` |
 
 ### Declaring errors for many operations
 

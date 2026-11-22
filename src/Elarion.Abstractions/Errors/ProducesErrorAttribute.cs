@@ -10,7 +10,8 @@ namespace Elarion.Abstractions;
 /// <para>
 /// Declare the specific codes a client is expected to branch on, and the kind-default codes (for example
 /// <c>[ProducesError(ErrorKind.NotFound)]</c>) the handler returns. Failures that the framework pipeline adds to a
-/// handler (request validation, authorization, feature gates, idempotency, previews) are declared implicitly. A
+/// handler (request validation, authorization, feature gates, idempotency, previews, declared upload limits) are
+/// declared implicitly. A
 /// handler that returns an undeclared code is reported at runtime in development (see <c>IErrorContractMonitor</c>).
 /// </para>
 /// <para>

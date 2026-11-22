@@ -753,6 +753,9 @@ public static class JsonRpcSchemaExporter {
     /// <summary>The vendor keyword carrying an upload member's declared accepted media types (<see cref="UploadLimitsAttribute"/>).</summary>
     internal const string ContentTypesKeyword = "x-elarion-content-types";
 
+    /// <summary>The vendor keyword carrying an upload member's declared accepted file extensions (<see cref="UploadLimitsAttribute"/>).</summary>
+    internal const string FileExtensionsKeyword = "x-elarion-file-extensions";
+
     private static JsonObject UploadNode(bool nullable, UploadLimitsAttribute? limits) {
         var node = new JsonObject {
             ["type"] = nullable ? new JsonArray("string", "null") : "string",
@@ -762,10 +765,14 @@ public static class JsonRpcSchemaExporter {
 
         // Declared limits (ADR-0100) travel next to the marker, so a client that predates them still sees an upload.
         if (limits?.MaxBytes > 0) node[MaxBytesKeyword] = limits.MaxBytes;
-        if (limits?.ContentTypes is { Length: > 0 } contentTypes)
-            node[ContentTypesKeyword] = new JsonArray(contentTypes.Select(static t => (JsonNode?)JsonValue.Create(t)).ToArray());
+        if (limits?.ContentTypes is { Length: > 0 } contentTypes) node[ContentTypesKeyword] = StringArray(contentTypes);
+        if (limits?.FileExtensions is { Length: > 0 } extensions) node[FileExtensionsKeyword] = StringArray(extensions);
 
         return node;
+
+        static JsonArray StringArray(string[] values) {
+            return new JsonArray(values.Select(static v => (JsonNode?)JsonValue.Create(v)).ToArray());
+        }
     }
 
     // [UploadLimits] on the member, or on the positional record's constructor parameter.

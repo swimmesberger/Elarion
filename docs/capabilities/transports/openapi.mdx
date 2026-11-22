@@ -67,7 +67,8 @@ of that `AddElarionOpenApi()` contributes the parts that make it *Elarion's* con
   documented as what it is on the wire, a string (the staged upload's id) marked `x-elarion-upload: true` like in the
   JSON-RPC schema, instead of an opaque schema; a list of them gets its `items`. A member's declared
   [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) are written as
-  `x-elarion-max-bytes` and `x-elarion-content-types` (on the items of a list), so such a member has its own inline
+  `x-elarion-max-bytes`, `x-elarion-content-types` and `x-elarion-file-extensions` (on the items of a list), so such a
+  member has its own inline
   schema while every other one shares the `UploadedFile` component, which never carries a member's limits.
 - **The idempotency contract** (below).
 

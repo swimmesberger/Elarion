@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 
@@ -7,11 +8,11 @@ namespace Elarion.Generators;
 /// <summary>
 /// Collects a handler's declared error contract (ADR-0080): the <c>[ProducesError]</c> declarations on the handler
 /// plus the failures the framework pipeline adds where they are statically knowable (request validation,
-/// authorization requirements, feature gates, idempotency, previews); <see cref="ErrorContractScopes"/> later adds
-/// the declarations the operation inherits from its pipeline decorators, its module and its assembly. The result is
-/// published with the operation, so the schema export and the generated clients describe every failure the
-/// operation can report. Also verifies that the response graph does not opt members out of the serializer contract
-/// (ADR-0082).
+/// authorization requirements, feature gates, idempotency, previews, declared upload limits);
+/// <see cref="ErrorContractScopes"/> later adds the declarations the operation inherits from its pipeline decorators,
+/// its module and its assembly. The result is published with the operation, so the schema export and the generated
+/// clients describe every failure the operation can report. Also verifies that the response graph does not opt
+/// members out of the serializer contract (ADR-0082).
 /// </summary>
 internal static class ErrorContractDiscovery {
     public const string ProducesErrorAttributeMetadataName = "Elarion.Abstractions.ProducesErrorAttribute";
@@ -113,6 +114,15 @@ internal static class ErrorContractDiscovery {
         var location = handler.Locations.FirstOrDefault();
         for (var current = handler; current is not null; current = current.BaseType)
             ReadDeclarations(current.GetAttributes(), owner, _ => location, byCode, report);
+
+        // The handler's own declaration wins over an implied one, so an upload code declared with another payload than
+        // the one IUploadedFiles answers with (typically none, as before the payloads existed) would hide the typed data.
+        if (report is not null)
+            foreach (var (code, payload) in UploadPayloads)
+                if (byCode.TryGetValue(code, out var declared) && declared.DataTypeFqn != payload)
+                    report(DiagnosticInfo.Create(
+                        UploadErrorPayloadMismatch, location, owner, code,
+                        DescribePayload(declared.DataTypeFqn), DescribePayload(payload)));
 
         foreach (var implied in ImpliedErrors(handler, requestType, compilation, isIdempotent, responseValueType))
             if (!byCode.ContainsKey(implied.Code))
@@ -222,6 +232,48 @@ internal static class ErrorContractDiscovery {
                 "preview.changed", "Conflict", responseValueType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
             yield return new ErrorDeclaration("preview.unsupported", "Internal", null);
         }
+
+        // Declared upload limits (ADR-0105): exactly where the upload-limits decorator attaches, the handler reads
+        // uploads through IUploadedFiles, which refuses a missing reference and a file that breaks a declared limit,
+        // each limit with the limit as typed payload. Invalid declarations are reported by the handler generator.
+        if (HandlerRegistrationGenerator.ParseUploadLimits(
+                requestType, compilation, ImmutableArray.CreateBuilder<DiagnosticInfo>()) is { Members.IsEmpty: false } uploads) {
+            yield return new ErrorDeclaration("upload.not_found", "Validation", null);
+            if (uploads.Members.Any(static member => member.MaxBytes > 0))
+                yield return new ErrorDeclaration("upload.too_large", "Validation", UploadTooLargeDataFqn);
+            if (uploads.Members.Any(static member => !member.ContentTypes.IsEmpty))
+                yield return new ErrorDeclaration("upload.content_type", "Validation", UploadContentTypeDataFqn);
+            if (uploads.Members.Any(static member => !member.FileExtensions.IsEmpty))
+                yield return new ErrorDeclaration("upload.file_extension", "Validation", UploadFileExtensionDataFqn);
+        }
+    }
+
+    private const string UploadTooLargeDataFqn = "global::Elarion.Abstractions.UploadTooLargeData";
+    private const string UploadContentTypeDataFqn = "global::Elarion.Abstractions.UploadContentTypeData";
+    private const string UploadFileExtensionDataFqn = "global::Elarion.Abstractions.UploadFileExtensionData";
+
+    // The payload IUploadedFiles answers each of its codes with (ErrorCodes.Upload*), null for none.
+    private static readonly (string Code, string? Payload)[] UploadPayloads = [
+        ("upload.not_found", null),
+        ("upload.too_large", UploadTooLargeDataFqn),
+        ("upload.content_type", UploadContentTypeDataFqn),
+        ("upload.file_extension", UploadFileExtensionDataFqn)
+    ];
+
+    public static readonly DiagnosticDescriptor UploadErrorPayloadMismatch = new(
+        "ELERR004",
+        "Upload error declared with another payload",
+        "'{0}' declares error code '{1}' with {2}, but IUploadedFiles answers it with {3}, so the schema and the "
+        + "generated client misdescribe it; declare the code with that payload, or drop the declaration when the "
+        + "request's [UploadLimits] implies it",
+        "Elarion.Errors",
+        DiagnosticSeverity.Warning,
+        true);
+
+    private static string DescribePayload(string? fqn) {
+        return fqn is null
+            ? "no payload"
+            : "payload '" + (fqn.StartsWith("global::", System.StringComparison.Ordinal) ? fqn.Substring(8) : fqn) + "'";
     }
 
     private static bool TryReadDeclaration(AttributeData attribute, out ErrorDeclaration declaration) {

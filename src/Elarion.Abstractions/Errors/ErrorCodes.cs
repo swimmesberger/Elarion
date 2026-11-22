@@ -66,14 +66,23 @@ public static class ErrorCodes {
     /// </summary>
     public const string UploadNotFound = "upload.not_found";
 
-    /// <summary>An <see cref="UploadedFile"/> is larger than <see cref="UploadConstraints.MaxBytes"/> (<see cref="ErrorKind.Validation"/>).</summary>
+    /// <summary>
+    /// An <see cref="UploadedFile"/> is larger than <see cref="UploadConstraints.MaxBytes"/>; the payload is an
+    /// <see cref="UploadTooLargeData"/> (<see cref="ErrorKind.Validation"/>).
+    /// </summary>
     public const string UploadTooLarge = "upload.too_large";
 
     /// <summary>
-    /// An <see cref="UploadedFile"/>'s content type is not one of <see cref="UploadConstraints.ContentTypes"/>
-    /// (<see cref="ErrorKind.Validation"/>).
+    /// An <see cref="UploadedFile"/>'s content type is not one of <see cref="UploadConstraints.ContentTypes"/>; the
+    /// payload is an <see cref="UploadContentTypeData"/> (<see cref="ErrorKind.Validation"/>).
     /// </summary>
     public const string UploadContentType = "upload.content_type";
+
+    /// <summary>
+    /// An <see cref="UploadedFile"/>'s file name does not end in one of <see cref="UploadConstraints.FileExtensions"/>;
+    /// the payload is an <see cref="UploadFileExtensionData"/> (<see cref="ErrorKind.Validation"/>).
+    /// </summary>
+    public const string UploadFileExtension = "upload.file_extension";
 
     /// <summary>Returns the default code of <paramref name="kind"/>.</summary>
     public static string ForKind(ErrorKind kind) {

@@ -157,12 +157,13 @@ public static class BillingLimits {
 ### `[UploadLimits]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** property, parameter (positional record)
-- **Triggers:** declares the size and content-type limits of an `UploadedFile` request member (or a collection of them). The pipeline declares them for the request's files before the handler runs, and `IUploadedFiles` checks them on every open and commit of those files, on top of any constraints the call passes; the schema exports them as `x-elarion-max-bytes` / `x-elarion-content-types`, and the generated client rejects a file that breaks them before uploading it. Needs `AddElarionUploadedFiles`; a declaration the pipeline would not enforce is `ELUPL001`/`ELUPL002`. See [Declaring the limits on the member](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member).
+- **Triggers:** declares the size, content-type and file-extension limits of an `UploadedFile` request member (or a collection of them). The pipeline declares them for the request's files before the handler runs, and `IUploadedFiles` checks them on every open and commit of those files, on top of any constraints the call passes; the handler's error contract gains `upload.not_found` and the code of each declared limit with the limit as typed data; the schema exports them as `x-elarion-max-bytes` / `x-elarion-content-types` / `x-elarion-file-extensions`, and the generated client rejects a file that breaks them before uploading it. Needs `AddElarionUploadedFiles`; a declaration the pipeline would not enforce is `ELUPL001`/`ELUPL002`. See [Declaring the limits on the member](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member).
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `MaxBytes` | `long` | `0` | The largest accepted size in bytes; `0` for no limit (`upload.too_large`). |
-| `ContentTypes` | `string[]?` | `null` | The accepted media types, compared case-insensitively with parameters ignored; empty for any (`upload.content_type`). |
+| `MaxBytes` | `long` | `0` | The largest accepted size in bytes; `0` for no limit (`upload.too_large`, `UploadTooLargeData`). |
+| `ContentTypes` | `string[]?` | `null` | The accepted media types, compared case-insensitively with parameters ignored; empty for any (`upload.content_type`, `UploadContentTypeData`). |
+| `FileExtensions` | `string[]?` | `null` | The accepted file-name extensions with their leading dot (`".xlsx"`), compared case-insensitively against the end of the stored file name; empty for any (`upload.file_extension`, `UploadFileExtensionData`). For formats whose declared type varies between systems. |
 
 ### `[McpHandler]`
 

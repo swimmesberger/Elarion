@@ -146,6 +146,37 @@ public sealed class ErrorContractSchemaTests {
     }
 
     [Fact]
+    public void Schema_TypesTheUploadLimitPayloads_SoAClientWordsTheAnswerItself() {
+        var schema = Export(d => d.MapDelegate<Ping, Pong>(
+            "t.ping",
+            (r, sp, ct) => ValueTask.FromResult(Ok(r, sp, ct)),
+            errors: [
+                new ErrorContract { Code = ErrorCodes.UploadNotFound, Kind = ErrorKind.Validation },
+                new ErrorContract {
+                    Code = ErrorCodes.UploadTooLarge, Kind = ErrorKind.Validation, DataType = typeof(UploadTooLargeData)
+                },
+                new ErrorContract {
+                    Code = ErrorCodes.UploadContentType, Kind = ErrorKind.Validation, DataType = typeof(UploadContentTypeData)
+                },
+                new ErrorContract {
+                    Code = ErrorCodes.UploadFileExtension, Kind = ErrorKind.Validation,
+                    DataType = typeof(UploadFileExtensionData)
+                }
+            ]));
+
+        var errors = schema["methods"]!["t.ping"]!["errors"]!;
+        string[] Required(string code) =>
+            [.. errors[code]!["data"]!["required"]!.AsArray().Select(static n => n!.GetValue<string>())];
+
+        errors[ErrorCodes.UploadNotFound]!.AsObject().ContainsKey("data").Should().BeFalse();
+        Required(ErrorCodes.UploadTooLarge).Should().BeEquivalentTo("maxBytes", "length");
+        Required(ErrorCodes.UploadContentType).Should().BeEquivalentTo("contentTypes", "contentType");
+        Required(ErrorCodes.UploadFileExtension).Should().BeEquivalentTo("fileExtensions", "fileName");
+        errors[ErrorCodes.UploadFileExtension]!["data"]!["properties"]!["fileExtensions"]!["items"]!["type"]!
+            .GetValue<string>().Should().Be("string");
+    }
+
+    [Fact]
     public void Schema_OmitsErrors_WhenNoneDeclared() {
         var schema = Export(d => d.MapDelegate<Ping, Pong>("t.ping", (r, sp, ct) => ValueTask.FromResult(Ok(r, sp, ct))));
 

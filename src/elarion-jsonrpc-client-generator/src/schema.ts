@@ -33,6 +33,12 @@ export interface JsonSchema {
    * case-insensitively with parameters ignored, as the server compares them.
    */
   'x-elarion-content-types'?: string[]
+  /**
+   * The file-name extensions an `x-elarion-upload` member accepts (`[UploadLimits(FileExtensions = …)]`, ADR-0105),
+   * each with its leading dot, compared case-insensitively against the end of the file name, as the server compares
+   * them.
+   */
+  'x-elarion-file-extensions'?: string[]
   // Constraint keywords (JSON Schema 2020-12). exclusiveMinimum/exclusiveMaximum are numbers, not booleans.
   minLength?: number
   maxLength?: number

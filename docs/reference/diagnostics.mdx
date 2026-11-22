@@ -36,6 +36,7 @@ JSON-RPC method emission for `[Handler]` handlers. See
 | ELERR001 | Error | A `[ProducesError]` code is not lower-case ASCII letters, digits and underscores in dot-separated segments. | Use a code such as `token.malformed`. |
 | ELERR002 | Error | One error code is declared more than once on a handler (with its base classes), a decorator, a module or an assembly with a different kind or payload type. | Declare each code once per place; a code has exactly one kind and one payload. A narrower place may declare a code again to override a wider one. |
 | ELERR003 | Error | A `[RequiresDecision]` declares `Options` that are not an enum with members. | Pass `typeof` an enum whose members are the choices, or omit `Options` for a confirmation. |
+| ELERR004 | Warning | A handler declares an `IUploadedFiles` code with another payload than the one `IUploadedFiles` answers it with — typically `upload.too_large`, `upload.content_type` or `upload.file_extension` without one — so the schema and the generated client do not type the limit it carries. | Drop the declaration when the request's [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) implies it, or declare the payload: `[ProducesError(ErrorCodes.UploadTooLarge, ErrorKind.Validation, typeof(UploadTooLargeData))]`. |
 
 ## ELHTTP — HTTP endpoint generation
 
@@ -383,7 +384,7 @@ Preview-decorator attachment for handlers whose request implements `IPreviewable
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
-| ELUPL001 | Error | An `[UploadLimits]` on a handler request member is not enforced: the member holds no `UploadedFile` (nor a collection of them), `MaxBytes` is negative, a content type is blank, it declares no limit, or the member's getter is not accessible to the generated pipeline. | Declare it on an `UploadedFile`, `UploadedFile?` or collection member with `MaxBytes > 0` or at least one content type. See [Declaring the limits on the member](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member). |
+| ELUPL001 | Error | An `[UploadLimits]` on a handler request member is not enforced: the member holds no `UploadedFile` (nor a collection of them), `MaxBytes` is negative, a content type is blank, a file extension is not a dot followed by a name without white space or path separators (`"xlsx"`, `"."`, `".x ls"`), it declares no limit, or the member's getter is not accessible to the generated pipeline. | Declare it on an `UploadedFile`, `UploadedFile?` or collection member with `MaxBytes > 0`, at least one content type or at least one extension such as `".xlsx"`. See [Declaring the limits on the member](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member). |
 | ELUPL002 | Error | An `[UploadLimits]` is on a member of a type that is not the request type of a handler in the assembly (a nested DTO, a method parameter), where no pipeline applies it. | Declare the limits on a member of the handler's request type itself. |
 
 ## ELIDEMEF — Idempotency keys (EF Core)

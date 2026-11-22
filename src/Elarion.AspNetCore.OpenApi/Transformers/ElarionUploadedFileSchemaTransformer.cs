@@ -17,8 +17,8 @@ namespace Elarion.AspNetCore.OpenApi.Transformers;
 /// <remarks>
 /// <para>
 /// A member's declared <see cref="UploadLimitsAttribute"/> (ADR-0100) is written as
-/// <see cref="ElarionOpenApiExtensionNames.MaxBytes"/> and <see cref="ElarionOpenApiExtensionNames.ContentTypes"/>,
-/// placed as the JSON-RPC schema places them. Every other <see cref="UploadedFile"/> shares one component schema, which
+/// <see cref="ElarionOpenApiExtensionNames.MaxBytes"/>, <see cref="ElarionOpenApiExtensionNames.ContentTypes"/> and
+/// <see cref="ElarionOpenApiExtensionNames.FileExtensions"/>, placed as the JSON-RPC schema places them. Every other <see cref="UploadedFile"/> shares one component schema, which
 /// a per-member limit must never change, so a member with declared limits keeps its own inline schema: its schema id
 /// is dropped before the document turns schemas into component references.
 /// </para>
@@ -74,16 +74,21 @@ internal sealed class ElarionUploadedFileSchemaTransformer : IOpenApiSchemaTrans
     // Writes the declared limits; false when the attribute declares none (the build rejects that, ELUPL001).
     private static bool AddLimits(OpenApiSchema schema, UploadLimitsAttribute limits) {
         var constraints = limits.ToConstraints();
-        if (constraints.MaxBytes is null && constraints.ContentTypes is null) return false;
+        if (constraints is { MaxBytes: null, ContentTypes: null, FileExtensions: null }) return false;
 
         schema.Extensions ??= new Dictionary<string, IOpenApiExtension>(StringComparer.Ordinal);
         if (constraints.MaxBytes is { } maxBytes)
             schema.Extensions[ElarionOpenApiExtensionNames.MaxBytes] = new JsonNodeExtension(JsonValue.Create(maxBytes));
         if (constraints.ContentTypes is { } contentTypes)
-            schema.Extensions[ElarionOpenApiExtensionNames.ContentTypes] = new JsonNodeExtension(
-                new JsonArray(contentTypes.Select(static t => (JsonNode?)JsonValue.Create(t)).ToArray()));
+            schema.Extensions[ElarionOpenApiExtensionNames.ContentTypes] = StringArray(contentTypes);
+        if (constraints.FileExtensions is { } extensions)
+            schema.Extensions[ElarionOpenApiExtensionNames.FileExtensions] = StringArray(extensions);
 
         return true;
+
+        static JsonNodeExtension StringArray(IReadOnlyList<string> values) {
+            return new JsonNodeExtension(new JsonArray(values.Select(static v => (JsonNode?)JsonValue.Create(v)).ToArray()));
+        }
     }
 
     // [UploadLimits] on the member, or on the positional record's constructor parameter, as the JSON-RPC schema reads it.
