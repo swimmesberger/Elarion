@@ -248,21 +248,23 @@ its trigger applies:
 1. [Observability](/docs/capabilities/telemetry#user--request-context) — tracing + context enrichment (always).
 2. [Audit](/docs/concepts/auditing) outcome observer — `[Auditable]`.
 3. Authorization — `[Require*]` or `[ElarionAuthorizationDefaults]` in scope.
-4. [Feature gate](/docs/concepts/feature-flags) — `[FeatureGate]`.
-5. [Validation](/docs/concepts/validation) — DataAnnotations on the request graph.
-6. Cache invalidation — `[CacheInvalidate]`.
-7. [Resilience](/docs/capabilities/resilience) — `[Resilient]`.
-8. [Idempotency](/docs/concepts/idempotency) — `[Idempotent]` commands (owns the unit of work), or the
+4. [Visibility](/docs/concepts/authorization#members-only-some-callers-see) — a response with `[VisibleWith]`
+   members (hides them per caller, outside caching and idempotency).
+5. [Feature gate](/docs/concepts/feature-flags) — `[FeatureGate]`.
+6. [Validation](/docs/concepts/validation) — DataAnnotations on the request graph.
+7. Cache invalidation — `[CacheInvalidate]`.
+8. [Resilience](/docs/capabilities/resilience) — `[Resilient]`.
+9. [Idempotency](/docs/concepts/idempotency) — `[Idempotent]` commands (owns the unit of work), or the
    inbox for integration-event consumers.
-9. [Preview](/docs/concepts/previewable-commands) — commands whose request implements `IPreviewableRequest` (owns
-   the unit of work of a preview or a fingerprinted commit; a savepoint under idempotency).
-10. **Your `[DecoratorList]` decorators**, in list order.
-11. [Audit](/docs/concepts/auditing) success recorder — `[Auditable]`, inside your transaction decorator.
-12. [Cache](/docs/capabilities/caching) — `[Cacheable]`.
-13. The handler.
+10. [Preview](/docs/concepts/previewable-commands) — commands whose request implements `IPreviewableRequest` (owns
+    the unit of work of a preview or a fingerprinted commit; a savepoint under idempotency).
+11. **Your `[DecoratorList]` decorators**, in list order.
+12. [Audit](/docs/concepts/auditing) success recorder — `[Auditable]`, inside your transaction decorator.
+13. [Cache](/docs/capabilities/caching) — `[Cacheable]`.
+14. The handler.
 
-So a denied, gated, or invalid request never reaches your decorators or opens a transaction, a denied
-attempt is still audited, a replayed idempotent request never claims a key, a success audit record commits
+So a denied, gated, or invalid request never reaches your decorators or opens a transaction, a member only some
+callers may see is hidden from a cached or replayed answer too, a denied attempt is still audited, a replayed idempotent request never claims a key, a success audit record commits
 atomically with the handler's writes, and an `[Auditable]` cached query still records the read on a cache hit.
 
 ## Inspecting the resolved pipeline
