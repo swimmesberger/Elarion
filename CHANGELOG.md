@@ -26,6 +26,26 @@ minor releases may include breaking changes.
   its parameters: a helper returns `Expr.Expand((Invoice invoice) => IsOverdue.Invoke(invoice, today))` instead of
   assigning the lambda to a typed local and calling `Expand()` on that. See
   [Rules](https://elarion.wimmesberger.dev/docs/concepts/rules#helpers-that-return-a-composed-expression).
+- **Decision primitives for applications with their own call seam** (ADR-0101). The generated TypeScript client adds
+  `decisionQuestion(method, error)`, which recognizes a question the method declares (also when a seam wrapped the
+  `RpcError` as an error's `cause`), and `answerDecision(decisions, question, answer)`, which returns the request's
+  `decisions` with the answer added, so a dialog kept as declarative state (a query library's mutation, the resend's
+  failure shown inside the dialog) answers without a pending call. `withDecisions` is built on them and takes the
+  generated client or any call function `(method, params, options?) => Promise<result>` (`RpcCall<M>`); existing calls
+  compile unchanged. `RpcDecisionCode<M>` is now exported, next to the new `RpcMethodDecisionAnswer<M>` and
+  `RpcDecisionAnswerOf<Q>`. See
+  [Answering decisions](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#answering-decisions).
+- **The schema states each request's decisions.** `rpc-schema.json` narrows the `decisions` member of an
+  `IDecidingRequest` to the decisions its handler declares: per code an answer whose `code` is that code, whose `option`
+  is one of its options (optional for a confirmation) and which names its `item` for a per-item decision. The generated
+  `decisions` type follows it per method, so a request's description no longer has to list its decision codes. A
+  regenerated client is stricter: answers built from plain strings need the declared literals (or `answerDecision`),
+  and params validation rejects an undeclared code or option before sending. The server still reads an undeclared
+  answer as no answer.
+- **`DecisionAnswer.Confirming(code)` and `DecisionAnswer.Choosing(code, option)`**, with the per-item overloads
+  `Confirming(code, item)` and `Choosing(code, item, option)`, build an answer in one line for a test or an in-process
+  caller; `Choosing` spells the enum member as `Decision<TOption>` reads it (`OnlyHere` → `onlyHere`) and rejects a
+  value the enum does not declare.
 
 ### Fixed
 - **`[VisibleWith(ElarionPermissions.X.Y)]` hid nothing in the assembly that generates `ElarionPermissions`.** The

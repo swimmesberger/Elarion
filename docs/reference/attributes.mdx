@@ -579,7 +579,7 @@ Handler requirements are class attributes the handler-registration generator rea
 ### `[RequiresDecision]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** handler class (`AllowMultiple`, inherited)
-- **Triggers:** declares a decision the handler may ask its caller with `AppError.DecisionRequired(code, …)`: it joins the operation's error contract (kind `DecisionRequired`), and the schema exports its options and whether it is answered per item, which the generated client's `withDecisions` uses. The request implements `IDecidingRequest`. Options that are not an enum report `ELERR003`. See [Asking the caller to decide](/docs/concepts/results-and-errors#asking-the-caller-to-decide).
+- **Triggers:** declares a decision the handler may ask its caller with `AppError.DecisionRequired(code, …)`: it joins the operation's error contract (kind `DecisionRequired`), and the schema exports its options and whether it is answered per item, which the generated client's `withDecisions`, `decisionQuestion` and `answerDecision` use. The request implements `IDecidingRequest`; its `decisions` member is exported narrowed to the declared codes and options. Options that are not an enum report `ELERR003`. See [Asking the caller to decide](/docs/concepts/results-and-errors#asking-the-caller-to-decide).
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |

@@ -1001,11 +1001,162 @@ describe('JSON-RPC client generator', () => {
     expect(generated.typesSource).toContain(
       '"math.per_item": { kind: "decision_required"; data: undefined; options: "keep" | "drop"; perItem: true }')
     expect(generated.clientSource).toContain('export async function withDecisions<M extends RpcDecidingMethod>(')
+    expect(generated.clientSource).toContain('  client: RpcClient | RpcCall<M>,')
+    expect(generated.clientSource).toContain(
+      'export function decisionQuestion<M extends RpcDecidingMethod>(method: M, error: unknown): RpcMethodDecision<M> | undefined {')
+    expect(generated.clientSource).toContain('export function answerDecision<')
+    expect(generated.clientSource).toContain('export type RpcMethodDecisionAnswer<M extends RpcMethod> = RpcDecisionAnswerOf<RpcMethodDecision<M>>')
     expect(generated.clientSource).toContain(
       'const rpcDecisions: Partial<Record<RpcMethod, Readonly<Record<string, { readonly options: readonly string[]; readonly perItem: boolean }>>>> = '
       + '{"math.add":{"math.big_sum":{"options":["confirm"],"perItem":false},"math.per_item":{"options":["keep","drop"],"perItem":true}}}')
-    expect(without.clientSource).not.toContain('withDecisions')
-    expect(without.clientSource).not.toContain('rpcDecisions')
+    for (const name of ['withDecisions', 'rpcDecisions', 'decisionQuestion', 'answerDecision', 'RpcCall']) {
+      expect(without.clientSource).not.toContain(name)
+    }
+  })
+
+  it('types the decisions member with the declared codes and options the server narrowed it to', () => {
+    const generated = generateRpcClientFiles(decisionTestSchema())
+
+    expect(generated.typesSource).toMatch(
+      /decisions\?: \(\{\s*code: "math\.big_sum"\s*option\?: "confirm"\s*\} \| \{\s*code: "math\.per_item"\s*item: string\s*option: "keep" \| "drop"\s*\}\)\[\] \| null \| undefined/)
+    expect(generated.schemasSource).toMatch(
+      /decisions: z\.array\(z\.union\(\[z\.strictObject\(\{\s*code: z\.enum\(\["math\.big_sum"\]\),\s*option: z\.enum\(\["confirm"\]\)\.optional\(\),/)
+  })
+
+  it('type-checks the decision primitives against the narrowed decisions member under NodeNext', () => {
+    const generated = generateRpcClientFiles(decisionTestSchema())
+    const usage = [
+      "import { answerDecision, createRpcClient, decisionQuestion, withDecisions } from './rpc-client.js'",
+      "import type { RpcMethod, RpcMethodDecision, RpcMethodDecisionAnswer, RpcParams, RpcResult } from './rpc-client.js'",
+      '',
+      "const client = createRpcClient({ url: 'https://example.test/rpc' })",
+      'async function seam<M extends RpcMethod>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {',
+      "  try { return await client.call(method, params) } catch (error) { throw new Error('localized', { cause: error }) }",
+      '}',
+      '',
+      'export async function run(error: unknown): Promise<number> {',
+      "  let params: RpcParams<'math.add'> = { left: 1, right: 2 }",
+      "  const question = decisionQuestion('math.add', error)",
+      '  if (question === undefined) return 0',
+      "  if (question.code === 'math.per_item') {",
+      "    params = { ...params, decisions: answerDecision(params.decisions, question, { 'line-1': 'drop' }) }",
+      '    // @ts-expect-error an option the decision does not declare',
+      "    answerDecision(params.decisions, question, { 'line-1': 'maybe' })",
+      '  } else {',
+      '    const limit: number = question.data.limit',
+      "    params = { ...params, decisions: answerDecision(undefined, question, 'confirm') }",
+      '    void limit',
+      '  }',
+      "  const pending: RpcMethodDecision<'math.add'> = question",
+      "  const answers: RpcMethodDecisionAnswer<'math.add'>[] = answerDecision([], pending, 'confirm')",
+      "  params = { ...params, decisions: [...answers, { code: 'math.big_sum' }] }",
+      '  // @ts-expect-error a code the method does not declare',
+      "  params = { ...params, decisions: [{ code: 'math.unknown' }] }",
+      "  const viaSeam: number = await withDecisions(seam, 'math.add', params, () => 'confirm')",
+      "  const viaClient: number = await withDecisions(client, 'math.add', params, () => undefined)",
+      '  // @ts-expect-error a method that declares no decision',
+      "  decisionQuestion('user.get', error)",
+      '  return viaSeam + viaClient',
+      '}',
+      '',
+    ].join('\n')
+    // The Zod schemas are not under test here, and zod is no dependency of this package: a stub stands in.
+    const schemasStub = [
+      'export const rpcParamsSchemas: Record<string, any> = {}',
+      'export const rpcResultSchemas: Record<string, any> = {}',
+      'export const rpcErrorDataSchemas: Record<string, Record<string, any>> = {}',
+      '',
+    ].join('\n')
+
+    const diagnostics = typeCheck({
+      'rpc-types.ts': generated.typesSource,
+      'rpc-client.ts': generated.clientSource,
+      'rpc-schemas.ts': schemasStub,
+      'usage.ts': usage,
+    })
+
+    expect(diagnostics).toEqual([])
+  })
+
+  it('recognises a declared question and builds the answers for a resend', async () => {
+    const generated = generateRpcClientFiles(decisionTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as GeneratedClientModule & {
+      decisionQuestion(method: string, error: unknown): {
+        code: string; message: string; options: readonly string[]; perItem: boolean; data: unknown; error: unknown
+      } | undefined
+      answerDecision(decisions: unknown, question: unknown, answer: unknown): unknown[]
+    }
+    const {RpcError, decisionQuestion, answerDecision} = clientModule
+    const bigSum = new RpcError(-32006, 'That is a big sum.', {code: 'math.big_sum', data: {limit: 10}})
+    const perItem = new RpcError(-32006, 'Keep these lines?', {code: 'math.per_item'})
+
+    const question = decisionQuestion('math.add', bigSum)
+    expect(question).toEqual({
+      code: 'math.big_sum', message: 'That is a big sum.', options: ['confirm'], perItem: false, data: {limit: 10}, error: bigSum,
+    })
+    // An application seam that wraps the error keeps it as the cause.
+    expect(decisionQuestion('math.add', new Error('localized', {cause: new Error('wrapped', {cause: bigSum})}))?.error)
+      .toBe(bigSum)
+    // Not a declared question: another method, an undeclared code, another kind, or no RpcError at all.
+    expect(decisionQuestion('user.get', bigSum)).toBeUndefined()
+    expect(decisionQuestion('math.add', new RpcError(-32006, '?', {code: 'math.other'}))).toBeUndefined()
+    expect(decisionQuestion('math.add', new RpcError(-32006, '?', {code: 'constructor'}))).toBeUndefined()
+    expect(decisionQuestion('math.add', new RpcError(-32002, '?', {code: 'math.big_sum'}))).toBeUndefined()
+    expect(decisionQuestion('math.add', new Error('offline'))).toBeUndefined()
+    expect(decisionQuestion('math.add', 'math.big_sum')).toBeUndefined()
+
+    const confirmed = answerDecision(undefined, question, 'confirm')
+    expect(confirmed).toEqual([{code: 'math.big_sum', option: 'confirm'}])
+    const lines = answerDecision(
+      [...confirmed, {code: 'math.per_item', item: 'line-1', option: 'keep'}, {code: 'math.per_item', item: 'line-3', option: 'keep'}],
+      decisionQuestion('math.add', perItem),
+      {'line-1': 'drop', 'line-2': 'keep'})
+    // A new answer replaces the earlier one for the same code and item; every other answer stays.
+    expect(lines).toEqual([
+      {code: 'math.big_sum', option: 'confirm'},
+      {code: 'math.per_item', item: 'line-3', option: 'keep'},
+      {code: 'math.per_item', item: 'line-1', option: 'drop'},
+      {code: 'math.per_item', item: 'line-2', option: 'keep'},
+    ])
+    expect(answerDecision(lines, question, 'confirm')).toEqual([...lines.slice(1), {code: 'math.big_sum', option: 'confirm'}])
+  })
+
+  it('runs withDecisions over an application call function instead of the client', async () => {
+    const generated = generateRpcClientFiles(decisionTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as GeneratedClientModule & {
+      withDecisions(
+        client: unknown, method: string, params: unknown, ask: (question: { code: string }) => unknown
+      ): Promise<unknown>
+    }
+    const client = clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async (_input, init) => {
+        const request = JSON.parse(String(init?.body)) as { id: string; params: { decisions?: { code: string }[] } }
+        return (request.params.decisions ?? []).some((d) => d.code === 'math.big_sum')
+          ? jsonResponse({jsonrpc: '2.0', id: request.id, result: 42})
+          : jsonResponse({jsonrpc: '2.0', id: request.id, error: {
+            code: -32006, message: 'That is a big sum.', data: {code: 'math.big_sum', data: {limit: 10}},
+          }})
+      },
+      validateParams: false,
+      validateResults: false,
+    })
+    // The application's seam: its own error, with the RpcError as the cause, and no request options.
+    const calls: string[] = []
+    const seam = async (method: string, params: unknown) => {
+      calls.push(method)
+      try {
+        return await client.call(method, params)
+      } catch (error) {
+        throw new Error('Localized failure', {cause: error})
+      }
+    }
+
+    expect(await clientModule.withDecisions(seam, 'math.add', {left: 30, right: 12}, () => 'confirm')).toBe(42)
+    expect(calls).toEqual(['math.add', 'math.add'])
+    // Cancelling throws the seam's own error.
+    await expect(clientModule.withDecisions(seam, 'math.add', {left: 1, right: 2}, () => undefined))
+      .rejects.toThrow('Localized failure')
   })
 
   it('asks the application for a declared decision and resends with the answer', async () => {
@@ -1870,12 +2021,29 @@ function decisionTestSchema(): RpcSchema {
           properties: {
             left: {type: 'number'},
             right: {type: 'number'},
+            // The server narrows the decisions member to the declared decisions: one answer shape per code.
             decisions: {
               type: ['array', 'null'],
               items: {
-                type: 'object',
-                properties: {code: {type: 'string'}, item: {type: ['string', 'null']}, option: {type: 'string'}},
-                required: ['code'],
+                anyOf: [
+                  {
+                    type: 'object',
+                    properties: {
+                      code: {type: 'string', enum: ['math.big_sum']},
+                      option: {type: 'string', enum: ['confirm']},
+                    },
+                    required: ['code'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      code: {type: 'string', enum: ['math.per_item']},
+                      item: {type: 'string'},
+                      option: {type: 'string', enum: ['keep', 'drop']},
+                    },
+                    required: ['code', 'item', 'option'],
+                  },
+                ],
               },
             },
           },
@@ -2098,6 +2266,35 @@ async function loadGeneratedClient(clientSource: string): Promise<GeneratedClien
   ].join('\n'), 'utf-8')
 
   return await import(pathToFileURL(join(dir, 'rpc-client.mjs')).href) as GeneratedClientModule
+}
+
+// Type-checks generated files as an ES module package under NodeNext with strict settings; returns the formatted
+// diagnostics, so an unused @ts-expect-error is reported as well.
+function typeCheck(files: Record<string, string>): string[] {
+  const dir = mkdtempSync(join(tmpdir(), 'elarion-rpc-typecheck-'))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({type: 'module'}), 'utf-8')
+  for (const [name, source] of Object.entries(files)) {
+    writeFileSync(join(dir, name), source, 'utf-8')
+  }
+
+  const {options, errors} = ts.convertCompilerOptionsFromJson({
+    target: 'ES2022',
+    module: 'NodeNext',
+    moduleResolution: 'NodeNext',
+    lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+    strict: true,
+    noEmit: true,
+    skipLibCheck: true,
+    types: [],
+  }, dir)
+  expect(errors).toEqual([])
+  const program = ts.createProgram(Object.keys(files).map((name) => join(dir, name)), options)
+  return ts.getPreEmitDiagnostics(program).map((diagnostic) => {
+    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
+    if (diagnostic.file === undefined || diagnostic.start === undefined) return message
+    const {line} = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
+    return `${diagnostic.file.fileName.slice(dir.length + 1)}:${line + 1}: ${message}`
+  })
 }
 
 function jsonResponse(body: unknown): Response {

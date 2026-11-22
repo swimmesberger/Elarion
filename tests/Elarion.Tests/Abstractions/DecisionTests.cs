@@ -81,6 +81,41 @@ public sealed class DecisionTests {
         command.Unanswered("c", ["line-2"]).Should().BeEmpty();
     }
 
+    private enum ExportedChange {
+        OnlyHere,
+        AsCorrection
+    }
+
+    [Fact]
+    public void Confirming_BuildsTheConfirmationAnswer_ForTheRequestOrAnItem() {
+        DecisionAnswer.Confirming("c").Should().Be(new DecisionAnswer { Code = "c" });
+        DecisionAnswer.Confirming("c", "line-1").Should().Be(new DecisionAnswer { Code = "c", Item = "line-1" });
+
+        var command = new Command(DecisionAnswer.Confirming("c"), DecisionAnswer.Confirming("d", "line-1"));
+        command.IsConfirmed("c").Should().BeTrue();
+        command.IsConfirmed("d", "line-1").Should().BeTrue();
+        command.IsConfirmed("d").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Choosing_SpellsTheOptionAsTheSchemaExportsIt_AndDecisionReadsItBack() {
+        var whole = DecisionAnswer.Choosing("c", ExportedChange.OnlyHere);
+        var perItem = DecisionAnswer.Choosing("d", "line-2", DuplicateChoice.Skip);
+
+        whole.Should().Be(new DecisionAnswer { Code = "c", Option = "onlyHere" });
+        perItem.Should().Be(new DecisionAnswer { Code = "d", Item = "line-2", Option = "skip" });
+        var command = new Command(whole, perItem);
+        command.Decision<ExportedChange>("c").Should().Be(ExportedChange.OnlyHere);
+        command.Decision<DuplicateChoice>("d", "line-2").Should().Be(DuplicateChoice.Skip);
+    }
+
+    [Fact]
+    public void Choosing_RejectsAValueTheEnumDoesNotDeclare() {
+        var act = () => DecisionAnswer.Choosing("c", (DuplicateChoice)7);
+
+        act.Should().Throw<ArgumentOutOfRangeException>().WithParameterName("option");
+    }
+
     [Fact]
     public void AnswersRoundTripWithTheOptionDefaultingToConfirm() {
         var info = DecisionJsonContext.Default.DecisionAnswer;

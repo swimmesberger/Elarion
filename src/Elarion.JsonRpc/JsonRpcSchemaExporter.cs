@@ -76,6 +76,7 @@ public static class JsonRpcSchemaExporter {
                 route.RequestType, options, SchemaDirection.Request, InjectReflectedRequestAnnotations);
             var responseSchema = BuildSchemaNode(
                 route.ResponseType, options, SchemaDirection.Response, InjectReflectedResponseAnnotations);
+            NarrowDecisionAnswers(requestSchema, route, options);
 
             var method = new JsonObject {
                 ["params"] = requestSchema,
@@ -328,6 +329,73 @@ public static class JsonRpcSchemaExporter {
         }
 
         return node;
+    }
+
+    /// <summary>
+    /// Narrows the items of the request's <see cref="IDecidingRequest.Decisions"/> member to the decisions the method
+    /// declares (ADR-0101), so the schema states which answers the request takes: per declared code, in ordinal order,
+    /// an answer whose <c>code</c> is that code, whose <c>option</c> is one of its options (optional for a
+    /// confirmation, where it defaults to <c>confirm</c>), and which names its <c>item</c> for a per-item decision. One
+    /// decision is that answer object, several are an <c>anyOf</c> of them. A method that declares no decision, or a
+    /// request without the member, keeps the member's schema as the serializer exports it.
+    /// </summary>
+    /// <remarks>
+    /// The schema describes the answers that count; the server still reads an undeclared one as no answer and asks
+    /// again, so no pre-handler check depends on it.
+    /// </remarks>
+    [RequiresUnreferencedCode(SchemaReflectionMessage)]
+    [RequiresDynamicCode(SchemaReflectionMessage)]
+    private static void NarrowDecisionAnswers(JsonNode requestSchema, HandlerRoute route, JsonSerializerOptions options) {
+        if (route.Errors is not { Count: > 0 } errors || !typeof(IDecidingRequest).IsAssignableFrom(route.RequestType))
+            return;
+
+        var decisions = errors
+            .Where(static error => error.Decision is not null)
+            .OrderBy(static error => error.Code, StringComparer.Ordinal)
+            .ToList();
+        if (decisions.Count == 0) return;
+
+        // Wire names come from the serializer's contract, so a naming policy or [JsonPropertyName] is honored.
+        if (WireName(options.GetTypeInfo(route.RequestType), nameof(IDecidingRequest.Decisions)) is not { } member
+            || requestSchema is not JsonObject request
+            || request["properties"]?[member] is not JsonObject property)
+            return;
+
+        var answer = options.GetTypeInfo(typeof(DecisionAnswer));
+        var code = WireName(answer, nameof(DecisionAnswer.Code)) ?? "code";
+        var item = WireName(answer, nameof(DecisionAnswer.Item)) ?? "item";
+        var option = WireName(answer, nameof(DecisionAnswer.Option)) ?? "option";
+
+        var cases = new List<JsonNode>(decisions.Count);
+        foreach (var error in decisions) {
+            var decision = error.Decision!;
+            var properties = new JsonObject { [code] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(error.Code) } };
+            var required = new List<string> { code };
+            if (decision.PerItem) {
+                properties[item] = new JsonObject { ["type"] = "string" };
+                required.Add(item);
+            }
+
+            // Declaration order, as the errors node lists the options.
+            properties[option] = new JsonObject {
+                ["type"] = "string",
+                ["enum"] = new JsonArray(decision.Options.Select(static o => (JsonNode?)JsonValue.Create(o)).ToArray())
+            };
+            if (decision.Options is not [DecisionAnswer.Confirm]) required.Add(option);
+
+            cases.Add(new JsonObject {
+                ["type"] = "object",
+                ["properties"] = properties,
+                ["required"] = new JsonArray(required.Select(static name => (JsonNode?)JsonValue.Create(name)).ToArray())
+            });
+        }
+
+        property["items"] = cases.Count == 1 ? cases[0] : new JsonObject { ["anyOf"] = new JsonArray([.. cases]) };
+    }
+
+    // The JSON name of the member declared as clrName, or null when the contract does not serialize it.
+    private static string? WireName(JsonTypeInfo typeInfo, string clrName) {
+        return typeInfo.Properties.FirstOrDefault(p => p.AttributeProvider is MemberInfo member && member.Name == clrName)?.Name;
     }
 
     /// <summary>

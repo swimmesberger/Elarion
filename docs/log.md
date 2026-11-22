@@ -3,6 +3,7 @@
 ## 2026-11-22
 
 * **Update**: [ADR-0102](decisions/0102-rules-are-expressions-composed-once.md) gained an amendment: a rule takes one to four inputs, the expander and the rule check recognize every arity without a list, and Expr.Expand takes a lambda directly so a helper needs no typed local.
+* **Update**: [ADR-0101](decisions/0101-a-decision-required-answer.md) gained an amendment: the schema narrows a request's decisions member to its declared answers, the generated client exposes decisionQuestion and answerDecision (withDecisions takes the client or a call function), and DecisionAnswer gains Confirming and Choosing.
 * **Update**: [ADR-0100](decisions/0100-the-schema-exports-constants-presets-and-limits.md) accepted and implemented: typed limits, declared upload limits, request presets, sort keys and client constants in the schema and the generated client; [ADR-0105](decisions/0105-uploaded-files-are-handler-parameters.md) amended for the declared limits; glossary gains upload limits, request preset and client constants
 * **Update**: [ADR-0001](decisions/0001-event-transaction-phase.md) and [ADR-0003](decisions/0003-decorator-attachment-predicates.md) gained an amendment: the core package ships the opt-in TransactionDecorator, and the preview decorator of ADR-0104 is the one built-in owner of a unit of work.
 * **Update**: [ADR-0102](decisions/0102-rules-are-expressions-composed-once.md) now records UseElarionRuleCheck, the EF Core interceptor that refuses a query with an unexpanded rule.

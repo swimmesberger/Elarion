@@ -82,6 +82,69 @@ public sealed class ErrorContractSchemaTests {
         confirm["options"]!.AsArray().Select(n => n!.GetValue<string>()).Should().Equal("confirm");
     }
 
+    public sealed record DecidingPing : IDecidingRequest {
+        public required string Message { get; init; }
+        public IReadOnlyList<DecisionAnswer>? Decisions { get; init; }
+    }
+
+    private static readonly ErrorContract PerItemDecision = new() {
+        Code = "t.possible_duplicate", Kind = ErrorKind.DecisionRequired,
+        Decision = new DecisionContract { Options = ["skip", "import"], PerItem = true }
+    };
+
+    private static readonly ErrorContract Confirmation = new() {
+        Code = "t.confirm", Kind = ErrorKind.DecisionRequired, Decision = new DecisionContract { Options = [DecisionAnswer.Confirm] }
+    };
+
+    private static JsonNode DecisionsMember(IReadOnlyList<ErrorContract> errors, JsonSerializerOptions? options = null) {
+        var schema = Export(d => d.MapDelegate<DecidingPing, Pong>(
+            "t.ping", (_, _, _) => ValueTask.FromResult<Result<Pong>>(new Pong("x")), errors: errors), options);
+        return schema["methods"]!["t.ping"]!["params"]!["properties"]!.AsObject()
+            .Single(p => p.Key.Equals("decisions", StringComparison.OrdinalIgnoreCase)).Value!;
+    }
+
+    [Fact]
+    public void Schema_NarrowsTheDecisionsMember_ToOneAnswerShapePerDeclaredDecision() {
+        var member = DecisionsMember([PerItemDecision, new ErrorContract { Code = "t.other", Kind = ErrorKind.Conflict }, Confirmation]);
+
+        // The member stays an optional, nullable list; only its items are narrowed, in ordinal code order.
+        member["type"]!.AsArray().Select(n => n!.GetValue<string>()).Should().Equal("array", "null");
+        var cases = member["items"]!["anyOf"]!.AsArray();
+        cases.Select(c => c!["properties"]!["code"]!["enum"]![0]!.GetValue<string>())
+            .Should().Equal("t.confirm", "t.possible_duplicate");
+
+        // A confirmation: its option may be left out (it defaults to confirm), and it names no item.
+        var confirm = cases[0]!.AsObject();
+        confirm["properties"]!.AsObject().Select(p => p.Key).Should().Equal("code", "option");
+        confirm["properties"]!["option"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).Should().Equal("confirm");
+        Required(confirm).Should().Equal("code");
+
+        // A per-item choice: the item and one of the options, in declaration order, are required.
+        var perItem = cases[1]!.AsObject();
+        perItem["properties"]!["item"]!["type"]!.GetValue<string>().Should().Be("string");
+        perItem["properties"]!["option"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).Should().Equal("skip", "import");
+        Required(perItem).Should().Equal("code", "item", "option");
+    }
+
+    [Fact]
+    public void Schema_StatesASingleDecisionAsTheAnswerShapeItself_InTheContractsNames() {
+        var pascal = new JsonSerializerOptions(Options) { PropertyNamingPolicy = null };
+
+        var items = DecisionsMember([Confirmation], pascal)["items"]!.AsObject();
+
+        items.ContainsKey("anyOf").Should().BeFalse();
+        items["properties"]!.AsObject().Select(p => p.Key).Should().Equal("Code", "Option");
+        items["properties"]!["Code"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).Should().Equal("t.confirm");
+    }
+
+    [Fact]
+    public void Schema_LeavesTheDecisionsMemberAlone_WhenTheMethodDeclaresNoDecision() {
+        var items = DecisionsMember([new ErrorContract { Code = "t.other", Kind = ErrorKind.Conflict }])["items"]!.AsObject();
+
+        items.ContainsKey("anyOf").Should().BeFalse();
+        items["properties"]!["code"]!.AsObject().ContainsKey("enum").Should().BeFalse();
+    }
+
     [Fact]
     public void Schema_OmitsErrors_WhenNoneDeclared() {
         var schema = Export(d => d.MapDelegate<Ping, Pong>("t.ping", (r, sp, ct) => ValueTask.FromResult(Ok(r, sp, ct))));

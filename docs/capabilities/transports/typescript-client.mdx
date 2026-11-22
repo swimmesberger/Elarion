@@ -403,9 +403,21 @@ if (error instanceof RpcError && error.code === 'internal')
 ### Answering decisions
 
 A method whose handler declares [`[RequiresDecision]`](/docs/concepts/results-and-errors#asking-the-caller-to-decide)
-lists each decision in its `errors` with kind `decision_required`, its `options` and `perItem`. `withDecisions` runs
-the call; when the server needs a decision the method declares, it hands your dialog a typed question and calls again
-with the answer added to `decisions`, until the call succeeds or fails otherwise:
+lists each decision in its `errors` with kind `decision_required`, its `options` and `perItem`, and its request's
+`decisions` member is typed with exactly those answers: a declared code, one of its options, and for a per-item
+decision the item. An undeclared code or option is a compile error, and the generated params schema rejects it before
+the call is sent:
+
+```ts
+// RpcParams<'banking.imports.commit'>['decisions'], also available as RpcMethodDecisionAnswer<M>[]
+decisions?: (
+  | { code: 'banking.closed_period'; option?: 'confirm' }                              // a confirmation
+  | { code: 'banking.possible_duplicate'; item: string; option: 'import' | 'skip' }    // a choice per item
+)[] | null
+```
+
+`withDecisions` runs the call; when the server needs a decision the method declares, it hands your dialog a typed
+question and calls again with the answer added to `decisions`, until the call succeeds or fails otherwise:
 
 ```ts
 import { withDecisions } from './generated/rpc-client'
@@ -422,11 +434,38 @@ const outcome = await withDecisions(client, 'banking.imports.commit', { statemen
 ```
 
 The question carries `code`, `message`, the declared `options`, `perItem`, the typed `data` and the `RpcError`.
-Returning `undefined` cancels: `withDecisions` throws the decision error, which you can recognize with
+Returning `undefined` cancels: `withDecisions` throws the error the call failed with, which you can recognize with
 `error.isDecisionRequired`. A later answer for the same code and item replaces an earlier one, and `maxQuestions`
 (default 10) stops a server that keeps asking. Each resend is a new request, so an idempotent method gets a new
-idempotency key unless the options fix one. `withDecisions` and the `RpcDecision*` types are emitted only when a method
-declares a decision.
+idempotency key unless the options fix one.
+
+The first argument is the generated client or your own call seam, any function shaped
+`(method, params, options?) => Promise<result>` (`RpcCall<M>`), so the calls keep going through the timeouts,
+error mapping and localization of your application:
+
+```ts
+const outcome = await withDecisions(rpc, 'banking.imports.commit', { statement }, askImportDecision)
+```
+
+When the dialog is declarative state rather than an awaited promise (its saving state and the resend's failure shown
+inside it, a query library's mutation sending the call), use the two primitives `withDecisions` is built on:
+`decisionQuestion(method, error)` recognizes a question the method declares and returns it typed (or `undefined` for
+any other error), and `answerDecision(decisions, question, answer)` returns the request's `decisions` with the answer
+added, replacing an earlier answer for the same code and item:
+
+```ts
+import { answerDecision, decisionQuestion } from './generated/rpc-client'
+
+// When the call fails: keep the question and the params it answers.
+const question = decisionQuestion('banking.imports.commit', error)
+if (question) setPending({ question, params })
+
+// When the user answers: resend through your own mutation, with the answer added.
+commit.mutate({ ...pending.params, decisions: answerDecision(pending.params.decisions, pending.question, answer) })
+```
+
+Both recognize the `RpcError` itself or an error whose `cause` chain holds it, so a seam that wraps errors keeps working.
+`withDecisions`, the primitives and the `RpcDecision*` types are emitted only when a method declares a decision.
 
 ## Method requirements and UI gating
 
