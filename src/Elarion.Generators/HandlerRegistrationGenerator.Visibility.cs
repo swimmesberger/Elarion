@@ -26,6 +26,7 @@ public sealed partial class HandlerRegistrationGenerator {
         public const int Sequence = 4;
         public const int ImmutableArray = 5;
         public const int Created = 6;
+        public const int Polymorphic = 7;
     }
 
     /// <summary>The members a handler's response shows by permission: the success value, every permission named, and
@@ -42,7 +43,10 @@ public sealed partial class HandlerRegistrationGenerator {
         string TypeFqn,
         bool IsReferenceType,
         int Element,
-        EquatableArray<RedactedMemberModel> Members);
+        EquatableArray<RedactedMemberModel> Members,
+        // For a polymorphic type ([JsonDerivedType]): the copy functions of the derived types to dispatch to,
+        // most-derived first; the members above then copy an instance of the declared type itself.
+        EquatableArray<int> Derived);
 
     /// <summary>A member rewritten in the copy: hidden unless <see cref="Permission"/> is held, copied through
     /// <see cref="Redactor"/> (-1: as is), or both.</summary>
@@ -84,6 +88,7 @@ public sealed partial class HandlerRegistrationGenerator {
         public int Kind { get; set; } = -1;
         public VisibilityNode? Element { get; set; }
         public List<(IPropertySymbol Property, string? Permission, VisibilityNode Node)> Members { get; } = [];
+        public List<VisibilityNode> Derived { get; } = [];
         public string? UnsupportedReason { get; set; }
     }
 
@@ -139,6 +144,9 @@ public sealed partial class HandlerRegistrationGenerator {
 
             foreach (var member in node.Members)
                 Number(member.Node);
+
+            foreach (var derived in node.Derived)
+                Number(derived);
         }
 
         Number(root);
@@ -158,7 +166,9 @@ public sealed partial class HandlerRegistrationGenerator {
             }
 
             var members = ImmutableArray.CreateBuilder<RedactedMemberModel>();
-            if (node.Kind == RedactorKind.Object) {
+            var hasMembersToRewrite = node.Members.Any(m => m.Permission is not null || needs.Contains(m.Node));
+            if (node.Kind == RedactorKind.Object
+                || (node.Kind == RedactorKind.Polymorphic && hasMembersToRewrite)) {
                 if (node.Type is INamedTypeSymbol { IsRecord: false, IsValueType: false })
                     Fail($"'{typeFqn}' is neither a record nor a struct, so it cannot be copied with a 'with' expression");
 
@@ -186,12 +196,22 @@ public sealed partial class HandlerRegistrationGenerator {
                 }
             }
 
+            // The derived types to dispatch to, most-derived first, so a type deriving from another listed one is
+            // matched before its base.
+            var derived = node.Derived
+                .Where(needs.Contains)
+                .OrderByDescending(static d => InheritanceDepth(d.Type))
+                .ThenBy(d => d.Type.ToDisplayString(fmt), StringComparer.Ordinal)
+                .Select(d => ids[d])
+                .ToImmutableArray();
+
             redactors.Add(new RedactorModel(
                 node.Kind,
                 typeFqn,
                 !node.Type.IsValueType,
                 node.Element is { } element && ids.TryGetValue(element, out var elementId) ? elementId : -1,
-                members.ToImmutable()));
+                members.ToImmutable(),
+                derived));
         }
 
         if (failed)
@@ -260,20 +280,41 @@ public sealed partial class HandlerRegistrationGenerator {
             return node;
         }
 
-        // Any other interface or abstract shape is answered by the handler's runtime type, which the copy cannot see.
-        if (named.TypeKind == TypeKind.Interface)
-            return node;
-
         // Framework and BCL types are leaves: they never carry an application's [VisibleWith] members.
         var ns = named.ContainingNamespace?.ToDisplayString() ?? string.Empty;
         if (ns == "System" || ns.StartsWith("System.", StringComparison.Ordinal) || ns.StartsWith("Microsoft.",
                 StringComparison.Ordinal))
             return node;
 
-        node.Kind = RedactorKind.Object;
+        // A polymorphic type: System.Text.Json writes a derived type's own members only for the types its
+        // [JsonDerivedType] attributes declare, so exactly those are followed, and the copy dispatches on them.
+        var derivedTypes = ReadDerivedTypes(named);
+        if (derivedTypes.Count > 0) {
+            node.Kind = RedactorKind.Polymorphic;
+            foreach (var derivedType in derivedTypes)
+                node.Derived.Add(VisitVisibility(derivedType, walk));
+
+            // An instance of the declared type itself (when it can have one) is copied through its own members.
+            if (named.TypeKind != TypeKind.Interface && !named.IsAbstract)
+                foreach (var property in CollectVisibilityProperties(named))
+                    node.Members.Add((property, ReadVisibleWith(property, walk), VisitVisibility(property.Type, walk)));
+
+            return node;
+        }
+
         foreach (var property in CollectVisibilityProperties(named))
             node.Members.Add((property, ReadVisibleWith(property, walk), VisitVisibility(property.Type, walk)));
 
+        // Without [JsonDerivedType] an interface is written through its declared members, but no copy of it can be
+        // made; one that reaches a marked member is reported.
+        if (named.TypeKind == TypeKind.Interface) {
+            node.Kind = UnsupportedKind;
+            node.UnsupportedReason =
+                "is an interface the pipeline cannot copy; declare its implementations with [JsonDerivedType]";
+            return node;
+        }
+
+        node.Kind = RedactorKind.Object;
         return node;
     }
 
@@ -288,6 +329,9 @@ public sealed partial class HandlerRegistrationGenerator {
 
         foreach (var member in node.Members)
             CollectVisibilityClosure(member.Node, closure, seen);
+
+        foreach (var derived in node.Derived)
+            CollectVisibilityClosure(derived, closure, seen);
     }
 
     // A fixpoint over the closure, so a cycle (a tree node holding a list of itself) cannot cut a path short.
@@ -304,12 +348,37 @@ public sealed partial class HandlerRegistrationGenerator {
                 foreach (var member in node.Members)
                     need |= member.Permission is not null || needs.Contains(member.Node);
 
+                foreach (var derived in node.Derived)
+                    need |= needs.Contains(derived);
+
                 if (need && needs.Add(node))
                     changed = true;
             }
         } while (changed);
 
         return needs;
+    }
+
+    private const string JsonDerivedTypeAttributeMetadataName =
+        "System.Text.Json.Serialization.JsonDerivedTypeAttribute";
+
+    private static List<INamedTypeSymbol> ReadDerivedTypes(INamedTypeSymbol type) {
+        var derived = new List<INamedTypeSymbol>();
+        foreach (var attribute in type.GetAttributes())
+            if (attribute.AttributeClass?.ToDisplayString() == JsonDerivedTypeAttributeMetadataName
+                && attribute.ConstructorArguments.Length > 0
+                && attribute.ConstructorArguments[0].Value is INamedTypeSymbol derivedType)
+                derived.Add(derivedType);
+
+        return derived;
+    }
+
+    private static int InheritanceDepth(ITypeSymbol type) {
+        var depth = 0;
+        for (var current = type.BaseType; current is not null; current = current.BaseType)
+            depth++;
+
+        return depth;
     }
 
     private static bool IsDefinition(INamedTypeSymbol definition, string ns, string metadataName) {
@@ -414,6 +483,23 @@ public sealed partial class HandlerRegistrationGenerator {
         AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.VisibilityDecorator<,>", false);
     }
 
+    // The `{ Member = …, }` initializer of a `with` copy: each member hidden unless its permission is held, copied
+    // through its own copy function, or both. The caller appends what follows the closing brace.
+    private static void AppendHiddenMembers(StringBuilder sb, RedactorModel redactor, string indent) {
+        sb.AppendLine($"{indent}{{");
+        foreach (var member in redactor.Members) {
+            var copied = member.Redactor >= 0
+                ? $"__Hide{member.Redactor}(value.{member.Name}, permissions)"
+                : $"value.{member.Name}";
+            var expression = member.Permission is null
+                ? copied
+                : $"permissions.Holds({FormatStringLiteral(member.Permission)}) ? {copied} : null";
+            sb.AppendLine($"{indent}    {member.Name} = {expression},");
+        }
+
+        sb.Append($"{indent}}}");
+    }
+
     // The permissions and the copy functions, emitted into the registration class. The functions are written without
     // nullable annotations (their own #nullable context), because a member a caller may not see is set to null in a
     // copy of a value the handler declared non-null.
@@ -439,15 +525,27 @@ public sealed partial class HandlerRegistrationGenerator {
                     sb.AppendLine("        if (value is null) return null;");
 
                 sb.AppendLine("        return value with");
+                AppendHiddenMembers(sb, redactor, "        ");
+                sb.AppendLine(";");
+            }
+            else if (redactor.Kind == RedactorKind.Polymorphic) {
+                if (redactor.IsReferenceType)
+                    sb.AppendLine("        if (value is null) return null;");
+
+                // Most-derived first, then the declared type's own instance.
+                sb.AppendLine("        return value switch");
                 sb.AppendLine("        {");
-                foreach (var member in redactor.Members) {
-                    var copied = member.Redactor >= 0
-                        ? $"__Hide{member.Redactor}(value.{member.Name}, permissions)"
-                        : $"value.{member.Name}";
-                    var expression = member.Permission is null
-                        ? copied
-                        : $"permissions.Holds({FormatStringLiteral(member.Permission)}) ? {copied} : null";
-                    sb.AppendLine($"            {member.Name} = {expression},");
+                foreach (var derivedId in redactor.Derived)
+                    sb.AppendLine(
+                        $"            {redactors[derivedId].TypeFqn} __derived => __Hide{derivedId}(__derived, permissions),");
+
+                if (redactor.Members.IsEmpty) {
+                    sb.AppendLine("            _ => value,");
+                }
+                else {
+                    sb.AppendLine("            _ => value with");
+                    AppendHiddenMembers(sb, redactor, "            ");
+                    sb.AppendLine(",");
                 }
 
                 sb.AppendLine("        };");

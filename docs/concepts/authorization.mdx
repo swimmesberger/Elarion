@@ -488,8 +488,11 @@ Rules the generator enforces, as build errors rather than a member silently disc
 - The handler must answer `Result<T>` (`ELAUTH004`), and a singleton handler cannot use it (`ELSG013`), because the
   checker is per caller.
 
-The walk follows declared types: a member declared as an interface or an abstract base is not looked into, so keep
-marked members on concrete records. The permission belongs in the catalog like any other — usually a handler
+A member declared as a base type follows the derived types its `[JsonDerivedType]` attributes declare — exactly the
+types System.Text.Json writes with their own members — and the copy dispatches on the runtime type, most-derived
+first. An interface without `[JsonDerivedType]` that reaches a marked member is a build error (`ELAUTH004`), since no
+copy of it can be made. A member declared as `object` is written by its runtime type and is not looked into; keep
+marked members out of `object`-typed values. The permission belongs in the catalog like any other — usually a handler
 requires it already; if none does, declare it with [`[DeclarePermission]`](#permissions-no-handler-requires).
 
 ## See also

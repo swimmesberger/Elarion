@@ -66,8 +66,10 @@ permission as `ElarionPermissions.X.Y` or as `resource, verb`). The handler fill
 - Handlers stop nulling members; a response type says which of its members are restricted, and clients learn it from
   the schema.
 - A hidden member costs one copy of the response per call for callers without the permission, nothing for those with it.
-- The walk follows declared types. A member declared as an interface or abstract base is not looked into, so a marked
-  member on a derived runtime type is not seen; keep marked members on concrete records.
+- The walk follows declared types and, for a polymorphic base, the derived types its `[JsonDerivedType]` attributes
+  declare — the only derived types System.Text.Json writes with their own members — dispatching on the runtime type,
+  most-derived first. An interface without them that reaches a marked member is a build error. A member declared as
+  `object` is written by its runtime type and is not looked into.
 - Generated SQL filters (`[ResourceFilter]`'s `BypassPermission`, `QueryAuthorizers.WhenPermission`) still read the
   claims, because they translate to SQL over the principal directory; a host whose checker grants more than the claims
   grants those permissions as claims too.

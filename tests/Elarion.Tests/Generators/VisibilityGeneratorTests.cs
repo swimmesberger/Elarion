@@ -231,6 +231,83 @@ public sealed class VisibilityGeneratorTests {
         Compile(source);
     }
 
+    private const string PolymorphicSample = Preamble +
+                                             """
+
+                                             namespace Sample.App {
+                                                 using System.Text.Json.Serialization;
+
+                                                 [AppModule("App")]
+                                                 public static class AppModule { }
+
+                                                 [JsonDerivedType(typeof(Person), "person")]
+                                                 [JsonDerivedType(typeof(Employee), "employee")]
+                                                 [JsonDerivedType(typeof(Company), "company")]
+                                                 public abstract record Party(string Name);
+
+                                                 public record Person(string Name, [property: VisibleWith("people.read")] string? Birthday) : Party(Name);
+
+                                                 public sealed record Employee(string Name, string? Birthday, [property: VisibleWith("payroll.read")] decimal? Salary)
+                                                     : Person(Name, Birthday);
+
+                                                 public sealed record Company(string Name, string? Vat) : Party(Name);
+
+                                                 [JsonDerivedType(typeof(Phone), "phone")]
+                                                 public interface IChannel { }
+
+                                                 public sealed record Phone([property: VisibleWith("people.read")] string? Number) : IChannel;
+
+                                                 public sealed record Contact(Party Primary, IReadOnlyList<Party> Others, IChannel Channel);
+
+                                                 public sealed record ShowContact : IQuery;
+
+                                                 public sealed class ShowContactHandler : IHandler<ShowContact, Result<Contact>> {
+                                                     public ValueTask<Result<Contact>> HandleAsync(ShowContact request, CancellationToken ct) =>
+                                                         ValueTask.FromResult(Result<Contact>.Success(new Contact(
+                                                             new Person("Ada", "1815-12-10"),
+                                                             [new Employee("Bob", "1990-01-01", 5000m), new Company("Acme", "ATU1")],
+                                                             new Phone("+43 1"))));
+                                                 }
+
+                                                 public static class Probe {
+                                                     public static async Task<string> Run(IServiceProvider services) {
+                                                         using var scope = services.CreateScope();
+                                                         var handler = scope.ServiceProvider.GetRequiredService<IHandler<ShowContact, Result<Contact>>>();
+                                                         var c = (await handler.HandleAsync(new ShowContact(), CancellationToken.None)).Value;
+                                                         var employee = (Employee)c.Others[0];
+                                                         return string.Join("|",
+                                                             ((Person)c.Primary).Birthday ?? "-", employee.Birthday ?? "-", employee.Salary?.ToString() ?? "-",
+                                                             ((Company)c.Others[1]).Vat, ((Phone)c.Channel).Number ?? "-");
+                                                     }
+                                                 }
+                                             }
+                                             """;
+
+    [Fact]
+    public void FollowsThePolymorphicTypesJsonDerivedTypeDeclares() {
+        // System.Text.Json writes a derived type's members only for the declared derived types, so the copy
+        // dispatches on exactly those: the employee is matched before the person it derives from.
+        RunProbeFor(PolymorphicSample, "ShowContactHandler", "payroll.read").Should().Be("-|-|5000|ATU1|-");
+        RunProbeFor(PolymorphicSample, "ShowContactHandler", "people.read").Should().Be("1815-12-10|1990-01-01|-|ATU1|+43 1");
+
+        var generated = GetGenerated(Run(PolymorphicSample).Result, "Sample_App_ShowContactHandler.g.cs");
+        generated.IndexOf("global::Sample.App.Employee __derived", StringComparison.Ordinal)
+            .Should().BeLessThan(generated.IndexOf("global::Sample.App.Person __derived", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReportsAnInterfaceThatHoldsAMarkedMemberWithoutDerivedTypes() {
+        var diagnostics = DiagnosticsFor(
+            """
+            public interface IChannel { [VisibleWith("people.read")] string? Number { get; } }
+            public sealed record Contact(IChannel Channel);
+            """,
+            "Contact");
+
+        diagnostics.Should().ContainSingle(d => d.Id == "ELAUTH004")
+            .Which.GetMessage().Should().Contain("declare its implementations with [JsonDerivedType]");
+    }
+
     [Fact]
     public void ReusesOutputsAfterAnIrrelevantEdit() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(new HandlerRegistrationGenerator(), PreviewSample,
@@ -290,6 +367,10 @@ public sealed class VisibilityGeneratorTests {
     }
 
     private static string RunProbe(string source, params string[] permissions) {
+        return RunProbeFor(source, "PreviewImportHandler", permissions);
+    }
+
+    private static string RunProbeFor(string source, string handlerName, params string[] permissions) {
         var assembly = Compile(source);
         var services = new ServiceCollection();
         services.AddSingleton<ICurrentUser>(new FakeCurrentUser {
@@ -298,8 +379,8 @@ public sealed class VisibilityGeneratorTests {
         services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
         services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
         services.AddElarionAuthorization();
-        assembly.GetType("Sample.App.PreviewImportHandlerRegistration")!
-            .GetMethod("AddPreviewImportHandler", BindingFlags.Public | BindingFlags.Static)!
+        assembly.GetType($"Sample.App.{handlerName}Registration")!
+            .GetMethod($"Add{handlerName}", BindingFlags.Public | BindingFlags.Static)!
             .Invoke(null, [services]);
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
         var run = (Task<string>)assembly.GetType("Sample.App.Probe")!.GetMethod("Run")!.Invoke(null, [provider])!;

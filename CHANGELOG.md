@@ -20,8 +20,8 @@ minor releases may include breaking changes.
 - **Response members visible by permission** (ADR-0103). Mark a nullable member of a response record
   `[VisibleWith(ElarionPermissions.Banking.Read)]` (or `[VisibleWith("banking", Verbs.Read)]`) and the handler pipeline
   answers it as `null` for a caller who does not hold the permission, instead of each handler nulling it by hand. The
-  generator finds marked members through nested records, structs, arrays, lists, read-only collections, `Page<T>` and
-  `ElarionCreated<T>` and emits a reflection-free copy; the new `VisibilityDecorator` sits just inside authorization,
+  generator finds marked members through nested records, structs, arrays, lists, read-only collections, `Page<T>`,
+  `ElarionCreated<T>` and the derived types a base declares with `[JsonDerivedType]`, and emits a reflection-free copy; the new `VisibilityDecorator` sits just inside authorization,
   so cached and replayed answers are hidden per caller. `rpc-schema.json` exports `x-elarion-visible-with` on the
   member and the generated TypeScript documents it. New errors: `ELAUTH003` (a marked member is not nullable) and
   `ELAUTH004` (a shape the pipeline cannot copy). See
