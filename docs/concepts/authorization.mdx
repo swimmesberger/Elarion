@@ -473,9 +473,22 @@ omits them; a caller who holds them all gets the handler's value unchanged. The 
 [`IPermissionChecker`](#checking-a-permission-in-code)'s, the one the gate uses; without a registered checker every
 marked member is hidden.
 
+A member several audiences may see names each of them with `AnyOf`; a caller holding any one sees it:
+
+```csharp
+public sealed record BankAccountRow(
+    string Name,
+    [property: VisibleWith(AnyOf = [
+        ElarionPermissions.Settings.Read, ElarionPermissions.Settings.Write, ElarionPermissions.Banking.Read])]
+    decimal? OpeningBalance);
+```
+
+Next to a constructor permission, `AnyOf` adds alternatives to it: `[VisibleWith("banking", Verbs.Write, AnyOf =
+[ElarionPermissions.Audit.Read])]`.
+
 Because the decorator sits outside caching, idempotency and the transaction, a cached or replayed answer is stored
 whole and hidden per caller, and an in-process call through the pipeline is hidden the same way. `rpc-schema.json`
-marks the member with `x-elarion-visible-with: "banking.read"`, and the generated TypeScript documents it on the
+marks the member with `x-elarion-visible-with: "banking.read"` (an array for an `AnyOf` member), and the generated TypeScript documents it on the
 property (`/** Present only for callers holding the `banking.read` permission. */`), so a client knows why it may be
 missing; like every client-side projection that is a hint, not the authority.
 

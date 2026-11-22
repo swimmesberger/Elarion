@@ -591,12 +591,13 @@ Handler requirements are class attributes the handler-registration generator rea
 ### `[VisibleWith]`
 
 - **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** property or constructor parameter of a response type
-- **Triggers:** shows the member only to callers who hold the permission; for everyone else the generated `VisibilityDecorator` (just inside authorization) answers it as `null`. The decision is `IPermissionChecker.Holds`, the same as the `[RequirePermission]` gate. Exported as `x-elarion-visible-with` in `rpc-schema.json`. Build errors `ELAUTH003` (member not nullable) and `ELAUTH004` (a shape the pipeline cannot copy). See [Members only some callers see](/docs/concepts/authorization#members-only-some-callers-see).
+- **Triggers:** shows the member only to callers who hold the permission, or any one of the permissions it names; for everyone else the generated `VisibilityDecorator` (just inside authorization) answers it as `null`. The decision is `IPermissionChecker.Holds`, the same as the `[RequirePermission]` gate. Exported as `x-elarion-visible-with` in `rpc-schema.json` (a string, or an array for several permissions). Build errors `ELAUTH003` (member not nullable), `ELAUTH004` (a shape the pipeline cannot copy) and `ELAUTH005` (no permission, or one the generator cannot read). See [Members only some callers see](/docs/concepts/authorization#members-only-some-callers-see).
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `permission` | `string` (ctor) → `Permission` | required (one form) | The composed permission, e.g. `ElarionPermissions.Banking.Read`. |
 | `resource`, `verb` | `string` (ctor) | required (other form) | Composed to `{resource}.{verb}`, as `[RequirePermission]` composes it. |
+| `AnyOf` | `string[]?` (init) | `null` | Further permissions, any one of which shows the member too; alone (`[VisibleWith(AnyOf = [...])]`) it names them all. `Permissions` lists the constructor's permission, then these. |
 
 ### `[RequireRole]`
 

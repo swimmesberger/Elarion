@@ -51,10 +51,11 @@ export interface JsonSchema {
    */
   'x-elarion-error-messages'?: Record<string, string>
   /**
-   * The permission a caller must hold to receive this response member ([VisibleWith] on the server, ADR-0103); the
-   * server omits it for everyone else. The generator documents it on the generated property.
+   * The permission a caller must hold to receive this response member ([VisibleWith] on the server, ADR-0103), or the
+   * permissions any one of which shows it; the server omits it for everyone else. The generator documents it on the
+   * generated property.
    */
-  'x-elarion-visible-with'?: string
+  'x-elarion-visible-with'?: string | string[]
 }
 
 /**

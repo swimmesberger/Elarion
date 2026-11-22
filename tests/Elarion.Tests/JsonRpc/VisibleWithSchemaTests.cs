@@ -26,13 +26,17 @@ public sealed class VisibleWithSchemaTests {
         public Booking? Resembles { get; init; }
     }
 
-    public sealed record Preview(IReadOnlyList<Line> Lines, [VisibleWith("banking.read")] decimal? Opening);
+    public sealed record Preview(
+        IReadOnlyList<Line> Lines,
+        [VisibleWith("banking.read")] decimal? Opening,
+        [property: VisibleWith(AnyOf = ["settings.read", "settings.write", "banking.read"])] decimal? Balance,
+        [property: VisibleWith("banking", Verbs.Write, AnyOf = ["banking.read"])] string? Iban);
 
     [Fact]
     public void Schema_NamesThePermissionOfAMemberVisibleByPermission() {
         var dispatcher = new JsonRpcDispatcher(Options);
         dispatcher.MapDelegate<Show, Preview>("banking.preview",
-            (_, _, _) => ValueTask.FromResult(Result<Preview>.Success(new Preview([], null))));
+            (_, _, _) => ValueTask.FromResult(Result<Preview>.Success(new Preview([], null, null, null))));
         dispatcher.Freeze();
 
         var schema = JsonNode.Parse(JsonRpcSchemaExporter.Generate(dispatcher, Options))!;
@@ -43,5 +47,22 @@ public sealed class VisibleWithSchemaTests {
         var line = result["properties"]!["lines"]!["items"]!;
         line["properties"]!["resembles"]!["x-elarion-visible-with"]!.GetValue<string>().Should().Be("banking.read");
         line["properties"]!["row"]!.AsObject().ContainsKey("x-elarion-visible-with").Should().BeFalse();
+    }
+
+    [Fact]
+    public void Schema_ListsThePermissionsAnyOneOfWhichShowsAMember() {
+        var dispatcher = new JsonRpcDispatcher(Options);
+        dispatcher.MapDelegate<Show, Preview>("banking.preview",
+            (_, _, _) => ValueTask.FromResult(Result<Preview>.Success(new Preview([], null, null, null))));
+        dispatcher.Freeze();
+
+        var schema = JsonNode.Parse(JsonRpcSchemaExporter.Generate(dispatcher, Options))!;
+        var properties = schema["methods"]!["banking.preview"]!["result"]!["properties"]!;
+
+        properties["balance"]!["x-elarion-visible-with"]!.AsArray().Select(static p => p!.GetValue<string>())
+            .Should().Equal("settings.read", "settings.write", "banking.read");
+        // The constructor's permission first, then its alternatives.
+        properties["iban"]!["x-elarion-visible-with"]!.AsArray().Select(static p => p!.GetValue<string>())
+            .Should().Equal("banking.write", "banking.read");
     }
 }

@@ -511,6 +511,10 @@ describe('JSON-RPC client generator', () => {
             properties: {
               row: {type: 'integer'},
               opening: {type: ['number', 'null'], 'x-elarion-visible-with': 'banking.read'},
+              balance: {
+                type: ['number', 'null'],
+                'x-elarion-visible-with': ['settings.read', 'settings.write', 'banking.read'],
+              },
             },
             required: ['row'],
           },
@@ -522,6 +526,8 @@ describe('JSON-RPC client generator', () => {
 
     expect(generated.typesSource).toMatch(
       /\/\*\* Present only for callers holding the `banking\.read` permission\. \*\/\n\s*opening\?: number \| null \| undefined/)
+    expect(generated.typesSource).toMatch(
+      /\/\*\* Present only for callers holding any of the `settings\.read`, `settings\.write` or `banking\.read` permissions\. \*\/\n\s*balance\?: number \| null \| undefined/)
     expect(generated.typesSource).not.toMatch(/Present only[^\n]*\n\s*row/)
   })
 

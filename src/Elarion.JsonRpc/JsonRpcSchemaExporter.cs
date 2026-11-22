@@ -727,7 +727,8 @@ public static class JsonRpcSchemaExporter {
 
     /// <summary>
     /// The vendor keyword naming the permission a caller must hold to receive a response member
-    /// (<see cref="VisibleWithAttribute"/>, ADR-0103); the pipeline omits the member for everyone else.
+    /// (<see cref="VisibleWithAttribute"/>, ADR-0103) — a string, or an array when any one of several permissions shows
+    /// it (<see cref="VisibleWithAttribute.AnyOf"/>); the pipeline omits the member for everyone else.
     /// </summary>
     internal const string VisibleWithKeyword = "x-elarion-visible-with";
 
@@ -741,7 +742,10 @@ public static class JsonRpcSchemaExporter {
 
         var attribute = FindVisibleWith(property.AttributeProvider)
                         ?? FindVisibleWith(property.AssociatedParameter?.AttributeProvider);
-        if (attribute is not null) obj[VisibleWithKeyword] = attribute.Permission;
+        if (attribute?.Permissions is { Count: > 0 } permissions)
+            obj[VisibleWithKeyword] = permissions.Count == 1
+                ? JsonValue.Create(permissions[0])
+                : new JsonArray([.. permissions.Distinct(StringComparer.Ordinal).Select(static p => (JsonNode?)p)]);
 
         return schema;
     }

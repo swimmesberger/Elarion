@@ -8,6 +8,14 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **A member visible with any one of several permissions.** `[VisibleWith(AnyOf = [ElarionPermissions.Settings.Read,
+  ElarionPermissions.Banking.Read])]` shows the member to a caller holding either; next to a constructor permission,
+  `AnyOf` adds alternatives to it. `rpc-schema.json` exports such a member's `x-elarion-visible-with` as an array, and
+  the generated TypeScript documents every alternative. `VisibleWithAttribute.Permission` is `null` when only `AnyOf`
+  names the permissions; `Permissions` lists them all. See
+  [Authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization#members-only-some-callers-see).
+
 ### Fixed
 - **`[VisibleWith(ElarionPermissions.X.Y)]` hid nothing in the assembly that generates `ElarionPermissions`.** The
   catalog is emitted by another source generator, which the handler-registration generator cannot see, so the
