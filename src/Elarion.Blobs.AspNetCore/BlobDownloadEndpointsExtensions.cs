@@ -81,10 +81,13 @@ public static class BlobDownloadEndpointsExtensions {
         var blobRef = new BlobRef { Value = blobId };
         var metadata = await blobStore.GetMetadataAsync(blobRef, cancellationToken);
 
-        // Only the exact recorded owner may read; a missing, foreign-container, or unowned blob is reported
-        // as not found so ownership is never leaked.
+        // Only the exact recorded owner may read, and only while the blob is pending: a committed blob belongs to a
+        // record and is read through that record's own authorized path, so an uploader who lost access to the record
+        // cannot keep reading it here. A missing, foreign-container, unowned or committed blob is reported as not
+        // found so ownership is never leaked.
         if (metadata is null
             || metadata.Container != options.Container
+            || metadata.State != BlobLifecycleState.Pending
             || !BlobEndpointOwnership.IsOwnedBy(metadata, currentUser.UserId))
             return Results.NotFound();
 

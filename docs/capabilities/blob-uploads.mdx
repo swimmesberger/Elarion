@@ -198,7 +198,7 @@ app.MapElarionBlobUploads().RequireAuthorization();
 ```
 
 `POST` (multipart or raw body) writes a `Pending` blob and returns its id as `text/plain`; `DELETE /{id}`
-cancels an owner's pending upload. Both enforce authentication, the configured size cap, and an optional
+cancels an owner's pending upload (a committed blob answers `404`: it belongs to the record that kept it). Both enforce authentication, the configured size cap, and an optional
 content-type allow-list. Ownership is recorded as a dedicated `BlobUploadRequest.OwnerId` (surfaced as
 `BlobMetadata.OwnerId`) and compared **exactly** on cancel — not parsed from the stored name — so an id
 containing the naming separator cannot be forged, and a blob with no recorded owner is denied to everyone.
@@ -313,7 +313,9 @@ app.MapElarionBlobDownloads().RequireAuthorization();   // GET {prefix}/{blobId}
 
 `GET /{blobId}` streams the blob with its content type and leaf file name (`Content-Disposition:
 attachment`), applying the same exact-owner, fail-closed check as cancel — a missing, foreign-container,
-unowned, or someone else's blob is `404`, so ownership is never leaked.
+unowned, committed, or someone else's blob is `404`, so ownership is never leaked. Once a handler commits a blob to
+a record, the record's own (authorized) download path serves it; the uploader cannot keep reading it here after
+losing access to the record.
 
 **Import (large upload → processing handler):**
 

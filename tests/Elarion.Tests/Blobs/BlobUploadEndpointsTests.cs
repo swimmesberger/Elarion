@@ -193,6 +193,28 @@ public sealed class BlobUploadEndpointsTests {
     }
 
     [Fact]
+    public async Task Cancel_OwnersCommittedBlob_Returns404AndKeepsIt() {
+        // A committed blob belongs to the record that kept it; cancelling it would break that record.
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+        host.Store.Seed(new BlobMetadata {
+            Id = "kept",
+            Container = "uploads",
+            Name = "user-1/abc/file.bin",
+            ContentType = "application/octet-stream",
+            Size = 1,
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            State = BlobLifecycleState.Committed,
+            OwnerId = "user-1"
+        });
+
+        var response = await host.Client.DeleteAsync("/_elarion/blobs/kept", ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        host.Store.Deleted.Should().NotContain("kept");
+    }
+
+    [Fact]
     public async Task Cancel_OwnersPendingBlob_Returns204AndDeletes() {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(ct);

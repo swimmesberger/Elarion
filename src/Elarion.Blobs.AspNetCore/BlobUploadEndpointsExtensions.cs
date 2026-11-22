@@ -183,10 +183,12 @@ public static class BlobUploadEndpointsExtensions {
         var blobRef = new BlobRef { Value = blobId };
         var metadata = await blobStore.GetMetadataAsync(blobRef, cancellationToken);
 
-        // Only the owner may cancel their own upload; a missing or unowned blob is reported as not found so
-        // ownership is never leaked. Cancel is intended for a pending blob before it is committed.
+        // Only the owner may cancel their own upload, and only while it is pending: a committed blob belongs to the
+        // record that kept it, and deleting it here would break that record. A missing, unowned or committed blob is
+        // reported as not found so ownership is never leaked.
         if (metadata is null
             || metadata.Container != options.Container
+            || metadata.State != BlobLifecycleState.Pending
             || !BlobEndpointOwnership.IsOwnedBy(metadata, currentUser.UserId))
             return Results.NotFound();
 

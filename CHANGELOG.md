@@ -73,6 +73,11 @@ minor releases may include breaking changes.
   [Blob uploads](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler).
 
 ### Changed
+- **The direct-upload cancel and download routes answer `404` for a committed blob.** `DELETE {prefix}/{id}` and
+  `GET {prefix}/{id}` (`MapElarionBlobUploads`, `MapElarionBlobDownloads`) checked the owner but not the state, so an
+  uploader could still delete a blob a handler had committed to a record (breaking the record) or keep reading it
+  after losing access to the record. They now serve pending blobs only; serve a committed blob through the record's
+  own authorized endpoint.
 - **Breaking: `ErrorKind` gains `DecisionRequired`** (ADR-0101). The existing kinds keep their values; an exhaustive
   `switch` over `ErrorKind` in an application gets a new case (it maps to HTTP `409` and JSON-RPC `-32006`).
 

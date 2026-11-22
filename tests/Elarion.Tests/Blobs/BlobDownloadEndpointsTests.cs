@@ -21,7 +21,8 @@ namespace Elarion.Tests.Blobs;
 public sealed class BlobDownloadEndpointsTests {
     private static readonly BlobRef ExportRef = new() { Value = "export-1" };
 
-    private static BlobMetadata ExportMetadata(string? ownerId = "user-1", string container = "uploads") {
+    private static BlobMetadata ExportMetadata(
+        string? ownerId = "user-1", string container = "uploads", BlobLifecycleState state = BlobLifecycleState.Pending) {
         return new BlobMetadata {
             Id = ExportRef.Value,
             Container = container,
@@ -29,7 +30,7 @@ public sealed class BlobDownloadEndpointsTests {
             ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             Size = 3,
             CreatedAt = DateTimeOffset.UnixEpoch,
-            State = BlobLifecycleState.Pending,
+            State = state,
             OwnerId = ownerId
         };
     }
@@ -79,6 +80,18 @@ public sealed class BlobDownloadEndpointsTests {
         var ct = TestContext.Current.CancellationToken;
         await using var host = await StartAsync(ct);
         host.Store.Seed(ExportRef, ExportMetadata(container: "avatars"), [1]);
+
+        var response = await host.Client.GetAsync($"/_elarion/blobs/{ExportRef.Value}", ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Download_OwnersCommittedBlob_Returns404() {
+        // A committed blob belongs to a record and is read through that record's own authorized path.
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+        host.Store.Seed(ExportRef, ExportMetadata(state: BlobLifecycleState.Committed), [1]);
 
         var response = await host.Client.GetAsync($"/_elarion/blobs/{ExportRef.Value}", ct);
 
