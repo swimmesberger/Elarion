@@ -365,6 +365,11 @@ reload instead of failing as a CORS error — don't hand-roll an `X-Requested-Wi
 - **The UI reads requirements from the contract.** The schema exports each method's `requires`, `readOnly` and
   `[ClientTag]` hints; gate actions with `canCall(rpcMethodInfo[method], capabilities)` instead of repeating
   permission names at call sites.
+- **Values the client needs are declared, never copied** (ADR-0100). Show limits from `rpcLimits` (it mirrors the
+  DataAnnotations); declare an upload's size and types with `[UploadLimits]` on the `UploadedFile` member (the pipeline
+  enforces them, the client checks before uploading); declare a list's quick filters as `[RequestPreset]` static
+  readonly fields of the handler and count with the same field; export shared values with `[ClientConstants]` on a
+  static class of the module. Never hand-write `UPLOAD_LIMIT = 50` in the frontend.
 - **Unexpected exceptions are the framework's.** Every transport catches them outside all decorators and answers
   `code: "internal"` with a support `reference`; word it with `ConfigureElarionUnexpectedErrors`, never with an
   exception decorator or `IExceptionHandler`. "Not blank" is `[Required]` on the string (exported as a not-blank

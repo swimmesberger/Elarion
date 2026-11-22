@@ -21,7 +21,8 @@ public sealed class HandlerRegistrationGeneratorCacheTests {
             [AppModule("App")]
             public static class AppModule { }
 
-            public sealed record PingCommand(int Id) : ICommand;
+            public sealed record PingCommand(int Id, [property: UploadLimits(MaxBytes = 10)] UploadedFile? File = null)
+                : ICommand;
             public sealed record PingResponse(string Name);
 
             public sealed class PingHandler : IHandler<PingCommand, Result<PingResponse>> {
@@ -49,7 +50,9 @@ public sealed class HandlerRegistrationGeneratorCacheTests {
             "NoRetryPolicies",
             "ServiceScopeFacts",
             "Handlers",
-            "HandlerModuleAggregation");
+            "HandlerModuleAggregation",
+            "UploadLimitsSites",
+            "UploadLimitsCheck");
     }
 
     [Fact]

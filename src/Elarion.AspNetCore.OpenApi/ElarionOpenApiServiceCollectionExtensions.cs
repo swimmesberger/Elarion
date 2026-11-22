@@ -61,7 +61,8 @@ public static class ElarionOpenApiServiceCollectionExtensions {
             // payload, `data` — document both so generated clients can branch on the code without a cast.
             options.AddSchemaTransformer<ElarionProblemDetailsSchemaTransformer>();
             // An UploadedFile serializes through its converter as the staged blob's id: document it as the marked
-            // string the JSON-RPC schema exports (ADR-0105), not as an opaque schema.
+            // string the JSON-RPC schema exports (ADR-0105), not as an opaque schema, with a member's declared
+            // [UploadLimits] (ADR-0100) and the items of a list of them.
             options.AddSchemaTransformer<ElarionUploadedFileSchemaTransformer>();
             configureOptions?.Invoke(options);
         });

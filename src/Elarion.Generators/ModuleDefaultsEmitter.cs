@@ -37,6 +37,7 @@ internal static class ModuleDefaultsEmitter {
     public const string AddClientEventsMethod = "AddClientEvents";
     public const string AddFeatureFlagsMethod = "AddFeatureFlags";
     public const string AddJsonTypeInfoResolverMethod = "AddJsonTypeInfoResolver";
+    public const string AddClientConstantsMethod = "AddClientConstants";
 
     public const string ServiceCollectionFqn =
         "global::Microsoft.Extensions.DependencyInjection.IServiceCollection";
@@ -59,7 +60,8 @@ internal static class ModuleDefaultsEmitter {
         AddActorsMethod,
         AddClientEventsMethod,
         AddFeatureFlagsMethod,
-        AddJsonTypeInfoResolverMethod
+        AddJsonTypeInfoResolverMethod,
+        AddClientConstantsMethod
     ];
 
     public static string SiblingClassName(string moduleTypeName) {

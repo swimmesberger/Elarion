@@ -73,11 +73,35 @@ minor releases may include breaking changes.
   passes the reference to every step. The blob-upload examples no longer hand a raw blob id to `IBlobStore` or
   `IBlobLifecycle`, which check no owner. `Elarion.Blobs` now references `Elarion.Abstractions`. See
   [Blob uploads](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler).
+- **Declared upload limits** (ADR-0100). `[UploadLimits(MaxBytes = …, ContentTypes = […])]` on an `UploadedFile` request
+  member (or a collection of them) replaces repeating `UploadConstraints` at read time: the new `UploadLimitsDecorator`
+  declares them for the request's files before the handler runs, and `IUploadedFiles` (now also
+  `IDeclaredUploadConstraints`, from the same `AddElarionUploadedFiles`) checks them on every open and commit, on top of
+  any constraints the call passes. `rpc-schema.json` exports them as `x-elarion-max-bytes` and `x-elarion-content-types`
+  next to `x-elarion-upload` (the OpenAPI document too, on the member's own schema), and the generated params schema
+  rejects a `File`/`Blob` that breaks them before uploading it, with the server's message. New errors: `ELUPL001` (a declaration on a member that holds no uploaded file, or
+  without a valid limit) and `ELUPL002` (a declaration outside a handler's request). See
+  [Blob uploads](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member).
+- **Typed limits, request presets, sort keys and constants in the generated client** (ADR-0100). The TypeScript
+  generator emits `rpcLimits` in `rpc-schemas.ts`: every params member's numeric bounds (`maxLength`, `maxItems`,
+  `minimum`, …) and upload limits by method and member path, as literal types, so a page shows "up to 10" from the
+  server's `[MaxLength(10)]` instead of copying it. `[RequestPreset("toTransfer")]` on a static readonly field of a
+  handler exports a named request under the method's `presets` (the members that differ from the request's defaults),
+  offered as `rpcPresets['{method}'].{name}` typed as the method's params; the keys of the one `SortMap` a handler
+  declares are exported as `sortKeys` and `rpcSortKeys`; and `[ClientConstants]` on a static class of a module exports
+  its public constants as `constants.{module}.{name}` and `rpcConstants`, literal types, registered by the module's
+  generated services. The schema tool hands the exporter the host's handler types (`JsonRpcSchemaExportOptions.HandlerTypes`)
+  and the modules' `ModuleClientConstants` (`ClientConstants`). A schema without constraint keywords or declarations
+  generates byte-identical output; `rpc-types.ts` and `rpc-client.ts` never change. New errors and warning:
+  `ELRPC006`–`ELRPC008` (presets), `ELRPC009`–`ELRPC011` (constants), `ELRPC012` (a handler with several sort maps
+  exports no sort keys). See
+  [TypeScript client](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#limits-presets-sort-keys-and-constants).
 
 ### Fixed
 - **Schemas of uploaded files and file lists.** The OpenAPI document described an `UploadedFile` member as an opaque
   schema; it is now a string marked `x-elarion-upload: true`, as in `rpc-schema.json`. A list of `ElarionFile` exported
-  to `rpc-schema.json` without `items`; it now carries the file envelope, so the generated client converts each item.
+  to `rpc-schema.json` without `items`; it now carries the file envelope, so the generated client converts each item. A
+  list of `UploadedFile` had no `items` in the OpenAPI document; it now has the marked string.
 
 ### Changed
 - **The direct-upload cancel and download routes answer `404` for a committed blob.** `DELETE {prefix}/{id}` and

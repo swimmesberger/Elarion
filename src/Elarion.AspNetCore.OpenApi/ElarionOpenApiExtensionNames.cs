@@ -14,4 +14,16 @@ public static class ElarionOpenApiExtensionNames {
     /// (<see cref="Elarion.Abstractions.UploadedFile"/>, ADR-0105): a client uploads the file first and sends the id.
     /// </summary>
     public const string Upload = "x-elarion-upload";
+
+    /// <summary>
+    /// The largest size in bytes an <see cref="Upload"/> member accepts, from its
+    /// <see cref="Elarion.Abstractions.UploadLimitsAttribute"/> (ADR-0100); the JSON-RPC schema uses the same keyword.
+    /// </summary>
+    public const string MaxBytes = "x-elarion-max-bytes";
+
+    /// <summary>
+    /// The media types an <see cref="Upload"/> member accepts, from its
+    /// <see cref="Elarion.Abstractions.UploadLimitsAttribute"/> (ADR-0100); the JSON-RPC schema uses the same keyword.
+    /// </summary>
+    public const string ContentTypes = "x-elarion-content-types";
 }

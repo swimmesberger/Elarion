@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Identity;
 using Elarion.Blobs;
+using Elarion.Pipeline;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -240,6 +241,99 @@ public sealed class UploadedFilesTests {
         store.Contains("blob-1").Should().BeTrue();
     }
 
+    [Fact]
+    public async Task DeclaredLimits_ApplyToEveryReadAndKeepOfThatFile() {
+        var ct = TestContext.Current.CancellationToken;
+        var store = new UploadStore();
+        var declared = store.Seed("blob-1", Csv);
+        var other = store.Seed("blob-2", Csv);
+        await using var scope = CreateScope(store);
+        var declarations = scope.Services.GetRequiredService<IDeclaredUploadConstraints>();
+
+        declarations.Declare(declared, new UploadConstraints { MaxBytes = Csv.Length - 1 });
+        declarations.Declare(null, new UploadConstraints { MaxBytes = 1 });
+
+        (await scope.Uploads.OpenAsync(declared, cancellationToken: ct)).Error.Code.Should().Be(ErrorCodes.UploadTooLarge);
+        (await scope.Uploads.CommitAsync(declared, cancellationToken: ct)).Error.Code.Should().Be(ErrorCodes.UploadTooLarge);
+        var undeclared = await scope.Uploads.OpenAsync(other, cancellationToken: ct);
+        undeclared.IsSuccess.Should().BeTrue();
+        await undeclared.Value.DisposeAsync();
+        store.StateOf("blob-1").Should().Be(BlobLifecycleState.Pending);
+        store.OpenStreams.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DeclaredLimits_OnlyTighten_PassedConstraintsAndEveryDeclarationMustHold() {
+        var ct = TestContext.Current.CancellationToken;
+        var store = new UploadStore();
+        var file = store.Seed("blob-1", Csv, contentType: "text/csv");
+        await using var scope = CreateScope(store);
+        var declarations = scope.Services.GetRequiredService<IDeclaredUploadConstraints>();
+
+        declarations.Declare(file, new UploadConstraints { ContentTypes = ["text/csv"] });
+        var passedTooSmall = await scope.Uploads.OpenAsync(file, new UploadConstraints { MaxBytes = 1 }, ct);
+        // A second declaration of the same file (another member, a nested call) is checked as well.
+        declarations.Declare(new UploadedFile { Id = "blob-1" }, new UploadConstraints { ContentTypes = ["application/xml"] });
+        var passedLoose = await scope.Uploads.OpenAsync(file, new UploadConstraints { ContentTypes = ["text/csv"] }, ct);
+
+        passedTooSmall.Error.Code.Should().Be(ErrorCodes.UploadTooLarge);
+        passedLoose.Error.Code.Should().Be(ErrorCodes.UploadContentType);
+        store.OpenStreams.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UploadLimitsDecorator_DeclaresTheRequestsLimits_BeforeTheHandlerReads() {
+        var ct = TestContext.Current.CancellationToken;
+        var store = new UploadStore();
+        var statement = store.Seed("blob-1", Csv, contentType: "text/csv");
+        var receipt = store.Seed("blob-2", Csv, contentType: "text/csv");
+        await using var scope = CreateScope(store);
+        var reader = new ReadEveryFile(scope.Uploads);
+        // The shape of the generated declare function: one call per single member, a loop per collection member.
+        var handler = new UploadLimitsDecorator<ImportFiles, Result<string>>(
+            reader,
+            scope.Services.GetService<IDeclaredUploadConstraints>(),
+            static (request, uploads) => {
+                uploads.Declare(request.Statement, new UploadConstraints { ContentTypes = ["text/csv"] });
+                foreach (var file in request.Receipts)
+                    uploads.Declare(file, new UploadConstraints { ContentTypes = ["application/pdf"] });
+            });
+
+        var result = await handler.HandleAsync(new ImportFiles(statement, [receipt]), ct);
+
+        // The handler passed no constraints; the declared ones still refused the receipt.
+        result.Error.Code.Should().Be(ErrorCodes.UploadContentType);
+        reader.Opened.Should().Equal("blob-1");
+        scope.Services.GetRequiredService<IDeclaredUploadConstraints>().Should().BeSameAs(scope.Uploads);
+        store.OpenStreams.Should().Be(0);
+    }
+
+    [Fact]
+    public void UploadLimitsDecorator_WithoutDeclaredConstraints_RefusesTheHandler() {
+        var create = () => new UploadLimitsDecorator<ImportFiles, Result<string>>(
+            new ReadEveryFile(null!), null, static (_, _) => { });
+
+        create.Should().Throw<InvalidOperationException>().WithMessage("*AddElarionUploadedFiles*");
+    }
+
+    private sealed record ImportFiles(UploadedFile Statement, IReadOnlyList<UploadedFile> Receipts);
+
+    private sealed class ReadEveryFile(IUploadedFiles uploads) : IHandler<ImportFiles, Result<string>> {
+        public List<string> Opened { get; } = [];
+
+        public async ValueTask<Result<string>> HandleAsync(ImportFiles request, CancellationToken ct) {
+            foreach (var file in (UploadedFile[]) [request.Statement, .. request.Receipts]) {
+                var opened = await uploads.OpenAsync(file, cancellationToken: ct);
+                if (!opened.IsSuccess) return opened.Error;
+
+                await opened.Value.DisposeAsync();
+                Opened.Add(file.Id);
+            }
+
+            return "read";
+        }
+    }
+
     private static TestScope CreateScope(
         UploadStore store,
         bool authenticated = true,
@@ -260,6 +354,8 @@ public sealed class UploadedFilesTests {
     private sealed class TestScope(ServiceProvider provider, AsyncServiceScope scope, IUploadedFiles uploads)
         : IAsyncDisposable {
         public IUploadedFiles Uploads { get; } = uploads;
+
+        public IServiceProvider Services => scope.ServiceProvider;
 
         public async ValueTask DisposeAsync() {
             await scope.DisposeAsync();
