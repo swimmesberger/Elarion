@@ -133,7 +133,46 @@ Params validate the `File` instance (Zod `z.instanceof(File)`); the client encod
 envelope after validation and decodes result envelopes back into `File` objects before validation — so
 the conversion also runs when validation is disabled. Everything used is standard in browsers and Node
 20+; schemas without file payloads generate byte-identical output. Remember `ElarionFile` is the
-small-file tier — for large transfers use the [staged-blob flows](/docs/capabilities/blob-uploads#streaming-downloads-and-temp-file-flows).
+small-file tier — for large uploads use [uploaded files](#uploaded-files), for large downloads the
+[staged-blob flows](/docs/capabilities/blob-uploads#streaming-downloads-and-temp-file-flows).
+
+## Uploaded files
+
+A handler member typed [`UploadedFile`](/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler) travels as
+the blob id of a staged upload and is exported with an `x-elarion-upload` marker. The generated client types it
+`File | Blob | UploadedFileRef` in params and `UploadedFileRef` (an exported `string` alias in `rpc-types.ts`) in
+results. Pass a `File` and the client uploads it before the call, then sends the reference:
+
+```ts
+// One call: the client streams the file to the upload endpoint, then calls the method with its reference.
+const analysis = await rpc.statements.analyze({ statement: input.files[0] })
+
+// A multi-step flow: upload once, pass the reference to every step.
+const statement = await rpc.$uploadFile(input.files[0])
+const preview = await rpc.statements.preview({ statement, mapping })
+await rpc.statements.commit({ statement, mapping })
+```
+
+The default uploader POSTs the raw file to the direct-upload endpoint (`MapElarionBlobUploads`) with the client's
+`fetch` and `headers` (a `headers` function sees an empty `methods` list), its `type` as `Content-Type` and its name in
+`X-Elarion-File-Name` (or the `fileName` query parameter for a name outside printable ASCII), and reads the reference
+from the `text/plain` answer. It posts to `/_elarion/blobs` on the origin of `url`, or relative to the page for a
+relative `url`; the call's `AbortSignal` cancels its uploads too. Two client options change that:
+
+```ts
+const rpc = createRpcApi({
+  url: '/api/rpc',
+  uploadUrl: '/api/_elarion/blobs',                 // a host that mounts the endpoints under a path base
+  uploadFile: (file, { fileName, signal }) => tusUpload(file, { fileName, signal }),   // any uploader → reference
+})
+```
+
+`$uploadFile(file, { fileName, signal })` (also `$client.uploadFile`) names a `Blob` that has no name of its own. Params
+validation accepts a `Blob` or a string at an upload position, before the upload. A failed upload rejects the call with
+`RpcTransportError` and the method is not called. A retry that passes the `File` again uploads it again and sends a new
+reference, so for an `[Idempotent]` operation upload once with `$uploadFile` and retry with the reference — otherwise
+the retried request differs from the first one and answers `idempotency.key_reused`. Schemas without upload members
+generate byte-identical output.
 
 ## C# unions map to TypeScript unions
 
@@ -166,8 +205,9 @@ result: z.union([z.strictObject({ ... }), z.strictObject({ ... })])
 - **Nullability follows the declaration**, like any other property: a `ProductLookup` property is required, a
   `ProductLookup?` one optional and nullable. A `default` union holds no case and serializes as `null`, so give a
   non-nullable union property a value.
-- **Not inside unions:** [file payloads](#file-payloads-map-to-native-file) — which case is active is only known per
-  value, so the client could not convert them at a fixed path; the generator rejects that schema.
+- **Not inside unions:** [file payloads](#file-payloads-map-to-native-file) and [uploaded files](#uploaded-files) —
+  which case is active is only known per value, so the client could not convert them at a fixed path; the generator
+  rejects that schema.
 
 Validation attributes on the case types are enforced on the active case, at the property's path
 (see [Validation](/docs/concepts/validation)).
@@ -338,6 +378,7 @@ try {
 | `isForbidden` | `-32003` | `Forbidden` |
 | `isBusinessRule` | `-32004` | `BusinessRule` |
 | `isUnauthorized` | `-32005` | `Unauthorized` |
+| `isDecisionRequired` | `-32006` | `DecisionRequired` |
 | `isInternalError` | `-32603` | `Internal` |
 
 The application codes are also exported as `ElarionErrorCodes` for `switch` statements, and the standard
@@ -354,6 +395,34 @@ to the message instead of matching the message text; it is `undefined` for every
 if (error instanceof RpcError && error.code === 'internal')
   return showError(`${error.message} (reference ${error.reference ?? 'unavailable'})`)
 ```
+
+### Answering decisions
+
+A method whose handler declares [`[RequiresDecision]`](/docs/concepts/results-and-errors#asking-the-caller-to-decide)
+lists each decision in its `errors` with kind `decision_required`, its `options` and `perItem`. `withDecisions` runs
+the call; when the server needs a decision the method declares, it hands your dialog a typed question and calls again
+with the answer added to `decisions`, until the call succeeds or fails otherwise:
+
+```ts
+import { withDecisions } from './generated/rpc-client'
+
+const outcome = await withDecisions(client, 'banking.imports.commit', { statement }, async (question) => {
+  switch (question.code) {
+    case 'banking.closed_period':
+      return (await confirm(question.message)) ? 'confirm' : undefined   // undefined cancels
+    case 'banking.possible_duplicate':
+      // perItem: one option per item key the data lists, typed "import" | "skip"
+      return await askPerLine(question.data.lines)                       // Record<string, 'import' | 'skip'>
+  }
+})
+```
+
+The question carries `code`, `message`, the declared `options`, `perItem`, the typed `data` and the `RpcError`.
+Returning `undefined` cancels: `withDecisions` throws the decision error, which you can recognize with
+`error.isDecisionRequired`. A later answer for the same code and item replaces an earlier one, and `maxQuestions`
+(default 10) stops a server that keeps asking. Each resend is a new request, so an idempotent method gets a new
+idempotency key unless the options fix one. `withDecisions` and the `RpcDecision*` types are emitted only when a method
+declares a decision.
 
 ## Method requirements and UI gating
 

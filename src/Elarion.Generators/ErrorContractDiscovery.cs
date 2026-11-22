@@ -7,8 +7,8 @@ namespace Elarion.Generators;
 /// <summary>
 /// Collects a handler's declared error contract (ADR-0080): the <c>[ProducesError]</c> declarations on the handler
 /// plus the failures the framework pipeline adds where they are statically knowable (request validation,
-/// authorization requirements, feature gates, idempotency); <see cref="ErrorContractScopes"/> later adds the
-/// declarations the operation inherits from its pipeline decorators, its module and its assembly. The result is
+/// authorization requirements, feature gates, idempotency, previews); <see cref="ErrorContractScopes"/> later adds
+/// the declarations the operation inherits from its pipeline decorators, its module and its assembly. The result is
 /// published with the operation, so the schema export and the generated clients describe every failure the
 /// operation can report. Also verifies that the response graph does not opt members out of the serializer contract
 /// (ADR-0082).
@@ -31,7 +31,8 @@ internal static class ErrorContractDiscovery {
             ["Forbidden"] = "forbidden",
             ["Unauthorized"] = "unauthorized",
             ["BusinessRule"] = "business_rule",
-            ["Internal"] = "internal"
+            ["Internal"] = "internal",
+            ["DecisionRequired"] = "decision_required"
         };
 
     public const string ValidationDataFqn = "global::Elarion.Abstractions.ValidationErrorData";
@@ -75,26 +76,45 @@ internal static class ErrorContractDiscovery {
         DiagnosticSeverity.Error,
         true);
 
-    public sealed record ErrorDeclaration(string Code, string Kind, string? DataTypeFqn);
+    /// <summary>
+    /// One declared error. <see cref="Decision"/> is set for a <c>[RequiresDecision]</c> declaration (kind
+    /// <c>DecisionRequired</c>): <c>"1|a,b"</c> for a per-item decision with options <c>a</c> and <c>b</c>,
+    /// <c>"0|confirm"</c> for a whole-request confirmation.
+    /// </summary>
+    public sealed record ErrorDeclaration(string Code, string Kind, string? DataTypeFqn, string? Decision = null);
+
+    public const string RequiresDecisionAttributeMetadataName = "Elarion.Abstractions.RequiresDecisionAttribute";
+
+    public static readonly DiagnosticDescriptor DecisionOptionsNotEnum = new(
+        "ELERR003",
+        "Decision options are not an enum",
+        "'{0}' declares decision '{1}' with Options = typeof({2}), which is not an enum with members; the options of a "
+        + "decision are the members of an enum (omit Options for a confirmation)",
+        "Elarion.Errors",
+        DiagnosticSeverity.Error,
+        true);
 
     /// <summary>The handler's declared and implied errors, sorted by code; reports invalid or conflicting declarations.</summary>
     /// <remarks>
     /// Declarations inherited from outside the handler class (pipeline decorators, the module, the assembly) are
     /// added by a later stage, <see cref="ErrorContractScopes"/>, because they live in other files.
+    /// <paramref name="responseValueType"/> is the handler's success type (the <c>T</c> of <c>Result&lt;T&gt;</c>): the
+    /// preview errors are implied only when it is a preview outcome, and <c>preview.changed</c> carries it as payload.
     /// </remarks>
     public static EquatableArray<ErrorDeclaration> Collect(
         INamedTypeSymbol handler,
         INamedTypeSymbol requestType,
         Compilation compilation,
         bool isIdempotent,
-        Action<DiagnosticInfo>? report) {
+        Action<DiagnosticInfo>? report,
+        ITypeSymbol? responseValueType = null) {
         var byCode = new Dictionary<string, ErrorDeclaration>(System.StringComparer.Ordinal);
         var owner = handler.ToDisplayString();
         var location = handler.Locations.FirstOrDefault();
         for (var current = handler; current is not null; current = current.BaseType)
             ReadDeclarations(current.GetAttributes(), owner, _ => location, byCode, report);
 
-        foreach (var implied in ImpliedErrors(handler, requestType, compilation, isIdempotent))
+        foreach (var implied in ImpliedErrors(handler, requestType, compilation, isIdempotent, responseValueType))
             if (!byCode.ContainsKey(implied.Code))
                 byCode[implied.Code] = implied;
 
@@ -114,11 +134,19 @@ internal static class ErrorContractDiscovery {
         Dictionary<string, ErrorDeclaration> byCode,
         Action<DiagnosticInfo>? report) {
         foreach (var attribute in attributes) {
-            if (attribute.AttributeClass?.ToDisplayString() != ProducesErrorAttributeMetadataName)
+            ErrorDeclaration? declaration;
+            var attributeName = attribute.AttributeClass?.ToDisplayString();
+            if (attributeName == ProducesErrorAttributeMetadataName) {
+                if (!TryReadDeclaration(attribute, out declaration))
+                    continue;
+            }
+            else if (attributeName == RequiresDecisionAttributeMetadataName) {
+                if (!TryReadDecision(attribute, owner, locate, report, out declaration))
+                    continue;
+            }
+            else {
                 continue;
-
-            if (!TryReadDeclaration(attribute, out var declaration))
-                continue;
+            }
 
             if (!IsValidCode(declaration.Code)) {
                 report?.Invoke(DiagnosticInfo.Create(InvalidErrorCode, locate(attribute), owner, declaration.Code));
@@ -148,7 +176,8 @@ internal static class ErrorContractDiscovery {
     // attributes and request graph: assembly/module authorization defaults are not visible per handler, which is
     // why the runtime check always admits the default unauthorized/forbidden codes.
     private static IEnumerable<ErrorDeclaration> ImpliedErrors(
-        INamedTypeSymbol handler, INamedTypeSymbol requestType, Compilation compilation, bool isIdempotent) {
+        INamedTypeSymbol handler, INamedTypeSymbol requestType, Compilation compilation, bool isIdempotent,
+        ITypeSymbol? responseValueType) {
         if (compilation.GetTypeByMetadataName(ElarionValidationExtensionsMetadataName) is not null
             && ValidatableTypeWalker.IsValidatable(
                 requestType, new ValidatableTypeWalker.Context(compilation.Assembly)))
@@ -183,6 +212,16 @@ internal static class ErrorContractDiscovery {
             yield return new ErrorDeclaration("idempotency.in_progress", "Conflict", null);
             yield return new ErrorDeclaration("idempotency.key_reused", "BusinessRule", null);
         }
+
+        // A previewable command (ADR-0104): exactly where the preview decorator attaches, it can refuse a stale
+        // commit (carrying the new outcome) and refuse a preview on a host whose unit of work cannot roll back.
+        if (responseValueType is not null
+            && HandlerRegistrationGenerator.IsPreviewableRequest(requestType, compilation)
+            && HandlerRegistrationGenerator.IsPreviewOutcome(responseValueType, compilation)) {
+            yield return new ErrorDeclaration(
+                "preview.changed", "Conflict", responseValueType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+            yield return new ErrorDeclaration("preview.unsupported", "Internal", null);
+        }
     }
 
     private static bool TryReadDeclaration(AttributeData attribute, out ErrorDeclaration declaration) {
@@ -215,6 +254,75 @@ internal static class ErrorContractDiscovery {
 
         declaration = new ErrorDeclaration(code, kind, dataType);
         return true;
+    }
+
+    // [RequiresDecision(code, Options = typeof(TEnum), PerItem = …, DataType = typeof(T))]: a DecisionRequired error
+    // whose options are the enum's member names in camel case (the wire names DecisionExtensions parses), or the one
+    // option "confirm" without Options.
+    private static bool TryReadDecision(
+        AttributeData attribute,
+        string owner,
+        Func<AttributeData, Location?> locate,
+        Action<DiagnosticInfo>? report,
+        out ErrorDeclaration declaration) {
+        declaration = null!;
+        if (attribute.ConstructorArguments.Length != 1 || attribute.ConstructorArguments[0].Value is not string code)
+            return false;
+
+        string? dataType = null;
+        var perItem = false;
+        var options = new List<string>();
+        foreach (var named in attribute.NamedArguments) {
+            switch (named.Key) {
+                case "DataType" when named.Value.Value is ITypeSymbol data:
+                    dataType = data.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                    break;
+                case "PerItem" when named.Value.Value is bool value:
+                    perItem = value;
+                    break;
+                case "Options" when named.Value.Value is ITypeSymbol optionsType:
+                    if (optionsType.TypeKind == TypeKind.Enum)
+                        foreach (var member in optionsType.GetMembers())
+                            if (member is IFieldSymbol { HasConstantValue: true } field)
+                                options.Add(CamelCase(field.Name));
+
+                    if (options.Count == 0) {
+                        report?.Invoke(DiagnosticInfo.Create(DecisionOptionsNotEnum, locate(attribute), owner, code,
+                            optionsType.ToDisplayString()));
+                        return false;
+                    }
+
+                    break;
+            }
+        }
+
+        if (options.Count == 0)
+            options.Add("confirm");
+
+        declaration = new ErrorDeclaration(code, "DecisionRequired", dataType,
+            (perItem ? "1|" : "0|") + string.Join(",", options));
+        return true;
+    }
+
+    // System.Text.Json's camel case: the leading run of upper-case letters is lowered, keeping the last one of a run
+    // that starts a new word ("URLValue" -> "urlValue", "OnlyHere" -> "onlyHere").
+    internal static string CamelCase(string name) {
+        if (name.Length == 0 || !char.IsUpper(name[0]))
+            return name;
+
+        var chars = name.ToCharArray();
+        for (var i = 0; i < chars.Length; i++) {
+            if (i == 1 && !char.IsUpper(chars[i]))
+                break;
+
+            var hasNext = i + 1 < chars.Length;
+            if (i > 0 && hasNext && !char.IsUpper(chars[i + 1]))
+                break;
+
+            chars[i] = char.ToLowerInvariant(chars[i]);
+        }
+
+        return new string(chars);
     }
 
     private static string? EnumMemberName(TypedConstant constant) {

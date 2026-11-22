@@ -448,8 +448,10 @@ transports), which is wrong past a few megabytes. Large files move through the
 [staging blob area](/docs/capabilities/blob-storage) instead, and the handler only sees a **pointer**:
 
 - **Import**: the client uploads through `MapElarionResumableBlobUploads` (resumable) or `MapElarionBlobUploads` into the
-  pending area, then passes the returned blob reference to the handler, which streams from
-  `IBlobStore.OpenReadAsync`. A blob the handler never commits is garbage-collected after its TTL.
+  pending area, then passes the returned blob reference to the handler as an
+  [`UploadedFile`](/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler), which streams it from
+  `IUploadedFiles.OpenAsync` (the caller's own pending upload only). A blob the handler never commits is
+  garbage-collected after its TTL.
 - **Export**: the handler streams the artifact into the store as a pending blob owned by the current user
   and returns its `BlobRef`; the client streams it down from `MapElarionBlobDownloads`. An export nobody
   downloads expires on its own — the pending state doubles as temp-file semantics.

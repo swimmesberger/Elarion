@@ -12,8 +12,9 @@ namespace Elarion.Authorization;
 /// </summary>
 public static class AuthorizationServiceCollectionExtensions {
     /// <summary>
-    /// Registers <see cref="AuthorizationOptions"/> and the default <see cref="IAuthorizer"/>
-    /// (<see cref="ClaimsAuthorizer"/>). Required by any host whose handlers use authorization attributes;
+    /// Registers <see cref="AuthorizationOptions"/>, the default <see cref="IAuthorizer"/>
+    /// (<see cref="ClaimsAuthorizer"/>) and the default <see cref="IPermissionChecker"/>
+    /// (<see cref="ClaimsPermissionChecker"/>). Required by any host whose handlers use authorization attributes;
     /// <c>AddElarionIdentity</c> calls this for you.
     /// </summary>
     /// <remarks>
@@ -66,6 +67,10 @@ public static class AuthorizationServiceCollectionExtensions {
         // the interface resolves the same scoped instance rather than constructing a second one.
         services.TryAddScoped<ClaimsAuthorizer>();
         services.TryAddScoped<IAuthorizer>(static sp => sp.GetRequiredService<ClaimsAuthorizer>());
+        // The one permission decision: the [RequirePermission] gate above, [VisibleWith] members and handler code all
+        // ask it, so a host that replaces it (registered before this call) changes all three together.
+        services.TryAddScoped<ClaimsPermissionChecker>();
+        services.TryAddScoped<IPermissionChecker>(static sp => sp.GetRequiredService<ClaimsPermissionChecker>());
         // Fail-closed default for a resource type without its own check; AddElarionResourceAuthorization replaces it
         // with the grants-backed authorizer. Both route to a per-type check (AddElarionResourceFilterCheck) first.
         services.TryAddScoped<IResourceAuthorizer, DenyResourceAuthorizer>();

@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Dispatch;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -124,6 +125,16 @@ public static class JsonRpcSchemaExporter {
             var entry = new JsonObject { ["kind"] = ErrorCodes.ForKind(error.Kind) };
             if (error.DataType is { } dataType)
                 entry["data"] = BuildSchemaNode(dataType, options, SchemaDirection.Response, InjectReflectedResponseAnnotations);
+
+            // A declared decision (ADR-0101): the options the caller picks from, and whether it answers per item.
+            if (error.Decision is { } decision) {
+                // Declaration order, not sorted: the options read as the dialog offers them.
+                var decisionNode = new JsonObject {
+                    ["options"] = new JsonArray(decision.Options.Select(static o => (JsonNode?)JsonValue.Create(o)).ToArray())
+                };
+                if (decision.PerItem) decisionNode["perItem"] = true;
+                entry["decision"] = decisionNode;
+            }
 
             node[error.Code] = entry;
         }
@@ -270,7 +281,8 @@ public static class JsonRpcSchemaExporter {
         var exporterOptions = new JsonSchemaExporterOptions {
             TreatNullObliviousAsNonNullable = true,
             TransformSchemaNode = (ctx, schema) => {
-                var node = ApplyRequiredness(ctx, NormalizeNumericType(ctx, MapFilePayload(ctx, schema)), direction);
+                var node = ApplyRequiredness(
+                    ctx, NormalizeNumericType(ctx, MapUploadPayload(ctx, MapFilePayload(ctx, schema), direction)), direction);
                 return extraTransform is null ? node : extraTransform(ctx, node);
             }
         };
@@ -426,8 +438,20 @@ public static class JsonRpcSchemaExporter {
     /// of a plain envelope interface.
     /// </summary>
     private static JsonNode MapFilePayload(JsonSchemaExporterContext ctx, JsonNode schema) {
-        if (ctx.TypeInfo.Type != typeof(Abstractions.ElarionFile)) return schema;
+        // A collection of files: the exporter leaves out the "items" of a converter-backed element (see
+        // MapUploadPayload), so the list would export as an array of anything; put the envelope back.
+        if (ctx.TypeInfo is { Kind: JsonTypeInfoKind.Enumerable } collection
+            && collection.ElementType == typeof(Abstractions.ElarionFile)
+            && schema is JsonObject array
+            && !array.ContainsKey("items")) {
+            array["items"] = FileNode();
+            return schema;
+        }
 
+        return ctx.TypeInfo.Type == typeof(Abstractions.ElarionFile) ? FileNode() : schema;
+    }
+
+    private static JsonObject FileNode() {
         return new JsonObject {
             ["type"] = "object",
             ["x-elarion-file"] = true,
@@ -442,6 +466,37 @@ public static class JsonRpcSchemaExporter {
     }
 
     /// <summary>
+    /// Replaces the schema node for <see cref="Elarion.Abstractions.UploadedFile"/>, opaque to the exporter because the
+    /// type serializes through its converter, with the converter's wire form: a string, the blob id of a staged upload
+    /// (ADR-0105). The node is marked <c>x-elarion-upload: true</c> so the TypeScript client generator accepts a
+    /// native <c>File</c> there and uploads it before the call. The replacement drops the exporter's own nullability,
+    /// so a nullable member gets <c>null</c> back from the property's annotation.
+    /// </summary>
+    private static JsonNode MapUploadPayload(JsonSchemaExporterContext ctx, JsonNode schema, SchemaDirection direction) {
+        if (ctx.TypeInfo.Type == typeof(Abstractions.UploadedFile))
+            return UploadNode(ctx.PropertyInfo is { } property
+                              && (direction == SchemaDirection.Request ? property.IsSetNullable : property.IsGetNullable));
+
+        // The exporter leaves out the "items" of a collection whose element schema accepts anything, which is what a
+        // converter-backed element exports as, before this transform ever sees the element: put it back.
+        if (ctx.TypeInfo is { Kind: JsonTypeInfoKind.Enumerable } collection
+            && collection.ElementType == typeof(Abstractions.UploadedFile)
+            && schema is JsonObject array
+            && !array.ContainsKey("items"))
+            array["items"] = UploadNode(false);
+
+        return schema;
+    }
+
+    private static JsonObject UploadNode(bool nullable) {
+        return new JsonObject {
+            ["type"] = nullable ? new JsonArray("string", "null") : "string",
+            ["x-elarion-upload"] = true,
+            ["description"] = "A file staged through the upload endpoint; the value is the blob id it answered with."
+        };
+    }
+
+    /// <summary>
     /// Composes the reflective per-property transforms applied to the full schema export: the
     /// <see cref="DescriptionAttribute"/> description plus the DataAnnotations constraint keywords, per direction.
     /// </summary>
@@ -451,7 +506,35 @@ public static class JsonRpcSchemaExporter {
 
     /// <inheritdoc cref="InjectReflectedRequestAnnotations"/>
     private static JsonNode InjectReflectedResponseAnnotations(JsonSchemaExporterContext ctx, JsonNode schema) {
-        return InjectReflectedConstraints(ctx, InjectReflectedDescription(ctx, schema), SchemaDirection.Response);
+        return InjectVisibleWith(ctx,
+            InjectReflectedConstraints(ctx, InjectReflectedDescription(ctx, schema), SchemaDirection.Response));
+    }
+
+    /// <summary>
+    /// The vendor keyword naming the permission a caller must hold to receive a response member
+    /// (<see cref="VisibleWithAttribute"/>, ADR-0103); the pipeline omits the member for everyone else.
+    /// </summary>
+    internal const string VisibleWithKeyword = "x-elarion-visible-with";
+
+    /// <summary>
+    /// Adds <see cref="VisibleWithKeyword"/> to a response member marked <see cref="VisibleWithAttribute"/> — on the
+    /// property, or on the positional record's constructor parameter — so a generated client can say why the member
+    /// may be missing.
+    /// </summary>
+    private static JsonNode InjectVisibleWith(JsonSchemaExporterContext ctx, JsonNode schema) {
+        if (ctx.PropertyInfo is not { } property || schema is not JsonObject obj) return schema;
+
+        var attribute = FindVisibleWith(property.AttributeProvider)
+                        ?? FindVisibleWith(property.AssociatedParameter?.AttributeProvider);
+        if (attribute is not null) obj[VisibleWithKeyword] = attribute.Permission;
+
+        return schema;
+    }
+
+    private static VisibleWithAttribute? FindVisibleWith(ICustomAttributeProvider? provider) {
+        return provider?.GetCustomAttributes(typeof(VisibleWithAttribute), true) is [VisibleWithAttribute found, ..]
+            ? found
+            : null;
     }
 
     /// <summary>

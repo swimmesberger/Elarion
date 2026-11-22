@@ -87,7 +87,13 @@ public sealed partial class HandlerRegistrationGenerator {
         // [Handler(Scope = …)] as the ServiceScope enum value (Scoped = 0, Singleton = 1, Transient = 2) —
         // the registration lifetime the emit uses. Singleton is compile-time verified (ELSG011-013).
         int ScopeValue,
-        EquatableArray<DiagnosticInfo> Diagnostics
+        EquatableArray<DiagnosticInfo> Diagnostics,
+        // The response members shown only to holders of a permission ([VisibleWith], ADR-0103) and the copy
+        // functions that hide them; null when the response has none (the decorator is then not emitted at all).
+        VisibilityInfo? Visibility = null,
+        // The outcome type (the T of Result<T>) when the request implements IPreviewableRequest and T is an
+        // IPreviewOutcome<T>: the preview decorator attaches (ADR-0104). Null for every other handler.
+        string? PreviewOutcomeFqn = null
     );
 
     // One in-compilation [Service(Scope = …)] fact: a contract (or implementation) FQN and its declared scope.

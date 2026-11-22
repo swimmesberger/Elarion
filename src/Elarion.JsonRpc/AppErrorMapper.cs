@@ -28,7 +28,7 @@ public static class AppErrorMapper {
 
     /// <summary>Maps an <see cref="ErrorKind"/> to its JSON-RPC integer error code.</summary>
     /// <remarks>
-    /// The application-range codes (-32001..-32005) are a wire contract mirrored by the TypeScript client
+    /// The application-range codes (-32001..-32006) are a wire contract mirrored by the TypeScript client
     /// generator (<c>src/elarion-jsonrpc-client-generator/src/rpc-client-source.ts</c>, <c>ElarionErrorCodes</c>
     /// and the <c>RpcError</c> getters). Keep both in sync — changing a code breaks every generated client.
     /// </remarks>
@@ -40,6 +40,7 @@ public static class AppErrorMapper {
             ErrorKind.Forbidden => -32003,
             ErrorKind.BusinessRule => -32004,
             ErrorKind.Unauthorized => -32005,
+            ErrorKind.DecisionRequired => -32006,
             ErrorKind.Internal => -32603, // Internal error
             _ => -32603
         };

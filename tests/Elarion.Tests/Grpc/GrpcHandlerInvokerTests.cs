@@ -17,6 +17,7 @@ public sealed class GrpcHandlerInvokerTests {
     [InlineData(ErrorKind.Forbidden, StatusCode.PermissionDenied, "forbidden")]
     [InlineData(ErrorKind.Unauthorized, StatusCode.Unauthenticated, "unauthorized")]
     [InlineData(ErrorKind.BusinessRule, StatusCode.FailedPrecondition, "business-rule")]
+    [InlineData(ErrorKind.DecisionRequired, StatusCode.FailedPrecondition, "decision-required")]
     [InlineData(ErrorKind.Internal, StatusCode.Internal, "internal")]
     public void Translate_MapsKnownKindsToStableStatusAndTrailer(
         ErrorKind kind,

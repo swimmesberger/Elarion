@@ -32,6 +32,10 @@ namespace Elarion.Sql;
 /// </remarks>
 internal sealed class SqlUnitOfWork(SqlSession session) : IUnitOfWork {
     /// <inheritdoc />
+    /// <remarks>A real database transaction: rolling back (or back to a savepoint) discards the scope's writes.</remarks>
+    public bool SupportsRollback => true;
+
+    /// <inheritdoc />
     public async ValueTask<IUnitOfWorkScope> BeginAsync(UnitOfWorkOptions options, CancellationToken ct) {
         var connection = await session.GetConnectionAsync(ct).ConfigureAwait(false);
 

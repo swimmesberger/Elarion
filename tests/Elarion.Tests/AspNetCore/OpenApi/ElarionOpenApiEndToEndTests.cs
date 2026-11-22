@@ -51,6 +51,8 @@ public sealed partial class ElarionOpenApiEndToEndTests {
         [StringLength(100, MinimumLength = 3)] public required string DisplayName { get; init; }
 
         [Range(1, 120)] public required int Age { get; init; }
+
+        public UploadedFile? Passport { get; init; }
     }
 
     private sealed record RegisterCustomerResponse(Guid Id);
@@ -320,6 +322,16 @@ public sealed partial class ElarionOpenApiEndToEndTests {
             var age = properties.GetProperty("age");
             age.GetProperty("minimum").GetDecimal().Should().Be(1);
             age.GetProperty("maximum").GetDecimal().Should().Be(120);
+
+            // An uploaded file is the staged blob's id on the wire, marked as the JSON-RPC schema marks it. The nullable
+            // member is a oneOf of null and the (shared) UploadedFile schema.
+            var passport = properties.GetProperty("passport");
+            var uploaded = passport.TryGetProperty("oneOf", out var alternatives)
+                ? alternatives.EnumerateArray().Select(a => ResolveSchema(doc.RootElement, a))
+                    .Single(a => a.TryGetProperty("x-elarion-upload", out _))
+                : ResolveSchema(doc.RootElement, passport);
+            uploaded.GetProperty("type").GetString().Should().Be("string");
+            uploaded.GetProperty("x-elarion-upload").GetBoolean().Should().BeTrue();
         }
         finally {
             await app.StopAsync(ct);

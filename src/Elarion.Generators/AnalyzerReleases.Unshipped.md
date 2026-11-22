@@ -67,6 +67,7 @@
  ELRPC005   | Elarion.JsonRpc                    | Error    | A streamed file cannot be carried by a [Handler] transport
  ELERR001   | Elarion.Errors                     | Error    | Invalid error code
  ELERR002   | Elarion.Errors                     | Error    | Conflicting error declaration
+ ELERR003   | Elarion.Errors                     | Error    | Decision options are not an enum
  ELRES001   | Elarion.Abstractions.Resilience    | Error    | Invalid resilience policy
  ELRES002   | Elarion.Abstractions.Resilience    | Error    | Duplicate resilience policy name
  ELCACHE001 | Elarion.Abstractions.Caching       | Error    | Handler cannot be both cacheable and cache-invalidating
@@ -78,6 +79,8 @@
  ELCACHE007 | Elarion.Abstractions.Caching       | Error    | Cache-key property does not exist
  ELAUTH001  | Elarion.Abstractions.Authorization | Error    | Authorized handler response cannot represent failure
  ELAUTH002  | Elarion.Abstractions.Authorization | Error    | RequireResource id path does not resolve
+ ELAUTH003  | Elarion.Abstractions.Authorization | Error    | [VisibleWith] member is not nullable
+ ELAUTH004  | Elarion.Abstractions.Authorization | Error    | Response member visible by permission cannot be hidden
  ELPOL001   | Elarion.Abstractions.Authorization | Error    | [AuthorizationPolicy] must be on an IAuthorizationPolicy
  ELPOL002   | Elarion.Abstractions.Authorization | Warning  | Authorization policy is not in any module
  ELPERM001  | Elarion.Abstractions.Authorization | Warning  | Authorization requirement is not in any module
@@ -107,6 +110,7 @@
  ELIDEM003  | Elarion.Abstractions.Idempotency   | Error    | [Idempotent] retention is invalid
  ELIDEM004  | Elarion.Abstractions.Idempotency   | Warning  | Handler cannot be both idempotent and cacheable
  ELINBX001  | Elarion.Abstractions.Messaging     | Warning  | [AllowDuplicates] handler is not an integration-event consumer
+ ELPREV001  | Elarion.Abstractions.Previews      | Error    | Previewable command handler does not return a preview outcome
  ELCEV001   | Elarion.Abstractions.ClientEvents  | Warning  | Client event is not in any module
  ELCEV002   | Elarion.Abstractions.ClientEvents  | Error    | Duplicate client-event topic name
  ELCEV003   | Elarion.Abstractions.ClientEvents  | Warning  | Client events are not registered without Elarion.ClientEvents

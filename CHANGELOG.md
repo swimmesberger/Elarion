@@ -8,6 +8,86 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **A synchronous permission check** (ADR-0103). Inject `IPermissionChecker` and ask
+  `permissions.Holds(ElarionPermissions.Banking.Read)` (or `Holds("banking", Verbs.Read)`, `HoldsAny`, `HoldsAll`)
+  for a decision that is not a gate, instead of `currentUser.HasClaim("permission", "…")`. `AddElarionAuthorization()`
+  registers `ClaimsPermissionChecker` (the configured `PermissionClaimType`; an unauthenticated caller holds nothing),
+  and `ClaimsAuthorizer` now evaluates every `[RequirePermission]` through the checker, so a host that registers its
+  own (for example administrators holding every permission) changes the gate and every in-code check together. The
+  session snapshot adds the catalog permissions the checker grants beyond the claims. See
+  [Authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization#checking-a-permission-in-code).
+- **Response members visible by permission** (ADR-0103). Mark a nullable member of a response record
+  `[VisibleWith(ElarionPermissions.Banking.Read)]` (or `[VisibleWith("banking", Verbs.Read)]`) and the handler pipeline
+  answers it as `null` for a caller who does not hold the permission, instead of each handler nulling it by hand. The
+  generator finds marked members through nested records, structs, arrays, lists, read-only collections, `Page<T>`,
+  `ElarionCreated<T>` and the derived types a base declares with `[JsonDerivedType]`, and emits a reflection-free copy; the new `VisibilityDecorator` sits just inside authorization,
+  so cached and replayed answers are hidden per caller. `rpc-schema.json` exports `x-elarion-visible-with` on the
+  member and the generated TypeScript documents it. New errors: `ELAUTH003` (a marked member is not nullable) and
+  `ELAUTH004` (a shape the pipeline cannot copy). See
+  [Authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization#members-only-some-callers-see).
+- **Asking the caller to decide** (ADR-0101). A handler declares a decision with
+  `[RequiresDecision(code, Options = typeof(TEnum), PerItem = …, DataType = …)]` and asks with
+  `AppError.DecisionRequired(code, message, data)`, a new `ErrorKind` (JSON-RPC `-32006`, HTTP `409`, gRPC
+  `FailedPrecondition`). The request implements `IDecidingRequest` and carries the answers in one `Decisions` list of
+  `{ code, item?, option }`; `IsConfirmed`, `Decision<TOption>` and `Unanswered(code, keys)` read it, so a per-item
+  decision refuses while any item the server found is unanswered instead of skipping it. The schema exports each
+  decision's options and `perItem`, and the generated TypeScript client gains `isDecisionRequired`,
+  `ElarionErrorCodes.decisionRequired` and, for schemas that declare decisions, `withDecisions(client, method, params,
+  ask)`, which asks the application's dialog with a typed question and resends with the answer. New error: `ELERR003`
+  (decision options are not an enum). See
+  [Results and errors](https://elarion.wimmesberger.dev/docs/concepts/results-and-errors#asking-the-caller-to-decide).
+- **Rules: one expression for queries and memory** (ADR-0102). `Rule<TInput, TResult>` and `Rule<TInput1, TInput2,
+  TResult>` in `Elarion.Expressions` (core, no EF dependency) hold a rule's expression: `rule.Expression` goes into a
+  query, `rule.Invoke(entity)` runs a delegate compiled once and cached (the interpreter under NativeAOT).
+  `Rule.Create(…)` infers the types. Inside another expression `rule.Invoke(x)` is a marker that `Expand()` (on an
+  expression, or `query.Expand()` on an `IQueryable`) inlines recursively, so rules compose in filters and in normal
+  constructor projections that EF Core translates; `Invoke` on an `Expression<Func<…>>` expands the same way.
+  `Expr.Captured(value)` makes a value a parameter instead of a literal, `Expr.Inline(lambda, arguments)` inlines a
+  lambda into a tree built at run time, and `Expr.AnyOf`/`AllOf`/`Not` combine predicates over one row (no predicates:
+  `AnyOf` is always false, `AllOf` always true). The page also gives the recipe for an aggregate a rule uses several
+  times: join it once and pass it as the rule's second input. `UseElarionRuleCheck()` (in `Elarion.EntityFrameworkCore`,
+  on the context options) makes EF Core refuse a query that still invokes a rule because `Expand()` was forgotten,
+  instead of running the rule on the client against an entity whose navigations were not loaded. See
+  [Rules](https://elarion.wimmesberger.dev/docs/concepts/rules).
+- **Previewable commands** (ADR-0104). A command whose request implements `IPreviewableRequest` (`bool Preview`,
+  `string? PreviewFingerprint`) is its own preview: with `Preview` set it runs fully, its outcome is returned stamped
+  with a fingerprint, and every database write is rolled back. A commit that sends the fingerprint back commits only
+  when its outcome is unchanged; otherwise it rolls back and fails with `409`/`Conflict`, code `preview.changed`,
+  carrying the new outcome as `data`. The outcome implements `IPreviewOutcome<T>` and must be deterministic for the
+  same decision. The generator attaches the new `PreviewDecorator` just inside idempotency and outside the
+  `[DecoratorList]`, implies `preview.changed` and `preview.unsupported` on the operation's error contract, and reports
+  `ELPREV001` when the response is not a `Result<T>` with `T : IPreviewOutcome<T>`. `IUnitOfWork.SupportsRollback` (a
+  default interface member, `false`; `true` for the EF Core and SQL-tier units of work) gates it: without a unit of
+  work that rolls back, a preview answers `preview.unsupported` and the handler never runs. Ordinary calls pass
+  straight through. See
+  [Previewable commands](https://elarion.wimmesberger.dev/docs/concepts/previewable-commands).
+- **Uploaded files as handler parameters** (ADR-0105). A handler takes a file staged through the direct-upload or tus
+  endpoint as an `UploadedFile` member, a blob-id string on the wire, and reads, keeps or discards it through
+  `IUploadedFiles` (`OpenAsync`, `CommitAsync`, `DeleteAsync`; registered by `AddElarionUploadedFiles` in
+  `Elarion.Blobs`). It answers only a pending upload of the current user in an upload container and refuses everything
+  else with the same `upload.not_found` error, so ids cannot be probed; `UploadConstraints` add `upload.too_large` and
+  `upload.content_type`. The schema exports the member as a string marked `x-elarion-upload`, and the generated
+  TypeScript client takes a `File`/`Blob` there, uploads it to the direct-upload endpoint before the call (client
+  options `uploadFile` and `uploadUrl`), and exposes `rpc.$uploadFile(file)`, so a multi-step flow uploads once and
+  passes the reference to every step. The blob-upload examples no longer hand a raw blob id to `IBlobStore` or
+  `IBlobLifecycle`, which check no owner. `Elarion.Blobs` now references `Elarion.Abstractions`. See
+  [Blob uploads](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler).
+
+### Fixed
+- **Schemas of uploaded files and file lists.** The OpenAPI document described an `UploadedFile` member as an opaque
+  schema; it is now a string marked `x-elarion-upload: true`, as in `rpc-schema.json`. A list of `ElarionFile` exported
+  to `rpc-schema.json` without `items`; it now carries the file envelope, so the generated client converts each item.
+
+### Changed
+- **The direct-upload cancel and download routes answer `404` for a committed blob.** `DELETE {prefix}/{id}` and
+  `GET {prefix}/{id}` (`MapElarionBlobUploads`, `MapElarionBlobDownloads`) checked the owner but not the state, so an
+  uploader could still delete a blob a handler had committed to a record (breaking the record) or keep reading it
+  after losing access to the record. They now serve pending blobs only; serve a committed blob through the record's
+  own authorized endpoint.
+- **Breaking: `ErrorKind` gains `DecisionRequired`** (ADR-0101). The existing kinds keep their values; an exhaustive
+  `switch` over `ErrorKind` in an application gets a new case (it maps to HTTP `409` and JSON-RPC `-32006`).
+
 ## [0.4.2] - 2026-11-21
 
 ### Added

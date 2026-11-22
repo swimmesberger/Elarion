@@ -157,6 +157,23 @@ A declarative authorization condition on a handler (`[Require*]`), enforced in t
 the transport and whatever the provider.
 _Avoid_: policy (an ASP.NET host concept), guard, permission check
 
+**Permission checker**:
+The one synchronous decision whether the current caller holds a permission (`IPermissionChecker`). The
+`[RequirePermission]` gate, handler code, members visible by permission and the client snapshot all ask it, so a host
+changes what a caller holds in one place.
+_Avoid_: `HasClaim` on the permission claim type, permission service
+
+**Member visible by permission**:
+A response member marked `[VisibleWith]`: the handler fills it for everybody, and the handler pipeline answers it as
+null for a caller who does not hold the permission.
+_Avoid_: field-level security (a database concept), masked field
+
+**Decision**:
+A question a valid command asks its caller before it runs ("import this possible duplicate?"), declared with
+`[RequiresDecision]`, asked with `AppError.DecisionRequired` and answered through the request's `Decisions`, once or
+per item.
+_Avoid_: confirmation flag, confirm conflict
+
 **Feature gate**:
 A runtime gate on a handler, keyed by a declared feature flag. A closed gate answers with the generic
 not-found outcome so the flag's name is not leaked. It is not module enablement.
@@ -264,6 +281,12 @@ _Avoid_: multipart upload, tus upload (one protocol over the seam), temp file
 The small, in-memory file payload of a handler. Large exports and uploads use the staged-blob tier instead.
 _Avoid_: attachment, stream (for a small file), form file
 
+**Uploaded file**:
+A handler parameter (`UploadedFile`) naming a file the caller staged through an upload endpoint; a blob-id string on
+the wire. The handler reads, keeps or discards it only through `IUploadedFiles`, which answers the caller's own
+pending upload and nothing else.
+_Avoid_: blob ref, file id, attachment id (for the parameter), upload token
+
 **Streamed file**:
 The file response of an HTTP-only handler (`ElarionStreamedFile`): content written to the response body after
 the handler pipeline has run, never buffered. Only HTTP carries it; JSON surfaces use an ElarionFile or a
@@ -274,6 +297,18 @@ _Avoid_: file stream, push stream, download result
 The one ordered sequence in which SQL scripts, C# code steps and EF migrations run, with one version
 sequence, one history and one lock; roll-forward only.
 _Avoid_: migration set, changelog, schema history (which is one part of it)
+
+**Rule**:
+A domain derivation or condition written once as an expression (`Rule<TInput, TResult>`): invoked inside a
+query, where `Expand()` inlines it for the provider to translate, and run in memory, compiled. Business rules
+that decide a command still live in the handler; a rule is how the handler and its queries share a definition.
+_Avoid_: specification, computed property, predicate helper, expression snippet
+
+**Previewable command**:
+A command whose request implements `IPreviewableRequest`: the same handler previews (runs, reports its outcome
+stamped with a preview fingerprint, rolls back) and commits, and a commit sent with the fingerprint commits only if
+its outcome is unchanged, otherwise it fails with `preview.changed`.
+_Avoid_: dry-run handler, preview endpoint, simulate mode, separate preview and commit operations
 
 ### Frontend
 

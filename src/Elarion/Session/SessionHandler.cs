@@ -20,7 +20,9 @@ namespace Elarion.Session;
 /// snapshot cannot disagree with the gate. A flag is reported as a variant only when its owner allocates one;
 /// otherwise it appears as a boolean flag, so a pure UI flag is first-class.
 /// Registered <see cref="IClientSnapshotContributor"/> instances add named application sections on top of that fixed
-/// shape.
+/// shape. The user's permissions are the principal's permission claims plus every catalog permission the
+/// <see cref="IPermissionChecker"/> grants, so a host whose checker grants more than the claims (administrators
+/// holding everything) projects the same answer the gate gives.
 /// </remarks>
 public sealed class SessionHandler(
     ICurrentUser currentUser,
@@ -28,7 +30,9 @@ public sealed class SessionHandler(
     AuthorizationOptions? authorizationOptions = null,
     IFeatureFlagCatalog? catalog = null,
     IFeatureFlagService? featureFlags = null,
-    IEnumerable<IClientSnapshotContributor>? contributors = null)
+    IEnumerable<IClientSnapshotContributor>? contributors = null,
+    IPermissionChecker? permissionChecker = null,
+    IPermissionCatalog? permissionCatalog = null)
     : IHandler<SessionRequest, Result<SessionResponse>> {
     /// <inheritdoc/>
     public async ValueTask<Result<SessionResponse>> HandleAsync(SessionRequest request, CancellationToken ct) {
@@ -60,7 +64,7 @@ public sealed class SessionHandler(
             Email = currentUser.Email,
             IsAuthenticated = currentUser.IsAuthenticated,
             Roles = currentUser.Roles,
-            Permissions = [.. currentUser.GetClaimValues(permissionClaimType)]
+            Permissions = HeldPermissions(permissionClaimType)
         };
 
         return new SessionResponse {
@@ -70,6 +74,25 @@ public sealed class SessionHandler(
             Variants = variants,
             Sections = await BuildSectionsAsync(ct).ConfigureAwait(false)
         };
+    }
+
+    // The claims first (the shape every host had before the checker existed), then the catalog permissions the checker
+    // grants beyond them; with the default checker the second part adds nothing.
+    private string[] HeldPermissions(string permissionClaimType) {
+        var claims = currentUser.GetClaimValues(permissionClaimType);
+        if (permissionChecker is null || permissionCatalog is null || !currentUser.IsAuthenticated) return [.. claims];
+
+        var held = new List<string>(claims);
+        HashSet<string>? seen = null;
+        foreach (var permission in permissionCatalog.Permissions) {
+            seen ??= new HashSet<string>(held, StringComparer.Ordinal);
+            if (!seen.Contains(permission) && permissionChecker.Holds(permission)) {
+                held.Add(permission);
+                seen.Add(permission);
+            }
+        }
+
+        return [.. held];
     }
 
     /// <summary>

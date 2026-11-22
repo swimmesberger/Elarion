@@ -56,6 +56,33 @@ public sealed class ErrorContractSchemaTests {
     }
 
     [Fact]
+    public void Schema_ExportsADecisionsOptionsInDeclarationOrder_AndWhetherItIsPerItem() {
+        var schema = Export(d => d.MapDelegate<Ping, Pong>(
+            "t.ping",
+            (r, sp, ct) => ValueTask.FromResult(Ok(r, sp, ct)),
+            errors: [
+                new ErrorContract {
+                    Code = "t.possible_duplicate", Kind = ErrorKind.DecisionRequired, DataType = typeof(TokenProblem),
+                    Decision = new DecisionContract { Options = ["skip", "import"], PerItem = true }
+                },
+                new ErrorContract {
+                    Code = "t.confirm", Kind = ErrorKind.DecisionRequired,
+                    Decision = new DecisionContract { Options = [DecisionAnswer.Confirm] }
+                }
+            ]));
+
+        var errors = schema["methods"]!["t.ping"]!["errors"]!;
+        var perItem = errors["t.possible_duplicate"]!;
+        perItem["kind"]!.GetValue<string>().Should().Be("decision_required");
+        perItem["decision"]!["options"]!.AsArray().Select(n => n!.GetValue<string>()).Should().Equal("skip", "import");
+        perItem["decision"]!["perItem"]!.GetValue<bool>().Should().BeTrue();
+        perItem["data"].Should().NotBeNull();
+        var confirm = errors["t.confirm"]!["decision"]!.AsObject();
+        confirm.ContainsKey("perItem").Should().BeFalse();
+        confirm["options"]!.AsArray().Select(n => n!.GetValue<string>()).Should().Equal("confirm");
+    }
+
+    [Fact]
     public void Schema_OmitsErrors_WhenNoneDeclared() {
         var schema = Export(d => d.MapDelegate<Ping, Pong>("t.ping", (r, sp, ct) => ValueTask.FromResult(Ok(r, sp, ct))));
 

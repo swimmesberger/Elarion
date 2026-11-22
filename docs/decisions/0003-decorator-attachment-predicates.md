@@ -189,3 +189,14 @@ the predicate is plain, runnable C#, it can be unit-tested directly
   `if (__pipelineApplies{i})`.
 - Documented in [decorator pipelines](../concepts/decorator-pipelines.mdx); the tutorial's transaction
   decorator uses `AppliesTo`.
+
+## Amendment (2026-11-22): the framework ships the transaction decorator
+
+The statement above that the framework ships "no concrete `TransactionDecorator`" is no longer true. Since the pipeline
+decorators moved into the core package ([ADR-0034](0034-abstractions-holds-contracts-not-implementations.md)),
+`Elarion.Pipeline.TransactionDecorator` ships there, with the `AppliesTo` predicate this record describes, over the
+`IUnitOfWork` seam whose providers (`AddElarionUnitOfWork<TDbContext>()`, the SQL tier) the framework also ships.
+What still holds is the point of the decision: the transaction is the application's choice. The decorator attaches
+only where an application lists it in its `[DecoratorList]`, and it opens the unit of work on the application's own
+scoped context. The one built-in decorator that owns a unit of work by itself is the preview decorator of
+[ADR-0104](0104-previewable-commands.md), and only for a request that asks for a preview or a fingerprinted commit.

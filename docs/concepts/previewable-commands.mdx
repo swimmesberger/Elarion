@@ -1,0 +1,152 @@
+---
+title: Previewable commands
+description: One handler is the preview and the commit — a preview runs the command and rolls it back, and a commit sent with the preview's fingerprint refuses to act on a decision that changed in between.
+---
+
+Imports, bulk changes and anything else a person should look at before it happens are usually built as two
+operations: `*.importPreview` computes what would happen, `*.import` does it. The two share their decision only by
+discipline, and between the two calls the database can change, so the commit can act on something the person never
+saw — a bank-statement row shown as *new* in the preview is silently held back at commit because it became a possible
+duplicate in the meantime.
+
+A **previewable command** is one handler that is both. Its request implements `IPreviewableRequest`; the framework
+runs a preview as the real command and rolls it back, and a commit carries the fingerprint of the outcome the person
+confirmed, so it commits only that outcome
+([ADR-0104](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0104-previewable-commands.md)).
+
+## Writing one
+
+The request carries two members, the outcome type stamps a fingerprint, and the handler is an ordinary command that
+makes its decision inside the transaction:
+
+```csharp
+using Elarion.Abstractions;
+using Elarion.Abstractions.Previews;
+
+[Handler("banking.imports.commit")]
+public sealed class ImportStatement(BankingDbContext db)
+    : IHandler<ImportStatement.Command, Result<ImportStatement.Outcome>> {
+
+    // Defaults make both members optional on the wire: an ordinary call sends neither.
+    public sealed record Command(Guid StatementId, bool Preview = false, string? PreviewFingerprint = null)
+        : IPreviewableRequest;
+
+    public sealed record Outcome(IReadOnlyList<RowDecision> Rows, int NewCount, int HeldBackCount)
+        : IPreviewOutcome<Outcome> {
+        public string? PreviewFingerprint { get; init; }
+
+        public Outcome WithPreviewFingerprint(string? fingerprint) => this with { PreviewFingerprint = fingerprint };
+    }
+
+    public async ValueTask<Result<Outcome>> HandleAsync(Command command, CancellationToken ct) {
+        var rows = await db.StatementRows.Where(r => r.StatementId == command.StatementId)
+            .OrderBy(r => r.Position).ToListAsync(ct);
+        var decisions = new List<RowDecision>();
+        foreach (var row in rows) {
+            var duplicate = await db.Bookings.AnyAsync(b => b.Reference == row.Reference, ct);
+            if (!duplicate) db.Bookings.Add(Booking.From(row)); // the real write, previewed or not
+            decisions.Add(new RowDecision(row.Position, duplicate ? "heldBack" : "new"));
+        }
+
+        return new Outcome(decisions, decisions.Count(d => d.Kind == "new"), decisions.Count(d => d.Kind == "heldBack"));
+    }
+}
+```
+
+There is no `if (command.Preview)` around the database writes: the preview *is* the commit, rolled back. The
+generator attaches the preview decorator to every handler whose request implements `IPreviewableRequest`; a response
+that is not `Result<T>` with `T : IPreviewOutcome<T>` is `ELPREV001`.
+
+## The round trip
+
+1. **Preview.** The client sends `preview: true`. The command runs fully, the decorator stamps the outcome with its
+   fingerprint, and every database write is rolled back. The response is the outcome, `previewFingerprint`
+   included.
+2. **Confirm.** The client sends the same command with `previewFingerprint` set to the value it showed. The command
+   runs again; if its outcome has the same fingerprint, the decorator commits and answers the outcome.
+3. **Changed.** If the outcome differs, nothing is committed and the call fails with `409`/`Conflict`, code
+   `preview.changed`. The error's data is the **new outcome**, with its own fingerprint, so the client can show what
+   changed and let the person confirm again without another preview call.
+
+```ts
+const preview = await rpc.banking.imports.commit({ statementId, preview: true })
+// …show preview.rows, then on confirm:
+try {
+  await rpc.banking.imports.commit({ statementId, previewFingerprint: preview.previewFingerprint })
+} catch (error) {
+  if (isRpcMethodError('banking.imports.commit', error) && error.code === 'preview.changed')
+    return showChangedPreview(error.data) // the new outcome, typed; confirm it with error.data.previewFingerprint
+  throw error
+}
+```
+
+A call with neither member is an ordinary command: the decorator passes it straight through (no extra unit of work,
+no hashing), so existing callers and in-process senders are unaffected. A call with `preview: true` is a preview even
+when it also carries a fingerprint. Both `preview.changed` (with the outcome as payload) and `preview.unsupported`
+are declared on the operation's error contract, so the schema export and the generated client type them.
+
+## The outcome must be deterministic
+
+The fingerprint is the SHA-256 (base64url) of the outcome's canonical JSON, serialized with `previewFingerprint`
+cleared through the source-generated metadata of the canonical JSON options. It changes exactly when the outcome
+changes, so the outcome must describe the **decision** and nothing else:
+
+- no freshly minted ids, timestamps, random values or row versions that differ between two runs of the same decision;
+- collections in a stable order (sort them; avoid sets whose order is unspecified);
+- nothing that depends on `Preview` itself.
+
+What belongs in it is what the person decides on: which rows are new, which are held back and why, the totals. A
+change in any of those refuses the commit; a change elsewhere in the database does not.
+
+The fingerprint is a consistency check, not a security token: a client that sends a forged fingerprint only skips
+its own check. Authorization, feature gates and validation run on every call as usual. When the outcome has
+[members visible by permission](/docs/concepts/authorization#members-only-some-callers-see), the fingerprint covers
+the outcome as the caller sees it, so it never encodes a member the caller may not see — and a change only in such a
+member does not refuse that caller's commit.
+
+## What a rollback does not undo
+
+The preview rolls back the **database transaction**. Everything enlisted in it goes: the handler's writes,
+[domain events](/docs/concepts/persistence-and-transactions#what-enlists-and-how) and their consumers' writes,
+integration events recorded in the outbox (or buffered by the in-memory tier), PostgreSQL blob commits, settings
+writes and the [audit](/docs/concepts/auditing) success record. Anything outside it stays done:
+
+- **Client events** are broadcast when they are published. They are re-query hints, so a preview's event only makes
+  clients re-read unchanged data; harmless, but publish them as integration events or skip them when `Preview` is set
+  if the noise matters.
+- **Cache invalidation** (`[CacheInvalidate]`) runs after a successful result, preview or not. It only costs a
+  re-computation.
+- **External calls** — a payment provider, an e-mail, an Azure blob commit, an HTTP request — happen for real. Check
+  `command.Preview` and skip them, or better, move them behind an integration event, which the outbox rolls back with
+  the preview.
+
+## Requirements and composition
+
+A preview needs a unit of work whose rollback really discards writes. `IUnitOfWork.SupportsRollback` says so; it is
+fail-closed (`false` by default), and the EF Core (`AddElarionUnitOfWork<TDbContext>()`) and SQL-tier units of work
+set it. Without one — no unit of work registered, or only the in-memory no-op default — a preview or a fingerprinted
+commit answers `500`/`Internal`, code `preview.unsupported`, and the handler never runs. A preview can never commit.
+
+The preview decorator sits just inside [idempotency](/docs/concepts/idempotency) and outside your `[DecoratorList]`
+([order](/docs/concepts/decorator-pipelines#order-matters)), so it owns the unit of work of a preview or a
+fingerprinted commit:
+
+- The handler runs in a nested scope that is committed on success, so the EF unit of work flushes the change tracker
+  (`SaveChanges`) inside the preview too: a constraint violation surfaces in the preview exactly as it would on
+  commit, instead of a preview that says yes to a commit that fails.
+- Your transaction decorator still attaches (a previewable request is an `ICommand`); its scope nests with a
+  savepoint.
+- Under `[Idempotent]` the idempotency decorator owns the transaction; the preview's scope is a savepoint in it and
+  rolls back, while the key and the preview response commit. A retry of the same preview replays it. The preview and
+  the commit are two calls, so each carries its own idempotency key (the generated client creates one per call).
+  Reused for the commit, the preview's key would replay the preview instead of committing; the default request
+  fingerprint of `[Idempotent]` rejects that as `idempotency.key_reused`.
+
+A previewable command can also [ask the caller to decide](/docs/concepts/results-and-errors#asking-the-caller-to-decide):
+a preview that reaches an unanswered decision fails with `DecisionRequired` like the commit would, and the generated
+client's `withDecisions` answers it and previews again with the answers in `decisions`. The commit then sends the same
+answers and the preview's fingerprint. If the handler should show pending questions inside the preview instead, it
+reports them in the outcome when `Preview` is set and asks only on commit.
+
+The handler span carries `elarion.preview.outcome` (`previewed`, `committed`, `changed`, `failed` or `unsupported`)
+for calls that are not ordinary.

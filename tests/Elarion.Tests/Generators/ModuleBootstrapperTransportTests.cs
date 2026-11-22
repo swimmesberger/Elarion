@@ -990,7 +990,7 @@ public sealed class ModuleBootstrapperTransportTests {
             "dispatcher.Map<global::ManifestOnly.GetManifest.Query, global::ManifestOnly.GetManifest.Response>(\"manifest.get\", global::Elarion.Abstractions.HandlerTransports.All, errors: global::System.Array.Empty<global::Elarion.Abstractions.ErrorContract>());");
         // A manifest entry carries its declared error contract into the registration (ADR-0080).
         generated.Should().Contain(
-            "dispatcher.Map<global::ManifestOnly.GetLegacy.Query, global::ManifestOnly.GetLegacy.Response>(\"manifest.legacy\", global::Elarion.Abstractions.HandlerTransports.JsonRpc | global::Elarion.Abstractions.HandlerTransports.Mcp, errors: new global::Elarion.Abstractions.ErrorContract[] { new global::Elarion.Abstractions.ErrorContract { Code = \"not_found\", Kind = global::Elarion.Abstractions.ErrorKind.NotFound }, new global::Elarion.Abstractions.ErrorContract { Code = \"token.malformed\", Kind = global::Elarion.Abstractions.ErrorKind.Validation, DataType = typeof(global::ManifestOnly.GetLegacy.Response) } });");
+            "dispatcher.Map<global::ManifestOnly.GetLegacy.Query, global::ManifestOnly.GetLegacy.Response>(\"manifest.legacy\", global::Elarion.Abstractions.HandlerTransports.JsonRpc | global::Elarion.Abstractions.HandlerTransports.Mcp, errors: new global::Elarion.Abstractions.ErrorContract[] { new global::Elarion.Abstractions.ErrorContract { Code = \"invoice.exported_change\", Kind = global::Elarion.Abstractions.ErrorKind.DecisionRequired, Decision = new global::Elarion.Abstractions.DecisionContract { Options = new string[] { \"onlyHere\", \"reexport\" }, PerItem = true } }, new global::Elarion.Abstractions.ErrorContract { Code = \"not_found\", Kind = global::Elarion.Abstractions.ErrorKind.NotFound }, new global::Elarion.Abstractions.ErrorContract { Code = \"token.malformed\", Kind = global::Elarion.Abstractions.ErrorKind.Validation, DataType = typeof(global::ManifestOnly.GetLegacy.Response) } });");
         compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
@@ -1755,6 +1755,8 @@ public sealed class ModuleBootstrapperTransportTests {
             "0",
             "0",
             EncodeFields(
+                // A declared decision (ADR-0101) carries its answer shape in the kind field.
+                "invoice.exported_change", "DecisionRequired;1|onlyHere,reexport", null,
                 "not_found", "NotFound", null,
                 "token.malformed", "Validation", "global::ManifestOnly.GetLegacy.Response"));
 

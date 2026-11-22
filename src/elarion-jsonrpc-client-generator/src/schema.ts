@@ -16,6 +16,13 @@ export interface JsonSchema {
    * `File`, results materialize one; the client converts to/from the wire envelope at the call boundary.
    */
   'x-elarion-file'?: boolean
+  /**
+   * Marks an Elarion uploaded-file reference (`UploadedFile`): a string, the blob id of a file staged through the
+   * direct-upload endpoint (ADR-0105). Params accept a `File`/`Blob` there, which the generated client uploads
+   * before the call and replaces by the returned reference, or a reference (`UploadedFileRef`) uploaded earlier;
+   * results carry the reference.
+   */
+  'x-elarion-upload'?: boolean
   // Constraint keywords (JSON Schema 2020-12). exclusiveMinimum/exclusiveMaximum are numbers, not booleans.
   minLength?: number
   maxLength?: number
@@ -33,6 +40,11 @@ export interface JsonSchema {
    * pre-validation reports the server's text.
    */
   'x-elarion-error-messages'?: Record<string, string>
+  /**
+   * The permission a caller must hold to receive this response member ([VisibleWith] on the server, ADR-0103); the
+   * server omits it for everyone else. The generator documents it on the generated property.
+   */
+  'x-elarion-visible-with'?: string
 }
 
 /**
@@ -42,6 +54,17 @@ export interface JsonSchema {
 export interface RpcErrorSchema {
   kind: string
   data?: JsonSchema
+  /**
+   * A declared decision (ADR-0101, kind `decision_required`): the options the caller picks from, in declaration order,
+   * and whether it answers per item. The generated `withDecisions` helper asks the application and resends.
+   */
+  decision?: RpcDecisionSchema
+}
+
+/** The answer shape of a declared decision. */
+export interface RpcDecisionSchema {
+  options: string[]
+  perItem?: boolean
 }
 
 export interface RpcMethodSchema {

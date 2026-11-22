@@ -1,5 +1,15 @@
 # Update log
 
+## 2026-11-22
+
+* **Update**: [ADR-0001](decisions/0001-event-transaction-phase.md) and [ADR-0003](decisions/0003-decorator-attachment-predicates.md) gained an amendment: the core package ships the opt-in TransactionDecorator, and the preview decorator of ADR-0104 is the one built-in owner of a unit of work.
+* **Update**: [ADR-0102](decisions/0102-rules-are-expressions-composed-once.md) now records UseElarionRuleCheck, the EF Core interceptor that refuses a query with an unexpanded rule.
+* **Update**: [ADR-0101](decisions/0101-a-decision-required-answer.md) is accepted and implemented, with per-item decisions, answers as one list of code, item and option, and options as camel-cased enum members; the glossary gained *decision*.
+* **Creation**: [ADR-0103](decisions/0103-one-permission-decision-and-members-visible-by-permission.md), one permission decision (IPermissionChecker) shared by the gate, handler code and response members visible by permission ([VisibleWith]); glossary terms Permission checker and Member visible by permission.
+* **Update**: [ADR-0102](decisions/0102-rules-are-expressions-composed-once.md) is accepted and implemented: rules over two inputs replace the proposed tuple-input rule (expression trees cannot contain tuple literals), Expr gained Inline, AnyOf, AllOf and Not, and the consequences now say what EF Core does when Expand is forgotten; the [glossary](../GLOSSARY.md) gained *rule*.
+* **Creation**: [ADR-0104](decisions/0104-previewable-commands.md) — a previewable command is one handler that previews (runs, reports, rolls back) and commits only the outcome it previewed, from the preview/commit handler pairs of a consuming application; the [glossary](../GLOSSARY.md) gained *previewable command*.
+* **Creation**: [ADR-0105](decisions/0105-uploaded-files-are-handler-parameters.md) — a handler takes a staged upload as an UploadedFile and reads, keeps or discards it only through IUploadedFiles, which answers the caller's own pending upload and nothing else; the [glossary](../GLOSSARY.md) gained *uploaded file*.
+
 ## 2026-11-21
 
 * **Creation**: proposed [ADR-0100](decisions/0100-the-schema-exports-constants-presets-and-limits.md) (constants, request presets and typed limits in the schema), [ADR-0101](decisions/0101-a-decision-required-answer.md) (a DecisionRequired answer with typed options and a client helper that resends) and [ADR-0102](decisions/0102-rules-are-expressions-composed-once.md) (one expression per rule, composed into queries and compiled for memory), from gaps a consuming application hand-rolled.

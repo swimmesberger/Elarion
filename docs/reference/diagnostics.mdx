@@ -28,6 +28,7 @@ JSON-RPC method emission for `[Handler]` handlers. See
 | ELRPC005 | Error | A `[Handler]` responds with `ElarionStreamedFile`, which only HTTP can carry: JSON-RPC, MCP and connections need a payload that serializes. No operation is registered. | Remove `[Handler]` and map the handler with `[HttpEndpoint]` alone, or respond with `ElarionFile` (small files) or a pending blob the client downloads (large files). |
 | ELERR001 | Error | A `[ProducesError]` code is not lower-case ASCII letters, digits and underscores in dot-separated segments. | Use a code such as `token.malformed`. |
 | ELERR002 | Error | One error code is declared more than once on a handler (with its base classes), a decorator, a module or an assembly with a different kind or payload type. | Declare each code once per place; a code has exactly one kind and one payload. A narrower place may declare a code again to override a wider one. |
+| ELERR003 | Error | A `[RequiresDecision]` declares `Options` that are not an enum with members. | Pass `typeof` an enum whose members are the choices, or omit `Options` for a confirmation. |
 
 ## ELHTTP — HTTP endpoint generation
 
@@ -105,6 +106,8 @@ Authorization-decorator attachment for `[RequirePermission]`/`[RequireRole]`/`[R
 | --- | --- | --- | --- |
 | ELAUTH001 | Error | A handler declares an authorization requirement but its response type does not implement `IResultFailureFactory<T>`, so the authorization check cannot short-circuit and would be silently skipped. | Return `Result<T>` or `Result` from the authorized handler so the check can short-circuit to `Unauthorized`/`Forbidden`. |
 | ELAUTH002 | Error | A handler declares `[RequireResource]` with an `Id` path that does not resolve to a property on the request type. | Point `[RequireResource]` `Id` at an existing property path on the request, e.g. `nameof(Request.Id)` or a dotted path of existing properties. |
+| ELAUTH003 | Error | A response member marked `[VisibleWith]` is not nullable, so it cannot be hidden from a caller without the permission. | Make the member nullable (`T?`). |
+| ELAUTH004 | Error | A handler's response holds `[VisibleWith]` members the pipeline cannot hide: the response is not `Result<T>`, or a type on the way is neither a record nor a struct, a rewritten member has no accessible `init`/`set`, a collection on the way is not an array, `List<T>`, `ImmutableArray<T>` or a read-only collection interface, an interface without `[JsonDerivedType]` holds a marked member, or a type is not accessible from the handler's assembly. | Reach marked members through records or structs with `init` members and the supported collections, and answer `Result<T>`. See [Members only some callers see](/docs/concepts/authorization#members-only-some-callers-see). |
 
 ## ELPOL — Authorization policies
 
@@ -177,7 +180,7 @@ Service registration and scheduled-job discovery. See [Services](/docs/concepts/
 | ELSG010 | Warning | A `[ScheduledJob]` type's namespace is not under any `[AppModule]`; under a module-bootstrapper host it will not be registered. | Move the job under a module's namespace so it is wired by that module's gated registration. |
 | ELSG011 | Error | A `[Handler(Scope = ServiceScope.Singleton)]` handler has a constructor dependency that is registered scoped or transient — a singleton handler is constructed once from the root provider, so the dependency would be captured for the application lifetime. | Make the dependency singleton or keep the handler scoped. |
 | ELSG012 | Error | A singleton handler's constructor dependency cannot be verified as singleton at compile time (unknown registration, keyed service, or a `[Service]` contract declared with conflicting scopes). There is deliberately no escape hatch: a captive scoped dependency must be impossible to ship. | Annotate the dependency's implementation with `[Service(Scope = ServiceScope.Singleton)]` in this assembly, or keep the handler scoped. |
-| ELSG013 | Error | A singleton handler's pipeline attaches a scope-dependent feature — `[Idempotent]` (or the default integration-event inbox), `[Auditable]`, `[Cacheable]`/`[CacheInvalidate]`, an authorization requirement, a `[FeatureGate]`, request validation, a feature-variant dependency, or a custom decorator with a per-dispatch dependency (the transaction decorator's `IUnitOfWork` included). These resolve per-dispatch services when the chain is built once from the root provider. | Remove the feature or keep the handler scoped. Singleton handlers pair with singleton dependencies and `[Resilient]` (the resilience runner is a singleton). |
+| ELSG013 | Error | A singleton handler's pipeline attaches a scope-dependent feature — `[Idempotent]` (or the default integration-event inbox), `[Auditable]`, `[Cacheable]`/`[CacheInvalidate]`, an authorization requirement, a `[FeatureGate]`, request validation, a `[VisibleWith]` response member, a feature-variant dependency, or a custom decorator with a per-dispatch dependency (the transaction decorator's `IUnitOfWork` included). These resolve per-dispatch services when the chain is built once from the root provider. | Remove the feature or keep the handler scoped. Singleton handlers pair with singleton dependencies and `[Resilient]` (the resilience runner is a singleton). |
 | ELSG014 | Error | A `[GenerateContractSetRegistration]` method names a contract that is not an interface or abstract class (or is an open generic). A contract set composes implementations of a contract; a concrete or open-generic type cannot be one. The method is still implemented (empty) so this is the only error you see. | Point the attribute at the seam's interface or abstract base class. |
 | ELSG015 | Warning | A declared contract set has no implementations in this assembly — usually a typo'd contract or a refactor casualty. The generated method still exists and registers nothing; the registry consuming the set decides whether empty is fatal. | Check the contract type, or remove the declaration if the seam is gone. |
 | ELSG016 | Error | The same contract is declared by more than one `[GenerateContractSetRegistration]` method in this assembly, which would be ambiguous. The first declaration (by file position) gets the real implementation; later ones are implemented empty. | Keep exactly one contract-set method per contract per assembly. |
@@ -353,6 +356,15 @@ See [Handling duplicates](/docs/capabilities/events/consuming-events#handling-du
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELINBX001 | Warning | A handler declares `[AllowDuplicates]` but its request type is not an `IIntegrationEvent`; only handler-form integration-event consumers have a default-on inbox to opt out of (domain events are exactly-once by atomicity), so the attribute has no effect. | Remove `[AllowDuplicates]`, or make the handler consume an `IIntegrationEvent`. |
+
+## ELPREV — Previewable commands
+
+Preview-decorator attachment for handlers whose request implements `IPreviewableRequest`. See
+[Previewable commands](/docs/concepts/previewable-commands).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELPREV001 | Error | A handler's request implements `IPreviewableRequest`, but its response is not `Result<T>` with `T : IPreviewOutcome<T>`, so the preview decorator cannot stamp and compare the outcome's fingerprint and the request's `Preview`/`PreviewFingerprint` would be silently ignored. | Return `Result<TOutcome>` whose outcome implements `IPreviewOutcome<TOutcome>`, or stop implementing `IPreviewableRequest`. |
 
 ## ELIDEMEF — Idempotency keys (EF Core)
 

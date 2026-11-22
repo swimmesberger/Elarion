@@ -32,6 +32,12 @@ public static class ErrorCodes {
     /// <summary>Default code of <see cref="ErrorKind.Internal"/>.</summary>
     public const string Internal = "internal";
 
+    /// <summary>
+    /// The default code of <see cref="ErrorKind.DecisionRequired"/>. A decision normally carries its own code (the one
+    /// its handler declares with <see cref="RequiresDecisionAttribute"/>); this is the fallback.
+    /// </summary>
+    public const string DecisionRequired = "decision_required";
+
     /// <summary>A mutating call to an <c>[Idempotent]</c> operation carried no idempotency key (<see cref="ErrorKind.Validation"/>).</summary>
     public const string IdempotencyKeyRequired = "idempotency.key_required";
 
@@ -40,6 +46,34 @@ public static class ErrorCodes {
 
     /// <summary>The idempotency key was already used with a different request (<see cref="ErrorKind.BusinessRule"/>).</summary>
     public const string IdempotencyKeyReused = "idempotency.key_reused";
+
+    /// <summary>
+    /// A previewable command's outcome no longer matches the preview the caller confirmed; nothing was committed and
+    /// the error's data is the new outcome (<see cref="ErrorKind.Conflict"/>).
+    /// </summary>
+    public const string PreviewChanged = "preview.changed";
+
+    /// <summary>
+    /// A previewable command was asked to preview, or to commit against a preview, but the host has no unit of work
+    /// that can roll back; the handler did not run (<see cref="ErrorKind.Internal"/>).
+    /// </summary>
+    public const string PreviewUnsupported = "preview.unsupported";
+
+    /// <summary>
+    /// An <see cref="UploadedFile"/> names no pending upload of the caller: it is missing, was removed by the blob
+    /// garbage collector, was already kept, belongs to someone else or lies outside the upload containers — all one
+    /// answer, so an id cannot be probed (<see cref="ErrorKind.Validation"/>).
+    /// </summary>
+    public const string UploadNotFound = "upload.not_found";
+
+    /// <summary>An <see cref="UploadedFile"/> is larger than <see cref="UploadConstraints.MaxBytes"/> (<see cref="ErrorKind.Validation"/>).</summary>
+    public const string UploadTooLarge = "upload.too_large";
+
+    /// <summary>
+    /// An <see cref="UploadedFile"/>'s content type is not one of <see cref="UploadConstraints.ContentTypes"/>
+    /// (<see cref="ErrorKind.Validation"/>).
+    /// </summary>
+    public const string UploadContentType = "upload.content_type";
 
     /// <summary>Returns the default code of <paramref name="kind"/>.</summary>
     public static string ForKind(ErrorKind kind) {
@@ -50,6 +84,7 @@ public static class ErrorCodes {
             ErrorKind.Forbidden => Forbidden,
             ErrorKind.Unauthorized => Unauthorized,
             ErrorKind.BusinessRule => BusinessRule,
+            ErrorKind.DecisionRequired => DecisionRequired,
             _ => Internal
         };
     }

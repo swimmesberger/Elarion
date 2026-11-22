@@ -41,6 +41,11 @@ public sealed partial class HandlerRegistrationGenerator {
             ? null
             : new ValidatableTypeWalker.Context(compilation.Assembly);
         var scopeFactMap = BuildServiceScopeFactMap(serviceScopeFacts);
+        // [VisibleWith] response members (ADR-0103): one memoized type walk for every handler of this pass, and none
+        // at all when the compilation cannot see the attribute.
+        var visibilityWalk = compilation.GetTypeByMetadataName(VisibleWithAttributeMetadataName) is { } visibleWith
+            ? new VisibilityWalk(visibleWith, compilation.Assembly)
+            : null;
         var builder = ImmutableArray.CreateBuilder<HandlerInfo>();
         foreach (var metadataName in candidates) {
             ct.ThrowIfCancellationRequested();
@@ -56,7 +61,8 @@ public sealed partial class HandlerRegistrationGenerator {
             var info = GetHandlerInfo(
                 classDecl, classSymbol, compilation, moduleDecoratorLists, moduleAuthDefaults,
                 assemblyRequireAuthenticated, moduleAuditDefaults, assemblyAuditDefault, modules,
-                variantContractSet, noRetryPolicySet, validationWalk, moduleTelemetryDefaults, scopeFactMap, ct);
+                variantContractSet, noRetryPolicySet, validationWalk, moduleTelemetryDefaults, scopeFactMap,
+                visibilityWalk, ct);
             if (info is not null)
                 builder.Add(info);
         }
@@ -121,6 +127,7 @@ public sealed partial class HandlerRegistrationGenerator {
         ValidatableTypeWalker.Context? validationWalk,
         IReadOnlyList<(string Namespace, int TelemetryMode)> moduleTelemetryDefaults,
         IReadOnlyDictionary<string, int> serviceScopeFacts,
+        VisibilityWalk? visibilityWalk,
         CancellationToken ct) {
         ct.ThrowIfCancellationRequested();
 
@@ -213,12 +220,24 @@ public sealed partial class HandlerRegistrationGenerator {
 
         var variantContractDeps = GetVariantContractDeps(classSymbol, variantContracts, fmt);
 
+        // Event consumers answer the event bus, not a caller, so there is nobody to hide a member from.
+        var visibility = isEventConsumer
+            ? null
+            : ParseVisibility(classDecl, classSymbol, responseType, visibilityWalk, diagnostics);
+
+        // A previewable command (ADR-0104) gets the preview decorator; ELPREV001 when its response cannot carry a
+        // fingerprint.
+        var previewOutcomeFqn = ParsePreviewable(
+            classDecl, classSymbol, requestType, responseType, compilation, fmt, diagnostics);
+
         var scopeValue = ParseHandlerScope(classSymbol);
-        if (scopeValue == 1)
+        if (scopeValue == 1) {
             VerifySingletonHandler(
                 classDecl, classSymbol, handlerFqn, fmt, serviceScopeFacts,
                 decorators, cacheable, cacheInvalidation, hasAuthorization, hasFeatureGates, hasValidation,
-                idempotent, audit, variantContractDeps, diagnostics);
+                idempotent, audit, variantContractDeps, diagnostics, visibility is not null);
+            VerifySingletonPreview(classDecl, handlerFqn, previewOutcomeFqn, diagnostics);
+        }
 
         return new HandlerInfo(
             handlerFqn,
@@ -244,7 +263,9 @@ public sealed partial class HandlerRegistrationGenerator {
             // [HandlerTelemetry] leveled resolution (ADR-0066): None means no observability decorator at all.
             ResolveTelemetryMode(classSymbol, compilation, moduleTelemetryDefaults) == 0,
             scopeValue,
-            diagnostics.ToImmutable());
+            diagnostics.ToImmutable(),
+            visibility,
+            previewOutcomeFqn);
     }
 
     // Decides whether the framework ValidationDecorator attaches to this handler (ADR-0027). Attachment is a
@@ -409,7 +430,8 @@ public sealed partial class HandlerRegistrationGenerator {
         IdempotentInfo? idempotent,
         AuditInfo? audit,
         EquatableArray<string> variantContractDeps,
-        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics,
+        bool hasVisibility) {
         var location = classDecl.Identifier.GetLocation();
 
         // ELSG013: every pipeline feature whose decorator resolves per-dispatch services when the chain is
@@ -428,6 +450,7 @@ public sealed partial class HandlerRegistrationGenerator {
         if (hasAuthorization) ScopedPipelineFeature("an authorization requirement");
         if (hasFeatureGates) ScopedPipelineFeature("a [FeatureGate]");
         if (hasValidation) ScopedPipelineFeature("request validation");
+        if (hasVisibility) ScopedPipelineFeature("a response member visible by permission ([VisibleWith])");
         if (!variantContractDeps.IsEmpty) ScopedPipelineFeature("a feature-variant dependency");
 
         foreach (var decorator in decorators)

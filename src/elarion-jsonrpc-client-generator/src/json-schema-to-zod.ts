@@ -16,8 +16,16 @@ import {
  *   of a union, mirroring the server's structural classifier, which rules out a case that does not declare a property
  *   present in the payload. Plain `z.object` would instead accept the first case whose required keys match and strip
  *   the others' properties.
+ * @param uploadInput emit the params form of an `x-elarion-upload` member, which also accepts the `File`/`Blob` the
+ *   client uploads before the call, instead of the reference string alone.
  */
-export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent = 0, strictObject = false): string {
+export function jsonSchemaToZod(
+  schema: JsonSchema,
+  ctx: SchemaContext,
+  indent = 0,
+  strictObject = false,
+  uploadInput = false
+): string {
   const {schema: resolved, ctx: resolvedCtx} = resolveSchema(schema, ctx)
   const nullable = isNullable(resolved)
   const base = baseType(resolved)
@@ -26,6 +34,12 @@ export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent =
   // client encodes params after validation and decodes results before validation).
   if (resolved['x-elarion-file'] === true) {
     return nullish('z.instanceof(File)', nullable)
+  }
+
+  // Params validate before the upload, so they take the file itself (File extends Blob) or a reference; results
+  // carry the reference.
+  if (resolved['x-elarion-upload'] === true) {
+    return nullish(uploadInput ? 'z.union([z.instanceof(Blob), z.string()])' : 'z.string()', nullable)
   }
 
   if (resolved.enum) {
@@ -53,7 +67,7 @@ export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent =
       if (isNullOnly(member)) {
         return
       }
-      const memberSchema = jsonSchemaToZod(stripNullable(member), memberCtx, indent, true)
+      const memberSchema = jsonSchemaToZod(stripNullable(member), memberCtx, indent, true, uploadInput)
       if (!members.includes(memberSchema)) {
         members.push(memberSchema)
       }
@@ -76,7 +90,7 @@ export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent =
     // The item schema goes in unstripped: the recursion handles item-level nullability, so a
     // `["string","null"]` item emits `z.string().nullish()` and a legal `["a", null]` element validates.
     // Nullability is only ever stripped at the top-level params/result envelope.
-    const itemSchema = jsonSchemaToZod(resolved.items, childContext(resolvedCtx, 'items'), indent)
+    const itemSchema = jsonSchemaToZod(resolved.items, childContext(resolvedCtx, 'items'), indent, false, uploadInput)
     return nullish(arraySchema(`z.array(${itemSchema})`, resolved), nullable)
   }
 
@@ -84,7 +98,8 @@ export function jsonSchemaToZod(schema: JsonSchema, ctx: SchemaContext, indent =
     const required = new Set(resolved.required ?? [])
     const pad = '  '.repeat(indent + 1)
     const fields = Object.entries(resolved.properties).map(([key, property]) => {
-      let fieldSchema = jsonSchemaToZod(property, childContext(resolvedCtx, `properties.${key}`), indent + 1)
+      let fieldSchema = jsonSchemaToZod(
+        property, childContext(resolvedCtx, `properties.${key}`), indent + 1, false, uploadInput)
       if (!required.has(key)) {
         fieldSchema += '.optional()'
       }

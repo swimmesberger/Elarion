@@ -535,6 +535,28 @@ Handler requirements are class attributes the handler-registration generator rea
 - **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class or record (`AllowMultiple`, not inherited)
 - **Triggers:** adds `{resource}.{verb}` to the generated permission catalog (`ElarionPermissions`, `IPermissionCatalog`) of the module whose namespace contains the type, **without** requiring it anywhere. For a permission a row-level rule checks on top of a coarser `[RequirePermission]`, so role policy derived from the catalog can grant it. No runtime effect. Same parameters as `[RequirePermission]`.
 
+### `[RequiresDecision]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** handler class (`AllowMultiple`, inherited)
+- **Triggers:** declares a decision the handler may ask its caller with `AppError.DecisionRequired(code, …)`: it joins the operation's error contract (kind `DecisionRequired`), and the schema exports its options and whether it is answered per item, which the generated client's `withDecisions` uses. The request implements `IDecidingRequest`. Options that are not an enum report `ELERR003`. See [Asking the caller to decide](/docs/concepts/results-and-errors#asking-the-caller-to-decide).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `code` | `string` (ctor) → `Code` | required | The decision's stable code. |
+| `Options` | `Type?` (init) | `null` | An enum whose members (in camel case) are the choices; `null` for a confirmation (`confirm`). |
+| `PerItem` | `bool` (init) | `false` | Answered per item key rather than once for the request. |
+| `DataType` | `Type?` (init) | `null` | The payload the question carries as `AppError.Data`. |
+
+### `[VisibleWith]`
+
+- **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** property or constructor parameter of a response type
+- **Triggers:** shows the member only to callers who hold the permission; for everyone else the generated `VisibilityDecorator` (just inside authorization) answers it as `null`. The decision is `IPermissionChecker.Holds`, the same as the `[RequirePermission]` gate. Exported as `x-elarion-visible-with` in `rpc-schema.json`. Build errors `ELAUTH003` (member not nullable) and `ELAUTH004` (a shape the pipeline cannot copy). See [Members only some callers see](/docs/concepts/authorization#members-only-some-callers-see).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `permission` | `string` (ctor) → `Permission` | required (one form) | The composed permission, e.g. `ElarionPermissions.Banking.Read`. |
+| `resource`, `verb` | `string` (ctor) | required (other form) | Composed to `{resource}.{verb}`, as `[RequirePermission]` composes it. |
+
 ### `[RequireRole]`
 
 - **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class (`AllowMultiple`, inherited)

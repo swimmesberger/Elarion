@@ -637,7 +637,9 @@ internal static class ElarionManifestCodec {
         var fields = new string?[errors.Count * 3];
         for (var i = 0; i < errors.Count; i++) {
             fields[i * 3] = errors[i].Code;
-            fields[i * 3 + 1] = errors[i].Kind;
+            // A decision's answer shape rides in the kind field ("DecisionRequired;1|a,b"), so the three-field layout an
+            // older generator reads stays unchanged for every other error.
+            fields[i * 3 + 1] = errors[i].Decision is { } decision ? errors[i].Kind + ";" + decision : errors[i].Kind;
             fields[i * 3 + 2] = errors[i].DataTypeFqn;
         }
 
@@ -655,7 +657,12 @@ internal static class ElarionManifestCodec {
             if (fields[i] is null || fields[i + 1] is null)
                 return false;
 
-            result.Add(new ErrorContractDiscovery.ErrorDeclaration(fields[i]!, fields[i + 1]!, fields[i + 2]));
+            var kind = fields[i + 1]!;
+            var separator = kind.IndexOf(';');
+            result.Add(separator < 0
+                ? new ErrorContractDiscovery.ErrorDeclaration(fields[i]!, kind, fields[i + 2])
+                : new ErrorContractDiscovery.ErrorDeclaration(fields[i]!, kind.Substring(0, separator), fields[i + 2],
+                    kind.Substring(separator + 1)));
         }
 
         errors = result;

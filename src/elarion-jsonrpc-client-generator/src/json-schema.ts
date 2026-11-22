@@ -101,30 +101,50 @@ export function formatPropertyName(key: string): string {
  * schema document.
  */
 export function collectFilePaths(schema: JsonSchema, ctx: SchemaContext): string[][] {
+  return collectMarkedPaths(schema, ctx, 'x-elarion-file')
+}
+
+/**
+ * Collects the property paths of every `x-elarion-upload` node in a params/result schema, in the notation of
+ * {@link collectFilePaths}, so the generated client knows where to upload `File`/`Blob` values before a call.
+ */
+export function collectUploadPaths(schema: JsonSchema, ctx: SchemaContext): string[][] {
+  return collectMarkedPaths(schema, ctx, 'x-elarion-upload')
+}
+
+type PayloadMarker = 'x-elarion-file' | 'x-elarion-upload'
+
+function collectMarkedPaths(schema: JsonSchema, ctx: SchemaContext, marker: PayloadMarker): string[][] {
   const paths: string[][] = []
-  visitFileNodes(schema, ctx, [], paths)
+  visitMarkedNodes(schema, ctx, [], paths, marker)
   return paths
 }
 
-function visitFileNodes(schema: JsonSchema, ctx: SchemaContext, prefix: string[], paths: string[][]): void {
+function visitMarkedNodes(
+  schema: JsonSchema,
+  ctx: SchemaContext,
+  prefix: string[],
+  paths: string[][],
+  marker: PayloadMarker
+): void {
   const {schema: resolved, ctx: resolvedCtx} = resolveSchema(schema, ctx)
-  if (resolved['x-elarion-file'] === true) {
+  if (resolved[marker] === true) {
     paths.push(prefix)
     return
   }
 
   if (resolved.items) {
-    visitFileNodes(stripNullable(resolved.items), childContext(resolvedCtx, 'items'), [...prefix, '*'], paths)
+    visitMarkedNodes(stripNullable(resolved.items), childContext(resolvedCtx, 'items'), [...prefix, '*'], paths, marker)
   }
 
-  if (resolved.anyOf && collectFilePathsInUnion(resolved, resolvedCtx)) {
+  if (resolved.anyOf && collectMarkedPathsInUnion(resolved, resolvedCtx, marker)) {
     // A file inside a union case cannot be converted at a fixed path: which case is active is only known per value.
-    throw new UnsupportedJsonSchemaError(resolvedCtx.path, 'x-elarion-file payloads inside an anyOf union are not supported')
+    throw new UnsupportedJsonSchemaError(resolvedCtx.path, `${marker} payloads inside an anyOf union are not supported`)
   }
 
   if (resolved.properties) {
     for (const [key, property] of Object.entries(resolved.properties)) {
-      visitFileNodes(property, childContext(resolvedCtx, `properties.${key}`), [...prefix, key], paths)
+      visitMarkedNodes(property, childContext(resolvedCtx, `properties.${key}`), [...prefix, key], paths, marker)
     }
   }
 }
@@ -164,9 +184,9 @@ export function isNullOnly(schema: JsonSchema): boolean {
   return schema.type === 'null' || (Array.isArray(schema.type) && schema.type.every((type) => type === 'null'))
 }
 
-function collectFilePathsInUnion(schema: JsonSchema, ctx: SchemaContext): boolean {
+function collectMarkedPathsInUnion(schema: JsonSchema, ctx: SchemaContext, marker: PayloadMarker): boolean {
   return (unionAlternatives(schema) ?? []).some((alternative, index) =>
-    collectFilePaths(alternative, childContext(ctx, `anyOf[${index}]`)).length > 0)
+    collectMarkedPaths(alternative, childContext(ctx, `anyOf[${index}]`), marker).length > 0)
 }
 
 function assertSupportedComposition(schema: JsonSchema, path: string) {

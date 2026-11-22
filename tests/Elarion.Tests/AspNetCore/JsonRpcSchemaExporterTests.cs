@@ -86,6 +86,81 @@ public sealed class JsonRpcSchemaExporterTests {
             .Should().BeEquivalentTo("contentType", "data");
     }
 
+    private sealed record StatementImportCommand {
+        public required UploadedFile Statement { get; init; }
+        public UploadedFile? Signature { get; init; }
+        public required IReadOnlyList<UploadedFile> Attachments { get; init; }
+    }
+
+    private sealed record StatementImportResponse {
+        public required UploadedFile Statement { get; init; }
+    }
+
+    private sealed record AttachmentsResponse {
+        public required IReadOnlyList<ElarionFile> Files { get; init; }
+    }
+
+    [Fact]
+    public void Generate_AListOfFiles_ExportsTheFileEnvelopeAsItsItems() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<PingRequest, AttachmentsResponse>(
+                "attachments.list",
+                (_, _, _) => ValueTask.FromResult<Result<AttachmentsResponse>>(new AttachmentsResponse { Files = [] }))
+            .Freeze();
+
+        using var doc = JsonDocument.Parse(JsonRpcSchemaExporter.Generate(dispatcher, options));
+
+        // The exporter drops the items of a converter-backed element; the file envelope is put back.
+        var items = doc.RootElement.GetProperty("methods").GetProperty("attachments.list").GetProperty("result")
+            .GetProperty("properties").GetProperty("files").GetProperty("items");
+        items.GetProperty("x-elarion-file").GetBoolean().Should().BeTrue();
+        items.GetProperty("properties").GetProperty("data").GetProperty("format").GetString().Should().Be("byte");
+    }
+
+    [Fact]
+    public void Generate_UploadedFileMembers_ExportAsMarkedStrings() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<StatementImportCommand, StatementImportResponse>(
+                "statements.import",
+                (request, _, _) => ValueTask.FromResult<Result<StatementImportResponse>>(
+                    new StatementImportResponse { Statement = request.Statement }))
+            .MapDelegate<PingRequest, UploadedFile>(
+                "statements.latest",
+                (_, _, _) => ValueTask.FromResult<Result<UploadedFile>>(new UploadedFile { Id = "blob-1" }))
+            .Freeze();
+
+        var schema = JsonRpcSchemaExporter.Generate(dispatcher, options);
+
+        using var doc = JsonDocument.Parse(schema);
+        var methods = doc.RootElement.GetProperty("methods");
+        var import = methods.GetProperty("statements.import");
+        var parameters = import.GetProperty("params");
+        var properties = parameters.GetProperty("properties");
+
+        // The converter's wire form (the blob id), marked so the TypeScript client uploads a File there first.
+        var statement = properties.GetProperty("statement");
+        statement.GetProperty("type").GetString().Should().Be("string");
+        statement.GetProperty("x-elarion-upload").GetBoolean().Should().BeTrue();
+        properties.GetProperty("signature").GetProperty("type").EnumerateArray().Select(static e => e.GetString())
+            .Should().Equal("string", "null");
+        properties.GetProperty("signature").GetProperty("x-elarion-upload").GetBoolean().Should().BeTrue();
+        // The exporter drops the items of a converter-backed element; they are put back.
+        var attachment = properties.GetProperty("attachments").GetProperty("items");
+        attachment.GetProperty("type").GetString().Should().Be("string");
+        attachment.GetProperty("x-elarion-upload").GetBoolean().Should().BeTrue();
+        // Nullability is the requiredness, as for every member (ADR-0082).
+        parameters.GetProperty("required").EnumerateArray().Select(static e => e.GetString())
+            .Should().BeEquivalentTo("statement", "attachments");
+
+        import.GetProperty("result").GetProperty("properties").GetProperty("statement")
+            .GetProperty("x-elarion-upload").GetBoolean().Should().BeTrue();
+        var latest = methods.GetProperty("statements.latest").GetProperty("result");
+        latest.GetProperty("type").GetString().Should().Be("string");
+        latest.GetProperty("x-elarion-upload").GetBoolean().Should().BeTrue();
+    }
+
     [Fact]
     public void Generate_FilePropertyInParams_EmitsBase64Envelope() {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
