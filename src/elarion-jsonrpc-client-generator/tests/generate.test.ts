@@ -501,6 +501,30 @@ describe('JSON-RPC client generator', () => {
     expect(generated.typesSource).toContain('tags: string[]')
   })
 
+  it('documents a result member visible only with a permission', () => {
+    const schema = {
+      methods: {
+        'banking.preview': {
+          params: {type: 'object', properties: {}},
+          result: {
+            type: 'object',
+            properties: {
+              row: {type: 'integer'},
+              opening: {type: ['number', 'null'], 'x-elarion-visible-with': 'banking.read'},
+            },
+            required: ['row'],
+          },
+        },
+      },
+    } satisfies RpcSchema
+
+    const generated = generateRpcClientFiles(schema)
+
+    expect(generated.typesSource).toMatch(
+      /\/\*\* Present only for callers holding the `banking\.read` permission\. \*\/\n\s*opening\?: number \| null \| undefined/)
+    expect(generated.typesSource).not.toMatch(/Present only[^\n]*\n\s*row/)
+  })
+
   it('passes explicit constraint error messages to the matching Zod checks', () => {
     const schema = {
       methods: {

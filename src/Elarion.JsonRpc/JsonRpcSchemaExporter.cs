@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 using Elarion.Abstractions;
+using Elarion.Abstractions.Authorization;
 using Elarion.Abstractions.Dispatch;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -451,7 +452,35 @@ public static class JsonRpcSchemaExporter {
 
     /// <inheritdoc cref="InjectReflectedRequestAnnotations"/>
     private static JsonNode InjectReflectedResponseAnnotations(JsonSchemaExporterContext ctx, JsonNode schema) {
-        return InjectReflectedConstraints(ctx, InjectReflectedDescription(ctx, schema), SchemaDirection.Response);
+        return InjectVisibleWith(ctx,
+            InjectReflectedConstraints(ctx, InjectReflectedDescription(ctx, schema), SchemaDirection.Response));
+    }
+
+    /// <summary>
+    /// The vendor keyword naming the permission a caller must hold to receive a response member
+    /// (<see cref="VisibleWithAttribute"/>, ADR-0103); the pipeline omits the member for everyone else.
+    /// </summary>
+    internal const string VisibleWithKeyword = "x-elarion-visible-with";
+
+    /// <summary>
+    /// Adds <see cref="VisibleWithKeyword"/> to a response member marked <see cref="VisibleWithAttribute"/> — on the
+    /// property, or on the positional record's constructor parameter — so a generated client can say why the member
+    /// may be missing.
+    /// </summary>
+    private static JsonNode InjectVisibleWith(JsonSchemaExporterContext ctx, JsonNode schema) {
+        if (ctx.PropertyInfo is not { } property || schema is not JsonObject obj) return schema;
+
+        var attribute = FindVisibleWith(property.AttributeProvider)
+                        ?? FindVisibleWith(property.AssociatedParameter?.AttributeProvider);
+        if (attribute is not null) obj[VisibleWithKeyword] = attribute.Permission;
+
+        return schema;
+    }
+
+    private static VisibleWithAttribute? FindVisibleWith(ICustomAttributeProvider? provider) {
+        return provider?.GetCustomAttributes(typeof(VisibleWithAttribute), true) is [VisibleWithAttribute found, ..]
+            ? found
+            : null;
     }
 
     /// <summary>

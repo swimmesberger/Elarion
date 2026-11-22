@@ -78,6 +78,8 @@
  ELCACHE007 | Elarion.Abstractions.Caching       | Error    | Cache-key property does not exist
  ELAUTH001  | Elarion.Abstractions.Authorization | Error    | Authorized handler response cannot represent failure
  ELAUTH002  | Elarion.Abstractions.Authorization | Error    | RequireResource id path does not resolve
+ ELAUTH003  | Elarion.Abstractions.Authorization | Error    | [VisibleWith] member is not nullable
+ ELAUTH004  | Elarion.Abstractions.Authorization | Error    | Response member visible by permission cannot be hidden
  ELPOL001   | Elarion.Abstractions.Authorization | Error    | [AuthorizationPolicy] must be on an IAuthorizationPolicy
  ELPOL002   | Elarion.Abstractions.Authorization | Warning  | Authorization policy is not in any module
  ELPERM001  | Elarion.Abstractions.Authorization | Warning  | Authorization requirement is not in any module

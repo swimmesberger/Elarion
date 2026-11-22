@@ -1,5 +1,9 @@
 # Update log
 
+## 2026-11-22
+
+* **Creation**: [ADR-0103](decisions/0103-one-permission-decision-and-members-visible-by-permission.md), one permission decision (IPermissionChecker) shared by the gate, handler code and response members visible by permission ([VisibleWith]); glossary terms Permission checker and Member visible by permission.
+
 ## 2026-11-21
 
 * **Creation**: proposed [ADR-0100](decisions/0100-the-schema-exports-constants-presets-and-limits.md) (constants, request presets and typed limits in the schema), [ADR-0101](decisions/0101-a-decision-required-answer.md) (a DecisionRequired answer with typed options and a client helper that resends) and [ADR-0102](decisions/0102-rules-are-expressions-composed-once.md) (one expression per rule, composed into queries and compiled for memory), from gaps a consuming application hand-rolled.

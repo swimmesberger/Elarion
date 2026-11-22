@@ -87,7 +87,10 @@ public sealed partial class HandlerRegistrationGenerator {
         // [Handler(Scope = …)] as the ServiceScope enum value (Scoped = 0, Singleton = 1, Transient = 2) —
         // the registration lifetime the emit uses. Singleton is compile-time verified (ELSG011-013).
         int ScopeValue,
-        EquatableArray<DiagnosticInfo> Diagnostics
+        EquatableArray<DiagnosticInfo> Diagnostics,
+        // The response members shown only to holders of a permission ([VisibleWith], ADR-0103) and the copy
+        // functions that hide them; null when the response has none (the decorator is then not emitted at all).
+        VisibilityInfo? Visibility = null
     );
 
     // One in-compilation [Service(Scope = …)] fact: a contract (or implementation) FQN and its declared scope.

@@ -157,6 +157,17 @@ A declarative authorization condition on a handler (`[Require*]`), enforced in t
 the transport and whatever the provider.
 _Avoid_: policy (an ASP.NET host concept), guard, permission check
 
+**Permission checker**:
+The one synchronous decision whether the current caller holds a permission (`IPermissionChecker`). The
+`[RequirePermission]` gate, handler code, members visible by permission and the client snapshot all ask it, so a host
+changes what a caller holds in one place.
+_Avoid_: `HasClaim` on the permission claim type, permission service
+
+**Member visible by permission**:
+A response member marked `[VisibleWith]`: the handler fills it for everybody, and the handler pipeline answers it as
+null for a caller who does not hold the permission.
+_Avoid_: field-level security (a database concept), masked field
+
 **Feature gate**:
 A runtime gate on a handler, keyed by a declared feature flag. A closed gate answers with the generic
 not-found outcome so the flag's name is not leaked. It is not module enablement.

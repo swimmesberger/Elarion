@@ -43,6 +43,7 @@ public sealed partial class HandlerRegistrationGenerator {
         AppendResourceBindingsField(sb, handler);
         AppendRegistrationMethod(sb, handler);
         AppendBuildPipelineMethods(sb, handler);
+        AppendVisibilityMembers(sb, handler);
 
         if (handler.Cacheable is not null)
             AppendCachePolicy(sb, handler);
@@ -215,6 +216,10 @@ public sealed partial class HandlerRegistrationGenerator {
         // or the handler, but authorization still runs first so an unauthenticated caller is never told whether a
         // gated feature exists.
         AppendFeatureGateDecorator(sb, handler);
+        // Members visible by permission are hidden just inside authorization (ADR-0103): outside the feature gate,
+        // validation, caching, idempotency and the transaction, so a cached or replayed answer is stored whole and
+        // hidden per caller, and nothing a caller may not see reaches the transport.
+        AppendVisibilityDecorator(sb, handler);
         // Authorization is the outermost functional gate (just inside tracing): a denied request never touches
         // caching, the pipeline (validation/transaction), or the handler, yet the denial is still traced.
         AppendAuthorizationDecorator(sb, handler);

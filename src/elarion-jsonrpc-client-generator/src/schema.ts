@@ -33,6 +33,11 @@ export interface JsonSchema {
    * pre-validation reports the server's text.
    */
   'x-elarion-error-messages'?: Record<string, string>
+  /**
+   * The permission a caller must hold to receive this response member ([VisibleWith] on the server, ADR-0103); the
+   * server omits it for everyone else. The generator documents it on the generated property.
+   */
+  'x-elarion-visible-with'?: string
 }
 
 /**

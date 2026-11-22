@@ -388,14 +388,109 @@ from it never grants it and the rule is dead code. Declare it on the type that r
 
 ```csharp
 [DeclarePermission("comments", Verbs.Manage)]    // in the catalog, enforced nowhere
-public sealed record CommentAccess(ICurrentUser User) {
+public sealed record CommentAccess(ICurrentUser User, IPermissionChecker Permissions) {
     public bool CanDelete(Comment comment) =>
-        comment.AuthorId == User.UserId || User.HasClaim("permission", ElarionPermissions.Comments.Manage);
+        comment.AuthorId == User.UserId || Permissions.Holds(ElarionPermissions.Comments.Manage);
 }
 ```
 
 `[DeclarePermission]` joins the owning module's catalog exactly like `[RequirePermission]` (same `ElarionPermissions`
 accessors, same `IPermissionCatalog` entries, cross-assembly through the manifest) and has no runtime effect.
+
+## Checking a permission in code
+
+Some decisions are not a gate: a handler every `banking.write` holder may run still shows the matched stored
+bookings only to `banking.read` holders, or a list adds a column for managers. Ask `IPermissionChecker` — a
+synchronous `bool`, the same decision the `[RequirePermission]` gate makes:
+
+```csharp
+[Handler]
+[RequirePermission("banking", Verbs.Write)]
+public sealed class PreviewImport(IPermissionChecker permissions, AppDbContext db)
+    : IHandler<PreviewImport.Command, Result<ImportPreview>> {
+    public async ValueTask<Result<ImportPreview>> HandleAsync(Command command, CancellationToken ct) {
+        var withBookings = permissions.Holds(ElarionPermissions.Banking.Read);
+        // permissions.Holds("banking", Verbs.Read), HoldsAny(…) and HoldsAll(…) compose the same strings
+        …
+    }
+}
+```
+
+Pass the generated `ElarionPermissions` accessors, not string literals: a renamed permission then fails the build
+instead of denying silently. `AddElarionAuthorization()` registers the default, `ClaimsPermissionChecker`: an
+authenticated caller holds a permission when it carries a claim of the configured `PermissionClaimType` with that
+value, exactly what the gate checks; an unauthenticated caller holds nothing. Do not read the claim yourself
+(`ICurrentUser.HasClaim("permission", …)`): that repeats the claim type and bypasses a host's replacement checker.
+
+### One place for "administrators hold everything"
+
+`ClaimsAuthorizer` evaluates every `[RequirePermission]` through `IPermissionChecker`, and so do
+[`[VisibleWith]`](#members-only-some-callers-see) members and the [client snapshot](/docs/concepts/client-capabilities).
+A host whose administrators hold every permission says so once, in a checker registered before
+`AddElarionAuthorization()` (which uses `TryAdd`), instead of adding `IsInRole("admin")` next to each check:
+
+```csharp
+public sealed class AdminHoldsEverything(ClaimsPermissionChecker claims, ICurrentUser user) : IPermissionChecker {
+    public bool Holds(string permission) => user.IsInRole("admin") || claims.Holds(permission);
+}
+
+builder.Services.AddScoped<IPermissionChecker, AdminHoldsEverything>();
+builder.Services.AddElarionAuthorization();   // still registers ClaimsPermissionChecker for the inner check
+```
+
+The session snapshot lists the permission claims plus every catalog permission the checker grants, so the
+client's `permissions` stay what the gate answers. Generated SQL filters (`[ResourceFilter]`'s `BypassPermission`,
+`QueryAuthorizers.WhenPermission`) read the claims themselves; grant those permissions as claims (seed them onto the
+role) when a replacement checker should cover them too.
+
+## Members only some callers see
+
+A recurring shape: a caller may run a handler, but one member of its answer belongs to a narrower audience. A bank
+import preview runs for `banking.write` holders, but the stored booking a line resembles goes only to `banking.read`
+holders; a list shows an opening balance or payments only to those who may read them. Declare it on the member
+instead of nulling it in each handler:
+
+```csharp
+public sealed record ImportPreviewLine {
+    public required int Row { get; init; }
+    public required decimal Amount { get; init; }
+
+    [VisibleWith(ElarionPermissions.Banking.Read)]      // or [VisibleWith("banking", Verbs.Read)]
+    public StoredBooking? Resembles { get; init; }
+}
+
+public sealed record ImportPreview(
+    IReadOnlyList<ImportPreviewLine> Lines,
+    [property: VisibleWith("banking", Verbs.Read)] decimal? OpeningBalance);
+```
+
+The handler fills every member for everybody. The generator finds the marked members through the handler's
+response type — nested records and structs, arrays, `List<T>`, `ImmutableArray<T>`, the read-only collection
+interfaces, `Nullable<T>`, `Page<T>` and `ElarionCreated<T>` — and attaches a `VisibilityDecorator` just inside
+authorization. For a caller who does not hold every permission the response uses, the decorator answers a copy
+(made with `with` expressions it generates, no reflection) whose marked members are `null`, so the transport
+omits them; a caller who holds them all gets the handler's value unchanged. The decision is
+[`IPermissionChecker`](#checking-a-permission-in-code)'s, the one the gate uses; without a registered checker every
+marked member is hidden.
+
+Because the decorator sits outside caching, idempotency and the transaction, a cached or replayed answer is stored
+whole and hidden per caller, and an in-process call through the pipeline is hidden the same way. `rpc-schema.json`
+marks the member with `x-elarion-visible-with: "banking.read"`, and the generated TypeScript documents it on the
+property (`/** Present only for callers holding the `banking.read` permission. */`), so a client knows why it may be
+missing; like every client-side projection that is a hint, not the authority.
+
+Rules the generator enforces, as build errors rather than a member silently disclosed:
+
+- A marked member must be nullable (`ELAUTH003`).
+- Every type on the way to a marked member must be a record or a struct whose rewritten members have an accessible
+  `init` or `set`, and every collection on the way one of the shapes above (`ELAUTH004`); a `HashSet<T>` or a
+  dictionary holding marked members is reported, not passed through.
+- The handler must answer `Result<T>` (`ELAUTH004`), and a singleton handler cannot use it (`ELSG013`), because the
+  checker is per caller.
+
+The walk follows declared types: a member declared as an interface or an abstract base is not looked into, so keep
+marked members on concrete records. The permission belongs in the catalog like any other — usually a handler
+requires it already; if none does, declare it with [`[DeclarePermission]`](#permissions-no-handler-requires).
 
 ## See also
 

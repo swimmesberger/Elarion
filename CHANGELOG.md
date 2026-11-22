@@ -8,6 +8,25 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **A synchronous permission check** (ADR-0103). Inject `IPermissionChecker` and ask
+  `permissions.Holds(ElarionPermissions.Banking.Read)` (or `Holds("banking", Verbs.Read)`, `HoldsAny`, `HoldsAll`)
+  for a decision that is not a gate, instead of `currentUser.HasClaim("permission", "…")`. `AddElarionAuthorization()`
+  registers `ClaimsPermissionChecker` (the configured `PermissionClaimType`; an unauthenticated caller holds nothing),
+  and `ClaimsAuthorizer` now evaluates every `[RequirePermission]` through the checker, so a host that registers its
+  own (for example administrators holding every permission) changes the gate and every in-code check together. The
+  session snapshot adds the catalog permissions the checker grants beyond the claims. See
+  [Authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization#checking-a-permission-in-code).
+- **Response members visible by permission** (ADR-0103). Mark a nullable member of a response record
+  `[VisibleWith(ElarionPermissions.Banking.Read)]` (or `[VisibleWith("banking", Verbs.Read)]`) and the handler pipeline
+  answers it as `null` for a caller who does not hold the permission, instead of each handler nulling it by hand. The
+  generator finds marked members through nested records, structs, arrays, lists, read-only collections, `Page<T>` and
+  `ElarionCreated<T>` and emits a reflection-free copy; the new `VisibilityDecorator` sits just inside authorization,
+  so cached and replayed answers are hidden per caller. `rpc-schema.json` exports `x-elarion-visible-with` on the
+  member and the generated TypeScript documents it. New errors: `ELAUTH003` (a marked member is not nullable) and
+  `ELAUTH004` (a shape the pipeline cannot copy). See
+  [Authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization#members-only-some-callers-see).
+
 ## [0.4.2] - 2026-11-21
 
 ### Added

@@ -75,7 +75,12 @@ export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, i
     const lines = Object.entries(resolved.properties).map(([key, property]) => {
       const optional = required.has(key) ? '' : '?'
       const propertyType = jsonSchemaToTypeScript(property, childContext(resolvedCtx, `properties.${key}`), indent + 1)
-      return `${pad}  ${formatPropertyName(key)}${optional}: ${propertyType}`
+      // A member the server shows only to holders of a permission ([VisibleWith]) says so where the caller reads it.
+      const visibleWith = property['x-elarion-visible-with']
+      const doc = typeof visibleWith === 'string'
+        ? `${pad}  /** Present only for callers holding the \`${visibleWith}\` permission. */\n`
+        : ''
+      return `${doc}${pad}  ${formatPropertyName(key)}${optional}: ${propertyType}`
     })
     const objectType = `{\n${lines.join('\n')}\n${pad}}`
     return nullable ? `${objectType} | null | undefined` : objectType

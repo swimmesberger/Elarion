@@ -1,0 +1,473 @@
+using System.Collections.Immutable;
+using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+
+namespace Elarion.Generators;
+
+/// <summary>
+/// Members visible by permission (<c>[VisibleWith]</c>, ADR-0103): finds, at compile time, every member of a handler's
+/// response that only holders of a permission may see — through nested records, structs, arrays, lists, read-only
+/// collections, <c>Nullable&lt;T&gt;</c> and <c>ElarionCreated&lt;T&gt;</c> — and emits one copy function per type on
+/// the way, which the <c>VisibilityDecorator</c> applies for a caller who does not hold every permission. Anything the
+/// copy cannot pass through is a build error, never a silently disclosed member.
+/// </summary>
+public sealed partial class HandlerRegistrationGenerator {
+    private const string VisibleWithAttributeMetadataName = "Elarion.Abstractions.Authorization.VisibleWithAttribute";
+
+    private const string VisibilityPermissionCheckerFqn =
+        "global::Elarion.Abstractions.Authorization.IPermissionChecker";
+
+    internal static class RedactorKind {
+        public const int Object = 0;
+        public const int Nullable = 1;
+        public const int Array = 2;
+        public const int List = 3;
+        public const int Sequence = 4;
+        public const int ImmutableArray = 5;
+        public const int Created = 6;
+    }
+
+    /// <summary>The members a handler's response shows by permission: the success value, every permission named, and
+    /// the copy functions (index 0 copies the value itself).</summary>
+    internal sealed record VisibilityInfo(
+        string ValueFqn,
+        EquatableArray<string> Permissions,
+        EquatableArray<RedactorModel> Redactors);
+
+    /// <summary>One emitted copy function: an object copied with <c>with</c>, or a wrapper/collection of
+    /// <see cref="Element"/>.</summary>
+    internal sealed record RedactorModel(
+        int Kind,
+        string TypeFqn,
+        bool IsReferenceType,
+        int Element,
+        EquatableArray<RedactedMemberModel> Members);
+
+    /// <summary>A member rewritten in the copy: hidden unless <see cref="Permission"/> is held, copied through
+    /// <see cref="Redactor"/> (-1: as is), or both.</summary>
+    internal sealed record RedactedMemberModel(
+        string Name,
+        string? Permission,
+        int Redactor);
+
+    private static readonly DiagnosticDescriptor VisibleMemberNotNullable = new(
+        "ELAUTH003",
+        "[VisibleWith] member is not nullable",
+        "Member '{0}' of '{1}' is marked [VisibleWith(\"{2}\")] but its type '{3}' is not nullable, so it cannot be "
+        + "hidden from callers without the permission; make the member nullable",
+        "Elarion.Abstractions.Authorization",
+        DiagnosticSeverity.Error,
+        true);
+
+    private static readonly DiagnosticDescriptor VisibleMemberCannotBeHidden = new(
+        "ELAUTH004",
+        "Response member visible by permission cannot be hidden",
+        "Handler '{0}' answers '{1}', which holds members visible only with a permission ([VisibleWith]), but {2}; "
+        + "reach such members through records or structs with settable (init) members, arrays, List<T>, "
+        + "ImmutableArray<T>, the read-only collection interfaces and Result<T>",
+        "Elarion.Abstractions.Authorization",
+        DiagnosticSeverity.Error,
+        true);
+
+    /// <summary>The per-pass walk state: type nodes memoized across every handler of one resolution pass.</summary>
+    internal sealed class VisibilityWalk(INamedTypeSymbol visibleWithAttribute, IAssemblySymbol currentAssembly) {
+        public INamedTypeSymbol VisibleWithAttribute { get; } = visibleWithAttribute;
+        public IAssemblySymbol CurrentAssembly { get; } = currentAssembly;
+        public Dictionary<ITypeSymbol, VisibilityNode> Nodes { get; } = new(SymbolEqualityComparer.Default);
+    }
+
+    internal sealed class VisibilityNode(ITypeSymbol type) {
+        public ITypeSymbol Type { get; } = type;
+
+        // -1: a leaf (nothing inside can be visible by permission); otherwise a RedactorKind, or Unsupported.
+        public int Kind { get; set; } = -1;
+        public VisibilityNode? Element { get; set; }
+        public List<(IPropertySymbol Property, string? Permission, VisibilityNode Node)> Members { get; } = [];
+        public string? UnsupportedReason { get; set; }
+    }
+
+    private const int UnsupportedKind = 99;
+
+    private static VisibilityInfo? ParseVisibility(
+        ClassDeclarationSyntax classDecl,
+        INamedTypeSymbol classSymbol,
+        ITypeSymbol responseType,
+        VisibilityWalk? walk,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+        if (walk is null)
+            return null;
+
+        var fmt = SymbolDisplayFormat.FullyQualifiedFormat;
+        var isResult = responseType is INamedTypeSymbol { TypeArguments.Length: 1 } namedResponse
+                       && IsDefinition(namedResponse.OriginalDefinition, "Elarion.Abstractions", "Result`1");
+        var valueType = isResult ? ((INamedTypeSymbol)responseType).TypeArguments[0] : responseType;
+
+        var root = VisitVisibility(valueType, walk);
+        var closure = new List<VisibilityNode>();
+        CollectVisibilityClosure(root, closure, new HashSet<VisibilityNode>());
+        var needs = ComputeNeeds(closure);
+        if (!needs.Contains(root))
+            return null;
+
+        var handlerFqn = classSymbol.ToDisplayString(fmt);
+        var responseFqn = responseType.ToDisplayString(fmt);
+        var location = classDecl.Identifier.GetLocation();
+        var failed = false;
+
+        void Fail(string reason) {
+            diagnostics.Add(DiagnosticInfo.Create(VisibleMemberCannotBeHidden, location, handlerFqn, responseFqn,
+                reason));
+            failed = true;
+        }
+
+        if (!isResult)
+            Fail("the response is not Result<T>, so the pipeline cannot answer a copy");
+
+        // Number the needed nodes in a deterministic depth-first order from the root, and check each can be copied.
+        var ids = new Dictionary<VisibilityNode, int>();
+        var order = new List<VisibilityNode>();
+
+        void Number(VisibilityNode node) {
+            if (!needs.Contains(node) || ids.ContainsKey(node))
+                return;
+
+            ids[node] = order.Count;
+            order.Add(node);
+            if (node.Element is { } element)
+                Number(element);
+
+            foreach (var member in node.Members)
+                Number(member.Node);
+        }
+
+        Number(root);
+
+        var permissions = new SortedSet<string>(StringComparer.Ordinal);
+        var redactors = ImmutableArray.CreateBuilder<RedactorModel>(order.Count);
+        foreach (var node in order) {
+            var typeFqn = node.Type.ToDisplayString(fmt);
+            if (node.Kind == UnsupportedKind) {
+                Fail($"'{typeFqn}' {node.UnsupportedReason}");
+                continue;
+            }
+
+            if (!AttributeArgumentRendering.IsAccessibleFromGeneratedCode(node.Type, walk.CurrentAssembly)) {
+                Fail($"'{typeFqn}' is not accessible from the handler's assembly");
+                continue;
+            }
+
+            var members = ImmutableArray.CreateBuilder<RedactedMemberModel>();
+            if (node.Kind == RedactorKind.Object) {
+                if (node.Type is INamedTypeSymbol { IsRecord: false, IsValueType: false })
+                    Fail($"'{typeFqn}' is neither a record nor a struct, so it cannot be copied with a 'with' expression");
+
+                foreach (var (property, permission, memberNode) in node.Members) {
+                    var nested = needs.Contains(memberNode);
+                    if (permission is null && !nested)
+                        continue;
+
+                    if (permission is not null) {
+                        permissions.Add(permission);
+                        if (!IsNullable(property.Type)) {
+                            diagnostics.Add(DiagnosticInfo.Create(VisibleMemberNotNullable, location,
+                                property.Name, typeFqn, permission, property.Type.ToDisplayString(fmt)));
+                            failed = true;
+                            continue;
+                        }
+                    }
+
+                    if (!HasAccessibleSetter(property, walk.CurrentAssembly)) {
+                        Fail($"member '{property.Name}' of '{typeFqn}' has no accessible init or set accessor");
+                        continue;
+                    }
+
+                    members.Add(new RedactedMemberModel(property.Name, permission, nested ? ids[memberNode] : -1));
+                }
+            }
+
+            redactors.Add(new RedactorModel(
+                node.Kind,
+                typeFqn,
+                !node.Type.IsValueType,
+                node.Element is { } element && ids.TryGetValue(element, out var elementId) ? elementId : -1,
+                members.ToImmutable()));
+        }
+
+        if (failed)
+            return null;
+
+        return new VisibilityInfo(valueType.ToDisplayString(fmt), permissions.ToImmutableArray(),
+            redactors.ToImmutable());
+    }
+
+    private static VisibilityNode VisitVisibility(ITypeSymbol type, VisibilityWalk walk) {
+        if (walk.Nodes.TryGetValue(type, out var existing))
+            return existing;
+
+        var node = new VisibilityNode(type);
+        walk.Nodes[type] = node;
+
+        if (type is IArrayTypeSymbol array) {
+            node.Kind = array.Rank == 1 ? RedactorKind.Array : UnsupportedKind;
+            node.UnsupportedReason = "is a multi-dimensional array";
+            node.Element = VisitVisibility(array.ElementType, walk);
+            return node;
+        }
+
+        if (type is not INamedTypeSymbol named
+            || named.TypeKind is not (TypeKind.Class or TypeKind.Struct or TypeKind.Interface))
+            return node;
+
+        var definition = named.OriginalDefinition;
+        if (definition.SpecialType == SpecialType.System_Nullable_T) {
+            node.Kind = RedactorKind.Nullable;
+            node.Element = VisitVisibility(named.TypeArguments[0], walk);
+            return node;
+        }
+
+        var wrapperKind = definition.SpecialType switch {
+            SpecialType.System_Collections_Generic_IEnumerable_T
+                or SpecialType.System_Collections_Generic_IReadOnlyList_T
+                or SpecialType.System_Collections_Generic_IReadOnlyCollection_T
+                or SpecialType.System_Collections_Generic_IList_T
+                or SpecialType.System_Collections_Generic_ICollection_T => RedactorKind.Sequence,
+            _ when IsDefinition(definition, "System.Collections.Generic", "List`1") => RedactorKind.List,
+            _ when IsDefinition(definition, "System.Collections.Immutable", "ImmutableArray`1") =>
+                RedactorKind.ImmutableArray,
+            _ when IsDefinition(definition, "Elarion.Abstractions", "ElarionCreated`1") => RedactorKind.Created,
+            _ => -1
+        };
+        if (wrapperKind < 0 && (named.SpecialType != SpecialType.None || named.IsAnonymousType))
+            return node;
+
+        if (wrapperKind >= 0) {
+            node.Kind = wrapperKind;
+            node.Element = VisitVisibility(named.TypeArguments[0], walk);
+            return node;
+        }
+
+        // Any other collection (a dictionary's values included): walk its element so a marked member inside is
+        // reported, not silently passed.
+        if (GetEnumerableElementType(named) is { } elementType) {
+            if (elementType is INamedTypeSymbol { TypeArguments.Length: 2 } pair
+                && IsDefinition(pair.OriginalDefinition, "System.Collections.Generic", "KeyValuePair`2"))
+                elementType = pair.TypeArguments[1];
+
+            node.Kind = UnsupportedKind;
+            node.UnsupportedReason = "is a collection type the pipeline cannot copy";
+            node.Element = VisitVisibility(elementType, walk);
+            return node;
+        }
+
+        // Any other interface or abstract shape is answered by the handler's runtime type, which the copy cannot see.
+        if (named.TypeKind == TypeKind.Interface)
+            return node;
+
+        // Framework and BCL types are leaves: they never carry an application's [VisibleWith] members.
+        var ns = named.ContainingNamespace?.ToDisplayString() ?? string.Empty;
+        if (ns == "System" || ns.StartsWith("System.", StringComparison.Ordinal) || ns.StartsWith("Microsoft.",
+                StringComparison.Ordinal))
+            return node;
+
+        node.Kind = RedactorKind.Object;
+        foreach (var property in CollectVisibilityProperties(named))
+            node.Members.Add((property, ReadVisibleWith(property, walk), VisitVisibility(property.Type, walk)));
+
+        return node;
+    }
+
+    private static void CollectVisibilityClosure(VisibilityNode node, List<VisibilityNode> closure,
+        HashSet<VisibilityNode> seen) {
+        if (!seen.Add(node))
+            return;
+
+        closure.Add(node);
+        if (node.Element is { } element)
+            CollectVisibilityClosure(element, closure, seen);
+
+        foreach (var member in node.Members)
+            CollectVisibilityClosure(member.Node, closure, seen);
+    }
+
+    // A fixpoint over the closure, so a cycle (a tree node holding a list of itself) cannot cut a path short.
+    private static HashSet<VisibilityNode> ComputeNeeds(List<VisibilityNode> closure) {
+        var needs = new HashSet<VisibilityNode>();
+        bool changed;
+        do {
+            changed = false;
+            foreach (var node in closure) {
+                if (needs.Contains(node))
+                    continue;
+
+                var need = node.Element is { } element && needs.Contains(element);
+                foreach (var member in node.Members)
+                    need |= member.Permission is not null || needs.Contains(member.Node);
+
+                if (need && needs.Add(node))
+                    changed = true;
+            }
+        } while (changed);
+
+        return needs;
+    }
+
+    private static bool IsDefinition(INamedTypeSymbol definition, string ns, string metadataName) {
+        return definition.MetadataName == metadataName
+               && definition.ContainingNamespace?.ToDisplayString() == ns;
+    }
+
+    private static ITypeSymbol? GetEnumerableElementType(INamedTypeSymbol type) {
+        foreach (var iface in type.AllInterfaces)
+            if (iface.OriginalDefinition.SpecialType == SpecialType.System_Collections_Generic_IEnumerable_T)
+                return iface.TypeArguments[0];
+
+        return null;
+    }
+
+    // Public, gettable instance properties (no indexers), most-derived first.
+    private static List<IPropertySymbol> CollectVisibilityProperties(INamedTypeSymbol type) {
+        var result = new List<IPropertySymbol>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (ITypeSymbol? current = type;
+             current is not null && current.SpecialType != SpecialType.System_Object;
+             current = current.BaseType)
+            foreach (var member in current.GetMembers()) {
+                if (member is not IPropertySymbol { IsStatic: false, IsIndexer: false, GetMethod: not null } property)
+                    continue;
+
+                if (property.DeclaredAccessibility != Accessibility.Public || property.IsImplicitlyDeclared)
+                    continue;
+
+                // A record's compiler-generated EqualityContract is protected, so it never reaches here.
+                if (seen.Add(property.Name))
+                    result.Add(property);
+            }
+
+        return result;
+    }
+
+    // The property's [VisibleWith], or — for a positional record — the one on the same-named constructor parameter.
+    private static string? ReadVisibleWith(IPropertySymbol property, VisibilityWalk walk) {
+        foreach (var attribute in property.GetAttributes())
+            if (ReadPermission(attribute, walk) is { } permission)
+                return permission;
+
+        if (property.ContainingType is not { } declaringType)
+            return null;
+
+        foreach (var constructor in declaringType.InstanceConstructors)
+        foreach (var parameter in constructor.Parameters) {
+            if (!string.Equals(parameter.Name, property.Name, StringComparison.Ordinal))
+                continue;
+
+            foreach (var attribute in parameter.GetAttributes())
+                if (ReadPermission(attribute, walk) is { } permission)
+                    return permission;
+        }
+
+        return null;
+    }
+
+    private static string? ReadPermission(AttributeData attribute, VisibilityWalk walk) {
+        if (!SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, walk.VisibleWithAttribute))
+            return null;
+
+        var arguments = attribute.ConstructorArguments;
+        return arguments.Length switch {
+            1 when arguments[0].Value is string permission => permission,
+            2 when arguments[0].Value is string resource && arguments[1].Value is string verb => resource + "." + verb,
+            _ => null
+        };
+    }
+
+    private static bool IsNullable(ITypeSymbol type) {
+        return type.IsValueType
+            ? type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T
+            : type.NullableAnnotation != NullableAnnotation.NotAnnotated;
+    }
+
+    private static bool HasAccessibleSetter(IPropertySymbol property, IAssemblySymbol currentAssembly) {
+        if (property.SetMethod is not { } setter)
+            return false;
+
+        return setter.DeclaredAccessibility switch {
+            Accessibility.Public => true,
+            Accessibility.Internal or Accessibility.ProtectedOrInternal =>
+                SymbolEqualityComparer.Default.Equals(property.ContainingAssembly, currentAssembly),
+            _ => false
+        };
+    }
+
+    // --- Emission -------------------------------------------------------------------------------------------------
+
+    private static void AppendVisibilityDecorator(StringBuilder sb, HandlerInfo handler) {
+        if (handler.Visibility is not { } visibility)
+            return;
+
+        sb.AppendLine(
+            $"                handler = new global::Elarion.Pipeline.VisibilityDecorator<{handler.RequestFqn}, {visibility.ValueFqn}>(");
+        sb.AppendLine("                    handler,");
+        sb.AppendLine($"                    sp.GetService<{VisibilityPermissionCheckerFqn}>(),");
+        sb.AppendLine("                    __visiblePermissions,");
+        sb.AppendLine("                    __Hide0);");
+        AppendPipelineStep(sb, "                ", "global::Elarion.Pipeline.VisibilityDecorator<,>", false);
+    }
+
+    // The permissions and the copy functions, emitted into the registration class. The functions are written without
+    // nullable annotations (their own #nullable context), because a member a caller may not see is set to null in a
+    // copy of a value the handler declared non-null.
+    private static void AppendVisibilityMembers(StringBuilder sb, HandlerInfo handler) {
+        if (handler.Visibility is not { } visibility)
+            return;
+
+        sb.AppendLine();
+        sb.Append("    private static readonly string[] __visiblePermissions = new string[] { ");
+        sb.Append(string.Join(", ", visibility.Permissions.AsImmutableArray.Select(FormatStringLiteral)));
+        sb.AppendLine(" };");
+        sb.AppendLine();
+        sb.AppendLine("#nullable disable");
+        var redactors = visibility.Redactors.AsImmutableArray;
+        for (var i = 0; i < redactors.Length; i++) {
+            var redactor = redactors[i];
+            if (i > 0) sb.AppendLine();
+            sb.AppendLine(
+                $"    private static {redactor.TypeFqn} __Hide{i}({redactor.TypeFqn} value, {VisibilityPermissionCheckerFqn} permissions)");
+            sb.AppendLine("    {");
+            if (redactor.Kind == RedactorKind.Object) {
+                if (redactor.IsReferenceType)
+                    sb.AppendLine("        if (value is null) return null;");
+
+                sb.AppendLine("        return value with");
+                sb.AppendLine("        {");
+                foreach (var member in redactor.Members) {
+                    var copied = member.Redactor >= 0
+                        ? $"__Hide{member.Redactor}(value.{member.Name}, permissions)"
+                        : $"value.{member.Name}";
+                    var expression = member.Permission is null
+                        ? copied
+                        : $"permissions.Holds({FormatStringLiteral(member.Permission)}) ? {copied} : null";
+                    sb.AppendLine($"            {member.Name} = {expression},");
+                }
+
+                sb.AppendLine("        };");
+            }
+            else {
+                var helper = redactor.Kind switch {
+                    RedactorKind.Nullable => "Nullable",
+                    RedactorKind.Array => "Array",
+                    RedactorKind.List => "List",
+                    RedactorKind.ImmutableArray => "ImmutableArray",
+                    RedactorKind.Created => "Created",
+                    _ => "Sequence"
+                };
+                sb.AppendLine(
+                    $"        return global::Elarion.Pipeline.ResponseRedaction.{helper}(value, __Hide{redactor.Element}, permissions);");
+            }
+
+            sb.AppendLine("    }");
+        }
+
+        sb.AppendLine("#nullable restore");
+    }
+}

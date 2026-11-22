@@ -535,6 +535,16 @@ Handler requirements are class attributes the handler-registration generator rea
 - **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class or record (`AllowMultiple`, not inherited)
 - **Triggers:** adds `{resource}.{verb}` to the generated permission catalog (`ElarionPermissions`, `IPermissionCatalog`) of the module whose namespace contains the type, **without** requiring it anywhere. For a permission a row-level rule checks on top of a coarser `[RequirePermission]`, so role policy derived from the catalog can grant it. No runtime effect. Same parameters as `[RequirePermission]`.
 
+### `[VisibleWith]`
+
+- **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** property or constructor parameter of a response type
+- **Triggers:** shows the member only to callers who hold the permission; for everyone else the generated `VisibilityDecorator` (just inside authorization) answers it as `null`. The decision is `IPermissionChecker.Holds`, the same as the `[RequirePermission]` gate. Exported as `x-elarion-visible-with` in `rpc-schema.json`. Build errors `ELAUTH003` (member not nullable) and `ELAUTH004` (a shape the pipeline cannot copy). See [Members only some callers see](/docs/concepts/authorization#members-only-some-callers-see).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `permission` | `string` (ctor) → `Permission` | required (one form) | The composed permission, e.g. `ElarionPermissions.Banking.Read`. |
+| `resource`, `verb` | `string` (ctor) | required (other form) | Composed to `{resource}.{verb}`, as `[RequirePermission]` composes it. |
+
 ### `[RequireRole]`
 
 - **Package:** `Elarion.Abstractions` (Authorization) · **Applies to:** class (`AllowMultiple`, inherited)

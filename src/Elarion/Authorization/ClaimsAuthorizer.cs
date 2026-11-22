@@ -28,14 +28,23 @@ namespace Elarion.Authorization;
 /// Cross-cutting rules evaluated in registration order after the authenticated gate and before the declared
 /// requirements. Optional: a host that registers none gets the previous behavior exactly.
 /// </param>
+/// <param name="permissions">
+/// The permission decision every <c>[RequirePermission]</c> is evaluated through, shared with handler code and
+/// <c>[VisibleWith]</c> members so the three cannot disagree. Optional: without it the authorizer answers from the
+/// <see cref="AuthorizationOptions.PermissionClaimType"/> claims itself, exactly as <see cref="ClaimsPermissionChecker"/>
+/// does.
+/// </param>
 public sealed class ClaimsAuthorizer(
     ICurrentUser user,
     IEnumerable<NamedAuthorizationPolicy> policies,
     IResourceAuthorizer resourceAuthorizer,
     AuthorizationOptions options,
     ILogger<ClaimsAuthorizer> logger,
-    IEnumerable<IGlobalAuthorizationRule>? globalRules = null
+    IEnumerable<IGlobalAuthorizationRule>? globalRules = null,
+    IPermissionChecker? permissions = null
 ) : IAuthorizer {
+    private readonly IPermissionChecker _permissions = permissions ?? new ClaimsPermissionChecker(user, options);
+
     /// <inheritdoc />
     public async ValueTask<AppError?> AuthorizeAsync(
         AuthorizationRequirements requirements, object? resource, CancellationToken ct) {
@@ -117,7 +126,7 @@ public sealed class ClaimsAuthorizer(
     // drift apart.
     private AppError? CheckDeclared(AuthorizationRequirements requirements) {
         foreach (var permission in requirements.Permissions)
-            if (!user.HasClaim(options.PermissionClaimType, permission))
+            if (!_permissions.Holds(permission))
                 return Forbidden("permission", permission);
 
         foreach (var role in requirements.Roles)
