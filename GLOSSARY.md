@@ -168,6 +168,12 @@ A response member marked `[VisibleWith]`: the handler fills it for everybody, an
 null for a caller who does not hold the permission.
 _Avoid_: field-level security (a database concept), masked field
 
+**Decision**:
+A question a valid command asks its caller before it runs ("import this possible duplicate?"), declared with
+`[RequiresDecision]`, asked with `AppError.DecisionRequired` and answered through the request's `Decisions`, once or
+per item.
+_Avoid_: confirmation flag, confirm conflict
+
 **Feature gate**:
 A runtime gate on a handler, keyed by a declared feature flag. A closed gate answers with the generic
 not-found outcome so the flag's name is not leaked. It is not module enablement.

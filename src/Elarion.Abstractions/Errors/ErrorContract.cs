@@ -16,4 +16,19 @@ public sealed record ErrorContract {
 
     /// <summary>The payload type carried as <see cref="AppError.Data"/>, or <see langword="null"/> when the error has none.</summary>
     public Type? DataType { get; init; }
+
+    /// <summary>
+    /// For a <see cref="ErrorKind.DecisionRequired"/> error declared with <see cref="RequiresDecisionAttribute"/>: the
+    /// options the caller picks from and whether it answers per item. <see langword="null"/> for every other error.
+    /// </summary>
+    public DecisionContract? Decision { get; init; }
+}
+
+/// <summary>The answer shape of a declared decision (<see cref="RequiresDecisionAttribute"/>), exported to the schema.</summary>
+public sealed record DecisionContract {
+    /// <summary>The options' wire names, in declaration order (<see cref="DecisionAnswer.Confirm"/> for a confirmation).</summary>
+    public required IReadOnlyList<string> Options { get; init; }
+
+    /// <summary>Whether the caller answers per item rather than once for the request.</summary>
+    public bool PerItem { get; init; }
 }

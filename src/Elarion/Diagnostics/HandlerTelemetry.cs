@@ -89,6 +89,7 @@ public static class HandlerTelemetry {
             ErrorKind.Conflict => "conflict",
             ErrorKind.Validation => "validation",
             ErrorKind.BusinessRule => "business_rule",
+            ErrorKind.DecisionRequired => "decision_required",
             ErrorKind.Internal => "internal",
             _ => "forbidden"
         };

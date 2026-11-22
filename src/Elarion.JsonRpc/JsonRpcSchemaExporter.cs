@@ -126,6 +126,16 @@ public static class JsonRpcSchemaExporter {
             if (error.DataType is { } dataType)
                 entry["data"] = BuildSchemaNode(dataType, options, SchemaDirection.Response, InjectReflectedResponseAnnotations);
 
+            // A declared decision (ADR-0101): the options the caller picks from, and whether it answers per item.
+            if (error.Decision is { } decision) {
+                // Declaration order, not sorted: the options read as the dialog offers them.
+                var decisionNode = new JsonObject {
+                    ["options"] = new JsonArray(decision.Options.Select(static o => (JsonNode?)JsonValue.Create(o)).ToArray())
+                };
+                if (decision.PerItem) decisionNode["perItem"] = true;
+                entry["decision"] = decisionNode;
+            }
+
             node[error.Code] = entry;
         }
 

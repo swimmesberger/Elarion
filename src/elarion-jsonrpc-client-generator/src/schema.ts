@@ -47,6 +47,17 @@ export interface JsonSchema {
 export interface RpcErrorSchema {
   kind: string
   data?: JsonSchema
+  /**
+   * A declared decision (ADR-0101, kind `decision_required`): the options the caller picks from, in declaration order,
+   * and whether it answers per item. The generated `withDecisions` helper asks the application and resends.
+   */
+  decision?: RpcDecisionSchema
+}
+
+/** The answer shape of a declared decision. */
+export interface RpcDecisionSchema {
+  options: string[]
+  perItem?: boolean
 }
 
 export interface RpcMethodSchema {

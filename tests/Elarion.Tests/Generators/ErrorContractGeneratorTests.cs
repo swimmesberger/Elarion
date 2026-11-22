@@ -20,6 +20,8 @@ public sealed class ErrorContractGeneratorTests {
 
         public sealed record TokenProblem(string Reason);
 
+        public enum ExportedChange { OnlyHere, Reexport }
+
         """;
 
     private static string Handler(string attributes, string response = "public sealed record Response(string Name);") =>
@@ -46,6 +48,28 @@ public sealed class ErrorContractGeneratorTests {
         diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
         generated.Should().Contain("token.malformed").And.Contain("global::Sample.Errors.TokenProblem")
             .And.Contain("not_found").And.Contain("NotFound");
+    }
+
+    [Fact]
+    public void RequiresDecision_IsPublishedAsADecisionRequiredErrorWithItsAnswerShape() {
+        var generated = Run(Handler(
+            """
+            [RequiresDecision("invoice.exported_change", Options = typeof(ExportedChange), DataType = typeof(TokenProblem))]
+            [RequiresDecision("tokens.possible_duplicate", PerItem = true)]
+            """), out var diagnostics);
+
+        diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        ContractOf(generated, "tokens.redeem").Should().Equal(
+            "invoice.exported_change:DecisionRequired;0|onlyHere,reexport:global::Sample.Errors.TokenProblem",
+            "tokens.possible_duplicate:DecisionRequired;1|confirm:");
+    }
+
+    [Fact]
+    public void RequiresDecision_WithOptionsThatAreNotAnEnum_IsReported() {
+        Run(Handler("""[RequiresDecision("invoice.exported_change", Options = typeof(TokenProblem))]"""),
+            out var diagnostics);
+
+        diagnostics.Should().ContainSingle(d => d.Id == "ELERR003");
     }
 
     [Fact]

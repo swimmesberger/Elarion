@@ -67,7 +67,13 @@ export function generateRpcClientFiles(
             createContext(error.data, `methods.${method}.errors.${code}.data`),
             3
           )
-        typesLines.push(`      ${JSON.stringify(code)}: { kind: ${JSON.stringify(error.kind)}; data: ${dataType} }`)
+        // A decision also states its options and whether it is answered per item, which withDecisions types its
+        // ask callback with.
+        const decision = error.decision === undefined
+          ? ''
+          : `; options: ${error.decision.options.map((option) => JSON.stringify(option)).join(' | ') || 'never'}`
+            + `; perItem: ${error.decision.perItem === true}`
+        typesLines.push(`      ${JSON.stringify(code)}: { kind: ${JSON.stringify(error.kind)}; data: ${dataType}${decision} }`)
       }
       typesLines.push('    }')
     }
@@ -172,6 +178,20 @@ export function generateRpcClientFiles(
     }
   }
 
+  // The declared decisions per method and code (ADR-0101); methods without any are omitted, and a schema without
+  // decisions emits no decision helper at all.
+  const decisionsByMethod: Record<string, Record<string, { options: string[]; perItem: boolean }>> = {}
+  for (const method of methods) {
+    const errors = schema.methods[method].errors ?? {}
+    for (const code of Object.keys(errors).sort()) {
+      const decision = errors[code].decision
+      if (decision !== undefined) {
+        decisionsByMethod[method] ??= {}
+        decisionsByMethod[method][code] = {options: [...decision.options], perItem: decision.perItem === true}
+      }
+    }
+  }
+
   const idempotentMethods = methods.filter((method) => schema.methods[method].idempotent === true)
 
   // Every method's client-visible facts, normalized so a consumer never has to tell "absent" from "false".
@@ -225,6 +245,7 @@ export function generateRpcClientFiles(
     idempotentMethods,
     methodInfo,
     errorCodesByMethod,
+    decisionsByMethod,
     paramsFilePaths,
     resultFilePaths,
   })

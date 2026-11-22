@@ -66,6 +66,7 @@ codes such as `not_found`, or on the decorator that adds them (see
 | `Unauthorized` | The caller is not authenticated (missing or invalid credentials). Maps to HTTP 401. |
 | `Forbidden` | The caller is authenticated but not authorized to perform this operation. |
 | `BusinessRule` | A domain business rule was violated. |
+| `DecisionRequired` | The request is valid but needs the caller's decision before it runs. Maps to HTTP 409. See [Asking the caller to decide](#asking-the-caller-to-decide). |
 | `Internal` | An unexpected internal error occurred. |
 
 ### Factory methods
@@ -83,6 +84,7 @@ AppError.Conflict("Invoice number is already reserved.");
 AppError.Unauthorized("Authentication required.");
 AppError.Forbidden("You cannot modify this resource.");
 AppError.BusinessRule("Credit limit exceeded.", data: limitInfo);
+AppError.DecisionRequired("banking.possible_duplicate", "Import these lines anyway?", duplicates);
 AppError.Internal("Failed to render the document.");
 ```
 
@@ -102,6 +104,7 @@ var code = error.Kind switch {
     ErrorKind.Forbidden    => -32003,        // server range
     ErrorKind.BusinessRule => -32004,        // server range
     ErrorKind.Unauthorized => -32005,        // server range
+    ErrorKind.DecisionRequired => -32006,    // server range
     _                      => -32603,        // spec "Internal error"
 };
 ```
@@ -110,6 +113,67 @@ This keeps handlers free of transport details: the same `AppError.NotFound(...)`
 error in one host and an HTTP `404` in another. For the complete, authoritative tables — both the
 JSON-RPC codes and the HTTP status mapping — see the
 [Result & error model reference](/docs/reference/result-and-errors).
+
+## Asking the caller to decide
+
+Some commands are valid but need the caller's decision first: "this line looks like a booking you already have —
+import it anyway?", or a choice such as changing an exported invoice "only here" or "as a correction". Instead of a
+`Conflict` with a code of its own plus a `ConfirmX` flag per flow, a handler declares the decision and asks with
+`ErrorKind.DecisionRequired`; every flow then shares one shape on the server, on the wire and in the generated
+client ([ADR-0101](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0101-a-decision-required-answer.md)).
+
+```csharp
+public enum DuplicateChoice { Import, Skip }
+
+[Handler]
+[RequirePermission("banking", Verbs.Write)]
+[RequiresDecision(Codes.PossibleDuplicate, Options = typeof(DuplicateChoice), PerItem = true,
+    DataType = typeof(PossibleDuplicates))]
+[RequiresDecision(Codes.ClosedPeriod)]          // no Options: a confirmation
+public sealed class CommitImport(AppDbContext db) : IHandler<CommitImport.Command, Result<ImportOutcome>> {
+    public sealed record Command : ICommand, IDecidingRequest {
+        public required UploadedFile Statement { get; init; }
+        public IReadOnlyList<DecisionAnswer>? Decisions { get; init; }
+    }
+
+    public async ValueTask<Result<ImportOutcome>> HandleAsync(Command command, CancellationToken ct) {
+        var lines = await ReadLinesAsync(command.Statement, ct);
+        if (lines.Any(l => l.InClosedPeriod) && !command.IsConfirmed(Codes.ClosedPeriod))
+            return AppError.DecisionRequired(Codes.ClosedPeriod, "Some lines fall into a closed period. Import them?");
+
+        // Per item: refuse while any line the server finds is unanswered, then act on each answer.
+        var duplicates = await FindPossibleDuplicatesAsync(lines, ct);
+        var unanswered = command.Unanswered(Codes.PossibleDuplicate, duplicates.Select(d => d.Key));
+        if (unanswered.Count > 0)
+            return AppError.DecisionRequired(Codes.PossibleDuplicate, "Some lines look like existing bookings.",
+                new PossibleDuplicates([.. duplicates.Where(d => unanswered.Contains(d.Key))]));
+
+        foreach (var line in lines)
+            if (command.Decision<DuplicateChoice>(Codes.PossibleDuplicate, line.Key) != DuplicateChoice.Skip)
+                db.Bookings.Add(line.ToBooking());
+        …
+    }
+}
+```
+
+- **The declaration** (`[RequiresDecision(code, Options = typeof(TEnum), PerItem = …, DataType = …)]`) joins the
+  operation's error contract like `[ProducesError]`: the schema exports the code with kind `decision_required`, its
+  options (the enum members in camel case, here `import`/`skip`; a confirmation's one option is `confirm`) and
+  `perItem`. Options that are not an enum are a build error (`ELERR003`).
+- **The answers travel in one member.** The request implements `IDecidingRequest`; its `Decisions` is a list of
+  `{ code, item?, option }`. `IsConfirmed(code)`, `Decision<TOption>(code)` and their per-item overloads read it (the
+  last answer for a code and item wins); `Unanswered(code, keys)` lists the items still to ask. An option the enum does
+  not declare counts as no answer, so the handler asks again.
+- **Ask inside the transaction**, only when the state that needs the decision is there. A resend after the state
+  changed simply runs — or asks about what is new: a line that became a possible duplicate since the caller last
+  answered is unanswered, so the command refuses instead of silently holding it back.
+- **Per item, the data lists the items.** The client answers by item key, so the payload names each item's key (and
+  whatever the dialog shows).
+
+The kind is on the wire (JSON-RPC `-32006`, HTTP `409`, gRPC `FailedPrecondition`), so a generic client recognizes
+every decision without knowing its code. The generated TypeScript client's
+[`withDecisions`](/docs/capabilities/transports/typescript-client#answering-decisions) asks the application's dialog
+and resends; the dialog stays the application's.
 
 ## Unexpected errors
 

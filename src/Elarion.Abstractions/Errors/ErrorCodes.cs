@@ -32,6 +32,12 @@ public static class ErrorCodes {
     /// <summary>Default code of <see cref="ErrorKind.Internal"/>.</summary>
     public const string Internal = "internal";
 
+    /// <summary>
+    /// The default code of <see cref="ErrorKind.DecisionRequired"/>. A decision normally carries its own code (the one
+    /// its handler declares with <see cref="RequiresDecisionAttribute"/>); this is the fallback.
+    /// </summary>
+    public const string DecisionRequired = "decision_required";
+
     /// <summary>A mutating call to an <c>[Idempotent]</c> operation carried no idempotency key (<see cref="ErrorKind.Validation"/>).</summary>
     public const string IdempotencyKeyRequired = "idempotency.key_required";
 
@@ -50,6 +56,7 @@ public static class ErrorCodes {
             ErrorKind.Forbidden => Forbidden,
             ErrorKind.Unauthorized => Unauthorized,
             ErrorKind.BusinessRule => BusinessRule,
+            ErrorKind.DecisionRequired => DecisionRequired,
             _ => Internal
         };
     }

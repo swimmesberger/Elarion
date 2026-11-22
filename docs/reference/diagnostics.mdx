@@ -28,6 +28,7 @@ JSON-RPC method emission for `[Handler]` handlers. See
 | ELRPC005 | Error | A `[Handler]` responds with `ElarionStreamedFile`, which only HTTP can carry: JSON-RPC, MCP and connections need a payload that serializes. No operation is registered. | Remove `[Handler]` and map the handler with `[HttpEndpoint]` alone, or respond with `ElarionFile` (small files) or a pending blob the client downloads (large files). |
 | ELERR001 | Error | A `[ProducesError]` code is not lower-case ASCII letters, digits and underscores in dot-separated segments. | Use a code such as `token.malformed`. |
 | ELERR002 | Error | One error code is declared more than once on a handler (with its base classes), a decorator, a module or an assembly with a different kind or payload type. | Declare each code once per place; a code has exactly one kind and one payload. A narrower place may declare a code again to override a wider one. |
+| ELERR003 | Error | A `[RequiresDecision]` declares `Options` that are not an enum with members. | Pass `typeof` an enum whose members are the choices, or omit `Options` for a confirmation. |
 
 ## ELHTTP — HTTP endpoint generation
 

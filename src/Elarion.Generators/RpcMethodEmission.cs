@@ -223,8 +223,21 @@ internal static class RpcMethodEmission {
         var items = entry.Errors.Select(static e =>
             $"new {contract} {{ Code = {Literal(e.Code)}, Kind = global::Elarion.Abstractions.ErrorKind.{e.Kind}"
             + (e.DataTypeFqn is null ? "" : $", DataType = typeof({e.DataTypeFqn})")
+            + DecisionExpression(e.Decision)
             + " }");
         return $"new {contract}[] {{ {string.Join(", ", items)} }}";
+    }
+
+    // A [RequiresDecision] declaration's answer shape ("1|a,b": per item, options a and b), or nothing.
+    private static string DecisionExpression(string? decision) {
+        var separator = decision?.IndexOf('|') ?? -1;
+        if (decision is null || separator < 0)
+            return string.Empty;
+
+        var options = decision.Substring(separator + 1).Split(',').Select(static option => Literal(option));
+        return ", Decision = new global::Elarion.Abstractions.DecisionContract { Options = new string[] { "
+               + string.Join(", ", options) + " }"
+               + (decision.StartsWith("1", StringComparison.Ordinal) ? ", PerItem = true" : string.Empty) + " }";
     }
 
     /// <summary>The fully-qualified <c>HandlerTransports</c> flag expression for an entry's surfaces.</summary>

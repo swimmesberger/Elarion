@@ -986,6 +986,81 @@ describe('JSON-RPC client generator', () => {
     expect(generated.clientSource).toContain('"tags":{"timeout":"180s","viewAs":"refused"}')
   })
 
+  it('types declared decisions and emits withDecisions only when a method declares one', () => {
+    const generated = generateRpcClientFiles(decisionTestSchema())
+    const without = generateRpcClientFiles(rpcClientTestSchema())
+
+    expect(generated.typesSource).toMatch(
+      /"math\.big_sum": \{ kind: "decision_required"; data: \{\s*limit: number\s*\}; options: "confirm"; perItem: false \}/)
+    expect(generated.typesSource).toContain(
+      '"math.per_item": { kind: "decision_required"; data: undefined; options: "keep" | "drop"; perItem: true }')
+    expect(generated.clientSource).toContain('export async function withDecisions<M extends RpcDecidingMethod>(')
+    expect(generated.clientSource).toContain(
+      'const rpcDecisions: Partial<Record<RpcMethod, Readonly<Record<string, { readonly options: readonly string[]; readonly perItem: boolean }>>>> = '
+      + '{"math.add":{"math.big_sum":{"options":["confirm"],"perItem":false},"math.per_item":{"options":["keep","drop"],"perItem":true}}}')
+    expect(without.clientSource).not.toContain('withDecisions')
+    expect(without.clientSource).not.toContain('rpcDecisions')
+  })
+
+  it('asks the application for a declared decision and resends with the answer', async () => {
+    const generated = generateRpcClientFiles(decisionTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as GeneratedClientModule & {
+      withDecisions(
+        client: unknown, method: string, params: unknown,
+        ask: (question: { code: string; options: readonly string[]; perItem: boolean; data: unknown }) => unknown,
+        options?: { maxQuestions?: number }
+      ): Promise<unknown>
+    }
+    const sent: unknown[] = []
+    const client = clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async (_input, init) => {
+        const request = JSON.parse(String(init?.body)) as { id: string; params: { decisions?: { code: string; item?: string; option: string }[] } }
+        sent.push(request.params.decisions)
+        const decisions = request.params.decisions ?? []
+        if (!decisions.some((d) => d.code === 'math.big_sum')) {
+          return jsonResponse({jsonrpc: '2.0', id: request.id, error: {
+            code: -32006, message: 'That is a big sum.', data: {code: 'math.big_sum', data: {limit: 10}},
+          }})
+        }
+        if (!decisions.some((d) => d.code === 'math.per_item' && d.item === 'line-2')) {
+          return jsonResponse({jsonrpc: '2.0', id: request.id, error: {
+            code: -32006, message: 'Keep these lines?', data: {code: 'math.per_item'},
+          }})
+        }
+        return jsonResponse({jsonrpc: '2.0', id: request.id, result: 42})
+      },
+      idGenerator: () => 'request-1',
+      validateParams: false,
+      validateResults: false,
+    })
+    const questions: { code: string; options: readonly string[]; perItem: boolean; data: unknown }[] = []
+
+    const result = await clientModule.withDecisions(client, 'math.add', {left: 30, right: 12}, (question) => {
+      questions.push(question)
+      return question.perItem ? {'line-1': 'keep', 'line-2': 'drop'} : 'confirm'
+    })
+
+    expect(result).toBe(42)
+    expect(questions.map((q) => [q.code, q.options, q.perItem, q.data])).toEqual([
+      ['math.big_sum', ['confirm'], false, {limit: 10}],
+      ['math.per_item', ['keep', 'drop'], true, undefined],
+    ])
+    expect(sent).toEqual([
+      [],
+      [{code: 'math.big_sum', option: 'confirm'}],
+      [
+        {code: 'math.big_sum', option: 'confirm'},
+        {code: 'math.per_item', item: 'line-1', option: 'keep'},
+        {code: 'math.per_item', item: 'line-2', option: 'drop'},
+      ],
+    ])
+
+    // A cancelled question throws the decision error; an undeclared one is never asked.
+    await expect(clientModule.withDecisions(client, 'math.add', {left: 1, right: 2}, () => undefined))
+      .rejects.toMatchObject({code: 'math.big_sum', isDecisionRequired: true})
+  })
+
   it('propagates a transform result of null instead of falling back to the raw value', async () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     const clientModule = await loadGeneratedClient(generated.clientSource)
@@ -1015,6 +1090,7 @@ describe('JSON-RPC client generator', () => {
       forbidden: -32003,
       businessRule: -32004,
       unauthorized: -32005,
+      decisionRequired: -32006,
     })
 
     // End-to-end: a NotFound error response surfaces on the getter, so a consumer branches without re-wrapping.
@@ -1041,6 +1117,7 @@ describe('JSON-RPC client generator', () => {
       {code: -32003, getter: 'isForbidden'},
       {code: -32004, getter: 'isBusinessRule'},
       {code: -32005, getter: 'isUnauthorized'},
+      {code: -32006, getter: 'isDecisionRequired'},
       {code: -32602, getter: 'isInvalidParams'},
       {code: -32603, getter: 'isInternalError'},
     ] as const
@@ -1767,6 +1844,44 @@ function rpcClientTestSchema(): RpcSchema {
             name: {type: 'string'},
           },
           required: ['id', 'name'],
+        },
+      },
+    },
+  }
+}
+
+function decisionTestSchema(): RpcSchema {
+  const schema = rpcClientTestSchema()
+  const add = schema.methods['math.add']
+  return {
+    ...schema,
+    methods: {
+      ...schema.methods,
+      'math.add': {
+        ...add,
+        params: {
+          type: 'object',
+          properties: {
+            left: {type: 'number'},
+            right: {type: 'number'},
+            decisions: {
+              type: ['array', 'null'],
+              items: {
+                type: 'object',
+                properties: {code: {type: 'string'}, item: {type: ['string', 'null']}, option: {type: 'string'}},
+                required: ['code'],
+              },
+            },
+          },
+          required: ['left', 'right'],
+        },
+        errors: {
+          'math.big_sum': {
+            kind: 'decision_required',
+            data: {type: 'object', properties: {limit: {type: 'number'}}, required: ['limit']},
+            decision: {options: ['confirm']},
+          },
+          'math.per_item': {kind: 'decision_required', decision: {options: ['keep', 'drop'], perItem: true}},
         },
       },
     },

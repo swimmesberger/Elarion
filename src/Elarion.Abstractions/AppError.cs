@@ -24,7 +24,14 @@ public enum ErrorKind {
     Internal,
 
     /// <summary>The caller is not authenticated (no/invalid credentials). Maps to HTTP 401.</summary>
-    Unauthorized
+    Unauthorized,
+
+    /// <summary>
+    /// The request is valid but needs the caller's decision before it runs ("this looks like a duplicate — import it
+    /// anyway?"). The caller answers through <see cref="IDecidingRequest.Decisions"/> and sends the request again.
+    /// Maps to HTTP 409; see <see cref="AppError.DecisionRequired"/>.
+    /// </summary>
+    DecisionRequired
 }
 
 /// <summary>
@@ -150,6 +157,27 @@ public sealed record AppError {
     /// <summary>Creates a business rule violation error with optional details.</summary>
     public static AppError BusinessRule(string message, string? code = null, object? data = null) {
         return Create(ErrorKind.BusinessRule, message, code, data);
+    }
+
+    /// <summary>
+    /// Creates the answer of a request that needs the caller's decision before it runs (ADR-0101). The
+    /// <paramref name="code"/> names the decision a handler declares with <see cref="RequiresDecisionAttribute"/>; the
+    /// caller answers it in <see cref="IDecidingRequest.Decisions"/> and resends. Ask inside the transaction, only when
+    /// the state that needs the decision is there, so a resend after the state changed simply runs.
+    /// </summary>
+    /// <param name="code">The decision's stable code, for example <c>"banking.possible_duplicate"</c>.</param>
+    /// <param name="message">A human-readable question.</param>
+    /// <param name="data">What the caller needs to decide (for a per-item decision, the items with their keys).</param>
+    /// <example>
+    /// <code>
+    /// if (duplicates.Count &gt; 0 &amp;&amp; !command.IsConfirmed(Codes.PossibleDuplicate))
+    ///     return AppError.DecisionRequired(Codes.PossibleDuplicate, "This looks like a booking you already have.",
+    ///         new PossibleDuplicate(duplicates[0].Id));
+    /// </code>
+    /// </example>
+    public static AppError DecisionRequired(string code, string message, object? data = null) {
+        ArgumentNullException.ThrowIfNull(code);
+        return Create(ErrorKind.DecisionRequired, message, code, data);
     }
 
     /// <summary>Creates an internal error with an optional detail message.</summary>

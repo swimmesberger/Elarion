@@ -338,6 +338,7 @@ try {
 | `isForbidden` | `-32003` | `Forbidden` |
 | `isBusinessRule` | `-32004` | `BusinessRule` |
 | `isUnauthorized` | `-32005` | `Unauthorized` |
+| `isDecisionRequired` | `-32006` | `DecisionRequired` |
 | `isInternalError` | `-32603` | `Internal` |
 
 The application codes are also exported as `ElarionErrorCodes` for `switch` statements, and the standard
@@ -354,6 +355,34 @@ to the message instead of matching the message text; it is `undefined` for every
 if (error instanceof RpcError && error.code === 'internal')
   return showError(`${error.message} (reference ${error.reference ?? 'unavailable'})`)
 ```
+
+### Answering decisions
+
+A method whose handler declares [`[RequiresDecision]`](/docs/concepts/results-and-errors#asking-the-caller-to-decide)
+lists each decision in its `errors` with kind `decision_required`, its `options` and `perItem`. `withDecisions` runs
+the call; when the server needs a decision the method declares, it hands your dialog a typed question and calls again
+with the answer added to `decisions`, until the call succeeds or fails otherwise:
+
+```ts
+import { withDecisions } from './generated/rpc-client'
+
+const outcome = await withDecisions(client, 'banking.imports.commit', { statement }, async (question) => {
+  switch (question.code) {
+    case 'banking.closed_period':
+      return (await confirm(question.message)) ? 'confirm' : undefined   // undefined cancels
+    case 'banking.possible_duplicate':
+      // perItem: one option per item key the data lists, typed "import" | "skip"
+      return await askPerLine(question.data.lines)                       // Record<string, 'import' | 'skip'>
+  }
+})
+```
+
+The question carries `code`, `message`, the declared `options`, `perItem`, the typed `data` and the `RpcError`.
+Returning `undefined` cancels: `withDecisions` throws the decision error, which you can recognize with
+`error.isDecisionRequired`. A later answer for the same code and item replaces an earlier one, and `maxQuestions`
+(default 10) stops a server that keeps asking. Each resend is a new request, so an idempotent method gets a new
+idempotency key unless the options fix one. `withDecisions` and the `RpcDecision*` types are emitted only when a method
+declares a decision.
 
 ## Method requirements and UI gating
 

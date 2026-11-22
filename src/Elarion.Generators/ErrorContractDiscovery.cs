@@ -31,7 +31,8 @@ internal static class ErrorContractDiscovery {
             ["Forbidden"] = "forbidden",
             ["Unauthorized"] = "unauthorized",
             ["BusinessRule"] = "business_rule",
-            ["Internal"] = "internal"
+            ["Internal"] = "internal",
+            ["DecisionRequired"] = "decision_required"
         };
 
     public const string ValidationDataFqn = "global::Elarion.Abstractions.ValidationErrorData";
@@ -75,7 +76,23 @@ internal static class ErrorContractDiscovery {
         DiagnosticSeverity.Error,
         true);
 
-    public sealed record ErrorDeclaration(string Code, string Kind, string? DataTypeFqn);
+    /// <summary>
+    /// One declared error. <see cref="Decision"/> is set for a <c>[RequiresDecision]</c> declaration (kind
+    /// <c>DecisionRequired</c>): <c>"1|a,b"</c> for a per-item decision with options <c>a</c> and <c>b</c>,
+    /// <c>"0|confirm"</c> for a whole-request confirmation.
+    /// </summary>
+    public sealed record ErrorDeclaration(string Code, string Kind, string? DataTypeFqn, string? Decision = null);
+
+    public const string RequiresDecisionAttributeMetadataName = "Elarion.Abstractions.RequiresDecisionAttribute";
+
+    public static readonly DiagnosticDescriptor DecisionOptionsNotEnum = new(
+        "ELERR003",
+        "Decision options are not an enum",
+        "'{0}' declares decision '{1}' with Options = typeof({2}), which is not an enum with members; the options of a "
+        + "decision are the members of an enum (omit Options for a confirmation)",
+        "Elarion.Errors",
+        DiagnosticSeverity.Error,
+        true);
 
     /// <summary>The handler's declared and implied errors, sorted by code; reports invalid or conflicting declarations.</summary>
     /// <remarks>
@@ -114,11 +131,19 @@ internal static class ErrorContractDiscovery {
         Dictionary<string, ErrorDeclaration> byCode,
         Action<DiagnosticInfo>? report) {
         foreach (var attribute in attributes) {
-            if (attribute.AttributeClass?.ToDisplayString() != ProducesErrorAttributeMetadataName)
+            ErrorDeclaration? declaration;
+            var attributeName = attribute.AttributeClass?.ToDisplayString();
+            if (attributeName == ProducesErrorAttributeMetadataName) {
+                if (!TryReadDeclaration(attribute, out declaration))
+                    continue;
+            }
+            else if (attributeName == RequiresDecisionAttributeMetadataName) {
+                if (!TryReadDecision(attribute, owner, locate, report, out declaration))
+                    continue;
+            }
+            else {
                 continue;
-
-            if (!TryReadDeclaration(attribute, out var declaration))
-                continue;
+            }
 
             if (!IsValidCode(declaration.Code)) {
                 report?.Invoke(DiagnosticInfo.Create(InvalidErrorCode, locate(attribute), owner, declaration.Code));
@@ -215,6 +240,75 @@ internal static class ErrorContractDiscovery {
 
         declaration = new ErrorDeclaration(code, kind, dataType);
         return true;
+    }
+
+    // [RequiresDecision(code, Options = typeof(TEnum), PerItem = …, DataType = typeof(T))]: a DecisionRequired error
+    // whose options are the enum's member names in camel case (the wire names DecisionExtensions parses), or the one
+    // option "confirm" without Options.
+    private static bool TryReadDecision(
+        AttributeData attribute,
+        string owner,
+        Func<AttributeData, Location?> locate,
+        Action<DiagnosticInfo>? report,
+        out ErrorDeclaration declaration) {
+        declaration = null!;
+        if (attribute.ConstructorArguments.Length != 1 || attribute.ConstructorArguments[0].Value is not string code)
+            return false;
+
+        string? dataType = null;
+        var perItem = false;
+        var options = new List<string>();
+        foreach (var named in attribute.NamedArguments) {
+            switch (named.Key) {
+                case "DataType" when named.Value.Value is ITypeSymbol data:
+                    dataType = data.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                    break;
+                case "PerItem" when named.Value.Value is bool value:
+                    perItem = value;
+                    break;
+                case "Options" when named.Value.Value is ITypeSymbol optionsType:
+                    if (optionsType.TypeKind == TypeKind.Enum)
+                        foreach (var member in optionsType.GetMembers())
+                            if (member is IFieldSymbol { HasConstantValue: true } field)
+                                options.Add(CamelCase(field.Name));
+
+                    if (options.Count == 0) {
+                        report?.Invoke(DiagnosticInfo.Create(DecisionOptionsNotEnum, locate(attribute), owner, code,
+                            optionsType.ToDisplayString()));
+                        return false;
+                    }
+
+                    break;
+            }
+        }
+
+        if (options.Count == 0)
+            options.Add("confirm");
+
+        declaration = new ErrorDeclaration(code, "DecisionRequired", dataType,
+            (perItem ? "1|" : "0|") + string.Join(",", options));
+        return true;
+    }
+
+    // System.Text.Json's camel case: the leading run of upper-case letters is lowered, keeping the last one of a run
+    // that starts a new word ("URLValue" -> "urlValue", "OnlyHere" -> "onlyHere").
+    internal static string CamelCase(string name) {
+        if (name.Length == 0 || !char.IsUpper(name[0]))
+            return name;
+
+        var chars = name.ToCharArray();
+        for (var i = 0; i < chars.Length; i++) {
+            if (i == 1 && !char.IsUpper(chars[i]))
+                break;
+
+            var hasNext = i + 1 < chars.Length;
+            if (i > 0 && hasNext && !char.IsUpper(chars[i + 1]))
+                break;
+
+            chars[i] = char.ToLowerInvariant(chars[i]);
+        }
+
+        return new string(chars);
     }
 
     private static string? EnumMemberName(TypedConstant constant) {

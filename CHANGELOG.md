@@ -26,6 +26,17 @@ minor releases may include breaking changes.
   member and the generated TypeScript documents it. New errors: `ELAUTH003` (a marked member is not nullable) and
   `ELAUTH004` (a shape the pipeline cannot copy). See
   [Authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization#members-only-some-callers-see).
+- **Asking the caller to decide** (ADR-0101). A handler declares a decision with
+  `[RequiresDecision(code, Options = typeof(TEnum), PerItem = …, DataType = …)]` and asks with
+  `AppError.DecisionRequired(code, message, data)`, a new `ErrorKind` (JSON-RPC `-32006`, HTTP `409`, gRPC
+  `FailedPrecondition`). The request implements `IDecidingRequest` and carries the answers in one `Decisions` list of
+  `{ code, item?, option }`; `IsConfirmed`, `Decision<TOption>` and `Unanswered(code, keys)` read it, so a per-item
+  decision refuses while any item the server found is unanswered instead of skipping it. The schema exports each
+  decision's options and `perItem`, and the generated TypeScript client gains `isDecisionRequired`,
+  `ElarionErrorCodes.decisionRequired` and, for schemas that declare decisions, `withDecisions(client, method, params,
+  ask)`, which asks the application's dialog with a typed question and resends with the answer. New error: `ELERR003`
+  (decision options are not an enum). See
+  [Results and errors](https://elarion.wimmesberger.dev/docs/concepts/results-and-errors#asking-the-caller-to-decide).
 - **Rules: one expression for queries and memory** (ADR-0102). `Rule<TInput, TResult>` and `Rule<TInput1, TInput2,
   TResult>` in `Elarion.Expressions` (core, no EF dependency) hold a rule's expression: `rule.Expression` goes into a
   query, `rule.Invoke(entity)` runs a delegate compiled once and cached (the interpreter under NativeAOT).
@@ -37,6 +48,10 @@ minor releases may include breaking changes.
   `AnyOf` is always false, `AllOf` always true). The page also gives the recipe for an aggregate a rule uses several
   times: join it once and pass it as the rule's second input. See
   [Rules](https://elarion.wimmesberger.dev/docs/concepts/rules).
+
+### Changed
+- **Breaking: `ErrorKind` gains `DecisionRequired`** (ADR-0101). The existing kinds keep their values; an exhaustive
+  `switch` over `ErrorKind` in an application gets a new case (it maps to HTTP `409` and JSON-RPC `-32006`).
 
 ## [0.4.2] - 2026-11-21
 

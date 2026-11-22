@@ -35,6 +35,7 @@ public sealed class GrpcAppErrorTranslator : IAppErrorTranslator<RpcException> {
             ErrorKind.Forbidden => (StatusCode.PermissionDenied, "forbidden"),
             ErrorKind.Unauthorized => (StatusCode.Unauthenticated, "unauthorized"),
             ErrorKind.BusinessRule => (StatusCode.FailedPrecondition, "business-rule"),
+            ErrorKind.DecisionRequired => (StatusCode.FailedPrecondition, "decision-required"),
             ErrorKind.Internal => (StatusCode.Internal, "internal"),
             _ => (StatusCode.Internal, "internal")
         };

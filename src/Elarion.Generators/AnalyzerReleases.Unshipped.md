@@ -67,6 +67,7 @@
  ELRPC005   | Elarion.JsonRpc                    | Error    | A streamed file cannot be carried by a [Handler] transport
  ELERR001   | Elarion.Errors                     | Error    | Invalid error code
  ELERR002   | Elarion.Errors                     | Error    | Conflicting error declaration
+ ELERR003   | Elarion.Errors                     | Error    | Decision options are not an enum
  ELRES001   | Elarion.Abstractions.Resilience    | Error    | Invalid resilience policy
  ELRES002   | Elarion.Abstractions.Resilience    | Error    | Duplicate resilience policy name
  ELCACHE001 | Elarion.Abstractions.Caching       | Error    | Handler cannot be both cacheable and cache-invalidating
