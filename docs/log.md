@@ -2,6 +2,7 @@
 
 ## 2026-11-22
 
+* **Update**: [ADR-0001](decisions/0001-event-transaction-phase.md) and [ADR-0003](decisions/0003-decorator-attachment-predicates.md) gained an amendment: the core package ships the opt-in TransactionDecorator, and the preview decorator of ADR-0104 is the one built-in owner of a unit of work.
 * **Update**: [ADR-0102](decisions/0102-rules-are-expressions-composed-once.md) now records UseElarionRuleCheck, the EF Core interceptor that refuses a query with an unexpanded rule.
 * **Update**: [ADR-0101](decisions/0101-a-decision-required-answer.md) is accepted and implemented, with per-item decisions, answers as one list of code, item and option, and options as camel-cased enum members; the glossary gained *decision*.
 * **Creation**: [ADR-0103](decisions/0103-one-permission-decision-and-members-visible-by-permission.md), one permission decision (IPermissionChecker) shared by the gate, handler code and response members visible by permission ([VisibleWith]); glossary terms Permission checker and Member visible by permission.
