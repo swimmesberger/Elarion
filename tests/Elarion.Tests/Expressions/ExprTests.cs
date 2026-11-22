@@ -8,6 +8,44 @@ namespace Elarion.Tests.Expressions;
 public sealed class ExprTests {
     private static readonly int[] Numbers = [1, 2, 3, 4, 5, 6];
 
+    private static readonly Rule<int, bool> IsEven = Rule.Create((int n) => n % 2 == 0);
+
+    private static readonly Rule<int, int, int, bool> IsBetween =
+        Rule.Create((int n, int from, int to) => n >= from && n <= to);
+
+    [Fact]
+    public void Expand_TakesALambdaOfEveryArity_AndInlinesTheRulesItInvokes() {
+        var even = Expr.Expand((int n) => IsEven.Invoke(n));
+        var evenAbove = Expr.Expand((int n, int minimum) => IsEven.Invoke(n) && n > minimum);
+        var between = Expr.Expand((int n, int from, int to) => IsBetween.Invoke(n, from, to));
+        var matchingBetween = Expr.Expand((int n, int from, int to, bool wantEven) =>
+            IsBetween.Invoke(n, from, to) && IsEven.Invoke(n) == wantEven);
+
+        RuleTests.ContainsInvoke(even).Should().BeFalse();
+        RuleTests.ContainsInvoke(evenAbove).Should().BeFalse();
+        RuleTests.ContainsInvoke(between).Should().BeFalse();
+        RuleTests.ContainsInvoke(matchingBetween).Should().BeFalse();
+        Numbers.Where(even.Compile()).Should().Equal(2, 4, 6);
+        Numbers.Where(n => evenAbove.Compile()(n, 2)).Should().Equal(4, 6);
+        Numbers.Where(n => between.Compile()(n, 2, 4)).Should().Equal(2, 3, 4);
+        Numbers.Where(n => matchingBetween.Compile()(n, 2, 5, false)).Should().Equal(3, 5);
+    }
+
+    [Fact]
+    public void Expand_InAHelperThatReturnsTheLambda_NeedsNoTypedLocal() {
+        var predicate = EvenBetween(2, 5);
+
+        RuleTests.ContainsInvoke(predicate).Should().BeFalse();
+        Numbers.Where(predicate.Compile()).Should().Equal(2, 4);
+    }
+
+    [Fact]
+    public void Expand_RuleFromAMethodCall_ThrowsNotSupported() {
+        var expand = () => Expr.Expand((int n) => GetIsEven().Invoke(n));
+
+        expand.Should().Throw<NotSupportedException>().WithMessage("*GetIsEven()*");
+    }
+
     [Fact]
     public void Captured_IsAMemberAccessOnAClosure_NotAConstant() {
         var captured = Expr.Captured(new DateOnly(2031, 7, 15));
@@ -124,6 +162,14 @@ public sealed class ExprTests {
         var predicate = Expr.Not<int>(n => n > 2);
 
         Numbers.Where(predicate.Compile()).Should().Equal(1, 2);
+    }
+
+    private static Expression<Func<int, bool>> EvenBetween(int from, int to) {
+        return Expr.Expand((int n) => IsBetween.Invoke(n, from, to) && IsEven.Invoke(n));
+    }
+
+    private static Rule<int, bool> GetIsEven() {
+        return IsEven;
     }
 
     private sealed class ParameterCollector : ExpressionVisitor {

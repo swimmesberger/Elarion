@@ -19,6 +19,11 @@ public static class RuleExpressionExtensions {
     /// <exception cref="NotSupportedException">An invoked rule is reached through an expression that cannot be
     /// evaluated without compiling code, such as a method call or a lambda parameter.</exception>
     /// <exception cref="InvalidOperationException">An invoked rule is null, or invokes itself.</exception>
+    /// <remarks>
+    /// A lambda has no type of its own, so this extension needs an expression already typed (a field, a local, a
+    /// rule's <c>Expression</c>). To expand a lambda where it is written, as a helper's return value, use
+    /// <see cref="Expr.Expand{T, TResult}(Expression{Func{T, TResult}})"/>.
+    /// </remarks>
     /// <example>
     /// <code>
     /// Expression&lt;Func&lt;Invoice, bool&gt;&gt; overdue = invoice =&gt; invoice.DueOn &lt; today &amp;&amp; OpenAmount.Invoke(invoice) &gt; 0;
@@ -97,5 +102,37 @@ public static class RuleExpressionExtensions {
         ArgumentNullException.ThrowIfNull(expression);
         return ((Func<TInput1, TInput2, TResult>)CompiledExpressions.GetValue(expression, Rule.Compile))(
             input1, input2);
+    }
+
+    /// <inheritdoc cref="Invoke{TInput, TResult}(Expression{Func{TInput, TResult}}, TInput)"/>
+    /// <param name="expression">The expression to invoke, usually a static field or a captured local.</param>
+    /// <param name="input1">The first argument.</param>
+    /// <param name="input2">The second argument.</param>
+    /// <param name="input3">The third argument.</param>
+    public static TResult Invoke<TInput1, TInput2, TInput3, TResult>(
+        this Expression<Func<TInput1, TInput2, TInput3, TResult>> expression,
+        TInput1 input1,
+        TInput2 input2,
+        TInput3 input3) {
+        ArgumentNullException.ThrowIfNull(expression);
+        return ((Func<TInput1, TInput2, TInput3, TResult>)CompiledExpressions.GetValue(expression, Rule.Compile))(
+            input1, input2, input3);
+    }
+
+    /// <inheritdoc cref="Invoke{TInput, TResult}(Expression{Func{TInput, TResult}}, TInput)"/>
+    /// <param name="expression">The expression to invoke, usually a static field or a captured local.</param>
+    /// <param name="input1">The first argument.</param>
+    /// <param name="input2">The second argument.</param>
+    /// <param name="input3">The third argument.</param>
+    /// <param name="input4">The fourth argument.</param>
+    public static TResult Invoke<TInput1, TInput2, TInput3, TInput4, TResult>(
+        this Expression<Func<TInput1, TInput2, TInput3, TInput4, TResult>> expression,
+        TInput1 input1,
+        TInput2 input2,
+        TInput3 input3,
+        TInput4 input4) {
+        ArgumentNullException.ThrowIfNull(expression);
+        return ((Func<TInput1, TInput2, TInput3, TInput4, TResult>)CompiledExpressions.GetValue(
+            expression, Rule.Compile))(input1, input2, input3, input4);
     }
 }

@@ -4,8 +4,8 @@ using System.Runtime.CompilerServices;
 namespace Elarion.Expressions;
 
 /// <summary>
-/// Creates a <see cref="Rule{TInput, TResult}"/> or <see cref="Rule{TInput1, TInput2, TResult}"/> with its types
-/// inferred from the lambda.
+/// Creates a rule over one to four inputs (<see cref="Rule{TInput, TResult}"/> to
+/// <see cref="Rule{TInput1, TInput2, TInput3, TInput4, TResult}"/>) with its types inferred from the lambda.
 /// </summary>
 /// <example>
 /// <code>
@@ -32,6 +32,20 @@ public static class Rule {
         return new Rule<TInput1, TInput2, TResult>(expression);
     }
 
+    /// <summary>Creates a rule over three inputs from <paramref name="expression"/>.</summary>
+    /// <param name="expression">The rule's definition, the one expression used in queries and in memory.</param>
+    public static Rule<TInput1, TInput2, TInput3, TResult> Create<TInput1, TInput2, TInput3, TResult>(
+        Expression<Func<TInput1, TInput2, TInput3, TResult>> expression) {
+        return new Rule<TInput1, TInput2, TInput3, TResult>(expression);
+    }
+
+    /// <summary>Creates a rule over four inputs from <paramref name="expression"/>.</summary>
+    /// <param name="expression">The rule's definition, the one expression used in queries and in memory.</param>
+    public static Rule<TInput1, TInput2, TInput3, TInput4, TResult> Create<TInput1, TInput2, TInput3, TInput4, TResult>(
+        Expression<Func<TInput1, TInput2, TInput3, TInput4, TResult>> expression) {
+        return new Rule<TInput1, TInput2, TInput3, TInput4, TResult>(expression);
+    }
+
     /// <summary>
     /// Compiles a rule's expression for in-memory use. Without dynamic code (NativeAOT) the expression interpreter
     /// runs it; System.Linq.Expressions would choose the interpreter there by itself, and saying so keeps the choice
@@ -39,6 +53,19 @@ public static class Rule {
     /// </summary>
     internal static Delegate Compile(LambdaExpression expression) {
         return expression.Compile(preferInterpretation: !RuntimeFeature.IsDynamicCodeSupported);
+    }
+
+    /// <summary>
+    /// Returns the delegate cached in <paramref name="compiled"/>, compiling <paramref name="expression"/> into it on
+    /// first use. A race compiles twice and keeps the first result; both delegates are equivalent, and no lock is held
+    /// while compiling.
+    /// </summary>
+    internal static TDelegate GetOrCompile<TDelegate>(ref TDelegate? compiled, LambdaExpression expression)
+        where TDelegate : Delegate {
+        var current = Volatile.Read(ref compiled);
+        if (current is not null) return current;
+
+        return Interlocked.CompareExchange(ref compiled, (TDelegate)Compile(expression), null) ?? compiled;
     }
 }
 
@@ -103,17 +130,7 @@ public sealed class Rule<TInput, TResult> : IRuleExpression {
     /// The rule compiled to a delegate, on first access, and cached. Without dynamic code (NativeAOT) the delegate
     /// runs on the expression interpreter.
     /// </summary>
-    public Func<TInput, TResult> Compiled {
-        get {
-            var compiled = Volatile.Read(ref _compiled);
-            if (compiled is not null) return compiled;
-
-            // A race compiles twice and keeps the first result; both delegates are equivalent, and no lock is held
-            // while compiling.
-            return Interlocked.CompareExchange(ref _compiled, (Func<TInput, TResult>)Rule.Compile(Expression), null)
-                ?? _compiled;
-        }
-    }
+    public Func<TInput, TResult> Compiled => Rule.GetOrCompile(ref _compiled, Expression);
 
     LambdaExpression IRuleExpression.Lambda => Expression;
 
@@ -166,16 +183,7 @@ public sealed class Rule<TInput1, TInput2, TResult> : IRuleExpression {
     /// The rule compiled to a delegate, on first access, and cached. Without dynamic code (NativeAOT) the delegate
     /// runs on the expression interpreter.
     /// </summary>
-    public Func<TInput1, TInput2, TResult> Compiled {
-        get {
-            var compiled = Volatile.Read(ref _compiled);
-            if (compiled is not null) return compiled;
-
-            return Interlocked.CompareExchange(
-                    ref _compiled, (Func<TInput1, TInput2, TResult>)Rule.Compile(Expression), null)
-                ?? _compiled;
-        }
-    }
+    public Func<TInput1, TInput2, TResult> Compiled => Rule.GetOrCompile(ref _compiled, Expression);
 
     LambdaExpression IRuleExpression.Lambda => Expression;
 
@@ -187,6 +195,117 @@ public sealed class Rule<TInput1, TInput2, TResult> : IRuleExpression {
     /// <param name="input2">The second input.</param>
     public TResult Invoke(TInput1 input1, TInput2 input2) {
         return Compiled(input1, input2);
+    }
+
+    /// <summary>Returns the rule's expression as text.</summary>
+    public override string ToString() {
+        return Expression.ToString();
+    }
+}
+
+/// <summary>
+/// A domain rule over three inputs, defined once as an expression; see <see cref="Rule{TInput, TResult}"/>. The
+/// further inputs carry values the rule cannot reach from the first: several aggregates joined once per row, or an
+/// aggregate and a date.
+/// </summary>
+/// <typeparam name="TInput1">The first input, usually the entity the rule is about.</typeparam>
+/// <typeparam name="TInput2">The second input.</typeparam>
+/// <typeparam name="TInput3">The third input.</typeparam>
+/// <typeparam name="TResult">What the rule derives: a value, or <see langword="bool"/> for a condition.</typeparam>
+/// <example>
+/// <code>
+/// // The paid and the credited sum are joined once per row and passed in, instead of summed at every use.
+/// static readonly Rule&lt;Invoice, decimal, decimal, decimal&gt; OpenGiven =
+///     Rule.Create((Invoice invoice, decimal paid, decimal credited) =&gt; invoice.Gross - paid - credited);
+///
+/// decimal open = OpenGiven.Invoke(invoice, Paid.Invoke(invoice), Credited.Invoke(invoice));
+/// </code>
+/// </example>
+public sealed class Rule<TInput1, TInput2, TInput3, TResult> : IRuleExpression {
+    private Func<TInput1, TInput2, TInput3, TResult>? _compiled;
+
+    /// <summary>Creates a rule from its definition.</summary>
+    /// <param name="expression">The rule's definition, the one expression used in queries and in memory.</param>
+    public Rule(Expression<Func<TInput1, TInput2, TInput3, TResult>> expression) {
+        ArgumentNullException.ThrowIfNull(expression);
+        Expression = expression;
+    }
+
+    /// <summary>The rule's definition.</summary>
+    public Expression<Func<TInput1, TInput2, TInput3, TResult>> Expression { get; }
+
+    /// <summary>
+    /// The rule compiled to a delegate, on first access, and cached. Without dynamic code (NativeAOT) the delegate
+    /// runs on the expression interpreter.
+    /// </summary>
+    public Func<TInput1, TInput2, TInput3, TResult> Compiled => Rule.GetOrCompile(ref _compiled, Expression);
+
+    LambdaExpression IRuleExpression.Lambda => Expression;
+
+    /// <summary>
+    /// Runs the rule in memory. Inside an expression tree the call is the marker that <c>Expand()</c> replaces with
+    /// the rule's body.
+    /// </summary>
+    /// <param name="input1">The first input.</param>
+    /// <param name="input2">The second input.</param>
+    /// <param name="input3">The third input.</param>
+    public TResult Invoke(TInput1 input1, TInput2 input2, TInput3 input3) {
+        return Compiled(input1, input2, input3);
+    }
+
+    /// <summary>Returns the rule's expression as text.</summary>
+    public override string ToString() {
+        return Expression.ToString();
+    }
+}
+
+/// <summary>
+/// A domain rule over four inputs, defined once as an expression; see <see cref="Rule{TInput, TResult}"/> and
+/// <see cref="Rule{TInput1, TInput2, TInput3, TResult}"/>.
+/// </summary>
+/// <typeparam name="TInput1">The first input, usually the entity the rule is about.</typeparam>
+/// <typeparam name="TInput2">The second input.</typeparam>
+/// <typeparam name="TInput3">The third input.</typeparam>
+/// <typeparam name="TInput4">The fourth input.</typeparam>
+/// <typeparam name="TResult">What the rule derives: a value, or <see langword="bool"/> for a condition.</typeparam>
+/// <example>
+/// <code>
+/// static readonly Rule&lt;Invoice, decimal, decimal, DateOnly, bool&gt; IsDunnable =
+///     Rule.Create((Invoice invoice, decimal paid, decimal credited, DateOnly today) =&gt;
+///         invoice.DueOn &lt; today &amp;&amp; OpenGiven.Invoke(invoice, paid, credited) &gt; 0);
+/// </code>
+/// </example>
+public sealed class Rule<TInput1, TInput2, TInput3, TInput4, TResult> : IRuleExpression {
+    private Func<TInput1, TInput2, TInput3, TInput4, TResult>? _compiled;
+
+    /// <summary>Creates a rule from its definition.</summary>
+    /// <param name="expression">The rule's definition, the one expression used in queries and in memory.</param>
+    public Rule(Expression<Func<TInput1, TInput2, TInput3, TInput4, TResult>> expression) {
+        ArgumentNullException.ThrowIfNull(expression);
+        Expression = expression;
+    }
+
+    /// <summary>The rule's definition.</summary>
+    public Expression<Func<TInput1, TInput2, TInput3, TInput4, TResult>> Expression { get; }
+
+    /// <summary>
+    /// The rule compiled to a delegate, on first access, and cached. Without dynamic code (NativeAOT) the delegate
+    /// runs on the expression interpreter.
+    /// </summary>
+    public Func<TInput1, TInput2, TInput3, TInput4, TResult> Compiled => Rule.GetOrCompile(ref _compiled, Expression);
+
+    LambdaExpression IRuleExpression.Lambda => Expression;
+
+    /// <summary>
+    /// Runs the rule in memory. Inside an expression tree the call is the marker that <c>Expand()</c> replaces with
+    /// the rule's body.
+    /// </summary>
+    /// <param name="input1">The first input.</param>
+    /// <param name="input2">The second input.</param>
+    /// <param name="input3">The third input.</param>
+    /// <param name="input4">The fourth input.</param>
+    public TResult Invoke(TInput1 input1, TInput2 input2, TInput3 input3, TInput4 input4) {
+        return Compiled(input1, input2, input3, input4);
     }
 
     /// <summary>Returns the rule's expression as text.</summary>

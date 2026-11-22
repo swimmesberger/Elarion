@@ -15,6 +15,17 @@ minor releases may include breaking changes.
   the generated TypeScript documents every alternative. `VisibleWithAttribute.Permission` is `null` when only `AnyOf`
   names the permissions; `Permissions` lists them all. See
   [Authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization#members-only-some-callers-see).
+- **Rules over three and four inputs** (ADR-0102). `Rule<TInput1, TInput2, TInput3, TResult>` and
+  `Rule<TInput1, TInput2, TInput3, TInput4, TResult>`, created with `Rule.Create(…)`, behave like the one- and
+  two-input rules: a compiled, cached delegate for memory, `Invoke` as the marker `Expand()` inlines, and
+  `UseElarionRuleCheck()` refuses them unexpanded. The `Invoke` extensions on `Expression<Func<…>>` gain the same
+  arities. A rule over several joined aggregates, or an aggregate and a date, no longer stays a hand-written
+  expression with a compiled copy. See
+  [Rules](https://elarion.wimmesberger.dev/docs/concepts/rules#rules-with-more-inputs).
+- **`Expr.Expand(lambda)`** expands a lambda where it is written, for one to four inputs, with the types inferred from
+  its parameters: a helper returns `Expr.Expand((Invoice invoice) => IsOverdue.Invoke(invoice, today))` instead of
+  assigning the lambda to a typed local and calling `Expand()` on that. See
+  [Rules](https://elarion.wimmesberger.dev/docs/concepts/rules#helpers-that-return-a-composed-expression).
 
 ### Fixed
 - **`[VisibleWith(ElarionPermissions.X.Y)]` hid nothing in the assembly that generates `ElarionPermissions`.** The

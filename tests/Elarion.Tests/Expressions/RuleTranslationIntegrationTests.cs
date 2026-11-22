@@ -35,6 +35,17 @@ public sealed class RuleTranslationIntegrationTests(PostgreSqlRulesFixture fixtu
         Rule.Create((RuleInvoice invoice, decimal paid) =>
             OpenGiven.Invoke(invoice, paid) > 0 && OpenGiven.Invoke(invoice, paid) < invoice.Gross);
 
+    // Three and four inputs: the joined paid sum plus values from outside the query, each rule invoking the one below.
+    private static readonly Rule<RuleInvoice, decimal, decimal, bool> IsSettledWithin =
+        Rule.Create((RuleInvoice invoice, decimal paid, decimal tolerance) =>
+            OpenGiven.Invoke(invoice, paid) <= tolerance);
+
+    private static readonly Rule<RuleInvoice, decimal, decimal, decimal, InvoiceStanding> Standing =
+        Rule.Create((RuleInvoice invoice, decimal paid, decimal tolerance, decimal remindFrom) =>
+            IsSettledWithin.Invoke(invoice, paid, tolerance) ? InvoiceStanding.Settled
+            : OpenGiven.Invoke(invoice, paid) >= remindFrom ? InvoiceStanding.Remind
+            : InvoiceStanding.Open);
+
     private static readonly Rule<RuleBooking, BookingWindow, bool> InWindow =
         Rule.Create((RuleBooking booking, BookingWindow window) =>
             booking.Account == window.Account && booking.BookedOn >= window.From && booking.BookedOn <= window.To);
@@ -150,6 +161,81 @@ public sealed class RuleTranslationIntegrationTests(PostgreSqlRulesFixture fixtu
     }
 
     [Fact]
+    public async Task RulesOverThreeAndFourInputs_TranslateAfterExpand_WithCapturedValuesAsParameters() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var db = fixture.CreateContext(ruleCheck: true);
+        var tolerance = 0.25m;
+        var remindFrom = 120m;
+
+        var paidByInvoice = db.Payments
+            .GroupBy(payment => payment.InvoiceId)
+            .Select(group => new { InvoiceId = group.Key, Paid = group.Sum(payment => payment.Amount) });
+        var query = db.Invoices
+            .LeftJoin(paidByInvoice, invoice => invoice.Id, paid => paid.InvoiceId,
+                (invoice, paid) => new { Invoice = invoice, Paid = (decimal?)paid!.Paid ?? 0m })
+            .Where(row => !IsSettledWithin.Invoke(row.Invoice, row.Paid, tolerance))
+            .OrderBy(row => row.Invoice.Number)
+            .Select(row => new {
+                row.Invoice.Number, Status = Standing.Invoke(row.Invoice, row.Paid, tolerance, remindFrom),
+            })
+            .Expand();
+        var sql = query.ToQueryString();
+        var rows = await query.ToListAsync(Ct);
+
+        CountSums(sql).Should().Be(1);
+        Statement(sql).Should().NotContain("0.25").And.NotContain("120");
+        ParameterDeclarations(sql).Should().Contain(line => line.Contains("0.25"))
+            .And.Contain(line => line.Contains("120"));
+        var loaded = await LoadInvoicesAsync(db);
+        rows.Select(row => (row.Number, row.Status)).Should().Equal(loaded
+            .Where(invoice => !IsSettledWithin.Invoke(invoice, Paid.Invoke(invoice), tolerance))
+            .Select(invoice =>
+                (invoice.Number, Standing.Invoke(invoice, Paid.Invoke(invoice), tolerance, remindFrom))));
+        rows.Select(row => (row.Number, row.Status)).Should().Equal(
+            ("A-2", InvoiceStanding.Open), ("A-3", InvoiceStanding.Open), ("A-5", InvoiceStanding.Remind));
+    }
+
+    [Fact]
+    public async Task RuleCheck_RefusesUnexpandedRulesOverThreeAndFourInputs() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var db = fixture.CreateContext(ruleCheck: true);
+        var tolerance = 0.25m;
+        var standing = Standing;
+        var settledWithin = IsSettledWithin.Expression;
+        var standingExpression = Standing.Expression;
+
+        // Each would run on the client without the check: the final projection, the rule in a captured local.
+        var threeInputExpression = () => db.Invoices
+            .Select(invoice => settledWithin.Invoke(invoice, 0m, tolerance)).ToListAsync(Ct);
+        var fourInputRule = () => db.Invoices
+            .Select(invoice => standing.Invoke(invoice, 0m, tolerance, 100m)).ToListAsync(Ct);
+        var fourInputExpression = () => db.Invoices
+            .Select(invoice => standingExpression.Invoke(invoice, 0m, tolerance, 100m)).ToListAsync(Ct);
+        var threeInputRuleInAFilter = () => db.Invoices
+            .Where(invoice => IsSettledWithin.Invoke(invoice, 0m, tolerance)).ToListAsync(Ct);
+
+        await threeInputExpression.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not expanded*");
+        await fourInputRule.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not expanded*");
+        await fourInputExpression.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not expanded*");
+        await threeInputRuleInAFilter.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not expanded*");
+    }
+
+    [Fact]
+    public async Task ExprExpand_ExpandsAFilterWhereAHelperReturnsIt_AndPassesTheRuleCheck() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        await using var db = fixture.CreateContext(ruleCheck: true);
+
+        var numbers = await db.Invoices.Where(StandingIs(InvoiceStanding.Remind, 0.25m, 120m))
+            .OrderBy(invoice => invoice.Number).Select(invoice => invoice.Number).ToListAsync(Ct);
+
+        var loaded = await LoadInvoicesAsync(db);
+        numbers.Should().Equal(loaded
+            .Where(invoice => Standing.Invoke(invoice, Paid.Invoke(invoice), 0.25m, 120m) == InvoiceStanding.Remind)
+            .Select(invoice => invoice.Number));
+        numbers.Should().Equal("A-5");
+    }
+
+    [Fact]
     public async Task CapturedValue_IsSentAsAParameter_WhereAConstantIsALiteral() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         await using var db = fixture.CreateContext();
@@ -226,6 +312,15 @@ public sealed class RuleTranslationIntegrationTests(PostgreSqlRulesFixture fixtu
         rows.Select(row => row.Number).Should().Equal("A-2", "A-5");
     }
 
+    // A helper returning a composed filter: Expr.Expand takes the lambda, so no typed local precedes the return.
+    private static Expression<Func<RuleInvoice, bool>> StandingIs(
+        InvoiceStanding wanted,
+        decimal tolerance,
+        decimal remindFrom) {
+        return Expr.Expand((RuleInvoice invoice) =>
+            Standing.Invoke(invoice, Paid.Invoke(invoice), tolerance, remindFrom) == wanted);
+    }
+
     private static async Task<List<RuleInvoice>> LoadInvoicesAsync(RulesDbContext db) {
         return await db.Invoices.Include(invoice => invoice.Payments).OrderBy(invoice => invoice.Number).ToListAsync(Ct);
     }
@@ -247,6 +342,12 @@ public sealed class RuleTranslationIntegrationTests(PostgreSqlRulesFixture fixtu
 public sealed record OpenInvoiceRow(string Number, decimal Open, bool Settled);
 
 public sealed record BookingWindow(string Account, DateOnly From, DateOnly To);
+
+public enum InvoiceStanding {
+    Settled,
+    Open,
+    Remind,
+}
 
 public sealed class RuleInvoice {
     public Guid Id { get; set; }
