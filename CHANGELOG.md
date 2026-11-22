@@ -26,6 +26,17 @@ minor releases may include breaking changes.
   member and the generated TypeScript documents it. New errors: `ELAUTH003` (a marked member is not nullable) and
   `ELAUTH004` (a shape the pipeline cannot copy). See
   [Authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization#members-only-some-callers-see).
+- **Rules: one expression for queries and memory** (ADR-0102). `Rule<TInput, TResult>` and `Rule<TInput1, TInput2,
+  TResult>` in `Elarion.Expressions` (core, no EF dependency) hold a rule's expression: `rule.Expression` goes into a
+  query, `rule.Invoke(entity)` runs a delegate compiled once and cached (the interpreter under NativeAOT).
+  `Rule.Create(…)` infers the types. Inside another expression `rule.Invoke(x)` is a marker that `Expand()` (on an
+  expression, or `query.Expand()` on an `IQueryable`) inlines recursively, so rules compose in filters and in normal
+  constructor projections that EF Core translates; `Invoke` on an `Expression<Func<…>>` expands the same way.
+  `Expr.Captured(value)` makes a value a parameter instead of a literal, `Expr.Inline(lambda, arguments)` inlines a
+  lambda into a tree built at run time, and `Expr.AnyOf`/`AllOf`/`Not` combine predicates over one row (no predicates:
+  `AnyOf` is always false, `AllOf` always true). The page also gives the recipe for an aggregate a rule uses several
+  times: join it once and pass it as the rule's second input. See
+  [Rules](https://elarion.wimmesberger.dev/docs/concepts/rules).
 
 ## [0.4.2] - 2026-11-21
 

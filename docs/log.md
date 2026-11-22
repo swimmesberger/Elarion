@@ -3,6 +3,7 @@
 ## 2026-11-22
 
 * **Creation**: [ADR-0103](decisions/0103-one-permission-decision-and-members-visible-by-permission.md), one permission decision (IPermissionChecker) shared by the gate, handler code and response members visible by permission ([VisibleWith]); glossary terms Permission checker and Member visible by permission.
+* **Update**: [ADR-0102](decisions/0102-rules-are-expressions-composed-once.md) is accepted and implemented: rules over two inputs replace the proposed tuple-input rule (expression trees cannot contain tuple literals), Expr gained Inline, AnyOf, AllOf and Not, and the consequences now say what EF Core does when Expand is forgotten; the [glossary](../GLOSSARY.md) gained *rule*.
 
 ## 2026-11-21
 

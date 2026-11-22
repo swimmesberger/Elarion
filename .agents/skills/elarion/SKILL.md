@@ -422,7 +422,7 @@ High-value pages (paths under `/docs/`, same layout in the repo's `docs/`):
 | Modules, hooks, gating | `concepts/modules`, `capabilities/hosting` |
 | REST / JSON-RPC / MCP / OpenAPI | `capabilities/transports/` |
 | Validation / authorization | `concepts/validation`, `concepts/authorization`, `concepts/resource-authorization` |
-| EF, transactions, pagination | `capabilities/entity-framework`, `concepts/persistence-and-transactions`, `capabilities/pagination` |
+| EF, transactions, pagination, rules in queries | `capabilities/entity-framework`, `concepts/persistence-and-transactions`, `capabilities/pagination`, `concepts/rules` |
 | Bulk insert (imports, backfills) | `capabilities/bulk-operations` |
 | Events, outbox, idempotency | `capabilities/events/`, `concepts/idempotency` |
 | Client events (live browser updates / SSE) | `capabilities/events/client-events` |
@@ -438,6 +438,8 @@ High-value pages (paths under `/docs/`, same layout in the repo's `docs/`):
 - you're writing `services.AddScoped<SomeHandler>()`, MediatR/`IRequestHandler`, or any manual
   handler registration;
 - a repository interface, `IAppDbContext`, or hand-rolled unit-of-work is wrapping EF;
+- an `ExpressionVisitor` that substitutes lambda parameters, `Expression.New(…GetConstructor…)` projections, or
+  LINQKit appear in the application — a rule shared by queries and memory is a `Rule<,>` with `Expand()`;
 - a singleton service is growing locks/`SemaphoreSlim`/`Channel` plumbing around mutable state —
   that's an `[Actor]`;
 - FluentValidation just appeared in a `.csproj`;

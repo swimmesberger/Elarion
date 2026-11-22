@@ -1,0 +1,217 @@
+---
+title: Rules
+description: Write a domain rule once as an expression, compose it into EF Core queries with Invoke and Expand, run the same definition in memory, and join an aggregate once when a rule uses it several times.
+---
+
+A rich domain defines rules — "the open amount of an invoice", "is it settled", "is it overdue" — and needs each of
+them twice: inside a query, translated to SQL, and in memory, on an entity that is already loaded. A **rule** holds
+the one expression both use. It lives in `Elarion.Expressions` in the core `Elarion` package, is plain
+`System.Linq.Expressions`, and depends on no ORM; EF Core is where it is most often translated.
+
+<Callout type="info">
+  Why the API is shaped this way, and what was rejected (LINQKit, an EF-only helper, views and computed columns), is
+  in [ADR-0102](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0102-rules-are-expressions-composed-once.md).
+</Callout>
+
+## Define a rule
+
+`Rule.Create` takes a lambda and infers the types from it. A rule may invoke other rules:
+
+```csharp
+using Elarion.Expressions;
+
+public static class InvoiceRules {
+    public static readonly Rule<Invoice, decimal> Paid =
+        Rule.Create((Invoice invoice) => invoice.Payments.Sum(p => p.Amount));
+
+    public static readonly Rule<Invoice, decimal> OpenAmount =
+        Rule.Create((Invoice invoice) => invoice.Gross - Paid.Invoke(invoice));
+
+    public static readonly Rule<Invoice, bool> IsSettled =
+        Rule.Create((Invoice invoice) => OpenAmount.Invoke(invoice) <= 0);
+}
+```
+
+`rule.Expression` is the definition, an `Expression<Func<Invoice, decimal>>`.
+
+## Run it in memory
+
+`rule.Invoke(invoice)` runs the rule on a loaded object. The expression is compiled on first use and the delegate is
+cached (`rule.Compiled`); concurrent first calls are safe. Without dynamic code (NativeAOT) the delegate runs on the
+expression interpreter.
+
+```csharp
+var invoice = await db.Invoices.Include(i => i.Payments).SingleAsync(i => i.Id == id, ct);
+if (InvoiceRules.IsSettled.Invoke(invoice))
+    return AppError.Conflict("The invoice is already settled.");
+```
+
+In memory, a rule sees only what is loaded: `OpenAmount` over an invoice whose `Payments` were not included sums an
+empty list, where SQL would have joined the payments.
+
+## Compose rules into queries
+
+Inside another expression, `rule.Invoke(x)` is a **marker**: a query provider cannot translate it. `Expand()` replaces
+every marker with the rule's body, its parameter substituted by the call's argument, and does so recursively for
+rules that invoke rules. Call it on the query, after the last operator that invokes a rule:
+
+```csharp
+var rows = await db.Invoices
+    .Where(invoice => !InvoiceRules.IsSettled.Invoke(invoice))
+    .OrderByDescending(invoice => InvoiceRules.OpenAmount.Invoke(invoice))
+    .Select(invoice => new OpenInvoiceRow(invoice.Id, invoice.Number, InvoiceRules.OpenAmount.Invoke(invoice)))
+    .Expand()
+    .ToListAsync(ct);
+```
+
+EF Core receives the inlined bodies, so the filter, the ordering and the projection are all SQL: a projection is a
+normal lambda with a constructor, not an `Expression.New` built by hand. `query.Expand()` returns a new query from the
+same provider; operators appended to it afterwards are not expanded, so expand last (or again).
+
+A rule can also go into an operator directly, `db.Invoices.Where(InvoiceRules.IsSettled.Expression)`; when it invokes
+other rules, call `Expand()` on the query as well. `Expand()` also works on any `Expression` or `Expression<TDelegate>`.
+
+### When `Expand()` is forgotten
+
+| Where the marker is | What EF Core does |
+| --- | --- |
+| A filter, an ordering, a join key | Fails: "The LINQ expression … could not be translated", naming `Invoke`. |
+| The final projection, rule in a static field or property | Fails: "The client projection contains a reference to a constant expression of 'Elarion.Expressions.Rule…' through the instance method 'Invoke'". |
+| The final projection, rule in a captured local | **Runs the rule on the client**, on an entity whose navigations were not loaded: the result is silently wrong. |
+
+Keep rules in static fields, as above, and the last row cannot happen.
+
+### Where a rule can live
+
+`Expand()` reads the rule instance out of the expression tree without compiling code. It follows constants and field
+or property accesses: a static field or property, a local the lambda captures, a field of a captured object. A rule
+obtained from a method call (`GetRule().Invoke(x)`) or from a lambda parameter throws a `NotSupportedException` that
+names the expression. A rule that invokes itself, directly or through another rule, has no finite expansion and
+throws an `InvalidOperationException`; in memory it runs.
+
+## Rules with a second input
+
+`Rule<TInput1, TInput2, TResult>` takes a value the rule cannot reach from the entity: today's date, a threshold, a
+joined aggregate. A local passed as the argument is a parameter in SQL.
+
+```csharp
+public static readonly Rule<Invoice, DateOnly, bool> IsOverdue =
+    Rule.Create((Invoice invoice, DateOnly today) =>
+        invoice.DueOn < today && InvoiceRules.OpenAmount.Invoke(invoice) > 0);
+
+var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+var overdue = await db.Invoices.Where(invoice => IsOverdue.Invoke(invoice, today)).Expand().ToListAsync(ct);
+```
+
+C# expression trees cannot contain tuple literals, so a rule over a tuple could not be invoked inside a query; give it
+two inputs instead.
+
+## Expressions without a rule
+
+`Invoke` is also an extension on `Expression<Func<T, TResult>>` and `Expression<Func<T1, T2, TResult>>`. Inside a query
+it is a marker `Expand()` inlines the same way; outside one it compiles the expression once per instance and runs it.
+
+```csharp
+Expression<Func<Invoice, bool>> isLarge = invoice => invoice.Gross > 10_000m;
+var large = await db.Invoices.Where(invoice => isLarge.Invoke(invoice) && invoice.Payments.Count == 0).Expand().ToListAsync(ct);
+```
+
+## Predicates built at run time
+
+`Expr` combines predicates over one row, each rebound to one shared parameter:
+
+- `Expr.AnyOf(predicates)` joins them with OR. No predicates give a predicate that is always false: no alternatives
+  match no row.
+- `Expr.AllOf(predicates)` joins them with AND. No predicates give a predicate that is always true: no conditions
+  restrict nothing.
+- `Expr.Not(predicate)` negates one.
+
+Both joins take `params` or any sequence. A typical use is one window per bank account, each with its own dates:
+
+```csharp
+public sealed record BookingWindow(Guid AccountId, DateOnly From, DateOnly To);
+
+static readonly Rule<Booking, BookingWindow, bool> InWindow =
+    Rule.Create((Booking booking, BookingWindow window) =>
+        booking.AccountId == window.AccountId && booking.BookedOn >= window.From && booking.BookedOn <= window.To);
+
+var inAnyWindow = Expr.AnyOf(windows.Select(window =>
+    (Expression<Func<Booking, bool>>)(booking => InWindow.Invoke(booking, window))));
+
+var bookings = await db.Bookings.Where(inAnyWindow).Expand().ToListAsync(ct);
+```
+
+Each window is a captured local, so every account and date is a parameter, and the query keeps one cached plan per
+number of windows:
+
+```sql
+WHERE (b."AccountId" = @window_AccountId AND b."BookedOn" >= @window_From AND b."BookedOn" <= @window_To)
+   OR (b."AccountId" = @window_AccountId3 AND b."BookedOn" >= @window_From4 AND b."BookedOn" <= @window_To5)
+```
+
+For a tree assembled from `Expression` factories, two more helpers keep the same properties:
+
+- `Expr.Captured(value)` returns the value as a member access on a closure object, the shape the compiler emits for a
+  captured local, so the provider sends it as a parameter. `Expression.Constant(value)` would put the literal into the
+  SQL text and give every value a plan of its own.
+- `Expr.Inline(lambda, arguments)` returns a lambda's body with its parameters replaced by the given expressions.
+
+```csharp
+var invoice = Expression.Parameter(typeof(Invoice), "invoice");
+var body = Expr.Inline(IsOverdue.Expression, invoice, Expr.Captured(today));
+var predicate = Expression.Lambda<Func<Invoice, bool>>(body, invoice);
+```
+
+## An aggregate used several times: join it once
+
+Expansion inlines a rule at every use. When the rule is a correlated subquery, every use is one more subquery: this
+filter and projection make PostgreSQL sum each invoice's payments three times.
+
+```csharp
+var partiallyPaid = db.Invoices
+    .Where(invoice => OpenAmount.Invoke(invoice) > 0 && OpenAmount.Invoke(invoice) < invoice.Gross)
+    .Select(invoice => new OpenInvoiceRow(invoice.Id, invoice.Number, OpenAmount.Invoke(invoice)))
+    .Expand();
+```
+
+Compute the aggregate once per row instead: project it in a grouped subquery, left-join that subquery once, and apply
+rules that take the joined value as their second input.
+
+```csharp
+public static readonly Rule<Invoice, decimal, decimal> OpenGiven =
+    Rule.Create((Invoice invoice, decimal paid) => invoice.Gross - paid);
+
+public static readonly Rule<Invoice, decimal, bool> IsPartiallyPaid =
+    Rule.Create((Invoice invoice, decimal paid) =>
+        OpenGiven.Invoke(invoice, paid) > 0 && OpenGiven.Invoke(invoice, paid) < invoice.Gross);
+
+var paidByInvoice = db.Payments
+    .GroupBy(payment => payment.InvoiceId)
+    .Select(group => new { InvoiceId = group.Key, Paid = group.Sum(payment => payment.Amount) });
+
+var partiallyPaid = await db.Invoices
+    .LeftJoin(paidByInvoice, invoice => invoice.Id, paid => paid.InvoiceId,
+        (invoice, paid) => new { Invoice = invoice, Paid = (decimal?)paid!.Paid ?? 0m })
+    .Where(row => IsPartiallyPaid.Invoke(row.Invoice, row.Paid))
+    .Select(row => new OpenInvoiceRow(row.Invoice.Id, row.Invoice.Number, OpenGiven.Invoke(row.Invoice, row.Paid)))
+    .Expand()
+    .ToListAsync(ct);
+```
+
+```sql
+SELECT i."Id", i."Number", i."Gross" - COALESCE(p."Paid", 0.0)
+FROM invoices AS i
+LEFT JOIN (
+    SELECT p0."InvoiceId", COALESCE(sum(p0."Amount"), 0.0) AS "Paid"
+    FROM payments AS p0
+    GROUP BY p0."InvoiceId"
+) AS p ON i."Id" = p."InvoiceId"
+WHERE i."Gross" - COALESCE(p."Paid", 0.0) > 0.0 AND i."Gross" - COALESCE(p."Paid", 0.0) < i."Gross"
+```
+
+The rule stays one definition; only its input changed. In memory, pass the aggregate the same way:
+`IsPartiallyPaid.Invoke(invoice, Paid.Invoke(invoice))`. Write `(decimal?)paid!.Paid ?? 0m` for the joined value:
+EF Core translates it to `COALESCE`, while a `paid == null` test on the anonymous type does not translate.
+
+Elarion adds no `LATERAL` or CTE construct for this: EF Core inlines projections, and the join is the shape that gives
+every provider one evaluation per row.

@@ -286,6 +286,12 @@ The one ordered sequence in which SQL scripts, C# code steps and EF migrations r
 sequence, one history and one lock; roll-forward only.
 _Avoid_: migration set, changelog, schema history (which is one part of it)
 
+**Rule**:
+A domain derivation or condition written once as an expression (`Rule<TInput, TResult>`): invoked inside a
+query, where `Expand()` inlines it for the provider to translate, and run in memory, compiled. Business rules
+that decide a command still live in the handler; a rule is how the handler and its queries share a definition.
+_Avoid_: specification, computed property, predicate helper, expression snippet
+
 ### Frontend
 
 **Contribution**:

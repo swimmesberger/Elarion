@@ -18,6 +18,7 @@
     "auditing",
     "settings",
     "persistence-and-transactions",
+    "rules",
     "polymorphic-references",
     "variable-substitution",
     "cross-module-communication",
