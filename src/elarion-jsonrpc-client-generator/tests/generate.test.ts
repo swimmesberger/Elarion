@@ -2426,3 +2426,350 @@ async function loadGeneratedEventsClient(eventsClientSource: string): Promise<Ev
 function microtasks(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
+
+describe('uploaded files (ADR-0105)', () => {
+  it('types upload members as File | Blob | UploadedFileRef in params and as the reference in results', () => {
+    const generated = generateRpcClientFiles(uploadClientTestSchema())
+
+    expect(generated.typesSource).toContain('export type UploadedFileRef = string')
+    expect(generated.typesSource).toContain('statement: File | Blob | UploadedFileRef\n')
+    expect(generated.typesSource).toContain('signature?: File | Blob | UploadedFileRef | null | undefined')
+    expect(generated.typesSource).toContain('attachments: (File | Blob | UploadedFileRef)[]')
+    expect(generated.typesSource).toContain('echo: UploadedFileRef\n')
+    expect(generated.schemasSource).toContain('statement: z.union([z.instanceof(Blob), z.string()]),')
+    expect(generated.schemasSource).toContain('signature: z.union([z.instanceof(Blob), z.string()]).nullish().optional(),')
+    expect(generated.schemasSource).toContain('attachments: z.array(z.union([z.instanceof(Blob), z.string()])),')
+    expect(generated.schemasSource).toContain('echo: z.string(),')
+    expect(generated.clientSource).toContain("import type { RpcMethods, UploadedFileRef } from './rpc-types.js'")
+    expect(generated.clientSource).toContain('uploadFile(file: Blob, options?: RpcUploadOptions): Promise<UploadedFileRef>')
+    expect(generated.clientSource).toContain("readonly $uploadFile: RpcClient['uploadFile']")
+  })
+
+  it('emits no upload runtime and stays byte-identical when the schema has no upload members', () => {
+    const without = generateRpcClientFiles(fileClientTestSchema())
+    const unmarked = fileClientTestSchema()
+    const container = unmarked.methods['files.roundTrip'].params.properties?.container as JsonSchema
+    container['x-elarion-upload'] = false
+    const withUnmarked = generateRpcClientFiles(unmarked)
+
+    expect(withUnmarked.typesSource).toBe(without.typesSource)
+    expect(withUnmarked.schemasSource).toBe(without.schemasSource)
+    expect(withUnmarked.clientSource).toBe(without.clientSource)
+    expect(without.typesSource).not.toContain('UploadedFileRef')
+    expect(without.clientSource).not.toContain('UploadedFileRef')
+    expect(without.clientSource).not.toContain('stageUploadParams')
+    expect(without.clientSource).not.toContain('uploadFile')
+  })
+
+  it('rejects an upload member inside a union case', () => {
+    const schema = {
+      methods: {
+        'a.b': {
+          params: {
+            type: 'object',
+            properties: {
+              value: {anyOf: [{type: 'string', 'x-elarion-upload': true}, {type: 'integer'}]},
+            },
+          },
+          result: {type: 'string'},
+        },
+      },
+    } satisfies RpcSchema
+
+    expect(() => generateRpcClientFiles(schema)).toThrow(/x-elarion-upload payloads inside an anyOf union/)
+  })
+
+  it('uploads File and Blob params to the direct-upload endpoint before the call and sends the references', async () => {
+    const generated = generateRpcClientFiles(uploadClientTestSchema())
+    const clientModule = await loadGeneratedUploadClient(generated.clientSource)
+    const server = uploadServer()
+    const rpc = clientModule.createRpcApi({
+      url: 'https://example.test/rpc',
+      fetch: server.fetch,
+      headers: {Authorization: 'Bearer test'},
+      idGenerator: () => 'call-1',
+    })
+
+    const statement = new File(['date;amount'], 'statement.csv', {type: 'text/csv'})
+    const signature = new Blob([new Uint8Array([1, 2])])
+    const result = await rpc.statements.analyze({
+      statement,
+      signature,
+      attachments: [new File(['x'], 'a.pdf', {type: 'application/pdf'}), 'blob-earlier'],
+      account: 'main',
+    })
+
+    expect(server.uploads.map((upload) => upload.url)).toEqual([
+      'https://example.test/_elarion/blobs',
+      'https://example.test/_elarion/blobs',
+      'https://example.test/_elarion/blobs',
+    ])
+    expect(server.uploads[0]).toMatchObject({
+      method: 'POST',
+      contentType: 'text/csv',
+      fileName: 'statement.csv',
+      authorization: 'Bearer test',
+      body: 'date;amount',
+    })
+    // A bare Blob has neither a name nor a type.
+    expect(server.uploads[1]).toMatchObject({contentType: 'application/octet-stream', fileName: null})
+    expect(server.uploads[2]).toMatchObject({contentType: 'application/pdf', fileName: 'a.pdf'})
+    expect(server.calls[0].params).toEqual({
+      statement: 'blob-1',
+      signature: 'blob-2',
+      attachments: ['blob-3', 'blob-earlier'],
+      account: 'main',
+    })
+    expect(result).toEqual({echo: 'blob-1'})
+  })
+
+  it('exposes uploadFile, so a multi-step flow uploads once and passes the reference to every step', async () => {
+    const generated = generateRpcClientFiles(uploadClientTestSchema())
+    const clientModule = await loadGeneratedUploadClient(generated.clientSource)
+    const server = uploadServer()
+    const rpc = clientModule.createRpcApi({url: 'https://example.test/rpc', fetch: server.fetch})
+
+    const reference = await rpc.$uploadFile(new Blob(['rows']), {fileName: 'named.csv'})
+    await rpc.statements.analyze({statement: reference, attachments: [], account: 'main'})
+    await rpc.statements.analyze({statement: reference, attachments: [], account: 'main'})
+
+    expect(reference).toBe('blob-1')
+    expect(server.uploads).toHaveLength(1)
+    expect(server.uploads[0].fileName).toBe('named.csv')
+    expect(server.calls.map((call) => (call.params as {statement: string}).statement)).toEqual(['blob-1', 'blob-1'])
+  })
+
+  it('sends a file name outside printable ASCII percent-encoded in the query instead of a header', async () => {
+    const generated = generateRpcClientFiles(uploadClientTestSchema())
+    const clientModule = await loadGeneratedUploadClient(generated.clientSource)
+    const server = uploadServer()
+    const absolute = clientModule.createRpcApi({url: 'https://example.test/rpc', fetch: server.fetch})
+    const relative = clientModule.createRpcApi({url: '/rpc', fetch: server.fetch})
+
+    await absolute.$uploadFile(new File(['x'], 'Kontoauszug März.csv', {type: 'text/csv'}))
+    await relative.$uploadFile(new File(['x'], 'Kontoauszug März.csv', {type: 'text/csv'}))
+
+    // Both are the form-encoded UTF-8 name ASP.NET Core decodes from the query.
+    expect(server.uploads.map((upload) => upload.url)).toEqual([
+      'https://example.test/_elarion/blobs?fileName=Kontoauszug+M%C3%A4rz.csv',
+      '/_elarion/blobs?fileName=Kontoauszug%20M%C3%A4rz.csv',
+    ])
+    expect(server.uploads.map((upload) => upload.fileName)).toEqual([null, null])
+  })
+
+  it('stays relative to the page for a relative RPC url, and honors a configured upload url', async () => {
+    const generated = generateRpcClientFiles(uploadClientTestSchema())
+    const clientModule = await loadGeneratedUploadClient(generated.clientSource)
+    const server = uploadServer()
+
+    await clientModule.createRpcApi({url: '/rpc', fetch: server.fetch}).$uploadFile(new Blob(['a']))
+    await clientModule.createRpcApi({url: '/rpc', fetch: server.fetch, uploadUrl: '/app/_elarion/blobs'})
+      .$uploadFile(new Blob(['b']))
+
+    expect(server.uploads.map((upload) => upload.url)).toEqual(['/_elarion/blobs', '/app/_elarion/blobs'])
+  })
+
+  it('stages through a configured uploader with the call signal', async () => {
+    const generated = generateRpcClientFiles(uploadClientTestSchema())
+    const clientModule = await loadGeneratedUploadClient(generated.clientSource)
+    const server = uploadServer()
+    const abort = new AbortController()
+    const seen: Array<{size: number; signal: AbortSignal | undefined}> = []
+    const rpc = clientModule.createRpcApi({
+      url: 'https://example.test/rpc',
+      fetch: server.fetch,
+      uploadFile: async (file, options) => {
+        seen.push({size: file.size, signal: options.signal})
+        return `custom-${seen.length}`
+      },
+    })
+
+    await rpc.statements.analyze({statement: new Blob(['abc']), attachments: [], account: 'main'}, {signal: abort.signal})
+
+    expect(seen).toEqual([{size: 3, signal: abort.signal}])
+    expect(server.uploads).toHaveLength(0)
+    expect((server.calls[0].params as {statement: string}).statement).toBe('custom-1')
+  })
+
+  it('fails the call with a transport error, without calling the method, when the upload is refused', async () => {
+    const generated = generateRpcClientFiles(uploadClientTestSchema())
+    const clientModule = await loadGeneratedUploadClient(generated.clientSource)
+    const server = uploadServer({status: 413, body: 'too large'})
+    const rpc = clientModule.createRpcApi({url: 'https://example.test/rpc', fetch: server.fetch})
+
+    await expect(rpc.statements.analyze({statement: new Blob(['abc']), attachments: [], account: 'main'}))
+      .rejects.toMatchObject({name: 'RpcTransportError', status: 413})
+    expect(server.calls).toHaveLength(0)
+  })
+
+  it('stages uploads per batch item and composes with file payloads', async () => {
+    const generated = generateRpcClientFiles(uploadClientTestSchema())
+    const clientModule = await loadGeneratedUploadClient(generated.clientSource)
+    const server = uploadServer()
+    let nextId = 0
+    const rpc = clientModule.createRpcApi({
+      url: 'https://example.test/rpc',
+      fetch: server.fetch,
+      idGenerator: () => `item-${++nextId}`,
+    })
+
+    const results = await rpc.$batch([
+      rpc.$request.statements.analyze({statement: new Blob(['a']), attachments: [], account: 'main'}),
+      rpc.$request.statements.commit({
+        statement: new Blob(['b']),
+        logo: new File(['png'], 'logo.png', {type: 'image/png'}),
+      }),
+    ])
+
+    expect(results.map((item) => item.ok)).toEqual([true, true])
+    expect(server.calls[0].params).toMatchObject({statement: 'blob-1'})
+    expect(server.calls[1].params).toEqual({
+      statement: 'blob-2',
+      logo: {contentType: 'image/png', fileName: 'logo.png', data: btoa('png')},
+    })
+  })
+})
+
+interface UploadClientModule {
+  createRpcApi(options: {
+    url: string | URL
+    fetch?: FetchLike
+    headers?: HeadersInit
+    idGenerator?: () => string | number
+    uploadFile?: (file: Blob, options: {fileName?: string; signal?: AbortSignal}) => Promise<string>
+    uploadUrl?: string | URL
+  }): UploadApiForTests
+}
+
+interface UploadApiForTests {
+  statements: {
+    analyze(params: unknown, options?: {signal?: AbortSignal}): Promise<unknown>
+    commit(params: unknown): Promise<unknown>
+  }
+  $request: {
+    statements: {
+      analyze(params: unknown): {method: string; params: unknown}
+      commit(params: unknown): {method: string; params: unknown}
+    }
+  }
+  $batch(items: readonly {method: string; params: unknown}[]): Promise<readonly BatchItemResultForTests[]>
+  $uploadFile(file: Blob, options?: {fileName?: string; signal?: AbortSignal}): Promise<string>
+}
+
+interface RecordedUpload {
+  url: string
+  method: string | undefined
+  contentType: string | null
+  fileName: string | null
+  authorization: string | null
+  body: string
+}
+
+// A stand-in for the host: the direct-upload endpoint answers blob-1, blob-2, ... as text/plain (or the given
+// failure), and the RPC endpoint echoes the first upload member of the params.
+function uploadServer(failure?: {status: number; body: string}): {
+  fetch: FetchLike
+  uploads: RecordedUpload[]
+  calls: Array<{method: string; params: unknown}>
+} {
+  const uploads: RecordedUpload[] = []
+  const calls: Array<{method: string; params: unknown}> = []
+  const fetch: FetchLike = async (input, init) => {
+    const url = input.toString()
+    if (url.includes('_elarion/blobs')) {
+      const headers = new Headers(init?.headers)
+      uploads.push({
+        url,
+        method: init?.method,
+        contentType: headers.get('content-type'),
+        fileName: headers.get('x-elarion-file-name'),
+        authorization: headers.get('authorization'),
+        body: await new Response(init?.body).text(),
+      })
+      return failure === undefined
+        ? new Response(`blob-${uploads.length}\n`, {status: 200, headers: {'Content-Type': 'text/plain'}})
+        : new Response(failure.body, {status: failure.status})
+    }
+
+    const payload = JSON.parse(String(init?.body)) as
+      | {id: string; method: string; params: {statement?: unknown}}
+      | Array<{id: string; method: string; params: {statement?: unknown}}>
+    const requests = Array.isArray(payload) ? payload : [payload]
+    calls.push(...requests.map((request) => ({method: request.method, params: request.params})))
+    const responses = requests.map((request) => ({
+      jsonrpc: '2.0',
+      id: request.id,
+      result: request.method === 'statements.analyze' ? {echo: request.params.statement} : 'ok',
+    }))
+    return jsonResponse(Array.isArray(payload) ? responses : responses[0])
+  }
+
+  return {fetch, uploads, calls}
+}
+
+function uploadClientTestSchema(): RpcSchema {
+  const upload = {type: 'string', 'x-elarion-upload': true} satisfies JsonSchema
+  return {
+    methods: {
+      'statements.analyze': {
+        params: {
+          type: 'object',
+          properties: {
+            statement: upload,
+            signature: {type: ['string', 'null'], 'x-elarion-upload': true},
+            attachments: {type: 'array', items: upload},
+            account: {type: 'string'},
+          },
+          required: ['statement', 'attachments', 'account'],
+        },
+        result: {
+          type: 'object',
+          properties: {echo: upload},
+          required: ['echo'],
+        },
+      },
+      'statements.commit': {
+        params: {
+          type: 'object',
+          properties: {
+            statement: upload,
+            logo: {
+              type: 'object',
+              'x-elarion-file': true,
+              properties: {
+                contentType: {type: 'string'},
+                fileName: {type: 'string'},
+                data: {type: 'string', format: 'byte'},
+              },
+              required: ['contentType', 'data'],
+            },
+          },
+          required: ['statement'],
+        },
+        result: {type: 'string'},
+      },
+    },
+  }
+}
+
+async function loadGeneratedUploadClient(clientSource: string): Promise<UploadClientModule> {
+  const dir = mkdtempSync(join(tmpdir(), 'elarion-rpc-upload-client-'))
+  const jsSource = ts.transpileModule(clientSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.ES2022,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText
+
+  writeFileSync(join(dir, 'rpc-client.mjs'), jsSource, 'utf-8')
+  // Pass-through schemas: params validation runs before the upload, so it sees the File/Blob values.
+  writeFileSync(join(dir, 'rpc-schemas.js'), [
+    'const passThrough = { parse: (value) => value }',
+    "export const rpcParamsSchemas = { 'statements.analyze': passThrough, 'statements.commit': passThrough }",
+    "export const rpcResultSchemas = { 'statements.analyze': passThrough, 'statements.commit': passThrough }",
+    'export const rpcErrorDataSchemas = {}',
+    '',
+  ].join('\n'), 'utf-8')
+
+  return await import(pathToFileURL(join(dir, 'rpc-client.mjs')).href) as UploadClientModule
+}

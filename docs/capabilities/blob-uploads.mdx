@@ -26,7 +26,7 @@ protocol lives only at the HTTP layer.
 
 | Package | Use it in | Contains |
 | --- | --- | --- |
-| `Elarion.Blobs` | Application | `BlobLifecycleState`, `IBlobLifecycle` (`CommitAsync`/`DeleteExpiredPendingAsync`), the additive `BlobUploadRequest.InitialState`/`ExpiresAt`, and the protocol-neutral **staged-upload seam** (`IStagedUploadStore`) with its in-memory default and the garbage collectors. |
+| `Elarion.Blobs` | Application | `BlobLifecycleState`, `IBlobLifecycle` (`CommitAsync`/`DeleteExpiredPendingAsync`), the additive `BlobUploadRequest.InitialState`/`ExpiresAt`, the protocol-neutral **staged-upload seam** (`IStagedUploadStore`) with its in-memory default and the garbage collectors, and the owner-checked reader behind the [`UploadedFile`](#passing-an-upload-to-a-handler) handler parameter (`AddElarionUploadedFiles`). |
 | `Elarion.Blobs.PostgreSql` | Infrastructure / host | The lifecycle on the PostgreSQL store (`state`/`expires_at` columns with a partial index, `AddElarionPostgreSqlBlobLifecycle`) and durable staged-upload staging (`UseElarionStagedUploads`, `AddElarionPostgreSqlStagedUploads`) so in-progress uploads survive restarts. |
 | `Elarion.Blobs.Azure` | Infrastructure / host | The same two roles on Azure Blob Storage: blob store + lifecycle over blob metadata, and native staging over append blobs (`AddElarionAzureBlobLifecycle`, `AddElarionAzureStagedUploads`). |
 | `Elarion.Blobs.Tus` | Host | The tus 1.0 resumable transport (`MapElarionResumableBlobUploads`, `AddElarionResumableBlobUploads`) — a pure protocol adapter over the staging seam. |
@@ -71,17 +71,35 @@ This adds `state` and `expires_at` columns plus a partial index over pending row
 
 ### Attaching a file to an entity
 
-```csharp
-public async ValueTask<Result<CreateContractResponse>> HandleAsync(CreateContract.Command request, CancellationToken ct) {
-    db.Contracts.Add(contract);
+The command carries the upload as an [`UploadedFile`](#passing-an-upload-to-a-handler), and the handler keeps it
+through `IUploadedFiles`, which commits only the caller's own pending upload:
 
-    // Promote the pre-uploaded blob in the same transaction as the entity insert.
-    if (!await blobLifecycle.CommitAsync(new BlobRef { Value = request.AttachmentBlobRef }, ct)) {
-        return AppError.NotFound("attachment no longer available");
+```csharp
+[Handler]
+[ProducesError(ErrorCodes.UploadNotFound, ErrorKind.Validation)]
+[ProducesError(ErrorCodes.UploadContentType, ErrorKind.Validation)]
+public sealed class CreateContract(AppDbContext db, IUploadedFiles uploads)
+    : IHandler<CreateContract.Command, Result<CreateContractResponse>> {
+    public sealed record Command : ICommand {
+        public required string Title { get; init; }
+        public required UploadedFile Attachment { get; init; }   // the id the upload endpoint answered
     }
 
-    await db.SaveChangesAsync(ct); // commit + insert are atomic
-    return new CreateContractResponse(contract.Id);
+    public async ValueTask<Result<CreateContractResponse>> HandleAsync(Command command, CancellationToken ct) {
+        // Promote the pre-uploaded blob in the same transaction as the entity insert.
+        var kept = await uploads.CommitAsync(
+            command.Attachment, new UploadConstraints { ContentTypes = ["application/pdf"] }, ct);
+        if (!kept.IsSuccess) return kept.Error;
+
+        var contract = new Contract {
+            Title = command.Title,
+            AttachmentBlobId = kept.Value.BlobId,       // read it later through IBlobStore
+            AttachmentName = kept.Value.FileName,
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync(ct); // commit + insert are atomic
+        return new CreateContractResponse(contract.Id);
+    }
 }
 ```
 
@@ -206,6 +224,79 @@ Both transports bake the current user's id into the upload, so the host must reg
   `server.revert` → `DELETE /{id}`. FilePond's chunked mode is tus-derived but not identical, so its
   resumable path needs a small client adapter.
 
+## Passing an upload to a handler
+
+A handler takes an upload as an **`UploadedFile`** member: on every JSON surface (JSON-RPC, MCP, HTTP bodies) a plain
+string, the blob id the upload endpoint answered with. It reads, keeps or discards the file only through
+**`IUploadedFiles`**, never by handing that id to `IBlobStore` itself:
+
+```csharp
+services.AddElarionPostgreSqlBlobLifecycle<AppDbContext>();
+services.AddElarionBlobUploads(o => o.Ttl = TimeSpan.FromHours(2));   // and/or AddElarionResumableBlobUploads
+services.AddElarionUploadedFiles();                                   // IUploadedFiles
+
+app.MapElarionBlobUploads().RequireAuthorization();
+```
+
+```csharp
+[Handler]
+[ProducesError(ErrorCodes.UploadNotFound, ErrorKind.Validation)]
+[ProducesError(ErrorCodes.UploadTooLarge, ErrorKind.Validation)]
+[ProducesError(ErrorCodes.UploadContentType, ErrorKind.Validation)]
+public sealed class AnalyzeStatement(IUploadedFiles uploads, StatementParser parser)
+    : IHandler<AnalyzeStatement.Command, Result<StatementAnalysis>> {
+    public sealed record Command : ICommand {
+        public required UploadedFile Statement { get; init; }
+    }
+
+    public async ValueTask<Result<StatementAnalysis>> HandleAsync(Command command, CancellationToken ct) {
+        var opened = await uploads.OpenAsync(command.Statement, new UploadConstraints {
+            MaxBytes = 50L * 1024 * 1024,
+            ContentTypes = ["text/csv", "application/xml"],
+        }, ct);
+        if (!opened.IsSuccess) return opened.Error;
+
+        await using var file = opened.Value;   // Content, ContentType, FileName, Length, ContentSha256
+        return await parser.AnalyzeAsync(file.Content, ct);
+    }
+}
+```
+
+`IUploadedFiles` has three operations:
+
+| Method | Does |
+| --- | --- |
+| `OpenAsync(file, constraints?, ct)` | Opens the content for reading. The upload stays pending, so the next step of a flow opens it again. Dispose the result. |
+| `CommitAsync(file, constraints?, ct)` | Keeps it: promotes the pending blob inside the caller's transaction ([above](#attaching-a-file-to-an-entity)) and answers a `CommittedUpload` (`BlobId`, `FileName`, `ContentType`, `Length`, `ContentSha256`) for the record. Needs an `IBlobLifecycle`. |
+| `DeleteAsync(file, ct)` | Discards it now instead of after its TTL. Idempotent; `false` when there was nothing of the caller's to delete. |
+
+Every operation answers only an upload that is **still pending**, whose recorded owner is **exactly the current
+user**, and that lies in an **upload container** (`UploadedFilesOptions.Containers`, default `uploads`, the container
+of both endpoints; list a renamed endpoint container there). A missing, expired, already kept, someone else's,
+unowned or foreign-container blob, and any call by an anonymous caller, all answer the same error, so a caller cannot
+tell which ids exist. A kept blob belongs to its record from then on: the record's own authorization guards it, and the
+reference no longer opens it.
+
+| Code | When |
+| --- | --- |
+| `upload.not_found` | No pending upload of the caller has that id. The caller uploads again. |
+| `upload.too_large` | The file is larger than `UploadConstraints.MaxBytes`. |
+| `upload.content_type` | The declared content type is not in `UploadConstraints.ContentTypes` (exact, case-insensitive, parameters such as `; charset` ignored). |
+
+All three are `Validation` errors (JSON-RPC `-32602`, HTTP `400`) the handler returns, so it declares the ones it can
+produce with `[ProducesError]`, as above. The constraints are the handler's per operation; the endpoints'
+`MaxContentLength`/`MaxSize` and `AllowedContentTypes` still cap what can be uploaded at all. The content type is the
+one the client declared, not sniffed: treat the content as untrusted input.
+
+An upload lives until it is committed, deleted, or collected after the endpoint's `Ttl` (`BlobUploadEndpointOptions.Ttl`,
+`ResumableBlobUploadOptions.Ttl`, default 30 minutes). A multi-step flow (analyze, preview, commit) passes the same
+`UploadedFile` to every step, so raise the `Ttl` to the longest time a user may spend in it.
+
+The exported schema marks the member `x-elarion-upload` (a string), and the
+[generated TypeScript client](/docs/capabilities/transports/typescript-client#uploaded-files) takes a `File` there and
+uploads it before the call; `rpc.$uploadFile(file)` uploads once for a multi-step flow. An MCP tool caller passes the
+id. See [ADR-0105](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0105-uploaded-files-are-handler-parameters.md).
+
 ## Streaming downloads and temp-file flows
 
 The staging area is also the framework's answer for **large files in handler flows** — the tier above the
@@ -227,8 +318,9 @@ unowned, or someone else's blob is `404`, so ownership is never leaked.
 **Import (large upload → processing handler):**
 
 1. The client uploads via tus (or the direct endpoint) into the staging area → gets a pending blob reference.
-2. It calls the processing handler (any transport) with that reference as a plain string field.
-3. The handler streams from `IBlobStore.OpenReadAsync(...)`, processes, and disposes of the temp file.
+2. It calls the processing handler (any transport) with that reference as an
+   [`UploadedFile`](#passing-an-upload-to-a-handler) member.
+3. The handler streams it from `IUploadedFiles.OpenAsync(...)`, processes it, and disposes of the temp file.
 
 A consumed import is the mirror image of [attaching a file to an entity](#attaching-a-file-to-an-entity):
 you never keep it, so **do not `CommitAsync` it** — commit means "promote to permanent and clear the
@@ -239,14 +331,16 @@ expiry," the opposite of what a throwaway import wants. There are two ways to re
 
 ```csharp
 public async ValueTask<Result<Unit>> HandleAsync(ImportRows.Command command, CancellationToken ct) {
-    var blobRef = new BlobRef { Value = command.BlobRef };
-    await using var download = await blobs.OpenReadAsync(blobRef, ct);
-    if (download is null) {
-        return AppError.NotFound("upload expired");
+    var opened = await uploads.OpenAsync(command.File, new UploadConstraints { ContentTypes = ["text/csv"] }, ct);
+    if (!opened.IsSuccess) {
+        return opened.Error;                            // upload.not_found: expired, consumed or not the caller's
     }
 
-    await importer.IngestAsync(download.Content, ct);   // stream and process
-    await blobs.DeleteAsync(blobRef, ct);               // reclaim now — no waiting for the GC
+    await using (var file = opened.Value) {
+        await importer.IngestAsync(file.Content, ct);   // stream and process
+    }
+
+    await uploads.DeleteAsync(command.File, ct);        // reclaim now — no waiting for the GC
     return Unit.Value;
 }
 ```

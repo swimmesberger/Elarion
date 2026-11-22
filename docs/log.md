@@ -6,6 +6,7 @@
 * **Creation**: [ADR-0103](decisions/0103-one-permission-decision-and-members-visible-by-permission.md), one permission decision (IPermissionChecker) shared by the gate, handler code and response members visible by permission ([VisibleWith]); glossary terms Permission checker and Member visible by permission.
 * **Update**: [ADR-0102](decisions/0102-rules-are-expressions-composed-once.md) is accepted and implemented: rules over two inputs replace the proposed tuple-input rule (expression trees cannot contain tuple literals), Expr gained Inline, AnyOf, AllOf and Not, and the consequences now say what EF Core does when Expand is forgotten; the [glossary](../GLOSSARY.md) gained *rule*.
 * **Creation**: [ADR-0104](decisions/0104-previewable-commands.md) — a previewable command is one handler that previews (runs, reports, rolls back) and commits only the outcome it previewed, from the preview/commit handler pairs of a consuming application; the [glossary](../GLOSSARY.md) gained *previewable command*.
+* **Creation**: [ADR-0105](decisions/0105-uploaded-files-are-handler-parameters.md) — a handler takes a staged upload as an UploadedFile and reads, keeps or discards it only through IUploadedFiles, which answers the caller's own pending upload and nothing else; the [glossary](../GLOSSARY.md) gained *uploaded file*.
 
 ## 2026-11-21
 

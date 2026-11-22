@@ -47,6 +47,20 @@ public sealed class RpcMcpInputSchemaTests {
         properties.GetProperty("secret").TryGetProperty("description", out _).Should().BeFalse();
     }
 
+    private sealed record UploadCommand {
+        public required Elarion.Abstractions.UploadedFile Statement { get; init; }
+    }
+
+    [Fact]
+    public void Build_UploadedFileMember_IsTheMarkedBlobIdString() {
+        var schema = RpcMcpInputSchema.Build(typeof(UploadCommand), Options, []);
+
+        // A tool caller passes the id the upload endpoint answered with, like the JSON-RPC client.
+        var statement = schema.GetProperty("properties").GetProperty("statement");
+        statement.GetProperty("type").GetString().Should().Be("string");
+        statement.GetProperty("x-elarion-upload").GetBoolean().Should().BeTrue();
+    }
+
     [Fact]
     public void Build_WithoutDescriptions_ProducesObjectSchema() {
         var schema = RpcMcpInputSchema.Build(typeof(SchemaCommand), Options, []);

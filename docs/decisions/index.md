@@ -105,3 +105,4 @@
 * [ADR-0102](0102-rules-are-expressions-composed-once.md) - A rule is one expression, composed into queries and compiled for memory (proposed)
 * [ADR-0103](0103-one-permission-decision-and-members-visible-by-permission.md) - One permission decision for the gate and the code, and response members visible by permission
 * [ADR-0104](0104-previewable-commands.md) - A command previews by running and rolling back, and commits only the outcome it previewed
+* [ADR-0105](0105-uploaded-files-are-handler-parameters.md) - An uploaded file is a handler parameter

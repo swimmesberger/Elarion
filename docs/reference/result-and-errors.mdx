@@ -182,8 +182,11 @@ shipped.
 Pipeline codes: `idempotency.key_required` (`Validation`), `idempotency.in_progress` (`Conflict`),
 `idempotency.key_reused` (`BusinessRule`), `preview.changed` (`Conflict`, the new outcome as payload) and
 `preview.unsupported` (`Internal`). Package codes: `paging.sort_key_unknown` (`Validation`, from
-`SortMap.Validate`), `settings.pinned`, `settings.concurrency_conflict`. Every framework answer carries its specific
-code, so a client never matches the message text. `ErrorCodes.IsValid(code)` checks the format.
+`SortMap.Validate`), `settings.pinned`, `settings.concurrency_conflict`, and the `IUploadedFiles` codes
+`upload.not_found`, `upload.too_large`, `upload.content_type` (`Validation`, returned by the handler that reads an
+[uploaded file](/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler), which declares them). Every
+framework answer carries its specific code, so a client never matches the message text. `ErrorCodes.IsValid(code)`
+checks the format.
 
 ## `[ProducesError]` — the declared error contract
 

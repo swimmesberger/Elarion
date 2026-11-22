@@ -16,6 +16,13 @@ export interface JsonSchema {
    * `File`, results materialize one; the client converts to/from the wire envelope at the call boundary.
    */
   'x-elarion-file'?: boolean
+  /**
+   * Marks an Elarion uploaded-file reference (`UploadedFile`): a string, the blob id of a file staged through the
+   * direct-upload endpoint (ADR-0105). Params accept a `File`/`Blob` there, which the generated client uploads
+   * before the call and replaces by the returned reference, or a reference (`UploadedFileRef`) uploaded earlier;
+   * results carry the reference.
+   */
+  'x-elarion-upload'?: boolean
   // Constraint keywords (JSON Schema 2020-12). exclusiveMinimum/exclusiveMaximum are numbers, not booleans.
   minLength?: number
   maxLength?: number

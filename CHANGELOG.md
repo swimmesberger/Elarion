@@ -48,7 +48,6 @@ minor releases may include breaking changes.
   `AnyOf` is always false, `AllOf` always true). The page also gives the recipe for an aggregate a rule uses several
   times: join it once and pass it as the rule's second input. See
   [Rules](https://elarion.wimmesberger.dev/docs/concepts/rules).
-
 - **Previewable commands** (ADR-0104). A command whose request implements `IPreviewableRequest` (`bool Preview`,
   `string? PreviewFingerprint`) is its own preview: with `Preview` set it runs fully, its outcome is returned stamped
   with a fingerprint, and every database write is rolled back. A commit that sends the fingerprint back commits only
@@ -61,6 +60,18 @@ minor releases may include breaking changes.
   work that rolls back, a preview answers `preview.unsupported` and the handler never runs. Ordinary calls pass
   straight through. See
   [Previewable commands](https://elarion.wimmesberger.dev/docs/concepts/previewable-commands).
+- **Uploaded files as handler parameters** (ADR-0105). A handler takes a file staged through the direct-upload or tus
+  endpoint as an `UploadedFile` member, a blob-id string on the wire, and reads, keeps or discards it through
+  `IUploadedFiles` (`OpenAsync`, `CommitAsync`, `DeleteAsync`; registered by `AddElarionUploadedFiles` in
+  `Elarion.Blobs`). It answers only a pending upload of the current user in an upload container and refuses everything
+  else with the same `upload.not_found` error, so ids cannot be probed; `UploadConstraints` add `upload.too_large` and
+  `upload.content_type`. The schema exports the member as a string marked `x-elarion-upload`, and the generated
+  TypeScript client takes a `File`/`Blob` there, uploads it to the direct-upload endpoint before the call (client
+  options `uploadFile` and `uploadUrl`), and exposes `rpc.$uploadFile(file)`, so a multi-step flow uploads once and
+  passes the reference to every step. The blob-upload examples no longer hand a raw blob id to `IBlobStore` or
+  `IBlobLifecycle`, which check no owner. `Elarion.Blobs` now references `Elarion.Abstractions`. See
+  [Blob uploads](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler).
+
 ### Changed
 - **Breaking: `ErrorKind` gains `DecisionRequired`** (ADR-0101). The existing kinds keep their values; an exhaustive
   `switch` over `ErrorKind` in an application gets a new case (it maps to HTTP `409` and JSON-RPC `-32006`).

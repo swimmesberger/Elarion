@@ -57,7 +57,9 @@ it uses. Add `Elarion.Abstractions` only to contract-only assemblies that cannot
   never implement request/reply.
 - HTTP handlers resolve the typed handler directly and translate `Result` through framework HTTP helpers.
   Keep endpoint conventions in the host; do not infer host authorization policy from handler attributes.
-- Small, in-memory files use `ElarionFile`; large exports/uploads use the staged-blob tier; an HTTP-only
+- Small, in-memory files use `ElarionFile`; large exports/uploads use the staged-blob tier, where a handler takes an
+  upload as an `UploadedFile` and reads, keeps or discards it only through `IUploadedFiles` (owner, pending state
+  and container checked, fail closed), never by handing its id to `IBlobStore` (ADR-0105); an HTTP-only
   `[HttpEndpoint]` (no `[Handler]`) may stream a file with `ElarionStreamedFile` (ADR-0098), never a host-mapped
   route that loses the handler's authorization and feature gate. Every framework file response carries
   `X-Content-Type-Options: nosniff`. Consult the file and blob capability docs before changing envelope,

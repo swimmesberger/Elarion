@@ -281,7 +281,8 @@ public static class JsonRpcSchemaExporter {
         var exporterOptions = new JsonSchemaExporterOptions {
             TreatNullObliviousAsNonNullable = true,
             TransformSchemaNode = (ctx, schema) => {
-                var node = ApplyRequiredness(ctx, NormalizeNumericType(ctx, MapFilePayload(ctx, schema)), direction);
+                var node = ApplyRequiredness(
+                    ctx, NormalizeNumericType(ctx, MapUploadPayload(ctx, MapFilePayload(ctx, schema), direction)), direction);
                 return extraTransform is null ? node : extraTransform(ctx, node);
             }
         };
@@ -449,6 +450,37 @@ public static class JsonRpcSchemaExporter {
                 ["data"] = new JsonObject { ["type"] = "string", ["format"] = "byte" }
             },
             ["required"] = new JsonArray("contentType", "data")
+        };
+    }
+
+    /// <summary>
+    /// Replaces the schema node for <see cref="Elarion.Abstractions.UploadedFile"/>, opaque to the exporter because the
+    /// type serializes through its converter, with the converter's wire form: a string, the blob id of a staged upload
+    /// (ADR-0105). The node is marked <c>x-elarion-upload: true</c> so the TypeScript client generator accepts a
+    /// native <c>File</c> there and uploads it before the call. The replacement drops the exporter's own nullability,
+    /// so a nullable member gets <c>null</c> back from the property's annotation.
+    /// </summary>
+    private static JsonNode MapUploadPayload(JsonSchemaExporterContext ctx, JsonNode schema, SchemaDirection direction) {
+        if (ctx.TypeInfo.Type == typeof(Abstractions.UploadedFile))
+            return UploadNode(ctx.PropertyInfo is { } property
+                              && (direction == SchemaDirection.Request ? property.IsSetNullable : property.IsGetNullable));
+
+        // The exporter leaves out the "items" of a collection whose element schema accepts anything, which is what a
+        // converter-backed element exports as, before this transform ever sees the element: put it back.
+        if (ctx.TypeInfo is { Kind: JsonTypeInfoKind.Enumerable } collection
+            && collection.ElementType == typeof(Abstractions.UploadedFile)
+            && schema is JsonObject array
+            && !array.ContainsKey("items"))
+            array["items"] = UploadNode(false);
+
+        return schema;
+    }
+
+    private static JsonObject UploadNode(bool nullable) {
+        return new JsonObject {
+            ["type"] = nullable ? new JsonArray("string", "null") : "string",
+            ["x-elarion-upload"] = true,
+            ["description"] = "A file staged through the upload endpoint; the value is the blob id it answered with."
         };
     }
 

@@ -19,9 +19,9 @@ namespace Elarion.Abstractions;
 /// This is deliberately <b>the small-file tier</b> — a pointer to a block of memory, buffered end to end
 /// (base64 adds ~33% on JSON surfaces). It is the right default up to a few megabytes (rule of thumb: 4 MB).
 /// Above that, use the <b>staged-blob tier</b>: upload through the provided blob endpoints into the pending
-/// (staging) area and hand the handler a blob pointer to stream from — and for large exports, write a pending
-/// blob and return its pointer for a streamed download. Pending blobs expire through the blob garbage
-/// collector, giving temp-file semantics for free. See the file-handling docs and ADR-0039.
+/// (staging) area and hand the handler an <see cref="UploadedFile"/> to stream from — and for large exports,
+/// write a pending blob and return its pointer for a streamed download. Pending blobs expire through the blob
+/// garbage collector, giving temp-file semantics for free. See the file-handling docs, ADR-0039 and ADR-0105.
 /// </para>
 /// <example>
 /// <code>

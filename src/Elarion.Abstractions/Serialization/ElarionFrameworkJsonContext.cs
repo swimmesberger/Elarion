@@ -35,4 +35,5 @@ namespace Elarion.Abstractions.Serialization;
 [JsonSerializable(typeof(Idempotency.StoredResult))]
 [JsonSerializable(typeof(AppError))]
 [JsonSerializable(typeof(ElarionFile))]
+[JsonSerializable(typeof(UploadedFile))]
 public sealed partial class ElarionFrameworkJsonContext : JsonSerializerContext;

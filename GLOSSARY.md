@@ -281,6 +281,12 @@ _Avoid_: multipart upload, tus upload (one protocol over the seam), temp file
 The small, in-memory file payload of a handler. Large exports and uploads use the staged-blob tier instead.
 _Avoid_: attachment, stream (for a small file), form file
 
+**Uploaded file**:
+A handler parameter (`UploadedFile`) naming a file the caller staged through an upload endpoint; a blob-id string on
+the wire. The handler reads, keeps or discards it only through `IUploadedFiles`, which answers the caller's own
+pending upload and nothing else.
+_Avoid_: blob ref, file id, attachment id (for the parameter), upload token
+
 **Streamed file**:
 The file response of an HTTP-only handler (`ElarionStreamedFile`): content written to the response body after
 the handler pipeline has run, never buffered. Only HTTP carries it; JSON surfaces use an ElarionFile or a

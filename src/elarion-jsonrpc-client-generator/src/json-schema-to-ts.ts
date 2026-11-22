@@ -11,7 +11,11 @@ import {
   unionAlternatives,
 } from './json-schema.js'
 
-export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, indent = 0): string {
+/**
+ * @param uploadInput emit the params form of an `x-elarion-upload` member (`File | Blob | UploadedFileRef`: the
+ *   client uploads a `File`/`Blob` before the call) instead of the reference alone.
+ */
+export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, indent = 0, uploadInput = false): string {
   const {schema: resolved, ctx: resolvedCtx} = resolveSchema(schema, ctx)
   const pad = '  '.repeat(indent)
   const nullable = isNullable(resolved)
@@ -21,6 +25,12 @@ export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, i
   // base64 wire shape at the call boundary, so callers never see the envelope.
   if (resolved['x-elarion-file'] === true) {
     return nullable ? 'File | null | undefined' : 'File'
+  }
+
+  // An uploaded-file reference travels as the blob id; in params the client also takes the file itself and uploads it.
+  if (resolved['x-elarion-upload'] === true) {
+    const upload = uploadInput ? 'File | Blob | UploadedFileRef' : 'UploadedFileRef'
+    return nullable ? `${upload} | null | undefined` : upload
   }
 
   if (resolved.enum) {
@@ -43,7 +53,7 @@ export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, i
       if (isNullOnly(member)) {
         return
       }
-      const memberType = jsonSchemaToTypeScript(stripNullable(member), memberCtx, indent)
+      const memberType = jsonSchemaToTypeScript(stripNullable(member), memberCtx, indent, uploadInput)
       if (!members.includes(memberType)) {
         members.push(memberType)
       }
@@ -64,7 +74,7 @@ export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, i
 
   if (base === 'array' && resolved.items) {
     // Unstripped items: the recursion emits the item's own nullability (`string | null | undefined`).
-    const itemType = jsonSchemaToTypeScript(resolved.items, childContext(resolvedCtx, 'items'), indent)
+    const itemType = jsonSchemaToTypeScript(resolved.items, childContext(resolvedCtx, 'items'), indent, uploadInput)
     // A union item type must be parenthesized — `"red" | "green"[]` is `"red" | ("green"[])`.
     const element = itemType.includes('|') ? `(${itemType})` : itemType
     return nullable ? `${element}[] | null | undefined` : `${element}[]`
@@ -74,7 +84,8 @@ export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, i
     const required = new Set(resolved.required ?? [])
     const lines = Object.entries(resolved.properties).map(([key, property]) => {
       const optional = required.has(key) ? '' : '?'
-      const propertyType = jsonSchemaToTypeScript(property, childContext(resolvedCtx, `properties.${key}`), indent + 1)
+      const propertyType = jsonSchemaToTypeScript(
+        property, childContext(resolvedCtx, `properties.${key}`), indent + 1, uploadInput)
       // A member the server shows only to holders of a permission ([VisibleWith]) says so where the caller reads it.
       const visibleWith = property['x-elarion-visible-with']
       const doc = typeof visibleWith === 'string'

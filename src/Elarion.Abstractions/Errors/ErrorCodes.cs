@@ -59,6 +59,22 @@ public static class ErrorCodes {
     /// </summary>
     public const string PreviewUnsupported = "preview.unsupported";
 
+    /// <summary>
+    /// An <see cref="UploadedFile"/> names no pending upload of the caller: it is missing, was removed by the blob
+    /// garbage collector, was already kept, belongs to someone else or lies outside the upload containers — all one
+    /// answer, so an id cannot be probed (<see cref="ErrorKind.Validation"/>).
+    /// </summary>
+    public const string UploadNotFound = "upload.not_found";
+
+    /// <summary>An <see cref="UploadedFile"/> is larger than <see cref="UploadConstraints.MaxBytes"/> (<see cref="ErrorKind.Validation"/>).</summary>
+    public const string UploadTooLarge = "upload.too_large";
+
+    /// <summary>
+    /// An <see cref="UploadedFile"/>'s content type is not one of <see cref="UploadConstraints.ContentTypes"/>
+    /// (<see cref="ErrorKind.Validation"/>).
+    /// </summary>
+    public const string UploadContentType = "upload.content_type";
+
     /// <summary>Returns the default code of <paramref name="kind"/>.</summary>
     public static string ForKind(ErrorKind kind) {
         return kind switch {

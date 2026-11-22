@@ -111,7 +111,7 @@ Read the [actor decision guide](/docs/concepts/actors) before adding the actor p
 
 | Package | Add it when |
 | --- | --- |
-| `Elarion.Blobs` | Application code needs streaming provider-neutral blob contracts, pending/commit lifecycle, listing, or staged upload seams. |
+| `Elarion.Blobs` | Application code needs streaming provider-neutral blob contracts, pending/commit lifecycle, listing, staged upload seams, or the `IUploadedFiles` reader for handlers that take an `UploadedFile`. |
 | `Elarion.Blobs.PostgreSql` | Blobs and/or resumable upload staging should live in the application's PostgreSQL database. |
 | `Elarion.Blobs.Azure` | Blobs and staged uploads should use Azure Blob Storage and append blobs. |
 | `Elarion.Blobs.AspNetCore` | An ASP.NET host needs direct upload/cancel and owner-scoped streaming download endpoints. |
