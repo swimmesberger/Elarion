@@ -107,3 +107,4 @@
 * [ADR-0104](0104-previewable-commands.md) - A command previews by running and rolling back, and commits only the outcome it previewed
 * [ADR-0105](0105-uploaded-files-are-handler-parameters.md) - An uploaded file is a handler parameter
 * [ADR-0106](0106-upload-policies-choose-the-staging-limits.md) - An upload names a policy that chooses its staging limits (proposed)
+* [ADR-0107](0107-a-shared-entity-names-the-module-that-writes-it.md) - A shared entity may name the one module that writes it (proposed)
