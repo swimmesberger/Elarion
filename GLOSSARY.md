@@ -291,8 +291,15 @@ _Avoid_: blob ref, file id, attachment id (for the parameter), upload token
 The size, content-type and file-extension limits an uploaded-file member declares (`[UploadLimits]`). The pipeline
 applies them to every read and keep of that file, the schema exports them, and the generated client checks a file
 against them before uploading it. A file that breaks one is refused with the limit as typed error data. Constraints
-passed when reading the file apply on top.
-_Avoid_: upload validation, file rules, upload policy
+passed when reading the file apply on top. What may be staged at all is the endpoint's, or the upload policy's.
+_Avoid_: upload validation, file rules
+
+**Upload policy**:
+A named set of staging limits and an optional check that a client names when it stages a file (`?policy=` on the
+direct endpoint, the `policy` key of the tus metadata). Its limits replace the endpoint's for that upload, and its
+check runs before the body is read. It decides what may be staged; a handler's upload limits still decide what it
+accepts.
+_Avoid_: upload target (the generated client's method and member pair), upload profile, staging route
 
 **Streamed file**:
 The file response of an HTTP-only handler (`ElarionStreamedFile`): content written to the response body after

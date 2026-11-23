@@ -33,6 +33,20 @@ minor releases may include breaking changes.
   while parsing a stored message answers `404` and is read once. In process, `OpenAsync` answers the file or the
   refusal. See
   [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints#streamed-files-http-only-endpoints).
+- **Upload policies: a larger staging limit for one kind of upload** (ADR-0106). `services.AddElarionUploadPolicy(
+  "mail.eml", p => { p.MaxBytes = …; p.ContentTypes = […]; p.Authorize = (context, ct) => … })` registers a named
+  policy; a client names it when it stages a file (`?policy=mail.eml&resourceId=…` on the direct endpoint, the `policy`
+  and `resourceId` keys of the tus `Upload-Metadata`). Its limits replace the endpoint's for that upload, and
+  `Authorize` checks the record the upload is for before the body is read (a refusal answers `404`). The generated
+  TypeScript client's `uploadFile(file, { policy, resourceId })` sends both. See
+  [Blob uploads](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#upload-policies-a-larger-limit-for-one-kind-of-upload).
+
+### Changed
+- **The upload endpoints set the request's body-size limit to their cap** (ADR-0106). The direct endpoint limits the
+  request body to `MaxContentLength` (plus 1 MiB of form overhead for multipart, whose file part is capped while it is
+  read), so a cap above the server's default (Kestrel: about 28.6 MB) now works without raising the server's limit for
+  every route, and a server limit above the cap no longer applies to this route. A tus `PATCH` is limited to the bytes
+  the upload still lacks: one that carries more answers `413` instead of having the excess ignored.
 
 ## [0.4.5] - 2026-11-23
 

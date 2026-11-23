@@ -3,6 +3,7 @@ using System.Text;
 using Elarion.Abstractions.Identity;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -20,6 +21,12 @@ public static class ResumableBlobUploadEndpointsExtensions {
     /// Maps the tus endpoints under the configured route prefix and returns the route group so the host can
     /// apply conventions (most importantly <c>.RequireAuthorization(...)</c>).
     /// </summary>
+    /// <remarks>
+    /// A creation may name an <see cref="UploadPolicy"/> with the <c>policy</c> key of <c>Upload-Metadata</c> (and the
+    /// record it is for with <c>resourceId</c>): its <see cref="UploadPolicy.MaxBytes"/> replaces <c>MaxSize</c>, its
+    /// content types are checked against the declared <c>filetype</c>, and its check runs before the session exists. Each
+    /// <c>PATCH</c> may carry at most the bytes the upload still lacks, which is also the request's body-size limit.
+    /// </remarks>
     public static RouteGroupBuilder MapElarionResumableBlobUploads(this IEndpointRouteBuilder endpoints) {
         ArgumentNullException.ThrowIfNull(endpoints);
 
@@ -187,17 +194,51 @@ public static class ResumableBlobUploadEndpointsExtensions {
             return;
         }
 
-        if (options.MaxSize is long max && length > max) {
-            response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-            return;
-        }
-
         var rawMetadata = context.Request.Headers[TusProtocol.UploadMetadata].ToString();
         var metadata = TusMetadata.Parse(rawMetadata);
         var fileName = SanitizeFileName(Pick(metadata, "filename", "name"));
         var contentType = Pick(metadata, "filetype", "type") is { Length: > 0 } type
             ? type
             : "application/octet-stream";
+
+        var maxSize = options.MaxSize;
+        if (metadata.TryGetValue("policy", out var policyName) && policyName.Length > 0) {
+            var policies = context.RequestServices.GetService<UploadPolicies>();
+            if (policies is null || !policies.TryGet(policyName, out var policy)) {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+
+            // Before the session exists, so a refused upload sends no bytes. Not found, so the record it names is not
+            // confirmed to exist.
+            var allowed = await policy.AllowsAsync(
+                new UploadPolicyContext {
+                    Policy = policyName,
+                    ResourceId = metadata.TryGetValue("resourceId", out var resourceId) && resourceId.Length > 0
+                        ? resourceId
+                        : null,
+                    User = currentUser,
+                    Services = context.RequestServices,
+                    Length = length
+                },
+                cancellationToken);
+            if (!allowed) {
+                response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            if (policy.ContentTypes is { Count: > 0 } accepted && !IsAccepted(contentType, accepted)) {
+                response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+
+            maxSize = policy.MaxBytes ?? maxSize;
+        }
+
+        if (maxSize is long max && length > max) {
+            response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+            return;
+        }
 
         var upload = await store.CreateAsync(
             new StagedUploadCreation {
@@ -309,6 +350,12 @@ public static class ResumableBlobUploadEndpointsExtensions {
             return;
         }
 
+        // A chunk carries at most the bytes the upload still lacks: that is this request's body limit, so an upload
+        // whose length a policy allows arrives in one PATCH without raising the server's limit for every route.
+        if (upload.Length is long declaredLength
+            && context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } bodyLimit)
+            bodyLimit.MaxRequestBodySize = declaredLength - upload.Offset;
+
         StagedUpload updated;
         try {
             updated = await store.AppendAsync(id, offset, context.Request.Body, cancellationToken);
@@ -320,6 +367,11 @@ public static class ResumableBlobUploadEndpointsExtensions {
         }
         catch (StagedUploadConflictException) {
             response.StatusCode = StatusCodes.Status409Conflict;
+            return;
+        }
+        catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge) {
+            // More bytes than the upload lacks; the store keeps only the committed offset.
+            response.StatusCode = StatusCodes.Status413PayloadTooLarge;
             return;
         }
 
@@ -385,6 +437,21 @@ public static class ResumableBlobUploadEndpointsExtensions {
         return currentUser.IsAuthenticated
                && upload.OwnerId is not null
                && string.Equals(upload.OwnerId, currentUser.UserId, StringComparison.Ordinal);
+    }
+
+    // Case-insensitive, parameters such as "; charset" ignored, as the direct endpoint compares them.
+    private static bool IsAccepted(string contentType, IReadOnlyCollection<string> accepted) {
+        var actual = MediaType(contentType);
+        foreach (var candidate in accepted)
+            if (string.Equals(MediaType(candidate), actual, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+        return false;
+    }
+
+    private static string MediaType(string contentType) {
+        var semicolon = contentType.IndexOf(';');
+        return (semicolon >= 0 ? contentType[..semicolon] : contentType).Trim();
     }
 
     private static bool IsOffsetContentType(string? contentType) {

@@ -269,6 +269,82 @@ public sealed class TusEndpointsTests {
         head.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+    [Fact]
+    public async Task Create_UnderAPolicy_TakesItsCap_AndASinglePatchMayExceedTheServersBodyLimit() {
+        var ct = TestContext.Current.CancellationToken;
+        // The server accepts 1,000-byte bodies, the endpoint 500-byte uploads; the policy 4,000 bytes.
+        await using var host = await StartAsync(ct, options => options.MaxSize = 500,
+            services => services.AddElarionUploadPolicy("large", policy => policy.MaxBytes = 4000),
+            serverBodyLimit: 1000);
+        var payload = Enumerable.Range(0, 3000).Select(index => (byte)index).ToArray();
+
+        var withoutPolicy = await host.Client.SendAsync(Create(3000), ct);
+        var overPolicy = await host.Client.SendAsync(Create(5000, policy: "large"), ct);
+        var created = await host.Client.SendAsync(Create(3000, policy: "large"), ct);
+        var patch = await host.Client.SendAsync(Patch(created.Headers.Location!.AbsolutePath, 0, payload), ct);
+
+        withoutPolicy.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        overPolicy.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        created.StatusCode.Should().Be(HttpStatusCode.Created);
+        patch.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        host.Store.Content(Header(patch, "Elarion-Blob-Ref")!).Should().Equal(payload);
+    }
+
+    [Fact]
+    public async Task Patch_CarryingMoreThanTheUploadLacks_Returns413_AndKeepsTheOffset() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+        var uploadPath = await CreateAsync(host.Client, 4, "doc.bin", "application/octet-stream", ct);
+
+        var patch = await host.Client.SendAsync(Patch(uploadPath, 0, new byte[10]), ct);
+        var head = await host.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, uploadPath), ct);
+
+        patch.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        Header(head, "Upload-Offset").Should().Be("0");
+    }
+
+    [Fact]
+    public async Task Create_UnderAPolicy_RefusedByItsCheck_Returns404_AndCreatesNoSession() {
+        var ct = TestContext.Current.CancellationToken;
+        UploadPolicyContext? asked = null;
+        await using var host = await StartAsync(ct, configureServices: services =>
+            services.AddElarionUploadPolicy("mail.eml", policy => {
+                policy.ContentTypes = ["message/rfc822"];
+                policy.Authorize = (context, _) => {
+                    asked = context;
+                    return ValueTask.FromResult(context.ResourceId == "draft-1");
+                };
+            }));
+
+        var refused = await host.Client.SendAsync(
+            Create(10, policy: "mail.eml", resourceId: "draft-2", contentType: "message/rfc822"), ct);
+        var wrongType = await host.Client.SendAsync(
+            Create(10, policy: "mail.eml", resourceId: "draft-1", contentType: "application/pdf"), ct);
+        var unknown = await host.Client.SendAsync(Create(10, policy: "missing"), ct);
+        var admitted = await host.Client.SendAsync(
+            Create(10, policy: "mail.eml", resourceId: "draft-1", contentType: "message/rfc822"), ct);
+
+        refused.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        refused.Headers.Location.Should().BeNull();
+        wrongType.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        unknown.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        admitted.StatusCode.Should().Be(HttpStatusCode.Created);
+        asked!.Policy.Should().Be("mail.eml");
+        asked.Length.Should().Be(10);
+        asked.User.UserId.Should().Be("user-1");
+    }
+
+    private static HttpRequestMessage Create(
+        long length, string? policy = null, string? resourceId = null, string contentType = "application/octet-stream") {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/_elarion/blobs/tus");
+        request.Headers.Add("Upload-Length", length.ToString());
+        var metadata = $"filename {Base64("upload.bin")},filetype {Base64(contentType)}";
+        if (policy is not null) metadata += $",policy {Base64(policy)}";
+        if (resourceId is not null) metadata += $",resourceId {Base64(resourceId)}";
+        request.Headers.Add("Upload-Metadata", metadata);
+        return request;
+    }
+
     private static async Task<string> CreateAsync(
         HttpClient client,
         long length,
@@ -306,10 +382,15 @@ public sealed class TusEndpointsTests {
     private static async Task<TestHost> StartAsync(
         CancellationToken cancellationToken,
         Action<ResumableBlobUploadOptions>? configure = null,
-        MutableCurrentUser? user = null) {
+        Action<IServiceCollection>? configureServices = null,
+        MutableCurrentUser? user = null,
+        long? serverBodyLimit = null) {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
+        if (serverBodyLimit is long limit)
+            builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = limit);
         builder.Logging.ClearProviders();
+        configureServices?.Invoke(builder.Services);
 
         var store = new RecordingBlobStore();
         builder.Services.AddSingleton<IBlobStore>(store);

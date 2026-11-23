@@ -2,6 +2,7 @@ using System.Text;
 using Elarion.Abstractions.Identity;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -15,10 +16,19 @@ namespace Elarion.Blobs.AspNetCore;
 /// the tus transport instead.
 /// </summary>
 public static class BlobUploadEndpointsExtensions {
+    // Room for the multipart boundaries, part headers and small fields around the file part.
+    private const long FormOverhead = 1024 * 1024;
+
     /// <summary>
     /// Maps the upload (<c>POST</c>/<c>PUT</c>) and cancel (<c>DELETE</c>) endpoints under the configured
     /// route prefix.
     /// </summary>
+    /// <remarks>
+    /// An upload may name an <see cref="UploadPolicy"/> with <c>?policy=</c> (and the record it is for with
+    /// <c>&amp;resourceId=</c>): its limits replace the endpoint's, and its check runs before the body is read. The
+    /// request's body-size limit is set to the cap that applies, so a cap above the server's default works for this
+    /// request without raising it for every route.
+    /// </remarks>
     /// <param name="endpoints">The endpoint route builder to map onto.</param>
     /// <returns>
     /// The mapped route group, so the host can apply conventions (most importantly
@@ -111,13 +121,51 @@ public static class BlobUploadEndpointsExtensions {
         CancellationToken cancellationToken) {
         if (!currentUser.IsAuthenticated) return Results.Unauthorized();
 
+        var maxBytes = options.MaxContentLength;
+        var allowedContentTypes = options.AllowedContentTypes;
+        if (request.Query["policy"].ToString() is { Length: > 0 } policyName) {
+            var policies = request.HttpContext.RequestServices.GetService<UploadPolicies>();
+            if (policies is null || !policies.TryGet(policyName, out var policy))
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest, detail: $"Unknown upload policy '{policyName}'.");
+
+            // Before the body is read: a refused upload never sends its bytes to the store. Not found, so the record
+            // the request names is not confirmed to exist.
+            var allowed = await policy.AllowsAsync(
+                new UploadPolicyContext {
+                    Policy = policyName,
+                    ResourceId = request.Query["resourceId"].ToString() is { Length: > 0 } resourceId ? resourceId : null,
+                    User = currentUser,
+                    Services = request.HttpContext.RequestServices,
+                    Length = request.ContentLength
+                },
+                cancellationToken);
+            if (!allowed) return Results.NotFound();
+
+            maxBytes = policy.MaxBytes ?? maxBytes;
+            allowedContentTypes = policy.ContentTypes ?? allowedContentTypes;
+        }
+
+        if (maxBytes is long bodyCap)
+            LimitRequestBody(request.HttpContext, request.HasFormContentType ? bodyCap + FormOverhead : bodyCap);
+
         string contentType;
         string clientName;
         long? lengthHint;
         Stream source;
 
         if (request.HasFormContentType) {
-            var form = await request.ReadFormAsync(cancellationToken);
+            IFormCollection form;
+            try {
+                // The file part is capped while it is read instead of after the whole form is buffered.
+                form = maxBytes is long partCap
+                    ? await request.ReadFormAsync(new FormOptions { MultipartBodyLengthLimit = partCap }, cancellationToken)
+                    : await request.ReadFormAsync(cancellationToken);
+            }
+            catch (Exception ex) when (maxBytes is long formCap && IsTooLarge(ex)) {
+                return TooLarge(formCap);
+            }
+
             var file = form.Files.GetFile("file") ?? (form.Files.Count > 0 ? form.Files[0] : null);
             if (file is null) return Results.BadRequest("No file part was found in the multipart form.");
 
@@ -139,10 +187,10 @@ public static class BlobUploadEndpointsExtensions {
             source = request.Body;
         }
 
-        if (!IsAllowedContentType(contentType, options.AllowedContentTypes))
+        if (!IsAllowedContentType(contentType, allowedContentTypes))
             return Results.BadRequest($"Content type '{contentType}' is not allowed.");
 
-        if (options.MaxContentLength is long cap) {
+        if (maxBytes is long cap) {
             // Reject early when the declared length already exceeds the cap (multipart, or a raw body with
             // a Content-Length); otherwise cap the unknown-length stream while it is read.
             var declared = lengthHint ?? request.ContentLength;
@@ -170,6 +218,24 @@ public static class BlobUploadEndpointsExtensions {
         catch (BlobUploadTooLargeException ex) {
             return TooLarge(ex.Limit);
         }
+        catch (BadHttpRequestException ex) when (maxBytes is long readCap
+                                                 && ex.StatusCode == StatusCodes.Status413PayloadTooLarge) {
+            // The server's body limit (set to the cap above) stopped a body without a declared length.
+            return TooLarge(readCap);
+        }
+    }
+
+    // Sets this request's body-size limit, which the server enforces while the body is read. Only before the first
+    // read, and only where the server lets the application change it.
+    private static void LimitRequestBody(HttpContext context, long limit) {
+        if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } feature)
+            feature.MaxRequestBodySize = limit;
+    }
+
+    // A form part over MultipartBodyLengthLimit, or a body over the request's limit.
+    private static bool IsTooLarge(Exception exception) {
+        return exception is InvalidDataException
+               || exception is BadHttpRequestException { StatusCode: StatusCodes.Status413PayloadTooLarge };
     }
 
     private static async Task<IResult> CancelCoreAsync(

@@ -167,6 +167,12 @@ const rpc = createRpcApi({
 })
 ```
 
+`$uploadFile(file, { policy, resourceId })` stages the file under an
+[upload policy](/docs/capabilities/blob-uploads#upload-policies-a-larger-limit-for-one-kind-of-upload) — a larger
+limit for one kind of upload, checked against the record it is for — and the default uploader sends both as query
+parameters; a configured `uploadFile` receives them in its options. Staging the `File` params of a call uses no policy,
+so a member that needs one is uploaded with `$uploadFile` first and called with the reference.
+
 `$uploadFile(file, { fileName, signal })` (also `$client.uploadFile`) names a `Blob` that has no name of its own. Params
 validation accepts a `Blob` or a string at an upload position, before the upload. When the member declares
 [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member), the `Blob` must also fit them:

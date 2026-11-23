@@ -332,13 +332,144 @@ public sealed class BlobUploadEndpointsTests {
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
+    [Fact]
+    public async Task Upload_UnderAPolicy_TakesItsCap_AndRaisesTheBodyLimitForThatRequestOnly() {
+        var ct = TestContext.Current.CancellationToken;
+        // The server accepts 1,000-byte bodies, the endpoint 500 bytes; the policy 4,000 bytes.
+        await using var host = await StartAsync(ct, options => options.MaxContentLength = 500,
+            services: services => services.AddElarionUploadPolicy("large", policy => policy.MaxBytes = 4000),
+            serverBodyLimit: 1000);
+
+        var plain = await host.Client.PostAsync("/_elarion/blobs", Raw(2000), ct);
+        var underPolicy = await host.Client.PostAsync("/_elarion/blobs?policy=large", Raw(2000), ct);
+        var chunkedOverPolicy = await host.Client.SendAsync(Chunked("/_elarion/blobs?policy=large", 5000), ct);
+
+        plain.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        underPolicy.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Store.SavedContent(await underPolicy.Content.ReadAsStringAsync(ct)).Should().HaveCount(2000);
+        chunkedOverPolicy.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+    }
+
+    [Fact]
+    public async Task Upload_UnderAPolicy_Multipart_IsCappedByThePolicy() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct, options => options.MaxContentLength = 500,
+            services: services => services.AddElarionUploadPolicy("large", policy => policy.MaxBytes = 4000),
+            serverBodyLimit: 1000);
+
+        var fits = await host.Client.PostAsync("/_elarion/blobs?policy=large", Form(3000), ct);
+        var tooLarge = await host.Client.PostAsync("/_elarion/blobs?policy=large", Form(5000), ct);
+
+        fits.StatusCode.Should().Be(HttpStatusCode.OK);
+        tooLarge.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        host.Store.Requests.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task Upload_UnderAPolicy_RefusedByItsCheck_Returns404_BeforeTheBodyReachesTheStore() {
+        var ct = TestContext.Current.CancellationToken;
+        var asked = new List<UploadPolicyContext>();
+        await using var host = await StartAsync(ct, services: services =>
+            services.AddElarionUploadPolicy("mail.eml", policy => policy.Authorize = (context, _) => {
+                asked.Add(context);
+                return ValueTask.FromResult(context.ResourceId == "draft-1" && context.User.UserId == "user-1");
+            }));
+
+        var refused = await host.Client.PostAsync("/_elarion/blobs?policy=mail.eml&resourceId=draft-2", Raw(10), ct);
+        var anonymousRecord = await host.Client.PostAsync("/_elarion/blobs?policy=mail.eml", Raw(10), ct);
+        var admitted = await host.Client.PostAsync("/_elarion/blobs?policy=mail.eml&resourceId=draft-1", Raw(10), ct);
+
+        refused.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        anonymousRecord.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        admitted.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Store.Requests.Should().HaveCount(1, "a refused upload never reaches the store");
+        asked.Select(context => context.ResourceId).Should().Equal("draft-2", null, "draft-1");
+        asked.Should().AllSatisfy(context => {
+            context.Policy.Should().Be("mail.eml");
+            context.Length.Should().Be(10);
+        });
+    }
+
+    [Fact]
+    public async Task Upload_NamingAnUnknownPolicy_Returns400() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+
+        var response = await host.Client.PostAsync("/_elarion/blobs?policy=missing", Raw(10), ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        host.Store.LastRequest.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Upload_UnderAPolicy_ItsContentTypesReplaceTheEndpoints() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct, options => options.AllowedContentTypes = ["application/pdf"],
+            services: services => services.AddElarionUploadPolicy("mail.eml",
+                policy => policy.ContentTypes = ["message/rfc822"]));
+
+        var message = await host.Client.PostAsync("/_elarion/blobs?policy=mail.eml", Raw(10, "message/rfc822"), ct);
+        var pdfUnderPolicy = await host.Client.PostAsync("/_elarion/blobs?policy=mail.eml", Raw(10, "application/pdf"), ct);
+        var messageWithoutPolicy = await host.Client.PostAsync("/_elarion/blobs", Raw(10, "message/rfc822"), ct);
+
+        message.StatusCode.Should().Be(HttpStatusCode.OK);
+        pdfUnderPolicy.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        messageWithoutPolicy.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public void AddElarionUploadPolicy_ConfiguresARegisteredPolicyAgain_AndRefusesNamesAClientCannotSend() {
+        var services = new ServiceCollection();
+        services.AddElarionUploadPolicy("mail.eml", policy => policy.MaxBytes = 10);
+        services.AddElarionUploadPolicy("mail.eml", policy => policy.ContentTypes = ["message/rfc822"]);
+        services.AddElarionUploadPolicy("avatar", policy => policy.MaxBytes = 1);
+        using var provider = services.BuildServiceProvider();
+
+        var policies = provider.GetRequiredService<UploadPolicies>();
+        policies.Names.Should().BeEquivalentTo("mail.eml", "avatar");
+        policies.TryGet("mail.eml", out var policy).Should().BeTrue();
+        policy!.MaxBytes.Should().Be(10);
+        policy.ContentTypes.Should().Equal("message/rfc822");
+        services.Count(descriptor => descriptor.ServiceType == typeof(UploadPolicies)).Should().Be(1);
+
+        foreach (var invalid in new[] { "", "with space", "ümlaut", "tab\t" }) {
+            var add = () => services.AddElarionUploadPolicy(invalid, _ => { });
+            add.Should().Throw<ArgumentException>();
+        }
+    }
+
+    private static ByteArrayContent Raw(int length, string contentType = "application/octet-stream") {
+        var content = new ByteArrayContent(new byte[length]);
+        content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        return content;
+    }
+
+    private static MultipartFormDataContent Form(int length) {
+        var content = new MultipartFormDataContent();
+        var filePart = new ByteArrayContent(new byte[length]);
+        filePart.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        content.Add(filePart, "file", "message.eml");
+        return content;
+    }
+
+    private static HttpRequestMessage Chunked(string url, int length) {
+        var content = new StreamContent(new MemoryStream(new byte[length]));
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+        request.Headers.TransferEncodingChunked = true;
+        return request;
+    }
+
     private static async Task<TestHost> StartAsync(
         CancellationToken cancellationToken,
         Action<BlobUploadEndpointOptions>? configure = null,
         FakeCurrentUser? user = null,
-        Action<IServiceCollection>? services = null) {
+        Action<IServiceCollection>? services = null,
+        long? serverBodyLimit = null) {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
+        if (serverBodyLimit is long limit)
+            builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = limit);
         builder.Logging.ClearProviders();
 
         var store = new RecordingBlobStore();

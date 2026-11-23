@@ -2777,6 +2777,58 @@ describe('uploaded files (ADR-0105)', () => {
     expect(server.uploads.map((upload) => upload.fileName)).toEqual([null, null])
   })
 
+  it('names the upload policy and the record it is for in the query, after the file name', async () => {
+    const generated = generateRpcClientFiles(uploadClientTestSchema())
+    const clientModule = await loadGeneratedUploadClient(generated.clientSource)
+    const server = uploadServer()
+    const absolute = clientModule.createRpcApi({url: 'https://example.test/rpc', fetch: server.fetch})
+    const relative = clientModule.createRpcApi({url: '/rpc', fetch: server.fetch})
+
+    await absolute.$uploadFile(new File(['x'], 'März.eml'), {policy: 'mail.eml', resourceId: 'draft 1'})
+    await relative.$uploadFile(new File(['x'], 'message.eml'), {policy: 'mail.eml'})
+
+    expect(server.uploads.map((upload) => upload.url)).toEqual([
+      'https://example.test/_elarion/blobs?fileName=M%C3%A4rz.eml&policy=mail.eml&resourceId=draft+1',
+      '/_elarion/blobs?policy=mail.eml',
+    ])
+    expect(server.uploads[1].fileName).toBe('message.eml')
+  })
+
+  it('type-checks the upload policy options under NodeNext', () => {
+    const generated = generateRpcClientFiles(uploadClientTestSchema())
+    const usage = [
+      "import { createRpcClient } from './rpc-client.js'",
+      "import type { RpcUploadOptions } from './rpc-client.js'",
+      '',
+      "const client = createRpcClient({ url: 'https://example.test/rpc' })",
+      'export async function run(file: File): Promise<string> {',
+      "  const options: RpcUploadOptions = { policy: 'mail.eml', resourceId: 'draft-1' }",
+      "  const reference = await client.uploadFile(file, { ...options, method: 'statements.analyze', member: 'statement' })",
+      '  // @ts-expect-error a policy is named by its string name',
+      '  await client.uploadFile(file, { policy: 1 })',
+      '  return reference',
+      '}',
+      '',
+    ].join('\n')
+    // zod is no dependency of this package: a stub stands in for the schemas, with the upload members.
+    const schemasStub = [
+      'export const rpcParamsSchemas: Record<string, any> = {}',
+      'export const rpcResultSchemas: Record<string, any> = {}',
+      'export const rpcErrorDataSchemas: Record<string, Record<string, any>> = {}',
+      "export const rpcUploadLimits = { 'statements.analyze': { statement: {} } } as const",
+      '',
+    ].join('\n')
+
+    const diagnostics = typeCheck({
+      'rpc-types.ts': generated.typesSource,
+      'rpc-client.ts': generated.clientSource,
+      'rpc-schemas.ts': schemasStub,
+      'usage.ts': usage,
+    })
+
+    expect(diagnostics).toEqual([])
+  })
+
   it('stays relative to the page for a relative RPC url, and honors a configured upload url', async () => {
     const generated = generateRpcClientFiles(uploadClientTestSchema())
     const clientModule = await loadGeneratedUploadClient(generated.clientSource)
@@ -2879,7 +2931,9 @@ interface UploadApiForTests {
   $batch(items: readonly {method: string; params: unknown}[]): Promise<readonly BatchItemResultForTests[]>
   $uploadFile(
     file: Blob,
-    options?: {fileName?: string; signal?: AbortSignal; method?: string; member?: string}
+    options?: {
+      fileName?: string; signal?: AbortSignal; method?: string; member?: string; policy?: string; resourceId?: string
+    }
   ): Promise<string>
 }
 
