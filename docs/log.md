@@ -2,6 +2,7 @@
 
 ## 2026-11-23
 
+* **Update**: [ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md) gained an amendment: QueryAuthorizers.UnlessClaim, a negated claim gate that withdraws an alternative from sessions carrying a claim (viewing the application as another user), read in both directions.
 * **Update**: [ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md) gained an amendment: WhereAuthorizedForAll lists the principals who may access every row of a selection, from the same relation, and nobody for an empty selection.
 * **Update**: [ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md) gained an amendment: QueryAuthorizers.Via lifts an owner type's rule to the rows that point at its owners, through a navigation or a joined set, in both directions, after an application hand-wrote the inverse of an "assigned to a record the caller may read" rule.
 * **Update**: [ADR-0101](decisions/0101-a-decision-required-answer.md) has an amendment: `Unanswered<TOption>` counts only a declared option and the untyped `Unanswered` only a confirmation, so a handler never skips an item answered with an undeclared option.

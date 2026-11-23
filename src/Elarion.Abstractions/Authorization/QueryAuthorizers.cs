@@ -13,8 +13,8 @@ namespace Elarion.Abstractions.Authorization;
 /// <remarks>
 /// <para>
 /// <b>Building blocks fail closed.</b> <see cref="Rows{TEntity}"/>, <see cref="Unrestricted{TEntity}"/>,
-/// <see cref="ForUser{TEntity,TKey}"/>, the <c>Via</c> rules and the <c>When…</c> gates deny a caller who is not
-/// authenticated (and, for
+/// <see cref="ForUser{TEntity,TKey}"/>, the <c>Via</c> rules and the <c>When…</c> and <c>Unless…</c> gates deny a
+/// caller who is not authenticated (and, for
 /// <see cref="ForUser{TEntity,TKey}"/>, whose id does not parse) before the rule is consulted. Only
 /// <see cref="From{TEntity}"/> hands the caller to a delegate unchecked.
 /// </para>
@@ -162,6 +162,61 @@ public static class QueryAuthorizers {
         return new InvertibleAuthorizer<TEntity>(
             Gate(user => user.HasClaim(claimType, permission), then),
             new ClaimGateRelation<TEntity>(claimType, permission, then));
+    }
+
+    /// <summary>
+    /// <paramref name="then"/> for an authenticated caller who holds <b>no</b> claim of <paramref name="claimType"/>;
+    /// nothing for one who does — so a session marked by a claim drops an alternative: while an administrator views the
+    /// application as another user (an <c>act</c> claim on the session), the administrator's bypass does not apply.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A negated gate grants when the claim is <b>missing</b>. Use it to withdraw an alternative from sessions that
+    /// carry a claim the host adds deliberately, never to deny what a claim the host might fail to add would deny.
+    /// </para>
+    /// <para>
+    /// The inverse reads the claim from the principal directory. A session claim such as an impersonation marker is not
+    /// a fact of the principal, so the directory lists it for nobody and "who may access this row" answers for ordinary
+    /// sessions, which is the question it asks.
+    /// </para>
+    /// </remarks>
+    /// <param name="claimType">The claim type whose presence, with any value, withdraws <paramref name="then"/>.</param>
+    /// <param name="then">What a caller without the claim may access.</param>
+    /// <typeparam name="TEntity">The entity type being authorized.</typeparam>
+    /// <example>
+    /// <code>
+    /// QueryAuthorizers.AnyOf(
+    ///     QueryAuthorizers.UnlessClaim("act", QueryAuthorizers.WhenRole("Admin", QueryAuthorizers.Unrestricted&lt;Contact&gt;())),
+    ///     ContactOwnerFilter.Specification)
+    /// </code>
+    /// </example>
+    public static IQueryAuthorizer<TEntity> UnlessClaim<TEntity>(string claimType, IQueryAuthorizer<TEntity> then)
+        where TEntity : class {
+        ArgumentException.ThrowIfNullOrEmpty(claimType);
+        ArgumentNullException.ThrowIfNull(then);
+        return new InvertibleAuthorizer<TEntity>(
+            Gate(user => !user.GetClaimValues(claimType).Any(), then),
+            new NegatedClaimGateRelation<TEntity>(claimType, null, then));
+    }
+
+    /// <summary>
+    /// <paramref name="then"/> for an authenticated caller who does <b>not</b> hold the claim <paramref name="claimType"/>
+    /// with <paramref name="value"/>; nothing for one who does. See
+    /// <see cref="UnlessClaim{TEntity}(string, IQueryAuthorizer{TEntity})"/> for when a negated gate fits.
+    /// </summary>
+    /// <param name="claimType">The claim type.</param>
+    /// <param name="value">The claim value whose presence withdraws <paramref name="then"/>.</param>
+    /// <param name="then">What a caller without the claim may access.</param>
+    /// <typeparam name="TEntity">The entity type being authorized.</typeparam>
+    public static IQueryAuthorizer<TEntity> UnlessClaim<TEntity>(
+        string claimType, string value, IQueryAuthorizer<TEntity> then)
+        where TEntity : class {
+        ArgumentException.ThrowIfNullOrEmpty(claimType);
+        ArgumentNullException.ThrowIfNull(value);
+        ArgumentNullException.ThrowIfNull(then);
+        return new InvertibleAuthorizer<TEntity>(
+            Gate(user => !user.HasClaim(claimType, value), then),
+            new NegatedClaimGateRelation<TEntity>(claimType, value, then));
     }
 
     /// <summary><paramref name="then"/> for callers in <paramref name="role"/>; nothing for anyone else.</summary>
@@ -475,15 +530,16 @@ public static class QueryAuthorizers {
             return relation.Body is ConstantExpression constant && Equals(constant.Value, value);
         }
 
-        // A predicate over the principal alone (membership of a holder set), widened to a relation and AND-ed with
-        // what the gate lets its holders access.
+        // A predicate over the principal alone (membership of a holder set, or its absence), widened to a relation and
+        // AND-ed with what the gate lets the principals it admits access.
         protected static Expression<Func<TEntity, TKey, bool>> Gated<TKey>(
-            IQueryable<TKey> holders, Expression<Func<TEntity, TKey, bool>> then) {
+            IQueryable<TKey> holders, Expression<Func<TEntity, TKey, bool>> then, bool negate = false) {
             if (IsConstant(then, false)) return then;
 
             Expression<Func<TKey, bool>> holds = principal => holders.Contains(principal);
             var principalParameter = then.Parameters[1];
             var holdsBody = new Rebinder(holds.Parameters[0], principalParameter).Visit(holds.Body);
+            if (negate) holdsBody = Expression.Not(holdsBody);
             var body = IsConstant(then, true) ? holdsBody : Expression.AndAlso(holdsBody, then.Body);
             return Expression.Lambda<Func<TEntity, TKey, bool>>(body, then.Parameters);
         }
@@ -523,6 +579,18 @@ public static class QueryAuthorizers {
                 .Where(claim => claim.Type == claimType && claim.Value == value)
                 .Select(claim => claim.PrincipalId);
             return Gated(holders, RelationOf(then, directory, operation));
+        }
+    }
+
+    // UnlessClaim: the principals without the claim (any value when value is null), AND-ed with what then grants.
+    private sealed class NegatedClaimGateRelation<TEntity>(string claimType, string? value, IQueryAuthorizer<TEntity> then)
+        : Relation<TEntity>
+        where TEntity : class {
+        public override Expression<Func<TEntity, TKey, bool>> Build<TKey>(
+            IPrincipalDirectory<TKey> directory, ResourceOperation operation) {
+            var claims = directory.Claims.Where(claim => claim.Type == claimType);
+            if (value is not null) claims = claims.Where(claim => claim.Value == value);
+            return Gated(claims.Select(claim => claim.PrincipalId), RelationOf(then, directory, operation), negate: true);
         }
     }
 

@@ -218,6 +218,25 @@ relation. Decisions:
    `WhereNotAuthorized`, it is exact under two-valued predicates; under `UseRelationalNulls` a relation that is SQL
    `NULL` for a row does not exclude the principal, which the forward filter still catches when the principal reads.
 
+## Amendment (2026-11-23): a negated claim gate
+
+The same application lets an administrator view the application as another user. One rule should then drop its
+administrator alternative, but the gates could only add alternatives for holders of a role or claim.
+
+**`QueryAuthorizers.UnlessClaim(claimType, then)`** (any value) and **`UnlessClaim(claimType, value, then)`** grant
+`then` to an authenticated caller who does *not* hold the claim. Its relation is `!holders.Contains(principal) AND
+then`, read from the principal directory like the positive gates. Decisions:
+
+1. **A claim, not a role or a delegate.** A session marker is a claim the host adds while it builds the principal; a
+   delegate gate (`When`) already exists and has no inverse.
+2. **It still denies an unauthenticated caller**, like every gate, so negation never reaches an anonymous request.
+3. **The inverse answers for ordinary sessions.** A session marker is no stored fact of a principal, so the directory
+   lists it for nobody, and "who may access this row" is asked about principals, not sessions. A claim the directory
+   does store (a suspension) is honoured in both directions.
+
+The page documents the hazard: a negated gate grants when the claim is missing, so it may withdraw an alternative but
+must not stand alone between a caller and the rows.
+
 ## Rejected alternatives
 
 - **A router as the default `IResourceAuthorizer`, with the backend as a second seam.** It needs a fallback service

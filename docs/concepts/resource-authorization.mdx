@@ -204,6 +204,7 @@ services.AddSingleton(ContactVisibility.Authorizer);
 | `Unrestricted()` | every row (a `null` filter) |
 | `ForUser<TEntity, TKey>((row, userId) => …)` | the rows related to the caller's id — ownership, membership, an assignment |
 | `When(condition, then)` / `WhenPermission(permission, then)` / `WhenRole(role, then)` | `then`, to callers passing the gate |
+| `UnlessClaim(claimType, then)` / `UnlessClaim(claimType, value, then)` | `then`, to callers **without** the claim ([withdrawing an alternative](#withdrawing-an-alternative-for-a-session)) |
 | `ForOperations(authorizer, operations…)` | `authorizer`, for the listed operations only |
 | `Via(owners, ownerRule)` / `Via(ownerSet, joins, ownerRule)` | the rows with an owner `ownerRule` grants ([through an owner](#visible-through-an-owner-as-part-of-a-rule)) |
 | `AnyOf(…)` / `AllOf(…)` | the union / the intersection |
@@ -244,6 +245,24 @@ QueryAuthorizers.AnyOf(
 `WhereAuthorized` asks about **`Read` unless told otherwise**. With a rule like this one, a write handler must pass
 its operation (`WhereAuthorized(access, user, ResourceOperation.Update)`) or declare it on `[RequireResource]`, which
 passes it for you.
+
+#### Withdrawing an alternative for a session
+
+`UnlessClaim` is a negated gate: its alternative applies to callers who do **not** hold a claim. It lets one rule drop
+an alternative for sessions the host marks — while an administrator views the application as another user, an `act`
+claim on the session withdraws the administrator's bypass, and the rest of the rule answers as for that user:
+
+```csharp
+QueryAuthorizers.AnyOf(
+    QueryAuthorizers.UnlessClaim("act",
+        QueryAuthorizers.WhenRole("Admin", QueryAuthorizers.Unrestricted<Contact>())),
+    ContactOwnerFilter.Specification)
+```
+
+A negated gate grants when the claim is missing, so use it only to withdraw an alternative from a claim the host adds
+on purpose, never as the only thing between a caller and rows. The [inverse](#who-may-see-a-record) reads the claim
+from the principal directory; a session marker is held by no stored principal, so "who may see this record" answers
+for ordinary sessions.
 
 ### Rows hidden from the caller
 
@@ -460,7 +479,8 @@ var readers = await users.ActiveStaff(now)                       // the candidat
   not asked about. Like the complement, "all" is exact under EF Core's default null semantics; with
   `UseRelationalNulls` a relation that evaluates to SQL `NULL` does not exclude a principal.
 - **The rule is read as a relation** between a row and a principal id. `ForUser` already is one; `Rows`,
-  `Unrestricted`, `WhenPermission`, `WhenRole`, `ForOperations`, `Via`, `AnyOf`, `AllOf` and the generated `[ResourceFilter]`
+  `Unrestricted`, `WhenPermission`, `WhenRole`, `UnlessClaim`, `ForOperations`, `Via`, `AnyOf`, `AllOf` and the
+  generated `[ResourceFilter]`
   (owner, bypass permission and role, user and role grants) translate to one. Pass the operation to ask who may
   *change* the record.
 - **Complete or refused.** A rule that contains `QueryAuthorizers.From`, `QueryAuthorizers.When`, a hand-written

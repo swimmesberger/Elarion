@@ -22,6 +22,11 @@ minor releases may include breaking changes.
   all of the rows by the entity's rule, in one statement, and nobody for an empty selection. `WhereAuthorizedFor` still
   answers "at least one". See
   [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#who-may-see-a-record).
+- **`QueryAuthorizers.UnlessClaim`: a negated claim gate** (ADR-0095 amendment). `UnlessClaim("act", adminBypass)`
+  grants its alternative only to callers without the claim, so one rule withdraws an administrator's bypass while the
+  administrator views the application as another user. `UnlessClaim(type, value, then)` matches one value. Both deny an
+  unauthenticated caller and are read by `WhereAuthorizedFor`. See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#withdrawing-an-alternative-for-a-session).
 
 ## [0.4.5] - 2026-11-23
 

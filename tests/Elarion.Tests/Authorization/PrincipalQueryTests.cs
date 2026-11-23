@@ -147,6 +147,64 @@ public sealed class PrincipalQueryTests {
     }
 
     [Fact]
+    public void UnlessClaim_WithdrawsAnAlternative_FromASessionCarryingTheClaim() {
+        var rule = QueryAuthorizers.AnyOf(
+            QueryAuthorizers.UnlessClaim("act", QueryAuthorizers.WhenRole("Admin", QueryAuthorizers.Unrestricted<Doc>())),
+            Owner);
+        var administrator = User(Dave, ["Admin"]);
+        var viewingAsAlice = new FakeCurrentUser {
+            IsAuthenticated = true, UserId = Dave.ToString(), Roles = ["Admin"], Claims = [("act", Alice.ToString())]
+        };
+
+        Docs.AsQueryable().WhereAuthorized(rule, administrator).Should().HaveCount(Docs.Length);
+        Docs.AsQueryable().WhereAuthorized(rule, viewingAsAlice).Should().BeEmpty("the bypass is withdrawn");
+        Docs.AsQueryable().WhereAuthorized(rule, new FakeCurrentUser { IsAuthenticated = false }).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void UnlessClaim_WithAValue_WithdrawsOnlyForThatValue() {
+        var rule = QueryAuthorizers.UnlessClaim(
+            "act", Alice.ToString(), QueryAuthorizers.WhenRole("Admin", QueryAuthorizers.Unrestricted<Doc>()));
+        FakeCurrentUser Acting(Guid subject) => new() {
+            IsAuthenticated = true, UserId = Dave.ToString(), Roles = ["Admin"], Claims = [("act", subject.ToString())]
+        };
+
+        Docs.AsQueryable().WhereAuthorized(rule, Acting(Alice)).Should().BeEmpty();
+        Docs.AsQueryable().WhereAuthorized(rule, Acting(Bob)).Should().HaveCount(Docs.Length);
+    }
+
+    [Fact]
+    public void UnlessClaim_Inverse_LeavesOutWhomTheDirectoryListsWithTheClaim_AndAgreesWithTheFilter() {
+        FakeCurrentUser[] users = [
+            User(Alice),
+            User(Bob, permissions: "docs.read"),
+            new() {
+                IsAuthenticated = true, UserId = Carol.ToString(),
+                Claims = [("permission", "docs.read"), ("suspended", "true")]
+            }
+        ];
+        var directory = new UserDirectory(users);
+        var candidates = users.Select(user => Guid.Parse(user.UserId)).AsQueryable();
+        var rule = QueryAuthorizers.AnyOf(
+            QueryAuthorizers.UnlessClaim(
+                "suspended",
+                QueryAuthorizers.WhenPermission("docs.read", QueryAuthorizers.Rows<Doc>(doc => !doc.IsRestricted))),
+            Owner);
+
+        foreach (var doc in Docs) {
+            var forward = users
+                .Where(user => Docs.AsQueryable().WhereAuthorized(rule, user).Contains(doc))
+                .Select(user => Guid.Parse(user.UserId));
+
+            candidates.WhereAuthorizedFor(new[] { doc }.AsQueryable(), rule, directory)
+                .Should().BeEquivalentTo(forward, "both directions read one rule (doc {0})", doc.Id);
+        }
+
+        candidates.WhereAuthorizedFor(new[] { Docs[0] }.AsQueryable(), rule, directory)
+            .Should().BeEquivalentTo([Alice, Bob], "Carol holds the claim that withdraws her reading");
+    }
+
+    [Fact]
     public void Inverse_KeepsAScopeAroundAnUnrestrictedAlternative() {
         var scoped = QueryAuthorizers.AllOf(
             QueryAuthorizers.Rows<Doc>(doc => !doc.IsRestricted),
