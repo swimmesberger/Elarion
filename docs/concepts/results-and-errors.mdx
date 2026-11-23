@@ -141,9 +141,9 @@ public sealed class CommitImport(AppDbContext db) : IHandler<CommitImport.Comman
         if (lines.Any(l => l.InClosedPeriod) && !command.IsConfirmed(Codes.ClosedPeriod))
             return AppError.DecisionRequired(Codes.ClosedPeriod, "Some lines fall into a closed period. Import them?");
 
-        // Per item: refuse while any line the server finds is unanswered, then act on each answer.
+        // Per item: refuse while any line the server finds has no declared option, then act on each answer.
         var duplicates = await FindPossibleDuplicatesAsync(lines, ct);
-        var unanswered = command.Unanswered(Codes.PossibleDuplicate, duplicates.Select(d => d.Key));
+        var unanswered = command.Unanswered<DuplicateChoice>(Codes.PossibleDuplicate, duplicates.Select(d => d.Key));
         if (unanswered.Count > 0)
             return AppError.DecisionRequired(Codes.PossibleDuplicate, "Some lines look like existing bookings.",
                 new PossibleDuplicates([.. duplicates.Where(d => unanswered.Contains(d.Key))]));
@@ -162,8 +162,10 @@ public sealed class CommitImport(AppDbContext db) : IHandler<CommitImport.Comman
   `perItem`. Options that are not an enum are a build error (`ELERR003`).
 - **The answers travel in one member.** The request implements `IDecidingRequest`; its `Decisions` is a list of
   `{ code, item?, option }`. `IsConfirmed(code)`, `Decision<TOption>(code)` and their per-item overloads read it (the
-  last answer for a code and item wins); `Unanswered(code, keys)` lists the items still to ask. An option the enum does
-  not declare counts as no answer, so the handler asks again.
+  last answer for a code and item wins); `Unanswered<TOption>(code, keys)` lists the items of a choice still to ask,
+  and `Unanswered(code, keys)` those of a per-item confirmation. An option the enum does not declare counts as no
+  answer everywhere, so the handler asks again: an item `Unanswered<TOption>` leaves out always has a
+  `Decision<TOption>`, and one answered with an undeclared option is asked about, never skipped silently.
 - **The schema states the answers the request takes.** Its `decisions` member is exported narrowed to the declared
   decisions: each answer names one of the declared codes and one of that decision's options (which a confirmation may
   leave out), and a per-item answer names its item. The generated client types `decisions` per method from it, so the

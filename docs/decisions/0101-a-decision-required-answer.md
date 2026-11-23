@@ -103,6 +103,28 @@ Elarion-only statement of what JSON Schema expresses, invisible to other schema 
 that lists the codes (prose no type checker reads); a loose `decisions` type with typed builder functions only (a
 hand-built answer would still compile with any code).
 
+## Amendment (2026-11-23): `Unanswered` reads an option as the other readers do
+
+`Unanswered(code, keys)` counted every per-item answer with the code, whatever its option, while `Decision<TOption>`
+reads an undeclared option as no answer. A handler that refused while `Unanswered` was not empty and then imported only
+the items answered `Import` skipped an item answered with an undeclared option silently, which the per-item rule above
+forbids. An application's scenario test found it.
+
+- **`Unanswered<TOption>(code, keys)`** lists the items whose last answer is not an option `TOption` declares: an item
+  is answered exactly when `Decision<TOption>(code, item)` returns an option. It is the reader for a per-item choice.
+- **`Unanswered(code, keys)`** lists the items whose last answer is not `confirm`: an item is answered exactly when
+  `IsConfirmed(code, item)` holds. It is the reader for a per-item confirmation. The readers now pair up by the
+  decision's shape, `IsConfirmed` and `Unanswered` for a confirmation, `Decision<TOption>` and `Unanswered<TOption>`
+  for a choice, and none of them counts an answer the decision does not declare.
+- Both read the last answer for an item, as the single-item readers do; before, any earlier answer counted.
+- Breaking for a handler that used the untyped `Unanswered` for a choice: it now asks again for every item answered
+  with an option. That fails closed, and the fix is the type argument.
+
+Rejected: keeping `Unanswered` option-blind and documenting it (the trap stays the shorter call); obsoleting it in
+favour of a typed overload and a new confirmation name (a second name for the confirmation reader, which `IsConfirmed`
+already pairs with); reading the declared options at run time from the handler's `[RequiresDecision]` (the extensions
+know only the request, and the type argument states the options at the call).
+
 ## Rejected alternatives
 
 - **A `Confirm` flag convention without a new kind.** What applications do now; a generic client still cannot
