@@ -8,6 +8,16 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **`QueryAuthorizers.Via`: a rule through an owner** (ADR-0095 amendment). `Via<Email, Contact>(e => e.Links.Select(l =>
+  l.Contact), contactRule)` admits the rows with at least one owner the caller may access under the owner type's own
+  rule; `Via<Email, Contact>(db.Contacts, (e, c) => e.Links.Any(l => l.Kind == "contact" && l.RecordId == c.Id),
+  contactRule)` does the same for a `(kind, id)` pointer without a navigation. It is a building block: it composes in
+  `AnyOf`/`AllOf`, the owner's rule is used as it stands, and `WhereAuthorizedFor` reads it, so "who may read this
+  record" needs no hand-written mirror of an "assigned to a record the caller may read" rule. A row without an owner is
+  not visible through it; `ownerOperation` asks the owner about another operation than the row's. See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#visible-through-an-owner-as-part-of-a-rule).
+
 ## [0.4.5] - 2026-11-23
 
 ### Fixed

@@ -164,6 +164,41 @@ simplest one that makes the contract coherent.
   application that registered its own authorizer before `AddElarion` and relied on the generated filter winning now
   gets its own registration.
 
+## Amendment (2026-11-23): a rule through an owner
+
+An application's e-mail feature states visibility as "readable when it is assigned to a record the caller may read",
+across 22 record kinds, one of which (contacts) has a composed rule of its own. `WhereAuthorizedVia` expresses that for
+one query, but it is not a building block: it cannot be an alternative of the e-mail type's rule, and the inverse cannot
+read it. The application wrote the inverse by hand and kept it in step with scenario tests — the mirror this ADR set out
+to remove.
+
+**`QueryAuthorizers.Via` lifts an owner type's rule to the rows that point at its owners.** Its relation is
+`(row, principal) => owners(row).Any(o => ownerRelation(o, principal))`, its filter the same with the owner's filter in
+place of the relation, so both directions read one rule and the owner's rule is used as it stands. Two forms:
+
+- `Via(row => owners, ownerRule)`: the owners are an expression over the row — a collection navigation, a join through
+  a link table. Context-free, so the rule can be a static field.
+- `Via(ownerSet, (row, owner) => joins, ownerRule)`: the owners are a set the row is joined to — a `(kind, id)` pointer
+  with no navigation. The set becomes part of every query the rule filters, so a rule over a `DbContext` set is composed
+  per scope.
+
+Decisions taken, each the simplest coherent one and revisable:
+
+1. **A row needs an owner.** An unrestricted owner rule admits the rows that *have* an owner, not every row: the
+   relation is an existence, and "assigned to a record the caller may read" is false of an unassigned row. This differs
+   from `WhereAuthorizedVia`, which keeps every row for an unrestricted caller; an unassigned row that should be visible
+   gets an alternative of its own.
+2. **The owner is asked about the row's operation** unless `ownerOperation` names another one, so "whoever may read the
+   record may change its notes" is one argument, and the default never widens a write to the owner's read rule.
+3. **It denies an unauthenticated caller itself**, like every other building block, instead of relying on the owner's
+   rule (which may be `From`).
+4. **An opaque owner rule refuses the inverse**, through the same `RelationOf` every composition uses.
+
+Rejected: **a `WhereAuthorizedVia` overload that returns an authorizer** (it would still need the caller's set and
+user at build time, so it could not be a static or composed rule); **an owner-set provider delegate** resolved per
+query (an `IQueryable` cannot be obtained inside an expression without a context, and a delegate is opaque to the
+inverse); **a navigation-only form** (a `(kind, id)` pointer has no navigation, and it is the shape that needed this).
+
 ## Rejected alternatives
 
 - **A router as the default `IResourceAuthorizer`, with the backend as a second seam.** It needs a fallback service

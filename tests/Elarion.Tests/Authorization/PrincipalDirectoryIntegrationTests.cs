@@ -212,6 +212,86 @@ public sealed class PrincipalDirectoryIntegrationTests(PrincipalDirectoryFixture
         cast.Named(readers).Should().Equal("admin", "flagged", "owner");
     }
 
+    [Fact]
+    public async Task Via_TranslatesBothForms_AndItsReadersAgreeWithItsFilter() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var provider = BuildProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ReadersDbContext>();
+        var directory = scope.ServiceProvider.GetRequiredService<IPrincipalDirectory<Guid>>();
+        var cast = new Cast(db)
+            .Add("owner")
+            .Add("clerk", permissions: ["dossiers.read"])
+            .Add("admin", roles: ["Admin"])
+            .Add("nobody");
+        var open = await SeedDossierAsync(db, cast["owner"], restricted: false);
+        var restricted = await SeedDossierAsync(db, cast["owner"], restricted: true);
+        var memos = new Dictionary<string, Memo> {
+            ["open"] = Memo(new MemoLink { Kind = "dossier", RecordId = open.Id, DossierId = open.Id }),
+            ["restricted"] = Memo(new MemoLink { Kind = "dossier", RecordId = restricted.Id, DossierId = restricted.Id }),
+            ["unassigned"] = Memo(),
+            // An invoice whose id equals a visible dossier's: only the kind keeps it out.
+            ["invoice"] = Memo(new MemoLink { Kind = "invoice", RecordId = open.Id })
+        };
+        db.AddRange(memos.Values);
+        await db.SaveChangesAsync(ct);
+        var ids = memos.Values.Select(memo => memo.Id).ToArray();
+        var dossierRule = QueryAuthorizers.AnyOf(
+            QueryAuthorizers.WhenRole(cast.Role("Admin"), QueryAuthorizers.Unrestricted<Dossier>()),
+            QueryAuthorizers.WhenPermission(
+                "dossiers.read", QueryAuthorizers.Rows<Dossier>(dossier => !dossier.IsRestricted)),
+            QueryAuthorizers.ForUser<Dossier, Guid>((dossier, userId) => dossier.OwnerId == userId));
+        (string Form, IQueryAuthorizer<Memo> Rule)[] forms = [
+            ("navigation", QueryAuthorizers.Via<Memo, Dossier>(
+                memo => memo.Links.Where(link => link.DossierId != null).Select(link => link.Dossier!), dossierRule)),
+            ("pointer", QueryAuthorizers.Via<Memo, Dossier>(
+                db.Dossiers,
+                (memo, dossier) => memo.Links.Any(link => link.Kind == "dossier" && link.RecordId == dossier.Id),
+                dossierRule))
+        ];
+        (string Name, FakeCurrentUser User)[] principals = [
+            ("owner", Principal(cast["owner"])),
+            ("clerk", Principal(cast["clerk"], permissions: "dossiers.read")),
+            ("admin", Principal(cast["admin"], [cast.Role("Admin")])),
+            ("nobody", Principal(cast["nobody"]))
+        ];
+
+        foreach (var (form, rule) in forms) {
+            var readersOf = new Dictionary<string, List<string>>();
+            foreach (var (memoName, memo) in memos) {
+                var readers = await cast.Everyone
+                    .WhereAuthorizedFor(db.Set<Memo>().Where(row => row.Id == memo.Id), rule, directory)
+                    .ToListAsync(ct);
+                readersOf[memoName] = cast.Named(readers).ToList();
+            }
+
+            readersOf["open"].Should().Equal(["admin", "clerk", "owner"], "({0})", form);
+            readersOf["restricted"].Should().Equal(["admin", "owner"], "({0})", form);
+            readersOf["unassigned"].Should().BeEmpty("({0}) a memo needs an owner", form);
+            readersOf["invoice"].Should().BeEmpty("({0}) the invoice is not a dossier", form);
+
+            foreach (var (name, user) in principals) {
+                var visible = await db.Set<Memo>().Where(memo => ids.Contains(memo.Id))
+                    .WhereAuthorized(rule, user)
+                    .Select(memo => memo.Id)
+                    .ToListAsync(ct);
+                var expected = memos.Where(memo => readersOf[memo.Key].Contains(name)).Select(memo => memo.Value.Id);
+                visible.Should().BeEquivalentTo(expected, "({0}) both directions read one rule for {1}", form, name);
+            }
+        }
+    }
+
+    private static Memo Memo(params MemoLink[] links) {
+        var memo = new Memo { Id = Guid.CreateVersion7() };
+        foreach (var link in links) {
+            link.Id = Guid.CreateVersion7();
+            memo.Links.Add(link);
+        }
+
+        return memo;
+    }
+
     private static FakeCurrentUser Principal(Guid id, string[]? roles = null, params string[] permissions) {
         return new FakeCurrentUser {
             IsAuthenticated = true,
@@ -287,7 +367,32 @@ internal sealed class DossierAccess(IResourceGrantSource grants)
     }
 }
 
-/// <summary>Maps <see cref="Dossier"/>, the Identity model and the resource-grants table.</summary>
+/// <summary>A record assigned to dossiers (and other records) through its links.</summary>
+public sealed class Memo {
+    public Guid Id { get; set; }
+
+    public List<MemoLink> Links { get; set; } = [];
+}
+
+/// <summary>
+/// A memo's assignment: a <c>(kind, id)</c> pointer, plus a dossier foreign key for the navigation form of the same
+/// assignment.
+/// </summary>
+public sealed class MemoLink {
+    public Guid Id { get; set; }
+
+    public Guid MemoId { get; set; }
+
+    public string Kind { get; set; } = "";
+
+    public Guid RecordId { get; set; }
+
+    public Guid? DossierId { get; set; }
+
+    public Dossier? Dossier { get; set; }
+}
+
+/// <summary>Maps <see cref="Dossier"/>, memos and their links, the Identity model and the resource-grants table.</summary>
 public sealed class ReadersDbContext(DbContextOptions<ReadersDbContext> options) : DbContext(options) {
     public DbSet<Dossier> Dossiers => Set<Dossier>();
 
@@ -295,6 +400,16 @@ public sealed class ReadersDbContext(DbContextOptions<ReadersDbContext> options)
         modelBuilder.Entity<Dossier>(builder => {
             builder.ToTable("dossiers");
             builder.HasKey(dossier => dossier.Id);
+        });
+        modelBuilder.Entity<Memo>(builder => {
+            builder.ToTable("memos");
+            builder.HasKey(memo => memo.Id);
+            builder.HasMany(memo => memo.Links).WithOne().HasForeignKey(link => link.MemoId);
+        });
+        modelBuilder.Entity<MemoLink>(builder => {
+            builder.ToTable("memo_links");
+            builder.HasKey(link => link.Id);
+            builder.HasOne(link => link.Dossier).WithMany().HasForeignKey(link => link.DossierId);
         });
         modelBuilder.ApplyElarionIdentity<ApplicationUser, ApplicationRole, Guid>();
         modelBuilder.ApplyElarionResourceGrants();
