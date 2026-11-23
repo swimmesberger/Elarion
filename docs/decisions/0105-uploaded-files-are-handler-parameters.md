@@ -76,6 +76,7 @@ not upload a file for the caller; each frontend hand-wrote an upload call before
    with `[ProducesError(ErrorCodes.UploadNotFound, ErrorKind.Validation)]` and the two constraint codes it can
    produce, like any error a service it calls returns (ADR-0080). They are not implied by the generator: the implied
    errors are those the pipeline adds, and which upload codes occur depends on the constraints the handler passes.
+   (Changed by the 2026-11-23 amendment: declared `[UploadLimits]` imply them, with typed payloads.)
 
 5. **The schema marks the member.** `JsonRpcSchemaExporter` exports an `UploadedFile` as
    `{ "type": "string", "x-elarion-upload": true, "description": … }`, with `null` added for a nullable member
@@ -127,6 +128,67 @@ and commit of that file, on top of the constraints a call passes; the schema exp
 and the generated client rejects a file that breaks them before uploading it. Constraints passed at read time still
 work and still apply. The rejected alternative "per-member limit attributes" below was rejected for as long as no
 schema support existed; ADR-0100 supplies it with one attribute for both limits.
+
+## Amendment (2026-11-23): typed refusals, file extensions and a targeted upload
+
+An application that moved 27 import methods to uploaded files reported four gaps. The constraint errors were English
+text with the limit in bytes, on the server and in the client's refinement, so it worded them by code and re-checked
+the size itself. The content type a browser declares for `.xlsx`, `.vcf` and `.ics` varies by system and is often
+missing (sent as `application/octet-stream`), so a content-type list refused real files. `uploadFile(file)` knew no
+method and checked no limit. And `DeleteAsync` on the PostgreSQL store saved the handler's tracked changes with it.
+
+1. **A refusal carries its limit as typed data.** `upload.too_large` carries `UploadTooLargeData` (`MaxBytes`,
+   `Length`), `upload.content_type` `UploadContentTypeData` (the accepted `ContentTypes`, the file's `ContentType`),
+   and the new `upload.file_extension` `UploadFileExtensionData` (the accepted `FileExtensions`, the stored
+   `FileName`). The payloads live in `Elarion.Abstractions` and are seeded into `ElarionFrameworkJsonContext`, as
+   `ValidationErrorData` is, because `AppError.Data` is an object slot no application context reaches. The message
+   stays, as the English fallback.
+
+2. **Decision 4 changes: declared limits imply the upload errors.** With `[UploadLimits]` the codes are statically
+   knowable, exactly where the upload-limits decorator attaches: the generator implies `upload.not_found` and, for each
+   kind of limit the request declares, its code with its payload, so the schema and the generated client type `data`
+   without the handler declaring anything. A handler that only passes `UploadConstraints` still declares the codes it
+   can produce, now with their payload. Because the handler's own declaration wins over an implied one, a declaration
+   of an upload code with another payload — typically none, as written before the payloads existed — would hide the
+   typed data; the generator reports it as the warning `ELERR004`.
+
+3. **Accepted file extensions.** `UploadConstraints.FileExtensions` and `[UploadLimits(FileExtensions = […])]`
+   accept a file by the end of the name the upload endpoint stored: each extension with its leading dot, compared
+   case-insensitively, the name longer than the extension (a file without a name is stored as `upload` and has none).
+   A declared extension that is not a dot followed by a name without white space or path separators is `ELUPL001`.
+   Extensions are one more limit: every declared limit must hold, so a member that declares both types and extensions
+   requires both, and a format with an unreliable type is declared by extension alone. They are exported as
+   `x-elarion-file-extensions` next to the other limits (JSON-RPC schema, OpenAPI, `rpcLimits`), and the client checks
+   them against the name it sends.
+
+4. **The client words nothing itself.** Its refinements carry `params: { code, <limit> }` on the Zod issue, for an
+   error map in the application's language. `rpc-schemas.ts` exports `rpcUploadLimits`, every upload member of every
+   method by path (a list by its own path) with its limits, whenever params take an uploaded file, so `rpc-client.ts`
+   stays independent of the declared values. `uploadFile(file, { method, member })` takes the pair typed from it,
+   checks the file against that member's limits before uploading it (skipped with `validateParams: false`), and throws
+   `RpcUploadLimitError`: an `RpcError` with the code, message and data the server would answer, plus the method and
+   member, so one handler words the client's refusal and the server's.
+
+5. **`DeleteAsync` is documented, not changed.** The PostgreSQL store removes the row through the scoped `DbContext`
+   it shares with the handler and saves it, which also writes whatever the handler still tracks. The interface's
+   documentation and the published page now say to call it after the handler's own save.
+
+Rejected alternatives of this amendment:
+
+- **An `ErrorMessage` on `[UploadLimits]`, as DataAnnotations has.** One attribute carries up to three limits, so one
+  message cannot fit each refusal. A resource message is resolved when the schema is exported, in one language, as the
+  DataAnnotations messages are, so it would not follow the user's language either. The client already knows the
+  user's language; code and data give it the facts to word every refusal.
+- **A sniffed content type.** Reading the bytes before the handler is the pre-handler check rejected above; magic
+  numbers tell an `.xlsx` from any other zip archive no better than its name does, and `.vcf` and `.ics` are text.
+- **Extensions as an alternative to the types (either one accepts).** A declaration would then loosen another one;
+  declarations only tighten.
+- **Completing a payload-less declaration with the implied payload.** Everywhere else the declaration closest to the
+  handler wins; a warning keeps that rule and makes the migration visible.
+- **`uploadFile` throwing `RpcParamsValidationError`.** The client would have to build a Zod error itself, and the
+  application would handle the same refusal in two shapes, one from the client and one from the server.
+- **Deleting without saving the shared context (`ExecuteDelete`).** It changes `IBlobStore.DeleteAsync` for every
+  caller of the store and when the delete commits relative to the handler's own save; that is its own change.
 
 ## Rejected alternatives
 

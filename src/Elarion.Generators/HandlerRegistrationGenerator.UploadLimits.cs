@@ -25,7 +25,7 @@ public sealed partial class HandlerRegistrationGenerator {
         "ELUPL001",
         "Invalid [UploadLimits] declaration",
         "[UploadLimits] on '{0}' is not enforced because {1}; declare it on an UploadedFile member (or a collection of "
-        + "UploadedFile) with MaxBytes > 0 or at least one non-blank content type",
+        + "UploadedFile) with MaxBytes > 0, a non-blank content type or a file extension such as \".xlsx\"",
         "Elarion.Abstractions",
         DiagnosticSeverity.Error,
         true);
@@ -60,7 +60,8 @@ public sealed partial class HandlerRegistrationGenerator {
         string Property,
         bool IsCollection,
         long MaxBytes,
-        EquatableArray<string> ContentTypes);
+        EquatableArray<string> ContentTypes,
+        EquatableArray<string> FileExtensions);
 
     /// <summary>One <c>[UploadLimits]</c> written in this compilation, for the misplaced-declaration check.</summary>
     internal sealed record UploadLimitsSite(string Key, string Display, string DeclaringType, LocationInfo Location);
@@ -109,8 +110,9 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     // The request's [UploadLimits] members: public instance properties, its own and inherited, with the attribute on the
-    // property or on the positional record's constructor parameter of the same name.
-    private static UploadLimitsInfo? ParseUploadLimits(
+    // property or on the positional record's constructor parameter of the same name. The error contract reads it too
+    // (ErrorContractDiscovery), so the codes a declaration implies follow exactly the members the pipeline enforces.
+    internal static UploadLimitsInfo? ParseUploadLimits(
         ITypeSymbol requestType,
         Compilation compilation,
         ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
@@ -135,7 +137,7 @@ public sealed partial class HandlerRegistrationGenerator {
                 sites.Add($"{siteType!.ToDisplayString(fmt)}|{property.Name}");
                 var location = attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation();
                 var display = $"{type.ToDisplayString(errorFmt)}.{property.Name}";
-                var (maxBytes, contentTypes, problem) = ReadUploadLimits(attribute);
+                var (maxBytes, contentTypes, fileExtensions, problem) = ReadUploadLimits(attribute);
                 var isCollection = false;
                 if (problem is null)
                     if (IsUploadedFile(property.Type, uploadedFile)) {
@@ -156,7 +158,7 @@ public sealed partial class HandlerRegistrationGenerator {
                     continue;
                 }
 
-                members.Add(new UploadLimitMember(property.Name, isCollection, maxBytes, contentTypes));
+                members.Add(new UploadLimitMember(property.Name, isCollection, maxBytes, contentTypes, fileExtensions));
             }
 
         if (sites.Count == 0) return null;
@@ -185,10 +187,11 @@ public sealed partial class HandlerRegistrationGenerator {
         return (null, null);
     }
 
-    private static (long MaxBytes, EquatableArray<string> ContentTypes, string? Problem) ReadUploadLimits(
-        AttributeData attribute) {
+    private static (long MaxBytes, EquatableArray<string> ContentTypes, EquatableArray<string> FileExtensions, string? Problem)
+        ReadUploadLimits(AttributeData attribute) {
         long maxBytes = 0;
         var contentTypes = ImmutableArray.CreateBuilder<string>();
+        var fileExtensions = ImmutableArray.CreateBuilder<string>();
         foreach (var named in attribute.NamedArguments)
             switch (named.Key) {
                 case "MaxBytes" when named.Value.Value is long value:
@@ -197,20 +200,46 @@ public sealed partial class HandlerRegistrationGenerator {
                 case "ContentTypes" when named.Value.Kind == TypedConstantKind.Array && !named.Value.IsNull:
                     foreach (var item in named.Value.Values) {
                         if (item.Value is not string contentType || string.IsNullOrWhiteSpace(contentType))
-                            return (0, EquatableArray<string>.Empty, "it lists a blank content type");
+                            return Invalid("it lists a blank content type");
 
                         contentTypes.Add(contentType);
                     }
 
                     break;
+                case "FileExtensions" when named.Value.Kind == TypedConstantKind.Array && !named.Value.IsNull:
+                    foreach (var item in named.Value.Values) {
+                        if (item.Value is not string extension || !IsFileExtension(extension))
+                            return Invalid(
+                                $"it lists the file extension '{item.Value as string}', which is not a dot followed by "
+                                + "a name without white space or path separators (for example \".xlsx\")");
+
+                        fileExtensions.Add(extension);
+                    }
+
+                    break;
             }
 
-        if (maxBytes < 0) return (0, EquatableArray<string>.Empty, "MaxBytes is negative");
+        if (maxBytes < 0) return Invalid("MaxBytes is negative");
 
-        if (maxBytes == 0 && contentTypes.Count == 0)
-            return (0, EquatableArray<string>.Empty, "it declares no limit");
+        if (maxBytes == 0 && contentTypes.Count == 0 && fileExtensions.Count == 0) return Invalid("it declares no limit");
 
-        return (maxBytes, contentTypes.ToImmutable(), null);
+        return (maxBytes, contentTypes.ToImmutable(), fileExtensions.ToImmutable(), null);
+
+        static (long, EquatableArray<string>, EquatableArray<string>, string?) Invalid(string problem) {
+            return (0, EquatableArray<string>.Empty, EquatableArray<string>.Empty, problem);
+        }
+    }
+
+    // ".xlsx", ".tar.gz": a leading dot and at least one more character, none of them white space, a path separator or
+    // a control character — the form an HTML accept attribute takes, and a suffix the stored file name can end in.
+    private static bool IsFileExtension(string extension) {
+        if (extension.Length < 2 || extension[0] != '.' || extension[extension.Length - 1] == '.') return false;
+
+        foreach (var character in extension)
+            if (char.IsWhiteSpace(character) || char.IsControl(character) || character is '/' or '\\')
+                return false;
+
+        return true;
     }
 
     private static bool IsUploadedFile(ITypeSymbol type, INamedTypeSymbol uploadedFile) {
@@ -271,13 +300,13 @@ public sealed partial class HandlerRegistrationGenerator {
         sb.AppendLine();
         for (var i = 0; i < limits.Members.Count; i++) {
             var member = limits.Members[i];
-            var parts = new List<string>(2);
+            var parts = new List<string>(3);
             if (member.MaxBytes > 0)
                 parts.Add($"MaxBytes = {member.MaxBytes.ToString(CultureInfo.InvariantCulture)}L");
             if (!member.ContentTypes.IsEmpty)
-                parts.Add("ContentTypes = new string[] { "
-                          + string.Join(", ", member.ContentTypes.Select(static t => SymbolDisplay.FormatLiteral(t, true)))
-                          + " }");
+                parts.Add("ContentTypes = " + StringArrayLiteral(member.ContentTypes));
+            if (!member.FileExtensions.IsEmpty)
+                parts.Add("FileExtensions = " + StringArrayLiteral(member.FileExtensions));
 
             sb.AppendLine(
                 $"    private static readonly {UploadConstraintsFqn} __uploadLimits{i} = new() {{ {string.Join(", ", parts)} }};");
@@ -300,6 +329,10 @@ public sealed partial class HandlerRegistrationGenerator {
         }
 
         sb.AppendLine("    }");
+    }
+
+    private static string StringArrayLiteral(EquatableArray<string> values) {
+        return "new string[] { " + string.Join(", ", values.Select(static v => SymbolDisplay.FormatLiteral(v, true))) + " }";
     }
 
     // Innermost: the limits are declared right before the handler runs, after every gate, so a refused, replayed or

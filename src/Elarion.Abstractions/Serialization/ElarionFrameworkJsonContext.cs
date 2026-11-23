@@ -16,7 +16,8 @@ namespace Elarion.Abstractions.Serialization;
 /// runtime type, and <see cref="System.Text.Json.JsonSerializer"/> needs a
 /// <see cref="System.Text.Json.Serialization.Metadata.JsonTypeInfo"/> for each concrete payload — which the STJ
 /// source generator never pulls into a module context because the <see cref="object"/> breaks static reachability.
-/// The framework's own such types live here (<see cref="ValidationErrorData"/>, plus the idempotency
+/// The framework's own such types live here (<see cref="ValidationErrorData"/>, the upload-limit payloads such as
+/// <see cref="UploadTooLargeData"/>, plus the idempotency
 /// <see cref="Elarion.Abstractions.Idempotency.StoredResult"/> replay envelope and the <see cref="AppError"/> it
 /// carries — none of which any app/module context registers, but which the idempotency store must serialize on an
 /// AOT-strict host); app-provided payloads (via <see cref="AppError.Validation(string, string, object)"/> and friends)
@@ -36,4 +37,7 @@ namespace Elarion.Abstractions.Serialization;
 [JsonSerializable(typeof(AppError))]
 [JsonSerializable(typeof(ElarionFile))]
 [JsonSerializable(typeof(UploadedFile))]
+[JsonSerializable(typeof(UploadTooLargeData))]
+[JsonSerializable(typeof(UploadContentTypeData))]
+[JsonSerializable(typeof(UploadFileExtensionData))]
 public sealed partial class ElarionFrameworkJsonContext : JsonSerializerContext;

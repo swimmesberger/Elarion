@@ -160,7 +160,64 @@ public sealed class VisibilityGeneratorTests {
             .And.Contain("permissions.Holds(global::VisibilityGeneratorTests.ElarionPermissions.Banking.Read)");
     }
 
+    // Visible with any one of several permissions, some named through the catalog the same compilation generates.
+    private const string AnyOfSample = Preamble +
+                                       """
+
+                                       namespace Sample.App {
+                                           [AppModule("App")]
+                                           public static class AppModule { }
+
+                                           public sealed record Account(
+                                               string Name,
+                                               [property: VisibleWith(AnyOf = [ElarionPermissions.Settings.Read, "settings.write", ElarionPermissions.Banking.Read])] decimal? Opening,
+                                               [property: VisibleWith("banking", "write", AnyOf = ["audit.read"])] string? Iban);
+                                           public sealed record ShowAccount : IQuery;
+
+                                           [RequirePermission("accounts", "read")]
+                                           [DeclarePermission("settings", "read")]
+                                           [DeclarePermission("banking", "read")]
+                                           public sealed class ShowAccountHandler : IHandler<ShowAccount, Result<Account>> {
+                                               public ValueTask<Result<Account>> HandleAsync(ShowAccount request, CancellationToken ct) =>
+                                                   ValueTask.FromResult(Result<Account>.Success(new Account("Main", 125m, "AT61")));
+                                           }
+
+                                           public static class Probe {
+                                               public static async Task<string> Run(IServiceProvider services) {
+                                                   using var scope = services.CreateScope();
+                                                   var handler = scope.ServiceProvider.GetRequiredService<IHandler<ShowAccount, Result<Account>>>();
+                                                   var result = await handler.HandleAsync(new ShowAccount(), CancellationToken.None);
+                                                   return (result.Value.Opening?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-") + "|" + (result.Value.Iban ?? "-");
+                                               }
+                                           }
+                                       }
+                                       """;
+
     [Theory]
+    [InlineData(new[] { "accounts.read" }, "-|-")]
+    [InlineData(new[] { "accounts.read", "settings.write" }, "125|-")]
+    [InlineData(new[] { "accounts.read", "banking.read" }, "125|-")]
+    [InlineData(new[] { "accounts.read", "audit.read" }, "-|AT61")]
+    [InlineData(new[] { "accounts.read", "banking.write" }, "-|AT61")]
+    public void ShowsAMemberToAHolderOfAnyOneOfItsPermissions(string[] held, string expected) {
+        RunProbeFor(AnyOfSample, "ShowAccountHandler", withPermissionCatalog: true, held).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ChecksEveryAlternativeOfAnAnyOfMember() {
+        var (result, diagnostics) = Run(AnyOfSample);
+
+        diagnostics.Should().BeEmpty();
+        GetGenerated(result, "Sample_App_ShowAccountHandler.g.cs").Should().Contain(
+            "(permissions.Holds(global::VisibilityGeneratorTests.ElarionPermissions.Settings.Read) || "
+            + "permissions.Holds(\"settings.write\") || "
+            + "permissions.Holds(global::VisibilityGeneratorTests.ElarionPermissions.Banking.Read)) ? value.Opening : null");
+    }
+
+    [Theory]
+    [InlineData("[property: VisibleWith]")]
+    [InlineData("[property: VisibleWith(AnyOf = [])]")]
+    [InlineData("[property: VisibleWith(AnyOf = [\"banking.read\", Generated.Permissions.BankingWrite])]")]
     [InlineData("[property: VisibleWith(Generated.Permissions.BankingRead)]")]
     [InlineData("[property: VisibleWith(null!)]")]
     [InlineData("[property: VisibleWith(\"banking\", Generated.Verbs.Read)]")]

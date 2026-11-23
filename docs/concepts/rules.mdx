@@ -100,10 +100,12 @@ obtained from a method call (`GetRule().Invoke(x)`) or from a lambda parameter t
 names the expression. A rule that invokes itself, directly or through another rule, has no finite expansion and
 throws an `InvalidOperationException`; in memory it runs.
 
-## Rules with a second input
+## Rules with more inputs
 
-`Rule<TInput1, TInput2, TResult>` takes a value the rule cannot reach from the entity: today's date, a threshold, a
-joined aggregate. A local passed as the argument is a parameter in SQL.
+A rule takes up to four inputs, the result last as in `Func`: next to `Rule<TInput, TResult>` there are
+`Rule<TInput1, TInput2, TResult>`, `Rule<TInput1, TInput2, TInput3, TResult>` and
+`Rule<TInput1, TInput2, TInput3, TInput4, TResult>`. The inputs after the first carry values the rule cannot reach from
+the entity: today's date, a threshold, a joined aggregate. A local passed as an argument is a parameter in SQL.
 
 ```csharp
 public static readonly Rule<Invoice, DateOnly, bool> IsOverdue =
@@ -114,18 +116,47 @@ var today = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
 var overdue = await db.Invoices.Where(invoice => IsOverdue.Invoke(invoice, today)).Expand().ToListAsync(ct);
 ```
 
+Three and four inputs fit a rule over several aggregates, each [joined once](#an-aggregate-used-several-times-join-it-once)
+and passed in, or over an aggregate and the values a query supplies:
+
+```csharp
+public static readonly Rule<Invoice, decimal, decimal, decimal> OpenGiven =
+    Rule.Create((Invoice invoice, decimal paid, decimal credited) => invoice.Gross - paid - credited);
+
+public static readonly Rule<Invoice, decimal, decimal, DateOnly, bool> IsDunnable =
+    Rule.Create((Invoice invoice, decimal paid, decimal credited, DateOnly today) =>
+        invoice.DueOn < today && OpenGiven.Invoke(invoice, paid, credited) > 0);
+```
+
 C# expression trees cannot contain tuple literals, so a rule over a tuple could not be invoked inside a query; give it
-two inputs instead.
+more inputs instead. Values that come from outside the query and belong together, such as a date window, can also travel
+as one record input, as the booking window [below](#predicates-built-at-run-time) does.
 
 ## Expressions without a rule
 
-`Invoke` is also an extension on `Expression<Func<T, TResult>>` and `Expression<Func<T1, T2, TResult>>`. Inside a query
-it is a marker `Expand()` inlines the same way; outside one it compiles the expression once per instance and runs it.
+`Invoke` is also an extension on `Expression<Func<…>>` with one to four inputs. Inside a query it is a marker
+`Expand()` inlines the same way; outside one it compiles the expression once per instance and runs it.
 
 ```csharp
 Expression<Func<Invoice, bool>> isLarge = invoice => invoice.Gross > 10_000m;
 var large = await db.Invoices.Where(invoice => isLarge.Invoke(invoice) && invoice.Payments.Count == 0).Expand().ToListAsync(ct);
 ```
+
+## Helpers that return a composed expression
+
+A lambda has no type of its own, so `Expand()` cannot be called on one where it is written: a helper that returns a
+composed filter would need a typed local first. `Expr.Expand` takes the lambda directly and infers the types from its
+parameters, for one to four inputs:
+
+```csharp
+public static Expression<Func<Invoice, bool>> OverdueOn(DateOnly today) =>
+    Expr.Expand((Invoice invoice) => IsOverdue.Invoke(invoice, today));
+
+var overdue = await db.Invoices.Where(InvoiceFilters.OverdueOn(today)).ToListAsync(ct);
+```
+
+The returned expression is already expanded, so the query needs no `Expand()` of its own unless another operator
+invokes a rule. It expands like `Expand()` and throws the same exceptions.
 
 ## Predicates built at run time
 
@@ -223,6 +254,10 @@ WHERE i."Gross" - COALESCE(p."Paid", 0.0) > 0.0 AND i."Gross" - COALESCE(p."Paid
 The rule stays one definition; only its input changed. In memory, pass the aggregate the same way:
 `IsPartiallyPaid.Invoke(invoice, Paid.Invoke(invoice))`. Write `(decimal?)paid!.Paid ?? 0m` for the joined value:
 EF Core translates it to `COALESCE`, while a `paid == null` test on the anonymous type does not translate.
+
+A rule over several aggregates (the paid and the credited sum) takes each as an input of its own: join one grouped
+subquery per aggregate and pass the joined values to a rule with three or four inputs, such as `OpenGiven` in
+[Rules with more inputs](#rules-with-more-inputs).
 
 Elarion adds no `LATERAL` or CTE construct for this: EF Core inlines projections, and the join is the shape that gives
 every provider one evaluation per row.

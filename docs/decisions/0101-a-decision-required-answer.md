@@ -78,6 +78,31 @@ back without anyone seeing it.
 - Migrating a `Confirm{What}` flag is mechanical: the flag becomes a `[RequiresDecision]` confirmation, the
   `Conflict` becomes `DecisionRequired` with the same code and data, and the client helper becomes `withDecisions`.
 
+## Amendment (2026-11-22): the schema states the answers, and the client exposes the loop's primitives
+
+An application that moved its confirmation flows to decisions found two gaps. Its calls go through its own seam
+(timeouts, error mapping, localized messages) and its dialogs are declarative state, so it could not keep one call
+pending inside `withDecisions`, and wrote its own recognize-the-question and build-the-answers helpers. And the
+generated `decisions` type took any code and option, so each request's description listed its codes by hand.
+
+- **The schema narrows the `decisions` member** of an `IDecidingRequest` to the decisions its handler declares: an
+  `anyOf` (or the one shape) of answers whose `code` is a declared code, whose `option` is one of that decision's
+  options (optional for a confirmation) and which names its `item` for a per-item decision. It is plain JSON Schema, so
+  the generated type and params validation follow it without a special case. The schema is narrower than the server
+  on purpose: it states the answers that count, and a generated client rejects an undeclared one before sending,
+  while the server still reads an undeclared answer as no answer and asks again.
+- **The generated client exposes the primitives** `decisionQuestion(method, error)` (the declared question, typed, or
+  `undefined`; it also finds the `RpcError` in an error's `cause` chain) and `answerDecision(decisions, question,
+  answer)` (the decisions with the answer added, an earlier answer for the same code and item replaced).
+  `withDecisions` is built on them and takes the generated client or any `(method, params, options?)` call function.
+- **`DecisionAnswer.Confirming(code[, item])` and `Choosing(code[, item], option)`** build an answer in C#, with the
+  option spelled as `Decision<TOption>` reads it.
+
+Rejected: an `x-elarion-decisions` marker on the member and narrowing in the TypeScript generator (a second,
+Elarion-only statement of what JSON Schema expresses, invisible to other schema readers); a generated description
+that lists the codes (prose no type checker reads); a loose `decisions` type with typed builder functions only (a
+hand-built answer would still compile with any code).
+
 ## Rejected alternatives
 
 - **A `Confirm` flag convention without a new kind.** What applications do now; a generic client still cannot

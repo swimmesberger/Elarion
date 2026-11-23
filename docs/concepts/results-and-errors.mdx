@@ -164,6 +164,25 @@ public sealed class CommitImport(AppDbContext db) : IHandler<CommitImport.Comman
   `{ code, item?, option }`. `IsConfirmed(code)`, `Decision<TOption>(code)` and their per-item overloads read it (the
   last answer for a code and item wins); `Unanswered(code, keys)` lists the items still to ask. An option the enum does
   not declare counts as no answer, so the handler asks again.
+- **The schema states the answers the request takes.** Its `decisions` member is exported narrowed to the declared
+  decisions: each answer names one of the declared codes and one of that decision's options (which a confirmation may
+  leave out), and a per-item answer names its item. The generated client types `decisions` per method from it, so the
+  request's description need not list its decision codes.
+- **Answering from C#** — a test, or an in-process caller — takes one line per answer, with the option spelled as
+  `Decision<TOption>` reads it:
+
+  ```csharp
+  var command = new CommitImport.Command {
+      Statement = statement,
+      Decisions = [
+          DecisionAnswer.Confirming(Codes.ClosedPeriod),                                   // { code }
+          DecisionAnswer.Choosing(Codes.PossibleDuplicate, "line-3", DuplicateChoice.Skip) // { code, item, option: "skip" }
+      ]
+  };
+  ```
+
+  `Confirming(code, item)` confirms one item of a per-item decision, and `Choosing(code, option)` answers a choice for
+  the whole request.
 - **Ask inside the transaction**, only when the state that needs the decision is there. A resend after the state
   changed simply runs — or asks about what is new: a line that became a possible duplicate since the caller last
   answered is unanswered, so the command refuses instead of silently holding it back.

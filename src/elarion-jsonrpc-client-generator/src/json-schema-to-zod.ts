@@ -112,24 +112,47 @@ export function jsonSchemaToZod(
   return 'z.unknown()'
 }
 
-// The File/Blob arm of an upload member, refined by its declared limits (ADR-0100) with the server's messages. The media
-// type is compared as the server compares it: case-insensitively, parameters ignored, and an untyped blob as the
-// application/octet-stream the uploader sends for it.
+// The File/Blob arm of an upload member, refined by its declared limits (ADR-0100, ADR-0105) with the server's messages.
+// Each issue's params carry the server's error code and the limit (`{ code: 'upload.too_large', maxBytes }`), so a Zod
+// error map words it in the application's language. The media type is compared as the server compares it:
+// case-insensitively, parameters ignored, and an untyped blob as the application/octet-stream the uploader sends for
+// it; the extension against the end of the name the uploader sends (a Blob has none).
 function uploadFileSchema(schema: JsonSchema): string {
   let expression = 'z.instanceof(Blob)'
   const maxBytes = schema['x-elarion-max-bytes']
   if (maxBytes !== undefined) {
-    const message = `The file is larger than the accepted ${maxBytes} bytes.`
-    expression += `.refine((file) => file.size <= ${maxBytes}, ${JSON.stringify(message)})`
+    expression += refinement(
+      `(file) => file.size <= ${maxBytes}`,
+      `The file is larger than the accepted ${maxBytes} bytes.`,
+      {code: 'upload.too_large', maxBytes})
   }
   const contentTypes = schema['x-elarion-content-types']
   if (contentTypes !== undefined && contentTypes.length > 0) {
     const accepted = contentTypes.map((type) => type.split(';')[0].trim().toLowerCase())
-    const message = `Files of this type are not accepted here; expected ${contentTypes.join(', ')}.`
-    expression += `.refine((file) => ${JSON.stringify(accepted)}.includes((file.type || 'application/octet-stream')`
-      + `.split(';')[0].trim().toLowerCase()), ${JSON.stringify(message)})`
+    expression += refinement(
+      `(file) => ${JSON.stringify(accepted)}.includes((file.type || 'application/octet-stream')`
+      + `.split(';')[0].trim().toLowerCase())`,
+      `Files of this type are not accepted here; expected ${contentTypes.join(', ')}.`,
+      {code: 'upload.content_type', contentTypes})
+  }
+  const fileExtensions = schema['x-elarion-file-extensions']
+  if (fileExtensions !== undefined && fileExtensions.length > 0) {
+    const accepted = fileExtensions.map((extension) => {
+      const lower = extension.trim().toLowerCase()
+      return lower.startsWith('.') ? lower : `.${lower}`
+    })
+    expression += refinement(
+      `(file) => { const name = (file instanceof File ? file.name : '').toLowerCase(); `
+      + `return ${JSON.stringify(accepted)}.some((extension) => name.length > extension.length && name.endsWith(extension)) }`,
+      `The file does not have an accepted extension; expected ${fileExtensions.join(', ')}.`,
+      {code: 'upload.file_extension', fileExtensions})
   }
   return expression
+}
+
+// A refinement in the `{ message, params }` form Zod v3 and v4 share; `params` reaches the issue (code "custom").
+function refinement(check: string, message: string, params: Record<string, unknown>): string {
+  return `.refine(${check}, { message: ${JSON.stringify(message)}, params: ${JSON.stringify(params)} })`
 }
 
 function nullish(expression: string, nullable: boolean): string {

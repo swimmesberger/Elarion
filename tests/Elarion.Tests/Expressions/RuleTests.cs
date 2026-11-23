@@ -36,6 +36,14 @@ public sealed class RuleTests {
     private static readonly Rule<Invoice, DateOnly, bool> IsOverdue =
         Rule.Create((Invoice invoice, DateOnly today) => invoice.DueOn < today && !IsSettled.Invoke(invoice));
 
+    // The join-once shape with two aggregates: the paid and the credited sum come in as inputs.
+    private static readonly Rule<Invoice, decimal, decimal, decimal> OpenGiven =
+        Rule.Create((Invoice invoice, decimal paid, decimal credited) => invoice.Gross - paid - credited);
+
+    private static readonly Rule<Invoice, decimal, decimal, DateOnly, bool> IsDunnable =
+        Rule.Create((Invoice invoice, decimal paid, decimal credited, DateOnly today) =>
+            invoice.DueOn < today && OpenGiven.Invoke(invoice, paid, credited) > 0);
+
     private static readonly Expression<Func<Invoice, decimal>> GrossTimesTwo = invoice => invoice.Gross * 2;
 
     // Invokes itself through its static field: fine in memory, no finite expansion.
@@ -56,6 +64,10 @@ public sealed class RuleTests {
         Invoices.Select(OpenAmount.Invoke).Should().Equal(0m, 60m, 50m, 0m);
         Invoices.Select(IsSettled.Invoke).Should().Equal(true, false, false, true);
         Invoices.Select(invoice => IsOverdue.Invoke(invoice, Today)).Should().Equal(false, true, false, false);
+        Invoices.Select(invoice => OpenGiven.Invoke(invoice, Paid.Invoke(invoice), 10m))
+            .Should().Equal(-10m, 50m, 40m, -10m);
+        Invoices.Select(invoice => IsDunnable.Invoke(invoice, Paid.Invoke(invoice), 10m, Today))
+            .Should().Equal(false, true, false, false);
     }
 
     [Fact]
@@ -63,6 +75,9 @@ public sealed class RuleTests {
         var rule = Rule.Create((Invoice invoice) => invoice.Gross);
 
         rule.Compiled.Should().BeSameAs(rule.Compiled);
+        IsOverdue.Compiled.Should().BeSameAs(IsOverdue.Compiled);
+        OpenGiven.Compiled.Should().BeSameAs(OpenGiven.Compiled);
+        IsDunnable.Compiled.Should().BeSameAs(IsDunnable.Compiled);
     }
 
     [Fact]
@@ -108,6 +123,32 @@ public sealed class RuleTests {
     }
 
     [Fact]
+    public void Expand_ThreeInputRule_SubstitutesEveryArgument() {
+        var credited = 10m;
+        Expression<Func<Invoice, decimal>> open = invoice => OpenGiven.Invoke(invoice, Paid.Invoke(invoice), credited);
+
+        var expanded = open.Expand();
+
+        ContainsInvoke(expanded).Should().BeFalse();
+        expanded.ToString().Should().Contain("credited").And.Contain("invoice.Payments.Sum(p => p.Amount)");
+        Invoices.Select(expanded.Compile()).Should().Equal(-10m, 50m, 40m, -10m);
+    }
+
+    [Fact]
+    public void Expand_FourInputRule_SubstitutesEveryArgumentAndInlinesTheRulesItInvokes() {
+        var credited = 10m;
+        var cutoff = Today;
+        Expression<Func<Invoice, bool>> dunnable =
+            invoice => IsDunnable.Invoke(invoice, Paid.Invoke(invoice), credited, cutoff);
+
+        var expanded = dunnable.Expand();
+
+        ContainsInvoke(expanded).Should().BeFalse();
+        expanded.ToString().Should().Contain("credited").And.Contain("cutoff").And.Contain("invoice.Gross");
+        Invoices.Select(expanded.Compile()).Should().Equal(false, true, false, false);
+    }
+
+    [Fact]
     public void Expand_RuleInAProjection_InlinesIntoTheConstructorArguments() {
         Expression<Func<Invoice, InvoiceRow>> projection = invoice => new InvoiceRow(invoice.Id, OpenAmount.Invoke(invoice));
 
@@ -141,6 +182,20 @@ public sealed class RuleTests {
         ContainsInvoke(expanded).Should().BeFalse();
         Invoices.Select(expanded.Compile()).Should().Equal(Invoices.Select(composed.Compile()));
         Invoices.Select(expanded.Compile()).Should().Equal(101m, 221m, 151m, 81m);
+    }
+
+    [Fact]
+    public void Expand_InvokeOnAThreeOrFourInputExpression_InlinesLikeARule() {
+        Expression<Func<Invoice, decimal, decimal, decimal>> openGiven =
+            (invoice, paid, credited) => invoice.Gross - paid - credited;
+        Expression<Func<Invoice, decimal, decimal, decimal, bool>> openAbove =
+            (invoice, paid, credited, minimum) => openGiven.Invoke(invoice, paid, credited) > minimum;
+        Expression<Func<Invoice, bool>> composed = invoice => openAbove.Invoke(invoice, Paid.Invoke(invoice), 10m, 45m);
+
+        var expanded = composed.Expand();
+
+        ContainsInvoke(expanded).Should().BeFalse();
+        Invoices.Select(expanded.Compile()).Should().Equal(false, true, false, false);
     }
 
     [Fact]
@@ -231,18 +286,25 @@ public sealed class RuleTests {
         GrossTimesTwo.Invoke(Invoices[2]).Should().Be(100m);
         ((Expression<Func<Invoice, DateOnly, bool>>)((invoice, today) => invoice.DueOn < today))
             .Invoke(Invoices[0], Today).Should().BeTrue();
+        ((Expression<Func<Invoice, decimal, decimal, decimal>>)((invoice, paid, credited) =>
+                invoice.Gross - paid - credited))
+            .Invoke(Invoices[1], 40m, 10m).Should().Be(50m);
+        ((Expression<Func<Invoice, decimal, decimal, DateOnly, bool>>)((invoice, paid, credited, today) =>
+                invoice.DueOn < today && invoice.Gross - paid - credited > 0))
+            .Invoke(Invoices[1], 40m, 10m, Today).Should().BeTrue();
     }
 
     [Fact]
     public void ToString_ShowsTheExpression() {
         OpenAmount.ToString().Should().Be(OpenAmount.Expression.ToString());
+        IsDunnable.ToString().Should().Be(IsDunnable.Expression.ToString());
     }
 
     private static Rule<Invoice, bool> GetRule() {
         return IsSettled;
     }
 
-    private static bool ContainsInvoke(Expression expression) {
+    internal static bool ContainsInvoke(Expression expression) {
         var finder = new InvokeFinder();
         finder.Visit(expression);
         return finder.Found;

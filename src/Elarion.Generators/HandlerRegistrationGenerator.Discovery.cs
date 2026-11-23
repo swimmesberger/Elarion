@@ -45,7 +45,7 @@ public sealed partial class HandlerRegistrationGenerator {
         // [VisibleWith] response members (ADR-0103): one memoized type walk for every handler of this pass, and none
         // at all when the compilation cannot see the attribute.
         var visibilityWalk = compilation.GetTypeByMetadataName(VisibleWithAttributeMetadataName) is { } visibleWith
-            ? new VisibilityWalk(visibleWith, compilation.Assembly, rootNamespace)
+            ? new VisibilityWalk(visibleWith, compilation, rootNamespace)
             : null;
         var builder = ImmutableArray.CreateBuilder<HandlerInfo>();
         foreach (var metadataName in candidates) {

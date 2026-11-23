@@ -58,7 +58,7 @@ public sealed partial class ElarionOpenApiEndToEndTests {
 
         public UploadedFile? Passport { get; init; }
 
-        [UploadLimits(ContentTypes = ["image/png"])] public UploadedFile? Photo { get; init; }
+        [UploadLimits(ContentTypes = ["image/png"], FileExtensions = [".png"])] public UploadedFile? Photo { get; init; }
 
         [MaxLength(3), UploadLimits(MaxBytes = 2048)] public IReadOnlyList<UploadedFile> Receipts { get; init; } = [];
 
@@ -345,6 +345,7 @@ public sealed partial class ElarionOpenApiEndToEndTests {
             // The shared schema carries no member's limits.
             uploaded.TryGetProperty("x-elarion-max-bytes", out _).Should().BeFalse();
             uploaded.TryGetProperty("x-elarion-content-types", out _).Should().BeFalse();
+            uploaded.TryGetProperty("x-elarion-file-extensions", out _).Should().BeFalse();
 
             // Declared [UploadLimits] (ADR-0100), as rpc-schema.json carries them: the member keeps its own schema.
             var contract = properties.GetProperty("contract");
@@ -360,6 +361,8 @@ public sealed partial class ElarionOpenApiEndToEndTests {
             photo.TryGetProperty("$ref", out _).Should().BeFalse();
             photo.GetProperty("x-elarion-content-types").EnumerateArray().Select(static t => t.GetString())
                 .Should().Equal("image/png");
+            photo.GetProperty("x-elarion-file-extensions").EnumerateArray().Select(static t => t.GetString())
+                .Should().Equal(".png");
             photo.TryGetProperty("x-elarion-max-bytes", out _).Should().BeFalse();
 
             // A list gets its items back (the element serializes through a converter), with the member's limits.

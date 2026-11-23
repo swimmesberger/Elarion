@@ -162,6 +162,27 @@ public sealed class ElarionJsonSerializationTests {
     }
 
     [Fact]
+    public void UploadLimitPayloads_SerializeUnderSourceGeneration_ReflectionOff() {
+        var services = new ServiceCollection();
+        services.AddElarionJson(); // no contributed context, reflection off (AOT-strict default)
+
+        var accessor = Resolve(services);
+
+        // AppError.Data is an object slot, so the transports serialize the payload by its runtime type: the framework
+        // context must cover the upload-limit payloads IUploadedFiles answers with.
+        JsonSerializer.Serialize(new UploadTooLargeData { MaxBytes = 1024, Length = 2048 }, accessor.GetTypeInfo<UploadTooLargeData>())
+            .Should().Be("{\"maxBytes\":1024,\"length\":2048}");
+        JsonSerializer.Serialize(
+                new UploadContentTypeData { ContentTypes = ["text/csv"], ContentType = "application/pdf" },
+                accessor.GetTypeInfo<UploadContentTypeData>())
+            .Should().Be("{\"contentTypes\":[\"text/csv\"],\"contentType\":\"application/pdf\"}");
+        JsonSerializer.Serialize(
+                new UploadFileExtensionData { FileExtensions = [".xlsx"], FileName = "contacts.vcf" },
+                accessor.GetTypeInfo<UploadFileExtensionData>())
+            .Should().Be("{\"fileExtensions\":[\".xlsx\"],\"fileName\":\"contacts.vcf\"}");
+    }
+
+    [Fact]
     public void StoredIdempotencyResult_RoundTrips_UnderSourceGeneration_ReflectionOff() {
         // The idempotency replay envelope must serialize AOT-strict: the framework context registers the
         // non-generic StoredResult (and AppError), while the success value goes through the module context's

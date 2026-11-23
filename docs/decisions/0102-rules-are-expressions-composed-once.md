@@ -95,3 +95,27 @@ Using one inside another needs expression-tree surgery, so applications write it
 - **Throwing on an empty `AnyOf`/`AllOf`.** A filter built from a list (the windows of the accounts a user may see)
   is often empty; the identity element gives the answer the filter means, where an exception would push a special
   case into every caller.
+
+## Amendment (2026-11-22): up to four inputs, and `Expr.Expand` for a lambda
+
+A consuming application had rules over three to five values (a duty's status; an invoice's open and overpaid amounts,
+computed from several joined aggregates) and kept them as hand-written expressions with a compiled copy, because a rule
+took at most two inputs. The decision above now reads: a rule takes **one to four inputs**, in the order `Func` has
+them (`Rule<TInput1, TInput2, TInput3, TResult>`, `Rule<TInput1, TInput2, TInput3, TInput4, TResult>`), each arity with
+`Rule.Create`, the compiled delegate, an `Invoke` extension on `Expression<Func<…>>`, expansion and the rule check.
+
+- **Why four.** Four is what the application asked for: the entity plus up to three values, such as joined aggregates
+  (each further input of the join-once recipe is one more aggregate joined per row) and a date. Every arity costs a
+  type, an `Invoke` extension and an `Expr.Expand` overload; `Func`'s sixteen would be surface no one uses. Values from
+  outside the query that belong together can already travel as one record input (the booking window), so the limit is
+  revisable, not a wall.
+- **The expander and the rule check do not list the arities.** The expander recognizes a rule by the internal
+  interface every arity implements, and `UseElarionRuleCheck()` matches any generic `Rule` type of the
+  `Elarion.Expressions` namespace by name prefix, since the EF package cannot reference the core types. A further
+  arity needs neither changed.
+- **`Expr.Expand(lambda)`.** A lambda has no natural type, so `Expand()` cannot be called on one where it is written,
+  and every helper returning a composed expression assigned it to a typed local first. `Expr.Expand` has one overload
+  per supported arity over `Expression<Func<…>>`, so the compiler infers the types from the lambda's parameters.
+  Rejected: a generic `Expand<TDelegate>(Expression<TDelegate>)` without the extension's `this`, whose delegate type
+  cannot be inferred from a lambda either; and `Rule.Create(…).Expression.Expand()`, which allocates a rule only to
+  reach its expression.

@@ -70,7 +70,11 @@ internal sealed class UnexpandedRuleInterceptor : IQueryExpressionInterceptor {
             if (method.Name != "Invoke" || method.DeclaringType is not { Namespace: RulesNamespace } declaringType)
                 return false;
 
-            return declaringType.Name is "Rule`2" or "Rule`3" or "RuleExpressionExtensions";
+            if (declaringType.Name == "RuleExpressionExtensions") return true;
+
+            // Rule`2 to Rule`5 (one to four inputs) and any arity added later: the prefix spares this package a list
+            // of names to keep in step with the core package it cannot reference.
+            return declaringType.IsGenericType && declaringType.Name.StartsWith("Rule`", StringComparison.Ordinal);
         }
     }
 }

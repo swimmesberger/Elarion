@@ -87,10 +87,7 @@ export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, i
       const propertyType = jsonSchemaToTypeScript(
         property, childContext(resolvedCtx, `properties.${key}`), indent + 1, uploadInput)
       // A member the server shows only to holders of a permission ([VisibleWith]) says so where the caller reads it.
-      const visibleWith = property['x-elarion-visible-with']
-      const doc = typeof visibleWith === 'string'
-        ? `${pad}  /** Present only for callers holding the \`${visibleWith}\` permission. */\n`
-        : ''
+      const doc = visibleWithDoc(property['x-elarion-visible-with'], pad)
       return `${doc}${pad}  ${formatPropertyName(key)}${optional}: ${propertyType}`
     })
     const objectType = `{\n${lines.join('\n')}\n${pad}}`
@@ -98,4 +95,18 @@ export function jsonSchemaToTypeScript(schema: JsonSchema, ctx: SchemaContext, i
   }
 
   return 'unknown'
+}
+
+/** The doc line of a member shown only to holders of a permission, or of any one of several. */
+function visibleWithDoc(visibleWith: string | string[] | undefined, pad: string): string {
+  const permissions = typeof visibleWith === 'string'
+    ? [visibleWith]
+    : Array.isArray(visibleWith) ? visibleWith.filter((p): p is string => typeof p === 'string') : []
+  if (permissions.length === 0) return ''
+
+  const quoted = permissions.map(p => `\`${p}\``)
+  const holding = quoted.length === 1
+    ? `the ${quoted[0]} permission`
+    : `any of the ${quoted.slice(0, -1).join(', ')} or ${quoted[quoted.length - 1]} permissions`
+  return `${pad}  /** Present only for callers holding ${holding}. */\n`
 }

@@ -511,6 +511,10 @@ describe('JSON-RPC client generator', () => {
             properties: {
               row: {type: 'integer'},
               opening: {type: ['number', 'null'], 'x-elarion-visible-with': 'banking.read'},
+              balance: {
+                type: ['number', 'null'],
+                'x-elarion-visible-with': ['settings.read', 'settings.write', 'banking.read'],
+              },
             },
             required: ['row'],
           },
@@ -522,6 +526,8 @@ describe('JSON-RPC client generator', () => {
 
     expect(generated.typesSource).toMatch(
       /\/\*\* Present only for callers holding the `banking\.read` permission\. \*\/\n\s*opening\?: number \| null \| undefined/)
+    expect(generated.typesSource).toMatch(
+      /\/\*\* Present only for callers holding any of the `settings\.read`, `settings\.write` or `banking\.read` permissions\. \*\/\n\s*balance\?: number \| null \| undefined/)
     expect(generated.typesSource).not.toMatch(/Present only[^\n]*\n\s*row/)
   })
 
@@ -995,11 +1001,162 @@ describe('JSON-RPC client generator', () => {
     expect(generated.typesSource).toContain(
       '"math.per_item": { kind: "decision_required"; data: undefined; options: "keep" | "drop"; perItem: true }')
     expect(generated.clientSource).toContain('export async function withDecisions<M extends RpcDecidingMethod>(')
+    expect(generated.clientSource).toContain('  client: RpcClient | RpcCall<M>,')
+    expect(generated.clientSource).toContain(
+      'export function decisionQuestion<M extends RpcDecidingMethod>(method: M, error: unknown): RpcMethodDecision<M> | undefined {')
+    expect(generated.clientSource).toContain('export function answerDecision<')
+    expect(generated.clientSource).toContain('export type RpcMethodDecisionAnswer<M extends RpcMethod> = RpcDecisionAnswerOf<RpcMethodDecision<M>>')
     expect(generated.clientSource).toContain(
       'const rpcDecisions: Partial<Record<RpcMethod, Readonly<Record<string, { readonly options: readonly string[]; readonly perItem: boolean }>>>> = '
       + '{"math.add":{"math.big_sum":{"options":["confirm"],"perItem":false},"math.per_item":{"options":["keep","drop"],"perItem":true}}}')
-    expect(without.clientSource).not.toContain('withDecisions')
-    expect(without.clientSource).not.toContain('rpcDecisions')
+    for (const name of ['withDecisions', 'rpcDecisions', 'decisionQuestion', 'answerDecision', 'RpcCall']) {
+      expect(without.clientSource).not.toContain(name)
+    }
+  })
+
+  it('types the decisions member with the declared codes and options the server narrowed it to', () => {
+    const generated = generateRpcClientFiles(decisionTestSchema())
+
+    expect(generated.typesSource).toMatch(
+      /decisions\?: \(\{\s*code: "math\.big_sum"\s*option\?: "confirm"\s*\} \| \{\s*code: "math\.per_item"\s*item: string\s*option: "keep" \| "drop"\s*\}\)\[\] \| null \| undefined/)
+    expect(generated.schemasSource).toMatch(
+      /decisions: z\.array\(z\.union\(\[z\.strictObject\(\{\s*code: z\.enum\(\["math\.big_sum"\]\),\s*option: z\.enum\(\["confirm"\]\)\.optional\(\),/)
+  })
+
+  it('type-checks the decision primitives against the narrowed decisions member under NodeNext', () => {
+    const generated = generateRpcClientFiles(decisionTestSchema())
+    const usage = [
+      "import { answerDecision, createRpcClient, decisionQuestion, withDecisions } from './rpc-client.js'",
+      "import type { RpcMethod, RpcMethodDecision, RpcMethodDecisionAnswer, RpcParams, RpcResult } from './rpc-client.js'",
+      '',
+      "const client = createRpcClient({ url: 'https://example.test/rpc' })",
+      'async function seam<M extends RpcMethod>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {',
+      "  try { return await client.call(method, params) } catch (error) { throw new Error('localized', { cause: error }) }",
+      '}',
+      '',
+      'export async function run(error: unknown): Promise<number> {',
+      "  let params: RpcParams<'math.add'> = { left: 1, right: 2 }",
+      "  const question = decisionQuestion('math.add', error)",
+      '  if (question === undefined) return 0',
+      "  if (question.code === 'math.per_item') {",
+      "    params = { ...params, decisions: answerDecision(params.decisions, question, { 'line-1': 'drop' }) }",
+      '    // @ts-expect-error an option the decision does not declare',
+      "    answerDecision(params.decisions, question, { 'line-1': 'maybe' })",
+      '  } else {',
+      '    const limit: number = question.data.limit',
+      "    params = { ...params, decisions: answerDecision(undefined, question, 'confirm') }",
+      '    void limit',
+      '  }',
+      "  const pending: RpcMethodDecision<'math.add'> = question",
+      "  const answers: RpcMethodDecisionAnswer<'math.add'>[] = answerDecision([], pending, 'confirm')",
+      "  params = { ...params, decisions: [...answers, { code: 'math.big_sum' }] }",
+      '  // @ts-expect-error a code the method does not declare',
+      "  params = { ...params, decisions: [{ code: 'math.unknown' }] }",
+      "  const viaSeam: number = await withDecisions(seam, 'math.add', params, () => 'confirm')",
+      "  const viaClient: number = await withDecisions(client, 'math.add', params, () => undefined)",
+      '  // @ts-expect-error a method that declares no decision',
+      "  decisionQuestion('user.get', error)",
+      '  return viaSeam + viaClient',
+      '}',
+      '',
+    ].join('\n')
+    // The Zod schemas are not under test here, and zod is no dependency of this package: a stub stands in.
+    const schemasStub = [
+      'export const rpcParamsSchemas: Record<string, any> = {}',
+      'export const rpcResultSchemas: Record<string, any> = {}',
+      'export const rpcErrorDataSchemas: Record<string, Record<string, any>> = {}',
+      '',
+    ].join('\n')
+
+    const diagnostics = typeCheck({
+      'rpc-types.ts': generated.typesSource,
+      'rpc-client.ts': generated.clientSource,
+      'rpc-schemas.ts': schemasStub,
+      'usage.ts': usage,
+    })
+
+    expect(diagnostics).toEqual([])
+  })
+
+  it('recognises a declared question and builds the answers for a resend', async () => {
+    const generated = generateRpcClientFiles(decisionTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as GeneratedClientModule & {
+      decisionQuestion(method: string, error: unknown): {
+        code: string; message: string; options: readonly string[]; perItem: boolean; data: unknown; error: unknown
+      } | undefined
+      answerDecision(decisions: unknown, question: unknown, answer: unknown): unknown[]
+    }
+    const {RpcError, decisionQuestion, answerDecision} = clientModule
+    const bigSum = new RpcError(-32006, 'That is a big sum.', {code: 'math.big_sum', data: {limit: 10}})
+    const perItem = new RpcError(-32006, 'Keep these lines?', {code: 'math.per_item'})
+
+    const question = decisionQuestion('math.add', bigSum)
+    expect(question).toEqual({
+      code: 'math.big_sum', message: 'That is a big sum.', options: ['confirm'], perItem: false, data: {limit: 10}, error: bigSum,
+    })
+    // An application seam that wraps the error keeps it as the cause.
+    expect(decisionQuestion('math.add', new Error('localized', {cause: new Error('wrapped', {cause: bigSum})}))?.error)
+      .toBe(bigSum)
+    // Not a declared question: another method, an undeclared code, another kind, or no RpcError at all.
+    expect(decisionQuestion('user.get', bigSum)).toBeUndefined()
+    expect(decisionQuestion('math.add', new RpcError(-32006, '?', {code: 'math.other'}))).toBeUndefined()
+    expect(decisionQuestion('math.add', new RpcError(-32006, '?', {code: 'constructor'}))).toBeUndefined()
+    expect(decisionQuestion('math.add', new RpcError(-32002, '?', {code: 'math.big_sum'}))).toBeUndefined()
+    expect(decisionQuestion('math.add', new Error('offline'))).toBeUndefined()
+    expect(decisionQuestion('math.add', 'math.big_sum')).toBeUndefined()
+
+    const confirmed = answerDecision(undefined, question, 'confirm')
+    expect(confirmed).toEqual([{code: 'math.big_sum', option: 'confirm'}])
+    const lines = answerDecision(
+      [...confirmed, {code: 'math.per_item', item: 'line-1', option: 'keep'}, {code: 'math.per_item', item: 'line-3', option: 'keep'}],
+      decisionQuestion('math.add', perItem),
+      {'line-1': 'drop', 'line-2': 'keep'})
+    // A new answer replaces the earlier one for the same code and item; every other answer stays.
+    expect(lines).toEqual([
+      {code: 'math.big_sum', option: 'confirm'},
+      {code: 'math.per_item', item: 'line-3', option: 'keep'},
+      {code: 'math.per_item', item: 'line-1', option: 'drop'},
+      {code: 'math.per_item', item: 'line-2', option: 'keep'},
+    ])
+    expect(answerDecision(lines, question, 'confirm')).toEqual([...lines.slice(1), {code: 'math.big_sum', option: 'confirm'}])
+  })
+
+  it('runs withDecisions over an application call function instead of the client', async () => {
+    const generated = generateRpcClientFiles(decisionTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as GeneratedClientModule & {
+      withDecisions(
+        client: unknown, method: string, params: unknown, ask: (question: { code: string }) => unknown
+      ): Promise<unknown>
+    }
+    const client = clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async (_input, init) => {
+        const request = JSON.parse(String(init?.body)) as { id: string; params: { decisions?: { code: string }[] } }
+        return (request.params.decisions ?? []).some((d) => d.code === 'math.big_sum')
+          ? jsonResponse({jsonrpc: '2.0', id: request.id, result: 42})
+          : jsonResponse({jsonrpc: '2.0', id: request.id, error: {
+            code: -32006, message: 'That is a big sum.', data: {code: 'math.big_sum', data: {limit: 10}},
+          }})
+      },
+      validateParams: false,
+      validateResults: false,
+    })
+    // The application's seam: its own error, with the RpcError as the cause, and no request options.
+    const calls: string[] = []
+    const seam = async (method: string, params: unknown) => {
+      calls.push(method)
+      try {
+        return await client.call(method, params)
+      } catch (error) {
+        throw new Error('Localized failure', {cause: error})
+      }
+    }
+
+    expect(await clientModule.withDecisions(seam, 'math.add', {left: 30, right: 12}, () => 'confirm')).toBe(42)
+    expect(calls).toEqual(['math.add', 'math.add'])
+    // Cancelling throws the seam's own error.
+    await expect(clientModule.withDecisions(seam, 'math.add', {left: 1, right: 2}, () => undefined))
+      .rejects.toThrow('Localized failure')
   })
 
   it('asks the application for a declared decision and resends with the answer', async () => {
@@ -1864,12 +2021,29 @@ function decisionTestSchema(): RpcSchema {
           properties: {
             left: {type: 'number'},
             right: {type: 'number'},
+            // The server narrows the decisions member to the declared decisions: one answer shape per code.
             decisions: {
               type: ['array', 'null'],
               items: {
-                type: 'object',
-                properties: {code: {type: 'string'}, item: {type: ['string', 'null']}, option: {type: 'string'}},
-                required: ['code'],
+                anyOf: [
+                  {
+                    type: 'object',
+                    properties: {
+                      code: {type: 'string', enum: ['math.big_sum']},
+                      option: {type: 'string', enum: ['confirm']},
+                    },
+                    required: ['code'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      code: {type: 'string', enum: ['math.per_item']},
+                      item: {type: 'string'},
+                      option: {type: 'string', enum: ['keep', 'drop']},
+                    },
+                    required: ['code', 'item', 'option'],
+                  },
+                ],
               },
             },
           },
@@ -2092,6 +2266,35 @@ async function loadGeneratedClient(clientSource: string): Promise<GeneratedClien
   ].join('\n'), 'utf-8')
 
   return await import(pathToFileURL(join(dir, 'rpc-client.mjs')).href) as GeneratedClientModule
+}
+
+// Type-checks generated files as an ES module package under NodeNext with strict settings; returns the formatted
+// diagnostics, so an unused @ts-expect-error is reported as well.
+function typeCheck(files: Record<string, string>): string[] {
+  const dir = mkdtempSync(join(tmpdir(), 'elarion-rpc-typecheck-'))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({type: 'module'}), 'utf-8')
+  for (const [name, source] of Object.entries(files)) {
+    writeFileSync(join(dir, name), source, 'utf-8')
+  }
+
+  const {options, errors} = ts.convertCompilerOptionsFromJson({
+    target: 'ES2022',
+    module: 'NodeNext',
+    moduleResolution: 'NodeNext',
+    lib: ['ES2022', 'DOM', 'DOM.Iterable'],
+    strict: true,
+    noEmit: true,
+    skipLibCheck: true,
+    types: [],
+  }, dir)
+  expect(errors).toEqual([])
+  const program = ts.createProgram(Object.keys(files).map((name) => join(dir, name)), options)
+  return ts.getPreEmitDiagnostics(program).map((diagnostic) => {
+    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
+    if (diagnostic.file === undefined || diagnostic.start === undefined) return message
+    const {line} = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
+    return `${diagnostic.file.fileName.slice(dir.length + 1)}:${line + 1}: ${message}`
+  })
 }
 
 function jsonResponse(body: unknown): Response {
@@ -2441,8 +2644,23 @@ describe('uploaded files (ADR-0105)', () => {
     expect(generated.schemasSource).toContain('attachments: z.array(z.union([z.instanceof(Blob), z.string()])),')
     expect(generated.schemasSource).toContain('echo: z.string(),')
     expect(generated.clientSource).toContain("import type { RpcMethods, UploadedFileRef } from './rpc-types.js'")
-    expect(generated.clientSource).toContain('uploadFile(file: Blob, options?: RpcUploadOptions): Promise<UploadedFileRef>')
+    expect(generated.clientSource).toContain(
+      "import { rpcErrorDataSchemas, rpcParamsSchemas, rpcResultSchemas, rpcUploadLimits } from './rpc-schemas.js'")
+    expect(generated.clientSource).toContain('uploadFile(file: Blob, options?: RpcUploadFileOptions): Promise<UploadedFileRef>')
     expect(generated.clientSource).toContain("readonly $uploadFile: RpcClient['uploadFile']")
+    // Every upload member, with or without declared limits, so the method/member pair of uploadFile is typed.
+    expect(generated.schemasSource).toContain([
+      'export const rpcUploadLimits = {',
+      '  "statements.analyze": {',
+      '    statement: {},',
+      '    signature: {},',
+      '    attachments: {},',
+      '  },',
+      '  "statements.commit": {',
+      '    statement: {},',
+      '  },',
+      '} as const',
+    ].join('\n'))
   })
 
   it('emits no upload runtime and stays byte-identical when the schema has no upload members', () => {
@@ -2459,6 +2677,8 @@ describe('uploaded files (ADR-0105)', () => {
     expect(without.clientSource).not.toContain('UploadedFileRef')
     expect(without.clientSource).not.toContain('stageUploadParams')
     expect(without.clientSource).not.toContain('uploadFile')
+    expect(without.clientSource).not.toContain('RpcUploadLimitError')
+    expect(without.schemasSource).not.toContain('rpcUploadLimits')
   })
 
   it('rejects an upload member inside a union case', () => {
@@ -2636,9 +2856,13 @@ interface UploadClientModule {
     fetch?: FetchLike
     headers?: HeadersInit
     idGenerator?: () => string | number
+    validateParams?: boolean
     uploadFile?: (file: Blob, options: {fileName?: string; signal?: AbortSignal}) => Promise<string>
     uploadUrl?: string | URL
   }): UploadApiForTests
+
+  RpcError: abstract new (...args: never[]) => Error
+  RpcUploadLimitError: abstract new (...args: never[]) => Error
 }
 
 interface UploadApiForTests {
@@ -2653,7 +2877,10 @@ interface UploadApiForTests {
     }
   }
   $batch(items: readonly {method: string; params: unknown}[]): Promise<readonly BatchItemResultForTests[]>
-  $uploadFile(file: Blob, options?: {fileName?: string; signal?: AbortSignal}): Promise<string>
+  $uploadFile(
+    file: Blob,
+    options?: {fileName?: string; signal?: AbortSignal; method?: string; member?: string}
+  ): Promise<string>
 }
 
 interface RecordedUpload {
@@ -2752,22 +2979,28 @@ function uploadClientTestSchema(): RpcSchema {
   }
 }
 
-async function loadGeneratedUploadClient(clientSource: string): Promise<UploadClientModule> {
+// Loads the generated client over pass-through Zod schemas (params validation runs before the upload, so it sees the
+// File/Blob values) and the generated rpcUploadLimits of `schemasSource`, the one block of it that needs no Zod.
+async function loadGeneratedUploadClient(clientSource: string, schemasSource?: string): Promise<UploadClientModule> {
   const dir = mkdtempSync(join(tmpdir(), 'elarion-rpc-upload-client-'))
-  const jsSource = ts.transpileModule(clientSource, {
+  const transpile = (source: string) => ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.ES2022,
       target: ts.ScriptTarget.ES2022,
     },
   }).outputText
 
-  writeFileSync(join(dir, 'rpc-client.mjs'), jsSource, 'utf-8')
-  // Pass-through schemas: params validation runs before the upload, so it sees the File/Blob values.
+  const uploadLimits = schemasSource === undefined
+    ? 'export const rpcUploadLimits = {}'
+    : transpile(/export const rpcUploadLimits = [\s\S]*?\n} as const\n/.exec(schemasSource)?.[0] ?? '')
+  writeFileSync(join(dir, 'rpc-client.mjs'), transpile(clientSource), 'utf-8')
   writeFileSync(join(dir, 'rpc-schemas.js'), [
     'const passThrough = { parse: (value) => value }',
-    "export const rpcParamsSchemas = { 'statements.analyze': passThrough, 'statements.commit': passThrough }",
-    "export const rpcResultSchemas = { 'statements.analyze': passThrough, 'statements.commit': passThrough }",
+    'const methods = new Proxy({}, { get: () => passThrough })',
+    'export const rpcParamsSchemas = methods',
+    'export const rpcResultSchemas = methods',
     'export const rpcErrorDataSchemas = {}',
+    uploadLimits,
     '',
   ].join('\n'), 'utf-8')
 
@@ -2818,6 +3051,7 @@ describe('client exports (ADR-0100)', () => {
                 maxItems: 10,
                 items: {type: 'string', 'x-elarion-upload': true, 'x-elarion-max-bytes': 2048},
               },
+              workbook: {type: ['string', 'null'], 'x-elarion-upload': true, 'x-elarion-file-extensions': ['.xlsx', '.XLS']},
             },
             required: ['statement', 'receipts'],
           },
@@ -2851,6 +3085,9 @@ describe('client exports (ADR-0100)', () => {
       '        maxBytes: 2048,',
       '      },',
       '    },',
+      '    workbook: {',
+      '      fileExtensions: [".xlsx", ".XLS"],',
+      '    },',
       '  },',
       '  "invoices.list": {',
       '    size: {',
@@ -2872,6 +3109,25 @@ describe('client exports (ADR-0100)', () => {
       'export type RpcLimits = typeof rpcLimits',
     ].join('\n'))
     expect(generated.schemasSource).not.toContain('"math.ping": {\n    ')
+    // The upload members alone, a list by its own path, for uploadFile(file, { method, member }).
+    expect(generated.schemasSource).toContain([
+      'export const rpcUploadLimits = {',
+      '  "documents.upload": {',
+      '    statement: {',
+      '      maxBytes: 1024,',
+      '      contentTypes: ["text/csv", "Application/XML; charset=utf-8"],',
+      '    },',
+      '    receipts: {',
+      '      maxBytes: 2048,',
+      '    },',
+      '    workbook: {',
+      '      fileExtensions: [".xlsx", ".XLS"],',
+      '    },',
+      '  },',
+      '} as const',
+      '',
+      'export type RpcUploadLimits = typeof rpcUploadLimits',
+    ].join('\n'))
   })
 
   it('exports presets typed as the method params, sort keys and module constants', () => {
@@ -2926,15 +3182,79 @@ describe('client exports (ADR-0100)', () => {
   it('rejects a file that breaks the declared upload limits before uploading it', () => {
     const generated = generateRpcClientFiles(exportsSchema())
 
+    // The issue params carry the server's error code and the limit, for a Zod error map in the application's language.
     expect(generated.schemasSource).toContain(
       'statement: z.union([z.instanceof(Blob)'
-      + '.refine((file) => file.size <= 1024, "The file is larger than the accepted 1024 bytes.")'
+      + '.refine((file) => file.size <= 1024, { message: "The file is larger than the accepted 1024 bytes.", '
+      + 'params: {"code":"upload.too_large","maxBytes":1024} })'
       + '.refine((file) => ["text/csv","application/xml"].includes((file.type || \'application/octet-stream\')'
-      + '.split(\';\')[0].trim().toLowerCase()), "Files of this type are not accepted here; expected text/csv, '
-      + 'Application/XML; charset=utf-8."), z.string()]),')
+      + '.split(\';\')[0].trim().toLowerCase()), { message: "Files of this type are not accepted here; expected text/csv, '
+      + 'Application/XML; charset=utf-8.", '
+      + 'params: {"code":"upload.content_type","contentTypes":["text/csv","Application/XML; charset=utf-8"]} }), z.string()]),')
     expect(generated.schemasSource).toContain(
       'receipts: z.array(z.union([z.instanceof(Blob).refine((file) => file.size <= 2048, '
-      + '"The file is larger than the accepted 2048 bytes."), z.string()])).max(10),')
+      + '{ message: "The file is larger than the accepted 2048 bytes.", '
+      + 'params: {"code":"upload.too_large","maxBytes":2048} }), z.string()])).max(10),')
+    // Extensions are compared lower-cased against the end of the name the uploader sends; a Blob has none.
+    expect(generated.schemasSource).toContain(
+      'workbook: z.union([z.instanceof(Blob).refine((file) => { const name = (file instanceof File ? file.name : \'\')'
+      + '.toLowerCase(); return [".xlsx",".xls"].some((extension) => name.length > extension.length '
+      + '&& name.endsWith(extension)) }, { message: "The file does not have an accepted extension; expected .xlsx, .XLS.", '
+      + 'params: {"code":"upload.file_extension","fileExtensions":[".xlsx",".XLS"]} }), z.string()]).nullish().optional(),')
+  })
+
+  it('checks uploadFile against the declared limits of the method member it names, before uploading', async () => {
+    const generated = generateRpcClientFiles(exportsSchema())
+    const clientModule = await loadGeneratedUploadClient(generated.clientSource, generated.schemasSource)
+    const server = uploadServer()
+    const rpc = clientModule.createRpcApi({url: 'https://example.test/rpc', fetch: server.fetch})
+    const refusal = async (upload: Promise<string>) => {
+      const error = await upload.then(() => undefined, (rejected: unknown) => rejected)
+      expect(error).toBeInstanceOf(clientModule.RpcUploadLimitError)
+      expect(error).toBeInstanceOf(clientModule.RpcError)
+      return error as {code: string; data: unknown; message: string; method: string; member: string; isInvalidParams: boolean}
+    }
+
+    const tooLarge = await refusal(rpc.$uploadFile(new File(['x'.repeat(1025)], 'a.csv', {type: 'text/csv'}),
+      {method: 'documents.upload', member: 'statement'}))
+    expect(tooLarge).toMatchObject({
+      code: 'upload.too_large',
+      data: {maxBytes: 1024, length: 1025},
+      message: 'The file is larger than the accepted 1024 bytes.',
+      method: 'documents.upload',
+      member: 'statement',
+      isInvalidParams: true,
+    })
+    // An untyped Blob is the application/octet-stream the uploader sends.
+    const untyped = await refusal(rpc.$uploadFile(new Blob(['a']), {method: 'documents.upload', member: 'statement'}))
+    expect(untyped).toMatchObject({
+      code: 'upload.content_type',
+      data: {contentTypes: ['text/csv', 'Application/XML; charset=utf-8'], contentType: 'application/octet-stream'},
+    })
+    // A list member's limits apply to each of its files.
+    expect(await refusal(rpc.$uploadFile(new Blob(['x'.repeat(2049)]), {method: 'documents.upload', member: 'receipts'})))
+      .toMatchObject({code: 'upload.too_large', data: {maxBytes: 2048, length: 2049}})
+    // The extension of the name the endpoint will store: the fileName option, else File.name, else "upload".
+    expect(await refusal(rpc.$uploadFile(new File(['x'], 'book.csv'), {method: 'documents.upload', member: 'workbook'})))
+      .toMatchObject({
+        code: 'upload.file_extension',
+        data: {fileExtensions: ['.xlsx', '.XLS'], fileName: 'book.csv'},
+        message: 'The file \'book.csv\' does not have an accepted extension; expected .xlsx, .XLS.',
+      })
+    expect(await refusal(rpc.$uploadFile(new Blob(['x']), {method: 'documents.upload', member: 'workbook'})))
+      .toMatchObject({code: 'upload.file_extension', data: {fileName: 'upload'}})
+    expect(server.uploads).toHaveLength(0)
+
+    // Fitting files upload: the media type case-insensitive with parameters ignored, the extension case-insensitive.
+    await rpc.$uploadFile(new File(['a'], 'a.xml', {type: 'application/xml;charset=utf-8'}),
+      {method: 'documents.upload', member: 'statement'})
+    await rpc.$uploadFile(new File(['a'], 'Q3.XLSX'), {method: 'documents.upload', member: 'workbook'})
+    await rpc.$uploadFile(new Blob(['a']), {method: 'documents.upload', member: 'workbook', fileName: 'named.xls'})
+    // Without a method nothing is checked; validateParams: false turns the check off.
+    await rpc.$uploadFile(new Blob(['x'.repeat(4096)]))
+    await clientModule.createRpcApi({url: 'https://example.test/rpc', fetch: server.fetch, validateParams: false})
+      .$uploadFile(new Blob(['x'.repeat(4096)]), {method: 'documents.upload', member: 'statement'})
+    expect(server.uploads.map((upload) => upload.fileName)).toEqual(['a.xml', 'Q3.XLSX', 'named.xls', null, null])
   })
 
   it('leaves the types and the client byte-identical, and emits no block for a schema without any', () => {

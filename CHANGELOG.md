@@ -8,6 +8,67 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **A member visible with any one of several permissions.** `[VisibleWith(AnyOf = [ElarionPermissions.Settings.Read,
+  ElarionPermissions.Banking.Read])]` shows the member to a caller holding either; next to a constructor permission,
+  `AnyOf` adds alternatives to it. `rpc-schema.json` exports such a member's `x-elarion-visible-with` as an array, and
+  the generated TypeScript documents every alternative. `VisibleWithAttribute.Permission` is `null` when only `AnyOf`
+  names the permissions; `Permissions` lists them all. See
+  [Authorization](https://elarion.wimmesberger.dev/docs/concepts/authorization#members-only-some-callers-see).
+- **Rules over three and four inputs** (ADR-0102). `Rule<TInput1, TInput2, TInput3, TResult>` and
+  `Rule<TInput1, TInput2, TInput3, TInput4, TResult>`, created with `Rule.Create(…)`, behave like the one- and
+  two-input rules: a compiled, cached delegate for memory, `Invoke` as the marker `Expand()` inlines, and
+  `UseElarionRuleCheck()` refuses them unexpanded. The `Invoke` extensions on `Expression<Func<…>>` gain the same
+  arities. A rule over several joined aggregates, or an aggregate and a date, no longer stays a hand-written
+  expression with a compiled copy. See
+  [Rules](https://elarion.wimmesberger.dev/docs/concepts/rules#rules-with-more-inputs).
+- **`Expr.Expand(lambda)`** expands a lambda where it is written, for one to four inputs, with the types inferred from
+  its parameters: a helper returns `Expr.Expand((Invoice invoice) => IsOverdue.Invoke(invoice, today))` instead of
+  assigning the lambda to a typed local and calling `Expand()` on that. See
+  [Rules](https://elarion.wimmesberger.dev/docs/concepts/rules#helpers-that-return-a-composed-expression).
+- **Decision primitives for applications with their own call seam** (ADR-0101). The generated TypeScript client adds
+  `decisionQuestion(method, error)`, which recognizes a question the method declares (also when a seam wrapped the
+  `RpcError` as an error's `cause`), and `answerDecision(decisions, question, answer)`, which returns the request's
+  `decisions` with the answer added, so a dialog kept as declarative state (a query library's mutation, the resend's
+  failure shown inside the dialog) answers without a pending call. `withDecisions` is built on them and takes the
+  generated client or any call function `(method, params, options?) => Promise<result>` (`RpcCall<M>`); existing calls
+  compile unchanged. `RpcDecisionCode<M>` is now exported, next to the new `RpcMethodDecisionAnswer<M>` and
+  `RpcDecisionAnswerOf<Q>`. See
+  [Answering decisions](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#answering-decisions).
+- **The schema states each request's decisions.** `rpc-schema.json` narrows the `decisions` member of an
+  `IDecidingRequest` to the decisions its handler declares: per code an answer whose `code` is that code, whose `option`
+  is one of its options (optional for a confirmation) and which names its `item` for a per-item decision. The generated
+  `decisions` type follows it per method, so a request's description no longer has to list its decision codes. A
+  regenerated client is stricter: answers built from plain strings need the declared literals (or `answerDecision`),
+  and params validation rejects an undeclared code or option before sending. The server still reads an undeclared
+  answer as no answer.
+- **`DecisionAnswer.Confirming(code)` and `DecisionAnswer.Choosing(code, option)`**, with the per-item overloads
+  `Confirming(code, item)` and `Choosing(code, item, option)`, build an answer in one line for a test or an in-process
+  caller; `Choosing` spells the enum member as `Decision<TOption>` reads it (`OnlyHere` → `onlyHere`) and rejects a
+  value the enum does not declare.
+- **Upload refusals carry the limit as typed data** (ADR-0105). `upload.too_large` now answers with
+  `UploadTooLargeData` (`maxBytes`, `length`), `upload.content_type` with `UploadContentTypeData` (`contentTypes`,
+  `contentType`), so a client words the refusal in its own language and unit instead of showing the English message
+  with the limit in bytes. A request that declares `[UploadLimits]` has `upload.not_found` and the code of each
+  declared limit, with its payload, in its error contract without declaring them; the schema and the generated client
+  type `error.data` per code. Drop your own `[ProducesError]` for those codes, or give it the payload type: a
+  declaration of an upload code with another payload (or none) is the new warning `ELERR004`, because it would hide the
+  typed data. See [Uploaded files](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler).
+- **Accepted file extensions for uploads.** `[UploadLimits(FileExtensions = [".xlsx", ".xls"])]` (and
+  `UploadConstraints.FileExtensions`) accepts a file by the end of its stored name, case-insensitively, for formats
+  whose content type a browser declares differently per system or not at all (`.xlsx`, `.vcf`, `.ics`). A file with
+  another name answers the new code `upload.file_extension` with `UploadFileExtensionData` (`fileExtensions`,
+  `fileName`). The extensions are exported as `x-elarion-file-extensions` (JSON-RPC schema, OpenAPI, `rpcLimits`) and
+  checked by the generated client before the upload; an extension without its leading dot is `ELUPL001`.
+- **`uploadFile(file, { method, member })` in the generated TypeScript client** checks a file against the declared
+  limits of that method's upload member before uploading it, and throws `RpcUploadLimitError`, an `RpcError` with the
+  code, message and data the server would answer. The method/member pair is typed from the new `rpcUploadLimits`
+  export, which lists every upload member with its limits. The params schema's refinements carry the same code and
+  limit as Zod issue `params`, for an error map in the application's language. See
+  [Upload limits in the user's language](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#upload-limits-in-the-users-language).
+- `IUploadedFiles.DeleteAsync` now documents that the PostgreSQL store saves the `DbContext` it shares with the
+  handler, so it also writes the handler's tracked changes: call it after the handler's own save.
+
 ### Fixed
 - **`[VisibleWith(ElarionPermissions.X.Y)]` hid nothing in the assembly that generates `ElarionPermissions`.** The
   catalog is emitted by another source generator, which the handler-registration generator cannot see, so the

@@ -109,32 +109,48 @@ export function collectFilePaths(schema: JsonSchema, ctx: SchemaContext): string
  * {@link collectFilePaths}, so the generated client knows where to upload `File`/`Blob` values before a call.
  */
 export function collectUploadPaths(schema: JsonSchema, ctx: SchemaContext): string[][] {
-  return collectMarkedPaths(schema, ctx, 'x-elarion-upload')
+  return collectUploadNodes(schema, ctx).map((node) => node.path)
+}
+
+/** A marked node of a params/result schema: its path (notation of {@link collectFilePaths}) and its resolved schema. */
+export interface MarkedNode {
+  path: string[]
+  schema: JsonSchema
+}
+
+/**
+ * Collects every `x-elarion-upload` node of a params/result schema with its resolved schema, which carries the member's
+ * declared limits (`x-elarion-max-bytes`, `x-elarion-content-types`, `x-elarion-file-extensions`).
+ */
+export function collectUploadNodes(schema: JsonSchema, ctx: SchemaContext): MarkedNode[] {
+  const nodes: MarkedNode[] = []
+  visitMarkedNodes(schema, ctx, [], nodes, 'x-elarion-upload')
+  return nodes
 }
 
 type PayloadMarker = 'x-elarion-file' | 'x-elarion-upload'
 
 function collectMarkedPaths(schema: JsonSchema, ctx: SchemaContext, marker: PayloadMarker): string[][] {
-  const paths: string[][] = []
-  visitMarkedNodes(schema, ctx, [], paths, marker)
-  return paths
+  const nodes: MarkedNode[] = []
+  visitMarkedNodes(schema, ctx, [], nodes, marker)
+  return nodes.map((node) => node.path)
 }
 
 function visitMarkedNodes(
   schema: JsonSchema,
   ctx: SchemaContext,
   prefix: string[],
-  paths: string[][],
+  nodes: MarkedNode[],
   marker: PayloadMarker
 ): void {
   const {schema: resolved, ctx: resolvedCtx} = resolveSchema(schema, ctx)
   if (resolved[marker] === true) {
-    paths.push(prefix)
+    nodes.push({path: prefix, schema: resolved})
     return
   }
 
   if (resolved.items) {
-    visitMarkedNodes(stripNullable(resolved.items), childContext(resolvedCtx, 'items'), [...prefix, '*'], paths, marker)
+    visitMarkedNodes(stripNullable(resolved.items), childContext(resolvedCtx, 'items'), [...prefix, '*'], nodes, marker)
   }
 
   if (resolved.anyOf && collectMarkedPathsInUnion(resolved, resolvedCtx, marker)) {
@@ -144,7 +160,7 @@ function visitMarkedNodes(
 
   if (resolved.properties) {
     for (const [key, property] of Object.entries(resolved.properties)) {
-      visitMarkedNodes(property, childContext(resolvedCtx, `properties.${key}`), [...prefix, key], paths, marker)
+      visitMarkedNodes(property, childContext(resolvedCtx, `properties.${key}`), [...prefix, key], nodes, marker)
     }
   }
 }

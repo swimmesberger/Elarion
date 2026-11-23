@@ -5,9 +5,10 @@ using System.Reflection;
 namespace Elarion.Expressions;
 
 /// <summary>
-/// Replaces every rule invocation in a tree (<see cref="Rule{TInput, TResult}.Invoke"/>,
-/// <see cref="Rule{TInput1, TInput2, TResult}.Invoke"/> and the <c>Invoke</c> extensions on expressions) with the
-/// invoked body, its parameters substituted by the call's arguments.
+/// Replaces every rule invocation in a tree (<c>Invoke</c> on a rule of any arity, from
+/// <see cref="Rule{TInput, TResult}.Invoke"/> to
+/// <see cref="Rule{TInput1, TInput2, TInput3, TInput4, TResult}.Invoke"/>, and the <c>Invoke</c> extensions on
+/// expressions) with the invoked body, its parameters substituted by the call's arguments.
 /// </summary>
 /// <remarks>
 /// The invoked rule or expression is read out of the tree by walking constants and field or property accesses with
@@ -54,7 +55,8 @@ internal sealed class RuleExpander : ExpressionVisitor {
         var method = node.Method;
         if (method.Name != nameof(Rule<,>.Invoke)) return false;
 
-        if (node.Object is not null && IsRuleType(method.DeclaringType)) {
+        // Every rule arity implements IRuleExpression, so the check needs no list of the rule types.
+        if (node.Object is not null && typeof(IRuleExpression).IsAssignableFrom(method.DeclaringType)) {
             var rule = Evaluate(node.Object, node) as IRuleExpression
                        ?? throw new InvalidOperationException($"Cannot expand '{node}': the invoked rule is null.");
             lambda = rule.Lambda;
@@ -70,12 +72,6 @@ internal sealed class RuleExpander : ExpressionVisitor {
         }
 
         return false;
-    }
-
-    private static bool IsRuleType(Type? type) {
-        if (type is not { IsGenericType: true }) return false;
-        var definition = type.GetGenericTypeDefinition();
-        return definition == typeof(Rule<,>) || definition == typeof(Rule<,,>);
     }
 
     /// <summary>

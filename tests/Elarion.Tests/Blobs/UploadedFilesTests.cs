@@ -108,6 +108,8 @@ public sealed class UploadedFilesTests {
 
         opened.Error.Code.Should().Be(ErrorCodes.UploadTooLarge);
         opened.Error.Kind.Should().Be(ErrorKind.Validation);
+        // The limit as typed data, so a client words the answer in its own language and unit.
+        opened.Error.Data.Should().Be(new UploadTooLargeData { MaxBytes = Csv.Length - 1, Length = Csv.Length });
         exact.IsSuccess.Should().BeTrue();
         await exact.Value.DisposeAsync();
         store.OpenStreams.Should().Be(0);
@@ -126,6 +128,75 @@ public sealed class UploadedFilesTests {
         opened.Error.Code.Should().Be(ErrorCodes.UploadContentType);
         opened.Error.Kind.Should().Be(ErrorKind.Validation);
         opened.Error.Message.Should().Contain("application/pdf").And.Contain("text/csv");
+        opened.Error.Data.Should().BeOfType<UploadContentTypeData>().Which.Should().BeEquivalentTo(
+            new UploadContentTypeData { ContentTypes = ["text/csv", "application/xml"], ContentType = "application/pdf" });
+    }
+
+    [Fact]
+    public async Task Open_FileExtensionNotAccepted_AnswersFileExtension_WithTheAcceptedExtensionsAndTheStoredName() {
+        var store = new UploadStore();
+        var file = store.Seed("blob-1", Csv, fileName: "contacts.vcf");
+
+        var opened = await OpenWithAsync(store, file, new UploadConstraints { FileExtensions = [".xlsx", ".xls"] });
+
+        opened.Error.Code.Should().Be(ErrorCodes.UploadFileExtension);
+        opened.Error.Kind.Should().Be(ErrorKind.Validation);
+        opened.Error.Message.Should().Contain("contacts.vcf").And.Contain(".xlsx, .xls");
+        opened.Error.Data.Should().BeOfType<UploadFileExtensionData>().Which.Should().BeEquivalentTo(
+            new UploadFileExtensionData { FileExtensions = [".xlsx", ".xls"], FileName = "contacts.vcf" });
+        store.OpenStreams.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("Q3 Report.XLSX", ".xlsx", true)]
+    [InlineData("report.xlsx", "XLSX", true)]
+    [InlineData("archive.tar.gz", ".tar.gz", true)]
+    [InlineData(".xlsx", ".xlsx", false)]
+    [InlineData("report.xlsx.exe", ".xlsx", false)]
+    [InlineData("reportxlsx", ".xlsx", false)]
+    // A file uploaded without a name is stored as "upload".
+    [InlineData("upload", ".xlsx", false)]
+    public async Task Open_FileExtensions_MatchTheEndOfTheStoredName_IgnoringCase(
+        string fileName, string extension, bool accepted) {
+        var store = new UploadStore();
+        var file = store.Seed("blob-1", Csv, fileName: fileName);
+
+        var opened = await OpenWithAsync(store, file, new UploadConstraints { FileExtensions = [extension] });
+
+        if (accepted) opened.IsSuccess.Should().BeTrue();
+        else opened.Error.Code.Should().Be(ErrorCodes.UploadFileExtension);
+    }
+
+    [Fact]
+    public async Task DeclaredFileExtensions_AcceptAFileWhoseBrowserSentNoUsefulType() {
+        // A spreadsheet a browser uploads as application/octet-stream: declared by its extension, it is accepted.
+        var ct = TestContext.Current.CancellationToken;
+        var store = new UploadStore();
+        var file = store.Seed("blob-1", Csv, contentType: "application/octet-stream", fileName: "Kunden.xlsx");
+        await using var scope = CreateScope(store);
+        scope.Services.GetRequiredService<IDeclaredUploadConstraints>()
+            .Declare(file, new UploadConstraints { MaxBytes = 1024, FileExtensions = [".xlsx"] });
+
+        var opened = await scope.Uploads.OpenAsync(file, cancellationToken: ct);
+        var typed = await scope.Uploads.OpenAsync(
+            file, new UploadConstraints { ContentTypes = ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"] }, ct);
+
+        opened.IsSuccess.Should().BeTrue();
+        await opened.Value.DisposeAsync();
+        // Declaring both requires both: a content-type list still refuses it.
+        typed.Error.Code.Should().Be(ErrorCodes.UploadContentType);
+        store.OpenStreams.Should().Be(0);
+    }
+
+    // Opens the file in a scope of its own and releases what it opened; the result's content is disposed.
+    private static async Task<Result<UploadedFileContent>> OpenWithAsync(
+        UploadStore store, UploadedFile file, UploadConstraints constraints) {
+        await using var scope = CreateScope(store);
+        var opened = await scope.Uploads.OpenAsync(file, constraints, TestContext.Current.CancellationToken);
+        if (opened.IsSuccess) await opened.Value.DisposeAsync();
+
+        store.OpenStreams.Should().Be(0);
+        return opened;
     }
 
     [Fact]
@@ -380,13 +451,14 @@ public sealed class UploadedFilesTests {
             BlobLifecycleState state = BlobLifecycleState.Pending,
             string container = "uploads",
             string contentType = "text/csv",
-            string? sha256 = null) {
+            string? sha256 = null,
+            string fileName = "statement.csv") {
             _blobs[id] = (new BlobMetadata {
                 Id = id,
                 Container = container,
                 // The shape the upload endpoints store ("{owner}/{guid}/{fileName}"), always under the caller's
                 // prefix: a refusal then proves ownership is read from OwnerId, never parsed from the name.
-                Name = $"{Owner}/{Guid.CreateVersion7():N}/statement.csv",
+                Name = $"{Owner}/{Guid.CreateVersion7():N}/{fileName}",
                 ContentType = contentType,
                 Size = data.Length,
                 CreatedAt = DateTimeOffset.UnixEpoch,

@@ -4,9 +4,48 @@ namespace Elarion.Expressions;
 
 /// <summary>
 /// Building blocks for expressions assembled at run time: a value a query provider parameterizes, a lambda inlined
-/// with given arguments, and predicates joined with OR or AND or negated.
+/// with given arguments, predicates joined with OR or AND or negated, and a lambda expanded where it is written.
 /// </summary>
 public static class Expr {
+    /// <summary>
+    /// Returns <paramref name="expression"/> with every rule invocation inlined, as
+    /// <see cref="RuleExpressionExtensions.Expand{TDelegate}(Expression{TDelegate})"/> does, but taking the lambda
+    /// directly: a lambda has no type of its own, so the extension needs a typed local first, while these overloads
+    /// infer the types from the lambda's parameters.
+    /// </summary>
+    /// <param name="expression">The lambda to expand.</param>
+    /// <exception cref="NotSupportedException">An invoked rule is reached through an expression that cannot be
+    /// evaluated without compiling code, such as a method call or a lambda parameter.</exception>
+    /// <exception cref="InvalidOperationException">An invoked rule is null, or invokes itself.</exception>
+    /// <example>
+    /// <code>
+    /// // A helper that returns a composed filter, without a typed local before the return.
+    /// public static Expression&lt;Func&lt;Invoice, bool&gt;&gt; OverdueOn(DateOnly today) =&gt;
+    ///     Expr.Expand((Invoice invoice) =&gt; IsOverdue.Invoke(invoice, today));
+    /// </code>
+    /// </example>
+    public static Expression<Func<T, TResult>> Expand<T, TResult>(Expression<Func<T, TResult>> expression) {
+        return expression.Expand();
+    }
+
+    /// <inheritdoc cref="Expand{T, TResult}(Expression{Func{T, TResult}})"/>
+    public static Expression<Func<T1, T2, TResult>> Expand<T1, T2, TResult>(
+        Expression<Func<T1, T2, TResult>> expression) {
+        return expression.Expand();
+    }
+
+    /// <inheritdoc cref="Expand{T, TResult}(Expression{Func{T, TResult}})"/>
+    public static Expression<Func<T1, T2, T3, TResult>> Expand<T1, T2, T3, TResult>(
+        Expression<Func<T1, T2, T3, TResult>> expression) {
+        return expression.Expand();
+    }
+
+    /// <inheritdoc cref="Expand{T, TResult}(Expression{Func{T, TResult}})"/>
+    public static Expression<Func<T1, T2, T3, T4, TResult>> Expand<T1, T2, T3, T4, TResult>(
+        Expression<Func<T1, T2, T3, T4, TResult>> expression) {
+        return expression.Expand();
+    }
+
     /// <summary>
     /// Returns <paramref name="value"/> as a member access on a closure object, the shape the C# compiler emits for a
     /// captured local. A query provider sends it as a parameter, so one query shape has one cached plan whatever the

@@ -48,12 +48,13 @@ public sealed partial class HandlerRegistrationGenerator {
         // most-derived first; the members above then copy an instance of the declared type itself.
         EquatableArray<int> Derived);
 
-    /// <summary>A member rewritten in the copy: hidden unless <see cref="Permission"/> is held, copied through
-    /// <see cref="Redactor"/> (-1: as is), or both. The permission is the C# expression the generated code passes to
-    /// <c>Holds</c>: a string literal, or a reference to an <c>ElarionPermissions</c> constant.</summary>
+    /// <summary>A member rewritten in the copy: hidden unless one of <see cref="Permissions"/> is held (none: never
+    /// hidden), copied through <see cref="Redactor"/> (-1: as is), or both. Each permission is the C# expression the
+    /// generated code passes to <c>Holds</c>: a string literal, or a reference to an <c>ElarionPermissions</c>
+    /// constant.</summary>
     internal sealed record RedactedMemberModel(
         string Name,
-        string? Permission,
+        EquatableArray<string> Permissions,
         int Redactor);
 
     private static readonly DiagnosticDescriptor VisibleMemberNotNullable = new(
@@ -79,8 +80,8 @@ public sealed partial class HandlerRegistrationGenerator {
     private static readonly DiagnosticDescriptor VisiblePermissionUnreadable = new(
         "ELAUTH005",
         "[VisibleWith] permission cannot be read",
-        "Member '{0}' of '{1}' is marked [VisibleWith] with a permission the generator cannot read, so it cannot hide "
-        + "the member; write the permission as a string constant, as ElarionPermissions.Resource.Verb, or as "
+        "Member '{0}' of '{1}' is marked [VisibleWith] with no permission or one the generator cannot read, so it cannot "
+        + "hide the member; write each permission as a string constant, as ElarionPermissions.Resource.Verb, or as "
         + "(resource, verb)",
         "Elarion.Abstractions.Authorization",
         DiagnosticSeverity.Error,
@@ -90,15 +91,20 @@ public sealed partial class HandlerRegistrationGenerator {
     // it and reports ELAUTH005. Never a C# expression, so it cannot reach the generated code.
     private const string UnreadablePermission = "<unreadable>";
 
+    private static readonly string[] Unreadable = [UnreadablePermission];
+
+    private const string AnyOfPropertyName = "AnyOf";
+
     private const string GeneratedPermissionCatalogName = "ElarionPermissions";
 
     /// <summary>The per-pass walk state: type nodes memoized across every handler of one resolution pass.</summary>
     internal sealed class VisibilityWalk(
         INamedTypeSymbol visibleWithAttribute,
-        IAssemblySymbol currentAssembly,
+        Compilation compilation,
         string rootNamespace) {
         public INamedTypeSymbol VisibleWithAttribute { get; } = visibleWithAttribute;
-        public IAssemblySymbol CurrentAssembly { get; } = currentAssembly;
+        public Compilation Compilation { get; } = compilation;
+        public IAssemblySymbol CurrentAssembly { get; } = compilation.Assembly;
 
         // Where this compilation's ElarionPermissions is generated (PermissionCatalogGenerator).
         public string RootNamespace { get; } = rootNamespace;
@@ -111,7 +117,8 @@ public sealed partial class HandlerRegistrationGenerator {
         // -1: a leaf (nothing inside can be visible by permission); otherwise a RedactorKind, or Unsupported.
         public int Kind { get; set; } = -1;
         public VisibilityNode? Element { get; set; }
-        public List<(IPropertySymbol Property, string? Permission, VisibilityNode Node)> Members { get; } = [];
+        // Permissions: null when the member is not marked; otherwise any one of them shows it.
+        public List<(IPropertySymbol Property, string[]? Permissions, VisibilityNode Node)> Members { get; } = [];
         public List<VisibilityNode> Derived { get; } = [];
         public string? UnsupportedReason { get; set; }
     }
@@ -190,29 +197,32 @@ public sealed partial class HandlerRegistrationGenerator {
             }
 
             var members = ImmutableArray.CreateBuilder<RedactedMemberModel>();
-            var hasMembersToRewrite = node.Members.Any(m => m.Permission is not null || needs.Contains(m.Node));
+            var hasMembersToRewrite = node.Members.Any(m => m.Permissions is not null || needs.Contains(m.Node));
             if (node.Kind == RedactorKind.Object
                 || (node.Kind == RedactorKind.Polymorphic && hasMembersToRewrite)) {
                 if (node.Type is INamedTypeSymbol { IsRecord: false, IsValueType: false })
                     Fail($"'{typeFqn}' is neither a record nor a struct, so it cannot be copied with a 'with' expression");
 
-                foreach (var (property, permission, memberNode) in node.Members) {
+                foreach (var (property, memberPermissions, memberNode) in node.Members) {
                     var nested = needs.Contains(memberNode);
-                    if (permission is null && !nested)
+                    if (memberPermissions is null && !nested)
                         continue;
 
-                    if (permission == UnreadablePermission) {
+                    if (memberPermissions is not null && memberPermissions.Contains(UnreadablePermission)) {
                         diagnostics.Add(DiagnosticInfo.Create(VisiblePermissionUnreadable, location,
                             property.Name, typeFqn));
                         failed = true;
                         continue;
                     }
 
-                    if (permission is not null) {
-                        permissions.Add(permission);
+                    if (memberPermissions is not null) {
+                        foreach (var permission in memberPermissions)
+                            permissions.Add(permission);
+
                         if (!IsNullable(property.Type)) {
                             diagnostics.Add(DiagnosticInfo.Create(VisibleMemberNotNullable, location,
-                                property.Name, typeFqn, permission, property.Type.ToDisplayString(fmt)));
+                                property.Name, typeFqn, string.Join(", ", memberPermissions),
+                                property.Type.ToDisplayString(fmt)));
                             failed = true;
                             continue;
                         }
@@ -223,7 +233,9 @@ public sealed partial class HandlerRegistrationGenerator {
                         continue;
                     }
 
-                    members.Add(new RedactedMemberModel(property.Name, permission, nested ? ids[memberNode] : -1));
+                    members.Add(new RedactedMemberModel(property.Name,
+                        (memberPermissions ?? []).ToImmutableArray().ToEquatableArray(),
+                        nested ? ids[memberNode] : -1));
                 }
             }
 
@@ -377,7 +389,7 @@ public sealed partial class HandlerRegistrationGenerator {
 
                 var need = node.Element is { } element && needs.Contains(element);
                 foreach (var member in node.Members)
-                    need |= member.Permission is not null || needs.Contains(member.Node);
+                    need |= member.Permissions is not null || needs.Contains(member.Node);
 
                 foreach (var derived in node.Derived)
                     need |= needs.Contains(derived);
@@ -448,10 +460,10 @@ public sealed partial class HandlerRegistrationGenerator {
     }
 
     // The property's [VisibleWith], or — for a positional record — the one on the same-named constructor parameter.
-    private static string? ReadVisibleWith(IPropertySymbol property, VisibilityWalk walk) {
+    private static string[]? ReadVisibleWith(IPropertySymbol property, VisibilityWalk walk) {
         foreach (var attribute in property.GetAttributes())
-            if (ReadPermission(attribute, walk) is { } permission)
-                return permission;
+            if (ReadPermissions(attribute, walk) is { } permissions)
+                return permissions;
 
         if (property.ContainingType is not { } declaringType)
             return null;
@@ -462,47 +474,127 @@ public sealed partial class HandlerRegistrationGenerator {
                 continue;
 
             foreach (var attribute in parameter.GetAttributes())
-                if (ReadPermission(attribute, walk) is { } permission)
-                    return permission;
+                if (ReadPermissions(attribute, walk) is { } permissions)
+                    return permissions;
         }
 
         return null;
     }
 
-    // The permission of a [VisibleWith], as the C# expression the generated code checks; UnreadablePermission when it
-    // cannot be read; null when the attribute is not [VisibleWith].
-    private static string? ReadPermission(AttributeData attribute, VisibilityWalk walk) {
+    // The permissions of a [VisibleWith] (the constructor's, then AnyOf), any one of which shows the member, as the C#
+    // expressions the generated code checks; Unreadable when one cannot be read or none is named; null when the
+    // attribute is not [VisibleWith].
+    private static string[]? ReadPermissions(AttributeData attribute, VisibilityWalk walk) {
         if (!SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, walk.VisibleWithAttribute))
             return null;
 
         // An argument naming a constant another generator emits into this compilation does not bind here
-        // (AttributeBinding). The permission catalog is the one such constant the attribute documents, so it is
-        // referenced from the generated code, where it exists.
-        if (attribute.AttributeConstructor is null)
-            return ReferenceGeneratedPermission(attribute, walk) ?? UnreadablePermission;
-
+        // (AttributeBinding). The permission catalog is the one such constant the attribute documents, so the
+        // arguments are read from the syntax and the catalog is referenced from the generated code, where it exists.
         if (AttributeBinding.HasUnboundArgument(attribute))
-            return UnreadablePermission;
+            return ReadPermissionsFromSyntax(attribute, walk) ?? Unreadable;
 
+        var permissions = new List<string>();
         var arguments = attribute.ConstructorArguments;
-        return arguments.Length switch {
-            1 when arguments[0].Value is string permission => HandlerRegistrationGenerator.FormatStringLiteral(permission),
-            2 when arguments[0].Value is string resource && arguments[1].Value is string verb =>
-                HandlerRegistrationGenerator.FormatStringLiteral(resource + "." + verb),
-            _ => UnreadablePermission
+        switch (arguments.Length) {
+            case 0:
+                break;
+            case 1 when arguments[0].Value is string permission:
+                permissions.Add(FormatStringLiteral(permission));
+                break;
+            case 2 when arguments[0].Value is string resource && arguments[1].Value is string verb:
+                permissions.Add(FormatStringLiteral(resource + "." + verb));
+                break;
+            default:
+                return Unreadable;
+        }
+
+        foreach (var named in attribute.NamedArguments) {
+            if (named.Key != AnyOfPropertyName || named.Value.IsNull)
+                continue;
+
+            foreach (var value in named.Value.Values) {
+                if (value.Value is not string alternative)
+                    return Unreadable;
+
+                permissions.Add(FormatStringLiteral(alternative));
+            }
+        }
+
+        return permissions.Count == 0 ? Unreadable : permissions.Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    // The permissions of a [VisibleWith] whose arguments did not all bind: each read as a constant where it is one, or as
+    // a reference to the generated catalog; null when any cannot be read.
+    private static string[]? ReadPermissionsFromSyntax(AttributeData attribute, VisibilityWalk walk) {
+        if (attribute.ApplicationSyntaxReference?.GetSyntax() is not AttributeSyntax syntax)
+            return null;
+
+        var model = walk.Compilation.GetSemanticModel(syntax.SyntaxTree);
+        var arguments = syntax.ArgumentList?.Arguments ?? default;
+        var positional = arguments.Where(static argument => argument.NameEquals is null).ToList();
+        var permissions = new List<string>();
+        switch (positional.Count) {
+            case 0:
+                break;
+            case 1:
+                if (ReadPermissionExpression(positional[0].Expression, model, walk) is not { } permission)
+                    return null;
+
+                permissions.Add(permission);
+                break;
+            case 2:
+                if (model.GetConstantValue(positional[0].Expression) is not { HasValue: true, Value: string resource }
+                    || model.GetConstantValue(positional[1].Expression) is not { HasValue: true, Value: string verb })
+                    return null;
+
+                permissions.Add(FormatStringLiteral(resource + "." + verb));
+                break;
+            default:
+                return null;
+        }
+
+        foreach (var argument in arguments) {
+            if (argument.NameEquals?.Name.Identifier.ValueText != AnyOfPropertyName)
+                continue;
+
+            if (ArrayElements(argument.Expression) is not { } elements)
+                return null;
+
+            foreach (var element in elements) {
+                if (ReadPermissionExpression(element, model, walk) is not { } permission)
+                    return null;
+
+                permissions.Add(permission);
+            }
+        }
+
+        return permissions.Count == 0 ? null : permissions.Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    private static string? ReadPermissionExpression(ExpressionSyntax expression, SemanticModel model,
+        VisibilityWalk walk) {
+        return model.GetConstantValue(expression) is { HasValue: true, Value: string permission }
+            ? FormatStringLiteral(permission)
+            : ReferenceGeneratedPermission(expression, walk);
+    }
+
+    // The elements of an array written in an attribute: a collection expression or an array creation.
+    private static List<ExpressionSyntax>? ArrayElements(ExpressionSyntax expression) {
+        return expression switch {
+            CollectionExpressionSyntax collection when collection.Elements.All(static e => e is ExpressionElementSyntax) =>
+                collection.Elements.Cast<ExpressionElementSyntax>().Select(static e => e.Expression).ToList(),
+            ImplicitArrayCreationExpressionSyntax implicitArray => implicitArray.Initializer.Expressions.ToList(),
+            ArrayCreationExpressionSyntax { Initializer: { } initializer } => initializer.Expressions.ToList(),
+            _ => null
         };
     }
 
-    // `[VisibleWith(ElarionPermissions.Payments.Read)]` (the catalog optionally qualified) as a reference to the constant
-    // in the namespace PermissionCatalogGenerator emits it into; null for any other argument. A name the catalog does
-    // not have fails to compile in the attribute itself, so the reference cannot hide a typo.
-    private static string? ReferenceGeneratedPermission(AttributeData attribute, VisibilityWalk walk) {
-        if (attribute.ApplicationSyntaxReference?.GetSyntax() is not AttributeSyntax { ArgumentList: { } argumentList })
-            return null;
-
-        var positional = argumentList.Arguments.Where(static argument => argument.NameEquals is null).ToList();
-        if (positional.Count != 1
-            || positional[0].Expression is not MemberAccessExpressionSyntax {
+    // `ElarionPermissions.Payments.Read` (the catalog optionally qualified) as a reference to the constant in the
+    // namespace PermissionCatalogGenerator emits it into; null for any other expression. A name the catalog does not
+    // have fails to compile in the attribute itself, so the reference cannot hide a typo.
+    private static string? ReferenceGeneratedPermission(ExpressionSyntax expression, VisibilityWalk walk) {
+        if (expression is not MemberAccessExpressionSyntax {
                 Name: IdentifierNameSyntax verb,
                 Expression: MemberAccessExpressionSyntax { Name: IdentifierNameSyntax resource } catalogAccess
             })
@@ -562,9 +654,13 @@ public sealed partial class HandlerRegistrationGenerator {
             var copied = member.Redactor >= 0
                 ? $"__Hide{member.Redactor}(value.{member.Name}, permissions)"
                 : $"value.{member.Name}";
-            var expression = member.Permission is null
+            var permissions = member.Permissions.AsImmutableArray;
+            var holds = string.Join(" || ", permissions.Select(static p => $"permissions.Holds({p})"));
+            var expression = permissions.IsDefaultOrEmpty
                 ? copied
-                : $"permissions.Holds({member.Permission}) ? {copied} : null";
+                : permissions.Length == 1
+                    ? $"{holds} ? {copied} : null"
+                    : $"({holds}) ? {copied} : null";
             sb.AppendLine($"{indent}    {member.Name} = {expression},");
         }
 

@@ -124,6 +124,90 @@ public sealed class ErrorContractGeneratorTests {
     }
 
     [Fact]
+    public void DeclaredUploadLimits_ImplyTheUploadErrors_WithTheLimitAsTypedPayload() {
+        const string source =
+            """
+            using System.Collections.Generic;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Elarion.Abstractions;
+
+            namespace Sample.Errors;
+
+            [Handler("imports.statement")]
+            public sealed class ImportStatement : IHandler<ImportStatement.Command, Result<int>> {
+                public sealed record Command(
+                    [property: UploadLimits(MaxBytes = 1024, ContentTypes = ["text/csv"])] UploadedFile Statement) {
+                    [UploadLimits(FileExtensions = [".xlsx"])]
+                    public IReadOnlyList<UploadedFile> Workbooks { get; init; } = [];
+                }
+
+                public ValueTask<Result<int>> HandleAsync(Command request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<int>>(1);
+            }
+
+            // Only the limit kinds a request declares are implied; its own declaration of a code still wins.
+            [Handler("imports.contacts")]
+            [ProducesError(ErrorCodes.UploadNotFound, ErrorKind.Validation, typeof(string))]
+            public sealed class ImportContacts : IHandler<ImportContacts.Command, Result<int>> {
+                public sealed record Command([property: UploadLimits(FileExtensions = [".vcf"])] UploadedFile File);
+
+                public ValueTask<Result<int>> HandleAsync(Command request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<int>>(1);
+            }
+
+            // An uploaded file without declared limits implies nothing: its handler declares what it passes.
+            [Handler("imports.plain")]
+            public sealed class ImportPlain : IHandler<ImportPlain.Command, Result<int>> {
+                public sealed record Command(UploadedFile File);
+
+                public ValueTask<Result<int>> HandleAsync(Command request, CancellationToken ct) =>
+                    ValueTask.FromResult<Result<int>>(1);
+            }
+            """;
+
+        var generated = Run(source, out var diagnostics);
+
+        diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        ContractOf(generated, "imports.statement").Should().Equal(
+            "upload.content_type:Validation:global::Elarion.Abstractions.UploadContentTypeData",
+            "upload.file_extension:Validation:global::Elarion.Abstractions.UploadFileExtensionData",
+            "upload.not_found:Validation:",
+            "upload.too_large:Validation:global::Elarion.Abstractions.UploadTooLargeData");
+        ContractOf(generated, "imports.contacts").Should().Equal(
+            "upload.file_extension:Validation:global::Elarion.Abstractions.UploadFileExtensionData",
+            "upload.not_found:Validation:string");
+        ContractOf(generated, "imports.plain").Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("[ProducesError(ErrorCodes.UploadTooLarge, ErrorKind.Validation)]", "upload.too_large", "with no payload")]
+    [InlineData("[ProducesError(ErrorCodes.UploadContentType, ErrorKind.Validation, typeof(TokenProblem))]",
+        "upload.content_type", "with payload 'Sample.Errors.TokenProblem'")]
+    [InlineData("[ProducesError(ErrorCodes.UploadNotFound, ErrorKind.Validation, typeof(TokenProblem))]",
+        "upload.not_found", "answers it with no payload")]
+    public void UploadCode_DeclaredWithAnotherPayloadThanIUploadedFilesSends_IsAWarning(
+        string declaration, string code, string detail) {
+        Run(Handler(declaration), out var diagnostics);
+
+        var warning = diagnostics.Should().ContainSingle(d => d.Id == "ELERR004").Subject;
+        warning.Severity.Should().Be(DiagnosticSeverity.Warning);
+        warning.GetMessage().Should().Contain($"'{code}'").And.Contain(detail);
+    }
+
+    [Fact]
+    public void UploadCode_DeclaredWithItsPayload_IsAccepted() {
+        Run(Handler(
+            """
+            [ProducesError(ErrorCodes.UploadNotFound, ErrorKind.Validation)]
+            [ProducesError(ErrorCodes.UploadTooLarge, ErrorKind.Validation, typeof(UploadTooLargeData))]
+            [ProducesError(ErrorCodes.UploadFileExtension, ErrorKind.Validation, typeof(UploadFileExtensionData))]
+            """), out var diagnostics);
+
+        diagnostics.Should().NotContain(d => d.Id == "ELERR004" || d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
     public void RequirePermission_ImpliesUnauthorizedAndForbidden() {
         var generated = Run(Handler("[Elarion.Abstractions.Authorization.RequirePermission(\"a\", \"read\")]"), out _);
 

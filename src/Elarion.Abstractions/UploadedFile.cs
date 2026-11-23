@@ -27,8 +27,8 @@ namespace Elarion.Abstractions;
 /// <code>
 /// [Handler]
 /// [ProducesError(ErrorCodes.UploadNotFound, ErrorKind.Validation)]
-/// [ProducesError(ErrorCodes.UploadTooLarge, ErrorKind.Validation)]
-/// [ProducesError(ErrorCodes.UploadContentType, ErrorKind.Validation)]
+/// [ProducesError(ErrorCodes.UploadTooLarge, ErrorKind.Validation, typeof(UploadTooLargeData))]
+/// [ProducesError(ErrorCodes.UploadContentType, ErrorKind.Validation, typeof(UploadContentTypeData))]
 /// public sealed class AnalyzeStatement(IUploadedFiles uploads, StatementParser parser)
 ///     : IHandler&lt;AnalyzeStatement.Command, Result&lt;Analysis&gt;&gt; {
 ///     public sealed record Command : ICommand {

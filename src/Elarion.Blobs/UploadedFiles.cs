@@ -140,15 +140,29 @@ internal sealed class UploadedFiles(
 
         if (constraints is null) return null;
 
+        // The message is the server's English fallback; the data carries the limit, so a client words it itself.
         if (constraints.MaxBytes is { } maxBytes && metadata.Size > maxBytes)
             return AppError.Validation(
-                $"The file is larger than the accepted {maxBytes} bytes.", ErrorCodes.UploadTooLarge);
+                $"The file is larger than the accepted {maxBytes} bytes.",
+                ErrorCodes.UploadTooLarge,
+                new UploadTooLargeData { MaxBytes = maxBytes, Length = metadata.Size });
 
-        if (constraints.ContentTypes is { Count: > 0 } contentTypes && !IsAccepted(metadata.ContentType, contentTypes))
+        if (constraints.ContentTypes is { Count: > 0 } contentTypes && !IsAccepted(metadata.ContentType, contentTypes)) {
+            var contentType = MediaType(metadata.ContentType);
             return AppError.Validation(
-                $"Files of type '{MediaType(metadata.ContentType)}' are not accepted here; expected "
-                + $"{string.Join(", ", contentTypes)}.",
-                ErrorCodes.UploadContentType);
+                $"Files of type '{contentType}' are not accepted here; expected {string.Join(", ", contentTypes)}.",
+                ErrorCodes.UploadContentType,
+                new UploadContentTypeData { ContentTypes = contentTypes, ContentType = contentType });
+        }
+
+        if (constraints.FileExtensions is { Count: > 0 } extensions) {
+            var fileName = FileNameOf(metadata.Name);
+            if (!HasAcceptedExtension(fileName, extensions))
+                return AppError.Validation(
+                    $"The file '{fileName}' does not have an accepted extension; expected {string.Join(", ", extensions)}.",
+                    ErrorCodes.UploadFileExtension,
+                    new UploadFileExtensionData { FileExtensions = extensions, FileName = fileName });
+        }
 
         return null;
     }
@@ -176,6 +190,20 @@ internal sealed class UploadedFiles(
         foreach (var candidate in accepted)
             if (MediaType(candidate).Equals(actual, StringComparison.OrdinalIgnoreCase))
                 return true;
+
+        return false;
+    }
+
+    // The name ends in the extension and is longer than it: a file named only ".xlsx" has no extension.
+    private static bool HasAcceptedExtension(string fileName, IReadOnlyList<string> accepted) {
+        foreach (var candidate in accepted) {
+            var extension = candidate.Trim();
+            if (extension.Length == 0) continue;
+
+            var dotted = extension[0] == '.' ? extension : "." + extension;
+            if (fileName.Length > dotted.Length && fileName.EndsWith(dotted, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
 
         return false;
     }

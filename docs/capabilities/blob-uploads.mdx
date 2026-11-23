@@ -239,10 +239,7 @@ app.MapElarionBlobUploads().RequireAuthorization();
 ```
 
 ```csharp
-[Handler]
-[ProducesError(ErrorCodes.UploadNotFound, ErrorKind.Validation)]
-[ProducesError(ErrorCodes.UploadTooLarge, ErrorKind.Validation)]
-[ProducesError(ErrorCodes.UploadContentType, ErrorKind.Validation)]
+[Handler]   // [UploadLimits] puts upload.not_found and the code of each declared limit into the error contract
 public sealed class AnalyzeStatement(IUploadedFiles uploads, StatementParser parser)
     : IHandler<AnalyzeStatement.Command, Result<StatementAnalysis>> {
     public sealed record Command : ICommand {
@@ -266,7 +263,7 @@ public sealed class AnalyzeStatement(IUploadedFiles uploads, StatementParser par
 | --- | --- |
 | `OpenAsync(file, constraints?, ct)` | Opens the content for reading. The upload stays pending, so the next step of a flow opens it again. Dispose the result. |
 | `CommitAsync(file, constraints?, ct)` | Keeps it: promotes the pending blob inside the caller's transaction ([above](#attaching-a-file-to-an-entity)) and answers a `CommittedUpload` (`BlobId`, `FileName`, `ContentType`, `Length`, `ContentSha256`) for the record. Needs an `IBlobLifecycle`. |
-| `DeleteAsync(file, ct)` | Discards it now instead of after its TTL. Idempotent; `false` when there was nothing of the caller's to delete. |
+| `DeleteAsync(file, ct)` | Discards it now instead of after its TTL. Idempotent; `false` when there was nothing of the caller's to delete. On the PostgreSQL store it saves the `DbContext` it shares with the handler: call it after the handler's own save ([below](#streaming-downloads-and-temp-file-flows)). |
 
 Every operation answers only an upload that is **still pending**, whose recorded owner is **exactly the current
 user**, and that lies in an **upload container** (`UploadedFilesOptions.Containers`, default `uploads`, the container
@@ -275,16 +272,41 @@ unowned or foreign-container blob, and any call by an anonymous caller, all answ
 tell which ids exist. A kept blob belongs to its record from then on: the record's own authorization guards it, and the
 reference no longer opens it.
 
-| Code | When |
-| --- | --- |
-| `upload.not_found` | No pending upload of the caller has that id. The caller uploads again. |
-| `upload.too_large` | The file is larger than `UploadConstraints.MaxBytes`. |
-| `upload.content_type` | The declared content type is not in `UploadConstraints.ContentTypes` (exact, case-insensitive, parameters such as `; charset` ignored). |
+| Code | When | `data` |
+| --- | --- | --- |
+| `upload.not_found` | No pending upload of the caller has that id. The caller uploads again. | none |
+| `upload.too_large` | The file is larger than `UploadConstraints.MaxBytes`. | `UploadTooLargeData`: `maxBytes`, the file's `length` |
+| `upload.content_type` | The declared content type is not in `UploadConstraints.ContentTypes` (exact, case-insensitive, parameters such as `; charset` ignored). | `UploadContentTypeData`: the accepted `contentTypes`, the file's `contentType` |
+| `upload.file_extension` | The stored file name does not end in one of `UploadConstraints.FileExtensions` (case-insensitive; a file uploaded without a name is stored as `upload`). | `UploadFileExtensionData`: the accepted `fileExtensions`, the file's `fileName` |
 
-All three are `Validation` errors (JSON-RPC `-32602`, HTTP `400`) the handler returns, so it declares the ones it can
-produce with `[ProducesError]`, as above. The limits are the handler's per operation; the endpoints'
-`MaxContentLength`/`MaxSize` and `AllowedContentTypes` still cap what can be uploaded at all. The content type is the
-one the client declared, not sniffed: treat the content as untrusted input.
+The limits are checked in that order, and the first one the file breaks answers. All four are `Validation` errors
+(JSON-RPC `-32602`, HTTP `400`) the handler returns. A request that
+[declares its limits](#declaring-the-limits-on-the-member) has `upload.not_found` and the code of each declared limit,
+with its payload, in its error contract already. A handler that only passes `UploadConstraints` declares the codes it
+can produce with their payload:
+
+```csharp
+[ProducesError(ErrorCodes.UploadNotFound, ErrorKind.Validation)]
+[ProducesError(ErrorCodes.UploadTooLarge, ErrorKind.Validation, typeof(UploadTooLargeData))]
+```
+
+A declaration of an upload code with another payload, or none, is the warning `ELERR004`: it would hide the typed data
+from the schema and the client.
+
+The `message` is an English fallback with the limit in bytes. To say it in the user's language, branch on the code and
+word the payload: the [generated client](/docs/capabilities/transports/typescript-client#uploaded-files) types `data`
+per code, and its own check before the upload reports the same codes and data.
+
+```ts
+catch (error) {
+  if (isRpcMethodError('statements.analyze', error) && error.code === 'upload.too_large')
+    showError(t('upload.tooLarge', { max: formatBytes(error.data.maxBytes) }))
+}
+```
+
+The limits are the handler's per operation; the endpoints' `MaxContentLength`/`MaxSize` and `AllowedContentTypes`
+still cap what can be uploaded at all. The content type and the file name are the ones the client declared, not
+sniffed: treat the content as untrusted input.
 
 An upload lives until it is committed, deleted, or collected after the endpoint's `Ttl` (`BlobUploadEndpointOptions.Ttl`,
 `ResumableBlobUploadOptions.Ttl`, default 30 minutes). A multi-step flow (analyze, preview, commit) passes the same
@@ -292,11 +314,11 @@ An upload lives until it is committed, deleted, or collected after the endpoint'
 
 ### Declaring the limits on the member
 
-`[UploadLimits(MaxBytes = …, ContentTypes = […])]` on the request member declares the limits once, where every side
-reads them. Before the handler runs, the pipeline declares them for the request's files to the scoped
-`IDeclaredUploadConstraints` (the same `AddElarionUploadedFiles` registration), and every `OpenAsync` and `CommitAsync`
-of those files checks them — the handler passes no constraints. The schema exports them next to the marker, and the
-generated client rejects a file that breaks them before uploading it.
+`[UploadLimits(MaxBytes = …, ContentTypes = […], FileExtensions = […])]` on the request member declares the limits
+once, where every side reads them. Before the handler runs, the pipeline declares them for the request's files to the
+scoped `IDeclaredUploadConstraints` (the same `AddElarionUploadedFiles` registration), and every `OpenAsync` and
+`CommitAsync` of those files checks them — the handler passes no constraints and declares no upload error. The schema
+exports them next to the marker, and the generated client rejects a file that breaks them before uploading it.
 
 ```csharp
 public sealed record Command : ICommand {
@@ -306,22 +328,29 @@ public sealed record Command : ICommand {
     // On a collection the limits apply to every file; [MaxLength] bounds how many there are.
     [MaxLength(10), UploadLimits(MaxBytes = 5L * 1024 * 1024, ContentTypes = ["application/pdf"])]
     public IReadOnlyList<UploadedFile> Receipts { get; init; } = [];
+
+    // Browsers declare a spreadsheet's type differently per system, often as application/octet-stream.
+    [UploadLimits(MaxBytes = 10L * 1024 * 1024, FileExtensions = [".xlsx", ".xls"])]
+    public UploadedFile? Workbook { get; init; }
 }
 ```
 
 | Rule | |
 | --- | --- |
 | Members | `UploadedFile`, `UploadedFile?`, or a collection of them (array, list, read-only collection), on the handler's request type, its own or inherited. On a positional record, target the property (`[property: UploadLimits(…)]`) or the parameter. |
-| Limits | `MaxBytes` (`0` = none) and `ContentTypes` (empty = any), compared as `UploadConstraints` compares them. At least one. |
+| Limits | `MaxBytes` (`0` = none), `ContentTypes` (empty = any) and `FileExtensions` (empty = any), compared as `UploadConstraints` compares them. At least one; every one declared must hold. |
+| Types or extensions | The content type is what the browser declared, and for `.xlsx`, `.vcf` or `.ics` that varies between systems or is missing (sent as `application/octet-stream`). Accept such formats by `FileExtensions` (each with its leading dot, compared case-insensitively against the end of the stored file name), not `ContentTypes`; declaring both requires both. |
+| Error contract | `upload.not_found`, and `upload.too_large`, `upload.content_type` or `upload.file_extension` for each kind of limit the request declares, with its payload — the handler declares none of them. |
 | Several | Constraints a call still passes to `IUploadedFiles` apply too; a file declared by two members must satisfy both. Declarations only tighten. |
-| Build errors | `ELUPL001` for a member that holds no uploaded file or a declaration without a valid limit; `ELUPL002` for a member of a type that is not a handler's request in the assembly — a declaration the pipeline would not enforce is never accepted. |
+| Build errors | `ELUPL001` for a member that holds no uploaded file, an extension that is not a dot followed by a name (`"xlsx"`, `".x ls"`), or a declaration without a valid limit; `ELUPL002` for a member of a type that is not a handler's request in the assembly — a declaration the pipeline would not enforce is never accepted. |
 | Fail closed | A handler with declared limits needs an `IDeclaredUploadConstraints` (registered by `AddElarionUploadedFiles`); without one its pipeline does not build. A singleton handler cannot declare limits (`ELSG013`). |
 
 The exported schema marks the member `x-elarion-upload` (a string), with the declared limits as
-`x-elarion-max-bytes` and `x-elarion-content-types` (on the items of a collection), and the
+`x-elarion-max-bytes`, `x-elarion-content-types` and `x-elarion-file-extensions` (on the items of a collection), and the
 [generated TypeScript client](/docs/capabilities/transports/typescript-client#uploaded-files) takes a `File` there,
-checks it against those limits and uploads it before the call; `rpc.$uploadFile(file)` uploads once for a multi-step
-flow, and `rpcLimits` shows the limits to the user. An MCP tool caller passes the id. The
+checks it against those limits and uploads it before the call; `rpc.$uploadFile(file, { method, member })` uploads once
+for a multi-step flow after the same check, and `rpcLimits` shows the limits to the user (an `<input accept>` from
+`fileExtensions`). An MCP tool caller passes the id. The
 [OpenAPI document](/docs/capabilities/transports/openapi) carries the same marker and limits. See
 [ADR-0105](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0105-uploaded-files-are-handler-parameters.md)
 and [ADR-0100](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0100-the-schema-exports-constants-presets-and-limits.md).
@@ -371,6 +400,7 @@ public async ValueTask<Result<Unit>> HandleAsync(ImportRows.Command command, Can
         await importer.IngestAsync(file.Content, ct);   // stream and process
     }
 
+    await db.SaveChangesAsync(ct);                      // the handler's own save first (see below)
     await uploads.DeleteAsync(command.File, ct);        // reclaim now — no waiting for the GC
     return Unit.Value;
 }
@@ -386,6 +416,14 @@ imported rows and **rolls back with them** if the import fails, leaving the file
 calling `DeleteAsync` inside the handler is safe. On an **external store (Azure Blob Storage)** the delete is
 an immediate side effect, not part of your database transaction, so delete only **after** the import
 transaction commits — or skip the explicit delete and let the garbage collector reclaim it.
+</Callout>
+
+<Callout type="warn">
+On the PostgreSQL store, `DeleteAsync` removes the blob row through the scoped `DbContext` it shares with the handler
+and calls `SaveChangesAsync` on it. That save writes **everything the handler still tracks** at that moment, not only
+the delete. Call `DeleteAsync` **after** the handler's own `SaveChangesAsync`, as the example does, never between
+changing tracked entities and saving them: a delete in between would save half-made changes before the handler
+validated or finished them.
 </Callout>
 
 Note the handler works with the **pending blob** the upload produced, never the staging *session*: by the

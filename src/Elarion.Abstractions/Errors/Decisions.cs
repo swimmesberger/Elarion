@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Elarion.Abstractions;
 
 /// <summary>
@@ -20,9 +22,68 @@ public interface IDecidingRequest {
 
 /// <summary>One answer to a decision: its <see cref="Code"/>, the chosen <see cref="Option"/>, and for a per-item decision
 /// the <see cref="Item"/> it answers.</summary>
+/// <remarks>
+/// <see cref="Confirming(string)"/> and <see cref="Choosing{TOption}(string, TOption)"/> (and their per-item overloads)
+/// build an answer in one line, with the option's wire name spelled as <see cref="DecisionExtensions"/> reads it.
+/// </remarks>
+/// <example>
+/// <code>
+/// var command = new CommitImport.Command {
+///     Statement = statement,
+///     Decisions = [
+///         DecisionAnswer.Confirming(Codes.ClosedPeriod),
+///         DecisionAnswer.Choosing(Codes.PossibleDuplicate, "line-3", DuplicateChoice.Skip)
+///     ]
+/// };
+/// </code>
+/// </example>
 public sealed record DecisionAnswer {
     /// <summary>The one option of a confirmation (a decision declared without options).</summary>
     public const string Confirm = "confirm";
+
+    /// <summary>An answer that confirms the whole-request decision <paramref name="code"/>.</summary>
+    public static DecisionAnswer Confirming(string code) {
+        ArgumentNullException.ThrowIfNull(code);
+        return new DecisionAnswer { Code = code };
+    }
+
+    /// <summary>An answer that confirms <paramref name="item"/> of the per-item decision <paramref name="code"/>.</summary>
+    public static DecisionAnswer Confirming(string code, string item) {
+        ArgumentNullException.ThrowIfNull(code);
+        ArgumentNullException.ThrowIfNull(item);
+        return new DecisionAnswer { Code = code, Item = item };
+    }
+
+    /// <summary>
+    /// An answer that chooses <paramref name="option"/> for the whole-request decision <paramref name="code"/>: the
+    /// option's wire name is the enum member's name in camel case, which
+    /// <see cref="DecisionExtensions.Decision{TOption}(IDecidingRequest, string)"/> reads back.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="option"/> is not a declared member of the enum.</exception>
+    public static DecisionAnswer Choosing<TOption>(string code, TOption option) where TOption : struct, Enum {
+        ArgumentNullException.ThrowIfNull(code);
+        return new DecisionAnswer { Code = code, Option = OptionName(option) };
+    }
+
+    /// <summary>
+    /// An answer that chooses <paramref name="option"/> for <paramref name="item"/> of the per-item decision
+    /// <paramref name="code"/>, with the option's wire name spelled as for <see cref="Choosing{TOption}(string, TOption)"/>.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="option"/> is not a declared member of the enum.</exception>
+    public static DecisionAnswer Choosing<TOption>(string code, string item, TOption option) where TOption : struct, Enum {
+        ArgumentNullException.ThrowIfNull(code);
+        ArgumentNullException.ThrowIfNull(item);
+        return new DecisionAnswer { Code = code, Item = item, Option = OptionName(option) };
+    }
+
+    // The wire name the schema exports for an option: the member name in System.Text.Json's camel case, as the
+    // generator spells it. A value the enum does not declare (or a combination of flags) has no name.
+    private static string OptionName<TOption>(TOption option) where TOption : struct, Enum {
+        return Enum.GetName(option) is { } name
+            ? JsonNamingPolicy.CamelCase.ConvertName(name)
+            : throw new ArgumentOutOfRangeException(nameof(option), option,
+                $"'{option}' is not a declared member of {typeof(TOption).Name}, so it is no option.");
+    }
 
     /// <summary>The decision's code, as the handler declared it with <see cref="RequiresDecisionAttribute"/>.</summary>
     public required string Code { get; init; }

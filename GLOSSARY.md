@@ -288,9 +288,10 @@ pending upload and nothing else.
 _Avoid_: blob ref, file id, attachment id (for the parameter), upload token
 
 **Upload limits**:
-The size and content-type limits an uploaded-file member declares (`[UploadLimits]`). The pipeline applies them to
-every read and keep of that file, the schema exports them, and the generated client checks a file against them
-before uploading it. Constraints passed when reading the file apply on top.
+The size, content-type and file-extension limits an uploaded-file member declares (`[UploadLimits]`). The pipeline
+applies them to every read and keep of that file, the schema exports them, and the generated client checks a file
+against them before uploading it. A file that breaks one is refused with the limit as typed error data. Constraints
+passed when reading the file apply on top.
 _Avoid_: upload validation, file rules, upload policy
 
 **Streamed file**:

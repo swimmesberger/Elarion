@@ -170,13 +170,52 @@ const rpc = createRpcApi({
 `$uploadFile(file, { fileName, signal })` (also `$client.uploadFile`) names a `Blob` that has no name of its own. Params
 validation accepts a `Blob` or a string at an upload position, before the upload. When the member declares
 [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member), the `Blob` must also fit them:
-a larger file or another media type fails params validation with the server's message (`RpcParamsValidationError`)
-and is never uploaded. The media type is compared as the server compares it — case-insensitively, parameters ignored,
-an untyped `Blob` as `application/octet-stream`. A reference passes; the server checks the file it names. A failed upload rejects the call with
-`RpcTransportError` and the method is not called. A retry that passes the `File` again uploads it again and sends a new
-reference, so for an `[Idempotent]` operation upload once with `$uploadFile` and retry with the reference — otherwise
-the retried request differs from the first one and answers `idempotency.key_reused`. Schemas without upload members
-generate byte-identical output.
+a larger file, another media type or a name without an accepted extension fails params validation with the server's
+message (`RpcParamsValidationError`) and is never uploaded. The media type is compared as the server compares it —
+case-insensitively, parameters ignored, an untyped `Blob` as `application/octet-stream` — and the extension against the
+end of the file's name, case-insensitively (a `Blob` has no name). A reference passes; the server checks the file it
+names. A failed upload rejects the call with `RpcTransportError` and the method is not called. A retry that passes the
+`File` again uploads it again and sends a new reference, so for an `[Idempotent]` operation upload once with
+`$uploadFile` and retry with the reference — otherwise the retried request differs from the first one and answers
+`idempotency.key_reused`. Schemas without upload members generate byte-identical output.
+
+### Upload limits in the user's language
+
+A refused file is reported by error code with the limit as data, never only as English text, on every path:
+
+- **The server** answers `upload.too_large` with `{ maxBytes, length }`, `upload.content_type` with
+  `{ contentTypes, contentType }` and `upload.file_extension` with `{ fileExtensions, fileName }`. A method whose request
+  declares `[UploadLimits]` has those codes in its contract, so `isRpcMethodError(method, error)` narrows `error.data` by
+  `error.code`.
+- **`$uploadFile(file, { method, member })`** checks the file against the limits of that method's upload member before
+  uploading it and throws `RpcUploadLimitError`: an `RpcError` with the code, message and data the server would answer,
+  plus `method` and `member`. One handler words both. The pair is typed — `method` is a method that takes an upload,
+  `member` one of its upload members by path (a list by its own path) — and the check is skipped when
+  `validateParams` is `false`.
+- **Params validation** before a call adds the code and the limit to the Zod issue as `params`
+  (`{ code: 'upload.too_large', maxBytes }`, likewise `contentTypes` and `fileExtensions`), so a Zod error map words it;
+  `RpcParamsValidationError.cause` carries the issues.
+
+```ts
+try {
+  const workbook = await rpc.$uploadFile(file, { method: 'contacts.import', member: 'workbook' })
+  await rpc.contacts.import({ workbook })
+} catch (error) {
+  if (!isRpcMethodError('contacts.import', error)) throw error
+  switch (error.code) {   // the client's check and the server's answer alike
+    case 'upload.too_large':
+      return showError(t('upload.tooLarge', { max: formatBytes(error.data.maxBytes) }))
+    case 'upload.file_extension':
+      return showError(t('upload.extension', { accepted: error.data.fileExtensions.join(', ') }))
+    default:
+      return showError(error.message)
+  }
+}
+```
+
+`rpcUploadLimits` in `rpc-schemas.ts` lists every upload member of each method with its declared `maxBytes`,
+`contentTypes` and `fileExtensions` (`{}` when it declares none); `$uploadFile` reads it, and a page can build an
+`<input accept>` from it.
 
 ## C# unions map to TypeScript unions
 
@@ -403,9 +442,21 @@ if (error instanceof RpcError && error.code === 'internal')
 ### Answering decisions
 
 A method whose handler declares [`[RequiresDecision]`](/docs/concepts/results-and-errors#asking-the-caller-to-decide)
-lists each decision in its `errors` with kind `decision_required`, its `options` and `perItem`. `withDecisions` runs
-the call; when the server needs a decision the method declares, it hands your dialog a typed question and calls again
-with the answer added to `decisions`, until the call succeeds or fails otherwise:
+lists each decision in its `errors` with kind `decision_required`, its `options` and `perItem`, and its request's
+`decisions` member is typed with exactly those answers: a declared code, one of its options, and for a per-item
+decision the item. An undeclared code or option is a compile error, and the generated params schema rejects it before
+the call is sent:
+
+```ts
+// RpcParams<'banking.imports.commit'>['decisions'], also available as RpcMethodDecisionAnswer<M>[]
+decisions?: (
+  | { code: 'banking.closed_period'; option?: 'confirm' }                              // a confirmation
+  | { code: 'banking.possible_duplicate'; item: string; option: 'import' | 'skip' }    // a choice per item
+)[] | null
+```
+
+`withDecisions` runs the call; when the server needs a decision the method declares, it hands your dialog a typed
+question and calls again with the answer added to `decisions`, until the call succeeds or fails otherwise:
 
 ```ts
 import { withDecisions } from './generated/rpc-client'
@@ -422,11 +473,38 @@ const outcome = await withDecisions(client, 'banking.imports.commit', { statemen
 ```
 
 The question carries `code`, `message`, the declared `options`, `perItem`, the typed `data` and the `RpcError`.
-Returning `undefined` cancels: `withDecisions` throws the decision error, which you can recognize with
+Returning `undefined` cancels: `withDecisions` throws the error the call failed with, which you can recognize with
 `error.isDecisionRequired`. A later answer for the same code and item replaces an earlier one, and `maxQuestions`
 (default 10) stops a server that keeps asking. Each resend is a new request, so an idempotent method gets a new
-idempotency key unless the options fix one. `withDecisions` and the `RpcDecision*` types are emitted only when a method
-declares a decision.
+idempotency key unless the options fix one.
+
+The first argument is the generated client or your own call seam, any function shaped
+`(method, params, options?) => Promise<result>` (`RpcCall<M>`), so the calls keep going through the timeouts,
+error mapping and localization of your application:
+
+```ts
+const outcome = await withDecisions(rpc, 'banking.imports.commit', { statement }, askImportDecision)
+```
+
+When the dialog is declarative state rather than an awaited promise (its saving state and the resend's failure shown
+inside it, a query library's mutation sending the call), use the two primitives `withDecisions` is built on:
+`decisionQuestion(method, error)` recognizes a question the method declares and returns it typed (or `undefined` for
+any other error), and `answerDecision(decisions, question, answer)` returns the request's `decisions` with the answer
+added, replacing an earlier answer for the same code and item:
+
+```ts
+import { answerDecision, decisionQuestion } from './generated/rpc-client'
+
+// When the call fails: keep the question and the params it answers.
+const question = decisionQuestion('banking.imports.commit', error)
+if (question) setPending({ question, params })
+
+// When the user answers: resend through your own mutation, with the answer added.
+commit.mutate({ ...pending.params, decisions: answerDecision(pending.params.decisions, pending.question, answer) })
+```
+
+Both recognize the `RpcError` itself or an error whose `cause` chain holds it, so a seam that wraps errors keeps working.
+`withDecisions`, the primitives and the `RpcDecision*` types are emitted only when a method declares a decision.
 
 ## Method requirements and UI gating
 
@@ -463,11 +541,12 @@ for a slow operation's client timeout, `readOnly` for which actions a read-only 
 
 Four more exports at the end of `rpc-schemas.ts` carry values the server declares, so a page shows or sends them
 instead of copying them. Each is emitted only when the schema has an entry for it; `rpc-types.ts` and
-`rpc-client.ts` never change.
+`rpc-client.ts` never change. (`rpcUploadLimits`, emitted whenever params take an uploaded file, is described under
+[upload limits](#upload-limits-in-the-users-language).)
 
 | Export | What it holds | Declared by |
 | --- | --- | --- |
-| `rpcLimits` | Every params member's limits by method and member path, as literal types: `minLength`, `maxLength`, `minimum`, `exclusiveMinimum`, `maximum`, `exclusiveMaximum`, `minItems`, `maxItems`, and an upload member's `maxBytes` and `contentTypes`. A nested member is reached through its parent, a list's elements through `items`. | The DataAnnotations the schema already exports, and [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) |
+| `rpcLimits` | Every params member's limits by method and member path, as literal types: `minLength`, `maxLength`, `minimum`, `exclusiveMinimum`, `maximum`, `exclusiveMaximum`, `minItems`, `maxItems`, and an upload member's `maxBytes`, `contentTypes` and `fileExtensions`. A nested member is reached through its parent, a list's elements through `items`. | The DataAnnotations the schema already exports, and [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) |
 | `rpcPresets` | Named request values per method, each typed as the method's params. | [`[RequestPreset]`](/docs/reference/attributes#requestpreset) on the handler |
 | `rpcSortKeys` | The keys the handler's sort map allows, in declaration order, with the direction a bare key applies and which one is the default. | The handler's [`SortMap`](/docs/capabilities/pagination#offset-pagination) |
 | `rpcConstants` | Each module's exported constants, as literal types. | [`[ClientConstants]`](/docs/reference/attributes#clientconstants) |

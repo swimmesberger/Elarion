@@ -59,6 +59,9 @@ public sealed class UploadLimitsGeneratorTests {
                                       public IReadOnlyList<UploadedFile> Receipts { get; init; } = [];
 
                                       public UploadedFile? Unlimited { get; init; }
+
+                                      [UploadLimits(FileExtensions = [".xlsx", ".tar.gz"])]
+                                      public UploadedFile? Workbook { get; init; }
                                   }
                               }
                               """;
@@ -78,8 +81,11 @@ public sealed class UploadLimitsGeneratorTests {
                                                foreach (var __file in __files0)
                                                    uploads.Declare(__file, __uploadLimits0);
                                    """);
+        generated.Should().Contain(
+            "__uploadLimits4 = new() { FileExtensions = new string[] { \".xlsx\", \".tar.gz\" } };");
         generated.Should().Contain("uploads.Declare(request.Signature, __uploadLimits2);");
         generated.Should().Contain("uploads.Declare(request.Statement, __uploadLimits3);");
+        generated.Should().Contain("uploads.Declare(request.Workbook, __uploadLimits4);");
         generated.Should().NotContain("request.Unlimited");
         generated.Should().Contain(
             "handler = new global::Elarion.Pipeline.UploadLimitsDecorator<global::Sample.App.ImportCommand, global::Elarion.Abstractions.Result<int>>(");
@@ -111,6 +117,13 @@ public sealed class UploadLimitsGeneratorTests {
     [InlineData("[UploadLimits(MaxBytes = -1)] public UploadedFile? File { get; init; }", "MaxBytes is negative")]
     [InlineData("[UploadLimits] public UploadedFile? File { get; init; }", "declares no limit")]
     [InlineData("[UploadLimits(ContentTypes = [\" \"])] public UploadedFile? File { get; init; }", "blank content type")]
+    [InlineData("[UploadLimits(FileExtensions = [])] public UploadedFile? File { get; init; }", "declares no limit")]
+    [InlineData("[UploadLimits(FileExtensions = [\"xlsx\"])] public UploadedFile? File { get; init; }", "file extension 'xlsx'")]
+    [InlineData("[UploadLimits(FileExtensions = [\".\"])] public UploadedFile? File { get; init; }", "file extension '.'")]
+    [InlineData("[UploadLimits(FileExtensions = [\".tar.\"])] public UploadedFile? File { get; init; }", "file extension '.tar.'")]
+    [InlineData("[UploadLimits(FileExtensions = [\".x ls\"])] public UploadedFile? File { get; init; }", "file extension '.x ls'")]
+    [InlineData("[UploadLimits(FileExtensions = [\"./xls\"])] public UploadedFile? File { get; init; }", "file extension './xls'")]
+    [InlineData("[UploadLimits(MaxBytes = 10, FileExtensions = [null])] public UploadedFile? File { get; init; }", "file extension ''")]
     public void ReportsAnInvalidDeclaration(string member, string reason) {
         var source = Preamble + Handler +
                      $$"""

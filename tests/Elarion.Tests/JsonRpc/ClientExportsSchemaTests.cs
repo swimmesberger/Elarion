@@ -77,6 +77,9 @@ public sealed class ClientExportsSchemaTests {
         public IReadOnlyList<UploadedFile> Receipts { get; init; } = [];
 
         public UploadedFile? Plain { get; init; }
+
+        [UploadLimits(FileExtensions = [".xlsx", ".xls"])]
+        public IReadOnlyList<UploadedFile> Workbooks { get; init; } = [];
     }
 
     private static JsonRpcDispatcher Dispatcher() {
@@ -191,6 +194,13 @@ public sealed class ClientExportsSchemaTests {
         properties["receipts"]!["maxItems"]!.GetValue<int>().Should().Be(10);
         properties["receipts"]!["items"]!["x-elarion-max-bytes"]!.GetValue<long>().Should().Be(2048);
         properties["plain"]!.AsObject().ContainsKey("x-elarion-max-bytes").Should().BeFalse();
+        // Accepted extensions travel the same way, alone when nothing else is declared.
+        var workbook = properties["workbooks"]!["items"]!.AsObject();
+        workbook["x-elarion-file-extensions"]!.AsArray().Select(static t => t!.GetValue<string>())
+            .Should().Equal(".xlsx", ".xls");
+        workbook.ContainsKey("x-elarion-max-bytes").Should().BeFalse();
+        workbook.ContainsKey("x-elarion-content-types").Should().BeFalse();
+        properties["statement"]!.AsObject().ContainsKey("x-elarion-file-extensions").Should().BeFalse();
     }
 
     [Fact]

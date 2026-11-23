@@ -33,6 +33,12 @@ export interface JsonSchema {
    * case-insensitively with parameters ignored, as the server compares them.
    */
   'x-elarion-content-types'?: string[]
+  /**
+   * The file-name extensions an `x-elarion-upload` member accepts (`[UploadLimits(FileExtensions = …)]`, ADR-0105),
+   * each with its leading dot, compared case-insensitively against the end of the file name, as the server compares
+   * them.
+   */
+  'x-elarion-file-extensions'?: string[]
   // Constraint keywords (JSON Schema 2020-12). exclusiveMinimum/exclusiveMaximum are numbers, not booleans.
   minLength?: number
   maxLength?: number
@@ -51,10 +57,11 @@ export interface JsonSchema {
    */
   'x-elarion-error-messages'?: Record<string, string>
   /**
-   * The permission a caller must hold to receive this response member ([VisibleWith] on the server, ADR-0103); the
-   * server omits it for everyone else. The generator documents it on the generated property.
+   * The permission a caller must hold to receive this response member ([VisibleWith] on the server, ADR-0103), or the
+   * permissions any one of which shows it; the server omits it for everyone else. The generator documents it on the
+   * generated property.
    */
-  'x-elarion-visible-with'?: string
+  'x-elarion-visible-with'?: string | string[]
 }
 
 /**
