@@ -17,6 +17,11 @@ minor releases may include breaking changes.
   record" needs no hand-written mirror of an "assigned to a record the caller may read" rule. A row without an owner is
   not visible through it; `ownerOperation` asks the owner about another operation than the row's. See
   [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#visible-through-an-owner-as-part-of-a-rule).
+- **`WhereAuthorizedForAll`: who may access every row of a selection** (ADR-0095 amendment). The inverse of
+  `WhereAuthorized` for a selection action ("whom may these e-mails be put in charge of"): the candidates related to
+  all of the rows by the entity's rule, in one statement, and nobody for an empty selection. `WhereAuthorizedFor` still
+  answers "at least one". See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#who-may-see-a-record).
 
 ## [0.4.5] - 2026-11-23
 

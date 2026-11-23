@@ -109,6 +109,44 @@ public sealed class PrincipalQueryTests {
     }
 
     [Fact]
+    public void InverseForAll_ListsWhoMayAccessEveryRow_TheIntersectionOfEachRowsReaders() {
+        // Every non-empty selection of the docs, by bit mask.
+        for (var mask = 1; mask < 1 << Docs.Length; mask++) {
+            var selection = Docs.Where((_, index) => (mask & (1 << index)) != 0).ToArray();
+            var expected = selection
+                .Select(doc => (IEnumerable<Guid>)Readers(Rule, doc))
+                .Aggregate((left, right) => left.Intersect(right));
+
+            Everyone.WhereAuthorizedForAll(selection.AsQueryable(), Rule, Directory)
+                .Should().BeEquivalentTo(expected, "selection {0}", string.Join(",", selection.Select(doc => doc.Id)));
+        }
+    }
+
+    [Fact]
+    public void InverseForAll_OfTheReviewedShape_KeepsOnlyWhoSeesTheWholeSelection() {
+        Everyone.WhereAuthorizedForAll(Docs.AsQueryable(), Rule, Directory).Should().Equal(Dave);
+        Everyone.WhereAuthorizedForAll(new[] { Docs[0], Docs[2] }.AsQueryable(), Rule, Directory)
+            .Should().BeEquivalentTo([Bob, Carol, Dave], "Alice owns doc 1 only; Bob and Carol read both");
+        Everyone.WhereAuthorizedForAll(new[] { Docs[1], Docs[2] }.AsQueryable(), Rule, Directory)
+            .Should().Equal([Dave], "only the administrator reads Alice's restricted doc and Bob's open one");
+    }
+
+    [Fact]
+    public void InverseForAll_OfNoRows_IsNobody() {
+        Everyone.WhereAuthorizedForAll(Array.Empty<Doc>().AsQueryable(), QueryAuthorizers.Unrestricted<Doc>(), Directory)
+            .Should().BeEmpty("every row of an empty selection would be everyone; nobody is the fail-closed answer");
+    }
+
+    [Fact]
+    public void InverseForAll_IsRefused_WhenAnyPartOfTheRuleIsOpaque() {
+        var rule = QueryAuthorizers.AnyOf(Owner, QueryAuthorizers.From<Doc>((_, _) => null));
+
+        var ask = () => Everyone.WhereAuthorizedForAll(Docs.AsQueryable(), rule, Directory).ToArray();
+
+        ask.Should().Throw<NotSupportedException>().WithMessage("*'QueryAuthorizers.From'*");
+    }
+
+    [Fact]
     public void Inverse_KeepsAScopeAroundAnUnrestrictedAlternative() {
         var scoped = QueryAuthorizers.AllOf(
             QueryAuthorizers.Rows<Doc>(doc => !doc.IsRestricted),

@@ -127,6 +127,13 @@ public sealed class PrincipalDirectoryIntegrationTests(PrincipalDirectoryFixture
         cast.Named(await openReaders.ToListAsync(ct)).Should().Equal("admin", "auditor", "clerk", "owner");
         cast.Named(await restrictedReaders.ToListAsync(ct)).Should().Equal("admin", "owner");
 
+        // Who may read both: one statement too (EXISTS and NOT EXISTS over the selection).
+        var both = db.Dossiers.Where(dossier => dossier.Id == open.Id || dossier.Id == restricted.Id);
+        cast.Named(await cast.Everyone.WhereAuthorizedForAll(both, rule, directory).ToListAsync(ct))
+            .Should().Equal("admin", "owner");
+        cast.Named(await cast.Everyone.WhereAuthorizedForAll(both.Where(_ => false), rule, directory).ToListAsync(ct))
+            .Should().BeEmpty();
+
         // The same accounts, as the principals Identity's claims factory would build, pass the forward filter.
         (string Name, FakeCurrentUser User)[] principals = [
             ("owner", Principal(cast["owner"])),

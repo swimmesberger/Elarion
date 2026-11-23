@@ -446,6 +446,19 @@ var readers = await users.ActiveStaff(now)                       // the candidat
 - **The candidates are yours.** The result is a subset of the principal ids you pass, so you decide who is eligible at
   all (the accounts that can still sign in, the staff of one department) and the rule decides who among them may
   access the rows. With several rows, a principal is returned when it may access at least one.
+- **Every row of a selection: `WhereAuthorizedForAll`.** A selection action — "whom may these 12 e-mails be put in
+  charge of" — needs the principals who may access **all** of them. It reads the same rule, in one statement, and
+  returns nobody for an empty selection:
+
+  ```csharp
+  var assignees = await users.ActiveStaff(now)
+      .WhereAuthorizedForAll(db.Emails.Where(e => selectedIds.Contains(e.Id)), emailAccess, directory)
+      .ToListAsync(ct);
+  ```
+
+  The rows are used as given, so a selected id that no longer names a row (deleted, or hidden by a query filter) is
+  not asked about. Like the complement, "all" is exact under EF Core's default null semantics; with
+  `UseRelationalNulls` a relation that evaluates to SQL `NULL` does not exclude a principal.
 - **The rule is read as a relation** between a row and a principal id. `ForUser` already is one; `Rows`,
   `Unrestricted`, `WhenPermission`, `WhenRole`, `ForOperations`, `Via`, `AnyOf`, `AllOf` and the generated `[ResourceFilter]`
   (owner, bypass permission and role, user and role grants) translate to one. Pass the operation to ask who may

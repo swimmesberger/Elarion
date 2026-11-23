@@ -199,6 +199,25 @@ user at build time, so it could not be a static or composed rule); **an owner-se
 query (an `IQueryable` cannot be obtained inside an expression without a context, and a delegate is opaque to the
 inverse); **a navigation-only form** (a `(kind, id)` pointer has no navigation, and it is the shape that needed this).
 
+## Amendment (2026-11-23): who may access every row
+
+The same application assigns a selection of e-mails to a colleague, who must be able to read every one of them.
+`WhereAuthorizedFor` answers "may access at least one", so the application wrote "all of them" by hand.
+
+**`principals.WhereAuthorizedForAll(rows, authorizer, directory, operation)`** returns the candidates related to
+**every** row: `principal => rows.Any() && rows.All(row => relation(row, principal))`, one statement, from the same
+relation. Decisions:
+
+1. **An empty selection admits nobody.** "Every row of none" is vacuously everyone; the inverse of `WhereAuthorizedFor`
+   returns nobody for no rows, and an assignment dialog offered every account for an empty selection would be the
+   fail-open reading.
+2. **A separate operator, not a quantifier argument.** `WhereAuthorizedFor` keeps its signature, and the name says at
+   the call site which question is asked.
+3. **"All" is computed at the relation level** (`NOT EXISTS` a row the principal is not related to), never by
+   intersecting per-row answers in memory, so the answer stays one statement for any selection size. Like
+   `WhereNotAuthorized`, it is exact under two-valued predicates; under `UseRelationalNulls` a relation that is SQL
+   `NULL` for a row does not exclude the principal, which the forward filter still catches when the principal reads.
+
 ## Rejected alternatives
 
 - **A router as the default `IResourceAuthorizer`, with the backend as a second seam.** It needs a fallback service

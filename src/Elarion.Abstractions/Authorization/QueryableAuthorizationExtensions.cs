@@ -198,6 +198,74 @@ public static class QueryableAuthorizationExtensions {
         return principals.Where(Expression.Lambda<Func<TKey, bool>>(body, relation.Parameters[1]));
     }
 
+    /// <summary>
+    /// Restricts <paramref name="principals"/> to those who may access <b>every one</b> of <paramref name="rows"/> for
+    /// <paramref name="operation"/> (defaulting to <see cref="ResourceOperation.Read"/>) — the inverse for a selection
+    /// action: "whom may these records be handed to", where each candidate must be able to see all of them. Nobody is
+    /// returned for no rows.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same rule and contract as <see cref="WhereAuthorizedFor{TKey,TEntity}"/>: the result is a subset of
+    /// <paramref name="principals"/>, every part of the rule must be an <see cref="IPrincipalQueryAuthorizer{TEntity}"/>
+    /// (or the call throws), roles and claims come from <paramref name="directory"/>, and the whole answer is one
+    /// statement: <c>WHERE EXISTS (rows) AND NOT EXISTS (rows the principal may not access)</c>.
+    /// </para>
+    /// <para>
+    /// <paramref name="rows"/> is used as given, so a row its query filters hide is not asked about. Pass exactly the
+    /// rows of the selection; a selected id that names no row (deleted meanwhile) leaves the others to decide.
+    /// </para>
+    /// <para>
+    /// The "every" is exact wherever the rule's predicate is either true or false for every row: in memory, and under
+    /// Entity Framework Core's default C# null semantics. With <c>UseRelationalNulls</c> a relation that evaluates to SQL
+    /// <c>NULL</c> for a row does not exclude the principal. The forward filter stays the authority.
+    /// </para>
+    /// </remarks>
+    /// <param name="principals">The candidate principal ids.</param>
+    /// <param name="rows">The rows asked about.</param>
+    /// <param name="authorizer">The entity's rule.</param>
+    /// <param name="directory">Who holds which role and claim.</param>
+    /// <param name="operation">The operation; defaults to <see cref="ResourceOperation.Read"/>.</param>
+    /// <typeparam name="TKey">The principal id type.</typeparam>
+    /// <typeparam name="TEntity">The entity type.</typeparam>
+    /// <exception cref="NotSupportedException">The rule, or a part of it, cannot be asked which principals it admits.</exception>
+    /// <example>
+    /// <code>
+    /// // The staff accounts the selected e-mails may be put in charge of: each must be able to read all of them.
+    /// var assignees = await users.ActiveStaff(now)
+    ///     .WhereAuthorizedForAll(db.Emails.Where(e =&gt; selectedIds.Contains(e.Id)), emailAccess, directory)
+    ///     .ToListAsync(ct);
+    /// </code>
+    /// </example>
+    public static IQueryable<TKey> WhereAuthorizedForAll<TKey, TEntity>(
+        this IQueryable<TKey> principals,
+        IQueryable<TEntity> rows,
+        IQueryAuthorizer<TEntity> authorizer,
+        IPrincipalDirectory<TKey> directory,
+        ResourceOperation? operation = null)
+        where TKey : notnull
+        where TEntity : class {
+        ArgumentNullException.ThrowIfNull(principals);
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(authorizer);
+        ArgumentNullException.ThrowIfNull(directory);
+
+        var relation = QueryAuthorizers.RelationOf(authorizer, directory, operation ?? ResourceOperation.Read);
+
+        // principal => rows.Any() && rows.All(row => relation(row, principal)). "Every row of none" would admit every
+        // candidate; an empty selection admits nobody instead, as WhereAuthorizedFor does. Templates as above.
+        Expression<Func<IQueryable<TEntity>, bool>> anyTemplate = static candidates => candidates.Any();
+        Expression<Func<IQueryable<TEntity>, Expression<Func<TEntity, bool>>, bool>> allTemplate =
+            static (candidates, predicate) => candidates.All(predicate);
+        var any = ((MethodCallExpression)anyTemplate.Body).Method;
+        var all = ((MethodCallExpression)allTemplate.Body).Method;
+        var admits = Expression.Lambda<Func<TEntity, bool>>(relation.Body, relation.Parameters[0]);
+        var body = Expression.AndAlso(
+            Expression.Call(any, rows.Expression),
+            Expression.Call(all, rows.Expression, Expression.Quote(admits)));
+        return principals.Where(Expression.Lambda<Func<TKey, bool>>(body, relation.Parameters[1]));
+    }
+
     private sealed class Substitution(Dictionary<ParameterExpression, Expression> replacements) : ExpressionVisitor {
         protected override Expression VisitParameter(ParameterExpression node) {
             return replacements.TryGetValue(node, out var replacement) ? replacement : base.VisitParameter(node);
