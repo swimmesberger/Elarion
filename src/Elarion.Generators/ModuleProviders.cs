@@ -36,6 +36,19 @@ internal static class ModuleProviders {
     }
 
     /// <summary>
+    /// The namespace the assembly-wide generated statics (<c>ElarionPermissions</c>, <c>ElarionFeatureFlags</c>, …)
+    /// are emitted into: the project's <c>RootNamespace</c>, or the assembly name without one. One definition, so a
+    /// generator that references such a static from its own output names the namespace the static is emitted into.
+    /// </summary>
+    public static IncrementalValueProvider<string> RootNamespace(IncrementalGeneratorInitializationContext context) {
+        return context.CompilationProvider
+            .Select(static (compilation, _) => compilation.AssemblyName ?? string.Empty)
+            .Combine(context.AnalyzerConfigOptionsProvider.Select(static (options, _) =>
+                options.GlobalOptions.TryGetValue("build_property.RootNamespace", out var ns) ? ns : null))
+            .Select(static (pair, _) => string.IsNullOrEmpty(pair.Right) ? pair.Left : pair.Right!);
+    }
+
+    /// <summary>
     /// Whether the assembly opts into the given generator, projected to a <see cref="bool"/> so
     /// downstream nodes only re-run when the trigger attribute appears or disappears (not on every edit).
     /// </summary>

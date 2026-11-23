@@ -178,6 +178,30 @@ public sealed class VariantServiceGeneratorTests {
         diagnostics.Any(d => d.Id == "ELVAR007" && d.Severity == DiagnosticSeverity.Error).Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData("[FeatureVariant(ElarionFeatureFlags.Names.ForecastAlgorithm, Variant = \"linear\")]")]
+    [InlineData("[FeatureVariant(\"ForecastAlgorithm\", Variant = Generated.Variants.Linear)]")]
+    public void ReportsElvar011_WhenAVariantArgumentCannotBeRead(string attribute) {
+        // A constant another generator emits into this compilation (the flag-name accessors) does not bind for this
+        // generator: the cause is reported, not a blank feature name.
+        var source = Preamble +
+                     $$"""
+
+                       namespace Sample.App {
+                           [AppModule("App")] public static class AppModule { }
+                           public interface IAlgorithm { }
+                           {{attribute}}
+                           [Service]
+                           public sealed class LinearAlgo : IAlgorithm { }
+                       }
+                       """;
+
+        var (_, diagnostics) = Run(new VariantServiceRegistrationGenerator(), source);
+
+        diagnostics.Should().ContainSingle(d => d.Id == "ELVAR011" && d.Severity == DiagnosticSeverity.Error);
+        diagnostics.Should().NotContain(d => d.Id == "ELVAR005");
+    }
+
     [Fact]
     public void ServiceGenerator_SkipsPlainRegistration_ForFeatureVariantClass() {
         // [FeatureVariant] is a modifier on [Service]: the service generator must NOT also emit a plain (unkeyed)

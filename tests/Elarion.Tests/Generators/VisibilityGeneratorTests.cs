@@ -116,6 +116,61 @@ public sealed class VisibilityGeneratorTests {
             .Should().BeLessThan(generated.IndexOf("AuthorizationDecorator<", StringComparison.Ordinal));
     }
 
+    // The catalog accessors are emitted by another generator into the same compilation, which the handler-registration
+    // generator cannot see: the attribute's argument does not bind there.
+    private const string CatalogSample = Preamble +
+                                         """
+
+                                         namespace Sample.App {
+                                             [AppModule("App")]
+                                             public static class AppModule { }
+
+                                             public sealed record Account(string Name, [property: VisibleWith(ElarionPermissions.Banking.Read)] decimal? Opening);
+                                             public sealed record ShowAccount : IQuery;
+
+                                             [RequirePermission("accounts", "read")]
+                                             [DeclarePermission("banking", "read")]
+                                             public sealed class ShowAccountHandler : IHandler<ShowAccount, Result<Account>> {
+                                                 public ValueTask<Result<Account>> HandleAsync(ShowAccount request, CancellationToken ct) =>
+                                                     ValueTask.FromResult(Result<Account>.Success(new Account("Main", 125m)));
+                                             }
+
+                                             public static class Probe {
+                                                 public static async Task<string> Run(IServiceProvider services) {
+                                                     using var scope = services.CreateScope();
+                                                     var handler = scope.ServiceProvider.GetRequiredService<IHandler<ShowAccount, Result<Account>>>();
+                                                     var result = await handler.HandleAsync(new ShowAccount(), CancellationToken.None);
+                                                     return result.Value.Name + "|" + (result.Value.Opening?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-");
+                                                 }
+                                             }
+                                         }
+                                         """;
+
+    [Fact]
+    public void HidesAMemberMarkedWithThePermissionCatalogOfTheSameCompilation() {
+        RunProbeFor(CatalogSample, "ShowAccountHandler", withPermissionCatalog: true, "accounts.read")
+            .Should().Be("Main|-");
+        RunProbeFor(CatalogSample, "ShowAccountHandler", withPermissionCatalog: true, "accounts.read", "banking.read")
+            .Should().Be("Main|125");
+
+        var (result, diagnostics) = Run(CatalogSample);
+        diagnostics.Should().BeEmpty();
+        GetGenerated(result, "Sample_App_ShowAccountHandler.g.cs").Should()
+            .Contain("VisibilityDecorator<global::Sample.App.ShowAccount, global::Sample.App.Account>(")
+            .And.Contain("permissions.Holds(global::VisibilityGeneratorTests.ElarionPermissions.Banking.Read)");
+    }
+
+    [Theory]
+    [InlineData("[property: VisibleWith(Generated.Permissions.BankingRead)]")]
+    [InlineData("[property: VisibleWith(null!)]")]
+    [InlineData("[property: VisibleWith(\"banking\", Generated.Verbs.Read)]")]
+    public void ReportsAPermissionTheGeneratorCannotRead(string attribute) {
+        var diagnostics = DiagnosticsFor($"public sealed record Row(int Id, {attribute} string? Iban);", "Row");
+
+        diagnostics.Should().ContainSingle(d => d.Id == "ELAUTH005")
+            .Which.GetMessage().Should().Contain("'Iban'");
+    }
+
     [Fact]
     public void LeavesAResponseWithoutMarkedMembersUntouched() {
         const string source = Preamble +
@@ -371,7 +426,12 @@ public sealed class VisibilityGeneratorTests {
     }
 
     private static string RunProbeFor(string source, string handlerName, params string[] permissions) {
-        var assembly = Compile(source);
+        return RunProbeFor(source, handlerName, false, permissions);
+    }
+
+    private static string RunProbeFor(string source, string handlerName, bool withPermissionCatalog,
+        params string[] permissions) {
+        var assembly = Compile(source, withPermissionCatalog);
         var services = new ServiceCollection();
         services.AddSingleton<ICurrentUser>(new FakeCurrentUser {
             IsAuthenticated = true, Claims = [.. permissions.Select(static p => ("permission", p))]
@@ -387,15 +447,22 @@ public sealed class VisibilityGeneratorTests {
         return run.GetAwaiter().GetResult();
     }
 
-    private static Assembly Compile(string source) {
+    private static Assembly Compile(string source, bool withPermissionCatalog = false) {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var compilation = CSharpCompilation.Create(
             "VisibilitySample" + Guid.CreateVersion7().ToString("N"),
             [CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken)],
             References(), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(
-            [new HandlerRegistrationGenerator().AsSourceGenerator(), new ModuleDefaultServicesGenerator().AsSourceGenerator()],
-            parseOptions: parseOptions);
+        ISourceGenerator[] generators = withPermissionCatalog
+            ? [
+                new HandlerRegistrationGenerator().AsSourceGenerator(),
+                new ModuleDefaultServicesGenerator().AsSourceGenerator(),
+                new PermissionCatalogGenerator().AsSourceGenerator()
+            ]
+            : [new HandlerRegistrationGenerator().AsSourceGenerator(), new ModuleDefaultServicesGenerator().AsSourceGenerator()];
+        // The catalog lands in the namespace the sample's code is in, as RootNamespace places it in a project.
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(generators, parseOptions: parseOptions,
+            optionsProvider: new RootNamespaceOptions("Sample.App"));
         driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out var generatorDiagnostics,
             TestContext.Current.CancellationToken);
         generatorDiagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Should().BeEmpty();

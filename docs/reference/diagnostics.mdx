@@ -115,6 +115,8 @@ Authorization-decorator attachment for `[RequirePermission]`/`[RequireRole]`/`[R
 | ELAUTH002 | Error | A handler declares `[RequireResource]` with an `Id` path that does not resolve to a property on the request type. | Point `[RequireResource]` `Id` at an existing property path on the request, e.g. `nameof(Request.Id)` or a dotted path of existing properties. |
 | ELAUTH003 | Error | A response member marked `[VisibleWith]` is not nullable, so it cannot be hidden from a caller without the permission. | Make the member nullable (`T?`). |
 | ELAUTH004 | Error | A handler's response holds `[VisibleWith]` members the pipeline cannot hide: the response is not `Result<T>`, or a type on the way is neither a record nor a struct, a rewritten member has no accessible `init`/`set`, a collection on the way is not an array, `List<T>`, `ImmutableArray<T>` or a read-only collection interface, an interface without `[JsonDerivedType]` holds a marked member, or a type is not accessible from the handler's assembly. | Reach marked members through records or structs with `init` members and the supported collections, and answer `Result<T>`. See [Members only some callers see](/docs/concepts/authorization#members-only-some-callers-see). |
+| ELAUTH005 | Error | The permission of a `[VisibleWith]` cannot be read by the generator, so it cannot hide the member: an argument that is not a constant, or names a constant another source generator emits into the same compilation other than `ElarionPermissions.Resource.Verb`. | Write the permission as a string constant, as `ElarionPermissions.Resource.Verb`, or as `(resource, verb)`. |
+| ELAUTH006 | Error | A `[RequireResource]` has an argument the generator cannot read (for example a constant or type another source generator emits into the same compilation), so it cannot bind the check. | Write the resource type, `Operation` and `Id` as literals, `nameof` or constants declared in source. |
 
 ## ELPOL — Authorization policies
 
@@ -260,7 +262,7 @@ Feature-gate decorator attachment for `[FeatureGate]`. See [Feature flags](/docs
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELFEAT001 | Error | A handler declares a `[FeatureGate]` but its response type does not implement `IResultFailureFactory<T>`, so the gate cannot short-circuit and would be silently skipped. | Return `Result<T>` or `Result` from the gated handler so the gate can short-circuit to `AppError.NotFound`. |
-| ELFEAT002 | Warning | A handler declares a `[FeatureGate]` with no feature name (or a blank one); the gate has no effect. | Pass at least one non-blank feature name to `[FeatureGate]`, or remove it. |
+| ELFEAT002 | Warning | A handler declares a `[FeatureGate]` with no feature name (or a blank one); the gate has no effect. A gate naming `ElarionFeatureFlags.Names.X` of its own assembly is not blank: the decorator reads the names at run time. | Pass at least one non-blank feature name to `[FeatureGate]`, or remove it. |
 
 ## ELFLAG — Feature-flag declarations
 
@@ -316,6 +318,7 @@ Variant-service registration for `[FeatureVariant]` and `[ConfigurationVariant]`
 | ELVAR008 | Error | A contract is bound by both `[FeatureVariant]` and `[ConfigurationVariant]`; a contract is selected by exactly one axis. | Pick one axis per contract: per-user feature allocation, or a global configuration value. |
 | ELVAR009 | Warning | A variant service declares a blank configuration key. | Pass a non-blank configuration key to `[ConfigurationVariant]`. |
 | ELVAR010 | Warning | Two variant selectors or values map to the same `ElarionVariants` accessor name (PascalCase collision); the second is omitted from the typed accessors, while every entry remains in the data surfaces (`All`/`ByKey`/…). | Rename one of the colliding selector keys or values so the PascalCased accessors differ. |
+| ELVAR011 | Error | A `[FeatureVariant]` or `[ConfigurationVariant]` has an argument the generator cannot read, typically `ElarionFeatureFlags.Names.X` declared in the same assembly (a source generator does not see another generator's output); the variant is not registered. | Write the feature name, configuration key or variant value as a string literal or a constant declared in source. |
 
 ## ELRG — Resource grants
 
