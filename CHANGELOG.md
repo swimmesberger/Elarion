@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-11-23
+
 ### Fixed
 - **`Unanswered` counted an answer whose option the decision does not declare** (ADR-0101). A handler that refused
   while `Unanswered(code, keys)` was not empty and then acted on each item's `Decision<TOption>` skipped an item
@@ -2706,7 +2708,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.5...HEAD
+[0.4.5]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.5
 [0.4.4]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.4
 [0.4.3]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.3
 [0.4.2]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.2

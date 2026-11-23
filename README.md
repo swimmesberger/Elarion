@@ -104,7 +104,7 @@ convention (here `clients.get`), while an explicit name is recommended for stabl
 ```xml
 <!-- Application library — the source generator ships inside the Elarion package -->
 <ItemGroup>
-  <PackageReference Include="Elarion" Version="0.4.4" />
+  <PackageReference Include="Elarion" Version="0.4.5" />
 </ItemGroup>
 ```
 
