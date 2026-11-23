@@ -8,6 +8,15 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **`Unanswered` counted an answer whose option the decision does not declare** (ADR-0101). A handler that refused
+  while `Unanswered(code, keys)` was not empty and then acted on each item's `Decision<TOption>` skipped an item
+  answered with an undeclared option silently. The new `Unanswered<TOption>(code, keys)` counts an item as answered
+  exactly when `Decision<TOption>(code, item)` returns an option, and `Unanswered(code, keys)` now counts only a
+  `confirm` answer, as `IsConfirmed(code, item)` does. Both read the last answer for an item. **Breaking** for a
+  handler that used `Unanswered` for a decision with options: it now asks again for every item answered with an
+  option; add the option enum as the type argument.
+
 ## [0.4.4] - 2026-11-23
 
 ### Added

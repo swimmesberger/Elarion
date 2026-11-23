@@ -100,7 +100,10 @@ public sealed record DecisionAnswer {
 
 /// <summary>
 /// Reads the caller's answers from an <see cref="IDecidingRequest"/>. An answer whose option is not one of the declared
-/// options counts as no answer, so the handler simply asks again.
+/// options counts as no answer, so the handler simply asks again. The readers pair up by the decision's shape:
+/// <see cref="IsConfirmed(IDecidingRequest, string)"/> and <see cref="Unanswered(IDecidingRequest, string, IEnumerable{string})"/>
+/// for a confirmation (declared without options), <see cref="Decision{TOption}(IDecidingRequest, string)"/> and
+/// <see cref="Unanswered{TOption}(IDecidingRequest, string, IEnumerable{string})"/> for a choice.
 /// </summary>
 /// <example>
 /// <code>
@@ -108,8 +111,8 @@ public sealed record DecisionAnswer {
 /// if (duplicate is not null &amp;&amp; !command.IsConfirmed(Codes.Duplicate))
 ///     return AppError.DecisionRequired(Codes.Duplicate, "A booking like this exists.", new Duplicate(duplicate.Id));
 ///
-/// // A choice per item: refuse while any item the server found is unanswered, then act on each answer.
-/// var unanswered = command.Unanswered(Codes.PossibleDuplicate, duplicates.Select(d =&gt; d.Key));
+/// // A choice per item: refuse while any item the server found has no declared option, then act on each answer.
+/// var unanswered = command.Unanswered&lt;DuplicateChoice&gt;(Codes.PossibleDuplicate, duplicates.Select(d =&gt; d.Key));
 /// if (unanswered.Count &gt; 0)
 ///     return AppError.DecisionRequired(Codes.PossibleDuplicate, "Some lines look like existing bookings.",
 ///         new PossibleDuplicates(duplicates.Where(d =&gt; unanswered.Contains(d.Key)).ToList()));
@@ -121,15 +124,13 @@ public sealed record DecisionAnswer {
 public static class DecisionExtensions {
     /// <summary>Whether the caller confirmed the whole-request decision <paramref name="code"/>.</summary>
     public static bool IsConfirmed(this IDecidingRequest request, string code) {
-        return Find(request, code, null) is { } answer
-               && string.Equals(answer.Option, DecisionAnswer.Confirm, StringComparison.OrdinalIgnoreCase);
+        return IsConfirmation(Find(request, code, null));
     }
 
     /// <summary>Whether the caller confirmed the per-item decision <paramref name="code"/> for <paramref name="item"/>.</summary>
     public static bool IsConfirmed(this IDecidingRequest request, string code, string item) {
         ArgumentNullException.ThrowIfNull(item);
-        return Find(request, code, item) is { } answer
-               && string.Equals(answer.Option, DecisionAnswer.Confirm, StringComparison.OrdinalIgnoreCase);
+        return IsConfirmation(Find(request, code, item));
     }
 
     /// <summary>
@@ -151,26 +152,54 @@ public static class DecisionExtensions {
     }
 
     /// <summary>
-    /// The <paramref name="items"/> the caller has not answered for the per-item decision <paramref name="code"/>, in
-    /// their order: the items to ask about. Empty when every item has an answer.
+    /// The <paramref name="items"/> the caller has not confirmed for the per-item confirmation <paramref name="code"/>
+    /// (a decision declared without options), in their order: the items to ask about. Empty when every item is
+    /// confirmed. An item is answered exactly when <see cref="IsConfirmed(IDecidingRequest, string, string)"/> is
+    /// <see langword="true"/> for it, so an answer with another option is no answer and the item is asked again.
     /// </summary>
+    /// <remarks>
+    /// For a decision declared with options use <see cref="Unanswered{TOption}(IDecidingRequest, string, IEnumerable{string})"/>:
+    /// this overload reads every option but <see cref="DecisionAnswer.Confirm"/> as no answer.
+    /// </remarks>
     public static IReadOnlyList<string> Unanswered(this IDecidingRequest request, string code, IEnumerable<string> items) {
+        return Collect(request, code, items, static answer => IsConfirmation(answer));
+    }
+
+    /// <summary>
+    /// The <paramref name="items"/> the caller has not answered with an option <typeparamref name="TOption"/> declares,
+    /// for the per-item decision <paramref name="code"/>, in their order: the items to ask about. Empty when every item
+    /// has a declared option. An item is answered exactly when
+    /// <see cref="Decision{TOption}(IDecidingRequest, string, string)"/> returns an option for it, so a handler that
+    /// refuses while this list is not empty and then acts on each item's option never skips an item silently.
+    /// </summary>
+    public static IReadOnlyList<string> Unanswered<TOption>(this IDecidingRequest request, string code,
+        IEnumerable<string> items) where TOption : struct, Enum {
+        return Collect(request, code, items, static answer => Parse<TOption>(answer) is not null);
+    }
+
+    // An item is answered when its last answer for the code counts, as the single-item readers decide.
+    private static List<string> Collect(IDecidingRequest request, string code, IEnumerable<string> items,
+        Func<DecisionAnswer, bool> counts) {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(code);
         ArgumentNullException.ThrowIfNull(items);
 
-        HashSet<string>? answered = null;
+        Dictionary<string, DecisionAnswer>? last = null;
         if (request.Decisions is { Count: > 0 } decisions)
             foreach (var answer in decisions)
                 if (answer.Item is not null && string.Equals(answer.Code, code, StringComparison.Ordinal))
-                    (answered ??= new HashSet<string>(StringComparer.Ordinal)).Add(answer.Item);
+                    (last ??= new Dictionary<string, DecisionAnswer>(StringComparer.Ordinal))[answer.Item] = answer;
 
         var unanswered = new List<string>();
         foreach (var item in items)
-            if (answered is null || !answered.Contains(item))
+            if (last is null || !last.TryGetValue(item, out var answer) || !counts(answer))
                 unanswered.Add(item);
 
         return unanswered;
+    }
+
+    private static bool IsConfirmation(DecisionAnswer? answer) {
+        return answer is not null && string.Equals(answer.Option, DecisionAnswer.Confirm, StringComparison.OrdinalIgnoreCase);
     }
 
     // The last answer wins, so a client that appends a changed answer replaces the earlier one.

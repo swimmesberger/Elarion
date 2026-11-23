@@ -81,6 +81,59 @@ public sealed class DecisionTests {
         command.Unanswered("c", ["line-2"]).Should().BeEmpty();
     }
 
+    [Fact]
+    public void Unanswered_OfAConfirmation_CountsOnlyAConfirmingAnswer() {
+        var command = new Command(
+            DecisionAnswer.Confirming("c", "line-1"),
+            new DecisionAnswer { Code = "c", Item = "line-2", Option = "skip" },
+            new DecisionAnswer { Code = "c", Item = "line-3", Option = "CONFIRM" });
+
+        // An answer with another option confirms nothing, so the item is asked about again.
+        command.Unanswered("c", ["line-1", "line-2", "line-3"]).Should().Equal("line-2");
+    }
+
+    [Fact]
+    public void Unanswered_OfAChoice_CountsOnlyAnOptionTheEnumDeclares() {
+        var command = new Command(
+            DecisionAnswer.Choosing("c", "line-1", DuplicateChoice.Import),
+            new DecisionAnswer { Code = "c", Item = "line-2", Option = "maybe" },
+            new DecisionAnswer { Code = "c", Item = "line-3", Option = "1" },
+            DecisionAnswer.Confirming("c", "line-4"),
+            new DecisionAnswer { Code = "c", Item = "line-5", Option = "SKIP" });
+
+        command.Unanswered<DuplicateChoice>("c", ["line-1", "line-2", "line-3", "line-4", "line-5", "line-6"])
+            .Should().Equal("line-2", "line-3", "line-4", "line-6");
+    }
+
+    [Fact]
+    public void Unanswered_OfAChoice_ReadsTheLastAnswerForAnItem() {
+        var command = new Command(
+            new DecisionAnswer { Code = "c", Item = "line-1", Option = "import" },
+            new DecisionAnswer { Code = "c", Item = "line-1", Option = "maybe" },
+            new DecisionAnswer { Code = "c", Item = "line-2", Option = "maybe" },
+            new DecisionAnswer { Code = "c", Item = "line-2", Option = "skip" });
+
+        command.Unanswered<DuplicateChoice>("c", ["line-1", "line-2"]).Should().Equal("line-1");
+    }
+
+    [Fact]
+    public void Unanswered_OfAChoice_LeavesNoItemWithoutADecision() {
+        // A handler refuses while Unanswered is not empty, then acts on each item's Decision: an item must never pass
+        // the first check and then read as no decision in the second.
+        var command = new Command(
+            DecisionAnswer.Choosing("c", "line-1", DuplicateChoice.Import),
+            DecisionAnswer.Choosing("c", "line-2", DuplicateChoice.Skip),
+            new DecisionAnswer { Code = "c", Item = "line-3", Option = "maybe" },
+            new DecisionAnswer { Code = "c", Option = "import" },
+            new DecisionAnswer { Code = "other", Item = "line-4", Option = "import" });
+        string[] items = ["line-1", "line-2", "line-3", "line-4"];
+
+        var unanswered = command.Unanswered<DuplicateChoice>("c", items);
+
+        foreach (var item in items)
+            unanswered.Contains(item).Should().Be(command.Decision<DuplicateChoice>("c", item) is null, item);
+    }
+
     private enum ExportedChange {
         OnlyHere,
         AsCorrection

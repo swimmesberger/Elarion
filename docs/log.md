@@ -2,6 +2,7 @@
 
 ## 2026-11-23
 
+* **Update**: [ADR-0101](decisions/0101-a-decision-required-answer.md) has an amendment: `Unanswered<TOption>` counts only a declared option and the untyped `Unanswered` only a confirmation, so a handler never skips an item answered with an undeclared option.
 * **Update**: [ADR-0105](decisions/0105-uploaded-files-are-handler-parameters.md) gained an amendment: upload refusals carry the limit as typed data and are implied by `[UploadLimits]`, a member accepts file extensions, the generated `uploadFile` checks the limits of a named method member, and `DeleteAsync` on the PostgreSQL store is documented to save the shared `DbContext`, after an application that moved its imports to uploaded files reported these gaps; the glossary's *upload limits* include file extensions and typed refusals.
 
 ## 2026-11-22
