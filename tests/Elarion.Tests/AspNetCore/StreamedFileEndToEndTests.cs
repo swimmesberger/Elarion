@@ -58,6 +58,19 @@ public sealed class StreamedFileEndToEndTests {
                     await body.FlushAsync(ct);
                     throw new InvalidOperationException("The third document vanished.");
                 }, "application/zip"),
+                // Name, type and tag are known only once the content is read; so is whether the part exists.
+                "deferred" => ElarionStreamedFile.Deferred(async ct => {
+                    await Task.Yield();
+                    return ElarionStreamedFile.FromStream(
+                        new MemoryStream("attachment"u8.ToArray()), "text/calendar", probe) with {
+                        FileName = "invite.ics",
+                        EntityTag = "part-2"
+                    };
+                }),
+                "deferred-missing" => ElarionStreamedFile.Deferred(async ct => {
+                    await Task.Yield();
+                    return AppError.NotFound("No such attachment.", "mail.attachment_not_found");
+                }),
                 _ => AppError.NotFound("No such export.")
             };
             return ValueTask.FromResult(result);
@@ -153,6 +166,57 @@ public sealed class StreamedFileEndToEndTests {
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+    }
+
+    [Fact]
+    public async Task DeferredFile_ServesWhatItsOpenAnswers_WithTheOpenedFilesHeaders_AndDisposesIt() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+
+        var response = await host.Client.GetAsync("/exports/deferred", ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("text/calendar");
+        response.Content.Headers.ContentDisposition!.FileName.Should().Be("invite.ics");
+        response.Headers.ETag!.Tag.Should().Be("\"part-2\"");
+        response.Headers.GetValues("X-Content-Type-Options").Should().Equal("nosniff");
+        (await response.Content.ReadAsStringAsync(ct)).Should().Be("attachment");
+        await host.Probe.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(10), ct);
+
+        using var conditional = new HttpRequestMessage(HttpMethod.Get, "/exports/deferred");
+        conditional.Headers.IfNoneMatch.Add(new EntityTagHeaderValue("\"part-2\""));
+        (await host.Client.SendAsync(conditional, ct)).StatusCode.Should().Be(HttpStatusCode.NotModified);
+    }
+
+    [Fact]
+    public async Task DeferredFile_RefusedByItsOpen_IsAProblemResponse_BeforeAnyByte() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+
+        var response = await host.Client.GetAsync("/exports/deferred-missing", ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        response.Content.Headers.ContentDisposition.Should().BeNull("no file header is sent for a refusal");
+        (await response.Content.ReadAsStringAsync(ct)).Should().Contain("mail.attachment_not_found");
+    }
+
+    [Fact]
+    public async Task DeferredFile_InProcess_IsOpenedByTheCaller() {
+        var ct = TestContext.Current.CancellationToken;
+        var plain = ElarionStreamedFile.FromStream(new MemoryStream([1]), "text/plain");
+        var deferred = ElarionStreamedFile.Deferred(_ => ValueTask.FromResult<Result<ElarionStreamedFile>>(plain));
+        var nested = ElarionStreamedFile.Deferred(_ => ValueTask.FromResult<Result<ElarionStreamedFile>>(deferred));
+
+        plain.IsDeferred.Should().BeFalse();
+        (await plain.OpenAsync(ct)).Value.Should().BeSameAs(plain);
+        deferred.IsDeferred.Should().BeTrue();
+        (await deferred.OpenAsync(ct)).Value.Should().BeSameAs(plain);
+
+        var write = () => deferred.WriteToAsync(new MemoryStream(), ct);
+        await write.Should().ThrowAsync<InvalidOperationException>().WithMessage("*OpenAsync*");
+        var openNested = async () => await nested.OpenAsync(ct);
+        await openNested.Should().ThrowAsync<InvalidOperationException>().WithMessage("*another deferred file*");
     }
 
     [Fact]

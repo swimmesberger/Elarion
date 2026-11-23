@@ -32,7 +32,8 @@ internal sealed class ElarionFileHttpResult(IResult inner) : IResult {
 /// <summary>
 /// An <see cref="ElarionStreamedFile"/> response. ASP.NET's stream results write the content and answer conditional
 /// requests (<c>If-None-Match</c>, <c>If-Modified-Since</c>); this adds the disposition, caching and sniffing headers,
-/// ties the file's lifetime to the response, and aborts the connection when the content fails mid-stream.
+/// ties the file's lifetime to the response, and aborts the connection when the content fails mid-stream. A deferred
+/// file is opened first, and a refusal it answers is sent as the ordinary problem response.
 /// </summary>
 internal sealed class ElarionStreamedFileHttpResult(ElarionStreamedFile file) : IResult {
     /// <summary>The largest run of synchronous writes a writer's body holds before the next asynchronous write.</summary>
@@ -43,7 +44,30 @@ internal sealed class ElarionStreamedFileHttpResult(ElarionStreamedFile file) : 
     public async Task ExecuteAsync(HttpContext httpContext) {
         ArgumentNullException.ThrowIfNull(httpContext);
         httpContext.Response.RegisterForDisposeAsync(file);
+        if (!file.IsDeferred) {
+            await ServeAsync(httpContext, file).ConfigureAwait(false);
+            return;
+        }
 
+        Result<ElarionStreamedFile> opened;
+        try {
+            opened = await file.OpenAsync(httpContext.RequestAborted).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested) {
+            return;
+        }
+
+        if (!opened.IsSuccess) {
+            // Nothing is written yet, so the refusal is an ordinary failure: its status, ProblemDetails and error code.
+            await ElarionHttpResults.ToProblem(opened.Error).ExecuteAsync(httpContext).ConfigureAwait(false);
+            return;
+        }
+
+        httpContext.Response.RegisterForDisposeAsync(opened.Value);
+        await ServeAsync(httpContext, opened.Value).ConfigureAwait(false);
+    }
+
+    private static async Task ServeAsync(HttpContext httpContext, ElarionStreamedFile file) {
         var headers = httpContext.Response.Headers;
         ElarionFileResponseHeaders.ForbidSniffing(httpContext.Response);
         var disposition = new ContentDispositionHeaderValue(

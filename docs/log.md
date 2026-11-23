@@ -2,6 +2,7 @@
 
 ## 2026-11-23
 
+* **Update**: [ADR-0098](decisions/0098-streamed-files-for-http-only-endpoints.md) gained an amendment: ElarionStreamedFile.Deferred decides the file after the pipeline and may refuse with an AppError before its first byte, so an attachment found only while parsing a stored message is read once; the [glossary](../GLOSSARY.md) entry *streamed file* mentions it.
 * **Update**: [ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md) gained an amendment: QueryAuthorizers.UnlessClaim, a negated claim gate that withdraws an alternative from sessions carrying a claim (viewing the application as another user), read in both directions.
 * **Update**: [ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md) gained an amendment: WhereAuthorizedForAll lists the principals who may access every row of a selection, from the same relation, and nobody for an empty selection.
 * **Update**: [ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md) gained an amendment: QueryAuthorizers.Via lifts an owner type's rule to the rows that point at its owners, through a navigation or a joined set, in both directions, after an application hand-wrote the inverse of an "assigned to a record the caller may read" rule.

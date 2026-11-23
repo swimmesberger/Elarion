@@ -78,6 +78,37 @@ Three more things those routes had to solve each time:
 - The synchronous-write allowance is a workaround for one BCL gap. When `ZipArchiveEntry`'s stream writes its trailer
   in `DisposeAsync`, the allowance costs nothing and can stay.
 
+## Amendment (2026-11-23): a file decided after the pipeline
+
+An application serves the attachments of stored e-mails. Which attachment a request names, and its name and type, are
+known only while parsing the stored message. A streamed file had to know its content type in the handler and could
+not answer `404` once the pipeline had finished, so the application either parsed the message twice (once in the
+handler to decide, once in the writer to send) or kept a host-mapped route.
+
+**`ElarionStreamedFile.Deferred(open)`** is a file whose `open` runs after the pipeline, where the content runs, and
+answers `Result<ElarionStreamedFile>`: the file to serve, with its own name, type and caching headers, or an
+`AppError`. The HTTP layer opens it before writing anything, so a refusal is the ordinary problem response with its
+status and code, and the file is read once. `OpenAsync` gives an in-process caller the same answer; `WriteToAsync` on
+an unopened deferred file throws.
+
+Decisions:
+
+1. **The open answers a whole file, not headers and a body.** Name, type, entity tag and the content come from the same
+   read, so the response cannot state the metadata of one read and send the bytes of another, and conditional requests
+   (`If-None-Match`) work as for any streamed file.
+2. **One type, not a new response type.** The generator, the diagnostics (`ELRPC005`, `ELHTTP007`) and the OpenAPI
+   mapping stay as they are. The cost: a deferred file is a placeholder whose own presentation properties are ignored,
+   which its documentation says.
+3. **An open may not answer another deferred file.** One level is what the case needs; a chain would only hide where
+   the decision is made.
+4. **The open disposes what it opened when it refuses.** The framework sees only the result; a refusal carries no
+   resource to dispose.
+
+Rejected: **a writer that may refuse before its first byte** (a callback context with `Refuse(error)` and late
+headers) — it mixes deciding with writing, and a refusal after a flush could no longer change the status; **parsing in
+the handler** — it runs inside the transaction and holds the database connection for the whole parse, which is what the
+post-pipeline content exists to avoid.
+
 ## Rejected alternatives
 
 - **A stream on `ElarionFile`.** Rejected again, for ADR-0039's reasons: the type crosses every surface, and a stream

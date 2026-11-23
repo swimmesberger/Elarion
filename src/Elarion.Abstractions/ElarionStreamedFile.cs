@@ -35,8 +35,14 @@ public enum FileDisposition {
 /// file.
 /// </para>
 /// <para>
+/// When only reading the content can tell whether the file exists, or what its name and type are — an attachment found
+/// while parsing a stored message — return a <see cref="Deferred"/> file: its open runs after the pipeline too, and
+/// answers the file to serve or an <see cref="AppError"/>, which is sent as an ordinary failure because no byte has been
+/// written yet.
+/// </para>
+/// <para>
 /// The instance owns its content: the HTTP layer disposes it with the response. A caller that invokes the handler
-/// in process (a test, a module API) disposes it.
+/// in process (a test, a module API) disposes it, and opens a deferred file with <see cref="OpenAsync"/>.
 /// </para>
 /// </remarks>
 /// <example>
@@ -56,25 +62,39 @@ public enum FileDisposition {
 ///     await using var zip = await ZipArchive.CreateAsync(body, ZipArchiveMode.Create, leaveOpen: true, null, ct);
 ///     foreach (var entry in entries) { … }
 /// }, "application/zip") with { FileName = "documents.zip" };
+///
+/// // An attachment found only while parsing the stored message: 404 before the first byte when it is not there.
+/// return ElarionStreamedFile.Deferred(async ct => {
+///     var download = await blobs.OpenReadAsync(message.BlobRef, ct);
+///     var part = download is null ? null : await MimeAttachments.FindAsync(download.Content, query.Part, ct);
+///     if (part is null) {
+///         if (download is not null) await download.DisposeAsync();
+///         return AppError.NotFound("No such attachment.");
+///     }
+///     return ElarionStreamedFile.FromStream(part.Content, part.ContentType, owner: download) with { FileName = part.FileName };
+/// });
 /// </code>
 /// </example>
 public sealed record ElarionStreamedFile : IAsyncDisposable {
     private readonly Stream? _content;
     private readonly IAsyncDisposable? _owner;
     private readonly Func<Stream, CancellationToken, Task>? _writer;
+    private readonly Func<CancellationToken, ValueTask<Result<ElarionStreamedFile>>>? _open;
     private int _disposed;
 
     private ElarionStreamedFile(
         string contentType,
         Stream? content,
         IAsyncDisposable? owner,
-        Func<Stream, CancellationToken, Task>? writer) {
+        Func<Stream, CancellationToken, Task>? writer,
+        Func<CancellationToken, ValueTask<Result<ElarionStreamedFile>>>? open = null) {
         ArgumentException.ThrowIfNullOrEmpty(contentType);
 
         ContentType = contentType;
         _content = content;
         _owner = owner;
         _writer = writer;
+        _open = open;
     }
 
     /// <summary>
@@ -106,7 +126,51 @@ public sealed record ElarionStreamedFile : IAsyncDisposable {
         return new ElarionStreamedFile(contentType, null, null, writeAsync);
     }
 
-    /// <summary>The MIME content type.</summary>
+    /// <summary>
+    /// A file decided after the pipeline: <paramref name="open"/> runs where the content would (in the request's scope,
+    /// after the handler's transaction) and answers either the file to serve — <see cref="FromStream"/> or
+    /// <see cref="FromWriter"/>, with its own name, type and caching headers — or an <see cref="AppError"/>, sent as the
+    /// ordinary failure response because nothing has been written yet. One read of the content both decides and serves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Everything a response states comes from the file <paramref name="open"/> answers; the deferred file itself
+    /// carries none of it, so <c>with { FileName = … }</c> on it has no effect. Decide what the pipeline can decide —
+    /// authorization, whether the record exists — in the handler, and defer only what needs the content.
+    /// </para>
+    /// <para>
+    /// The HTTP layer disposes the answered file with the response. When <paramref name="open"/> answers an error, it
+    /// disposes what it opened itself. An exception it throws is an ordinary unexpected error, since no byte is sent.
+    /// </para>
+    /// </remarks>
+    /// <param name="open">Decides the file; its token is cancelled when the client goes away.</param>
+    public static ElarionStreamedFile Deferred(Func<CancellationToken, ValueTask<Result<ElarionStreamedFile>>> open) {
+        ArgumentNullException.ThrowIfNull(open);
+        return new ElarionStreamedFile("application/octet-stream", null, null, null, open);
+    }
+
+    /// <summary>Whether this is a <see cref="Deferred"/> file, which <see cref="OpenAsync"/> turns into the file to serve.</summary>
+    public bool IsDeferred => _open is not null;
+
+    /// <summary>
+    /// The file to serve: for a <see cref="Deferred"/> file, what its open answers (the file, or the refusal); for any
+    /// other file, the file itself.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the open.</param>
+    /// <exception cref="InvalidOperationException">A deferred file's open answered another deferred file.</exception>
+    public async ValueTask<Result<ElarionStreamedFile>> OpenAsync(CancellationToken cancellationToken) {
+        if (_open is null) return this;
+
+        var opened = await _open(cancellationToken).ConfigureAwait(false);
+        if (opened.IsSuccess && opened.Value.IsDeferred) {
+            await opened.Value.DisposeAsync().ConfigureAwait(false);
+            throw new InvalidOperationException("A deferred file's open answered another deferred file; answer the file.");
+        }
+
+        return opened;
+    }
+
+    /// <summary>The MIME content type. A <see cref="Deferred"/> file has none of its own; the opened file states it.</summary>
     public string ContentType { get; }
 
     /// <summary>
@@ -154,8 +218,12 @@ public sealed record ElarionStreamedFile : IAsyncDisposable {
     /// <summary>Writes the content to <paramref name="destination"/>: copies the stream, or runs the writer.</summary>
     /// <param name="destination">The stream to write to; not disposed.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="InvalidOperationException">The file is <see cref="Deferred"/>; open it first.</exception>
     public Task WriteToAsync(Stream destination, CancellationToken cancellationToken) {
         ArgumentNullException.ThrowIfNull(destination);
+        if (_open is not null)
+            throw new InvalidOperationException("A deferred file has no content of its own; write the file OpenAsync answers.");
+
         return _writer is not null
             ? _writer(destination, cancellationToken)
             : _content!.CopyToAsync(destination, cancellationToken);

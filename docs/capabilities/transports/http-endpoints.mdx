@@ -414,6 +414,30 @@ return ElarionStreamedFile.FromWriter(async (body, ct) => {
 }, "application/zip") with { FileName = "documents.zip" };
 ```
 
+When only reading the content tells whether the file is there — an attachment found while parsing a stored message —
+or what its name and type are, return `ElarionStreamedFile.Deferred`. Its open runs where the content would and
+answers either the file or an `AppError`; since nothing is written yet, the error is the ordinary problem response
+(`404` with its code), and the file is read once:
+
+```csharp
+return ElarionStreamedFile.Deferred(async ct => {
+    var download = await blobs.OpenReadAsync(message.Blob, ct);
+    var part = download is null ? null : await MimeAttachments.FindAsync(download.Content, query.Part, ct);
+    if (part is null) {
+        if (download is not null) await download.DisposeAsync();   // an open that refuses disposes what it opened
+        return AppError.NotFound("No such attachment.", "mail.attachment_not_found");
+    }
+
+    return ElarionStreamedFile.FromStream(part.Content, part.ContentType, owner: download) with {
+        FileName = part.FileName,
+    };
+});
+```
+
+The answered file states everything the response carries; a property set on the deferred file itself has no effect.
+Authorization and whether the record exists stay in the handler. In process (a test, a module API), `OpenAsync`
+answers the file or the refusal.
+
 | Property | Response |
 | --- | --- |
 | `ContentType` | `Content-Type` |
@@ -427,8 +451,9 @@ What happens around the bytes:
 - **When the content runs.** After the pipeline, in the request's service scope but after the handler's transaction has
   committed. Open what the content needs in the handler, where a missing record still answers `404`; a blob read
   opened outside a transaction streams from the database without buffering.
-- **Failures.** Before the first byte, an exception is an ordinary unexpected error. After it, the status is already
-  sent, so the connection is aborted: the client sees a failed download, never a truncated file that looks complete.
+- **Failures.** Before the first byte, an exception is an ordinary unexpected error, and a deferred file's refusal is
+  its ordinary error response. After it, the status is already sent, so the connection is aborted: the client sees a
+  failed download, never a truncated file that looks complete.
 - **Synchronous writes.** The server refuses synchronous writes to the body. `ZipArchive` makes a few even through its
   async API: an entry stream from `OpenAsync` flushes its compressed trailer and data descriptor in the synchronous
   `Dispose` that `await using` falls back to. The body a writer receives holds such writes (up to 1 MiB at a time) and

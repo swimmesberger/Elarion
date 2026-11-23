@@ -296,7 +296,8 @@ _Avoid_: upload validation, file rules, upload policy
 
 **Streamed file**:
 The file response of an HTTP-only handler (`ElarionStreamedFile`): content written to the response body after
-the handler pipeline has run, never buffered. Only HTTP carries it; JSON surfaces use an ElarionFile or a
+the handler pipeline has run, never buffered. A deferred streamed file decides after the pipeline, before its first
+byte, which file it is or that it is refused. Only HTTP carries it; JSON surfaces use an ElarionFile or a
 pending blob.
 _Avoid_: file stream, push stream, download result
 

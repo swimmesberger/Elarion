@@ -27,6 +27,12 @@ minor releases may include breaking changes.
   administrator views the application as another user. `UnlessClaim(type, value, then)` matches one value. Both deny an
   unauthenticated caller and are read by `WhereAuthorizedFor`. See
   [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#withdrawing-an-alternative-for-a-session).
+- **A streamed file decided after the pipeline** (ADR-0098 amendment). `ElarionStreamedFile.Deferred(async ct => …)`
+  runs where the content runs and answers the file to serve — with its own name, type and entity tag — or an
+  `AppError`, which is sent as the ordinary problem response because no byte is written yet. An attachment found only
+  while parsing a stored message answers `404` and is read once. In process, `OpenAsync` answers the file or the
+  refusal. See
+  [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints#streamed-files-http-only-endpoints).
 
 ## [0.4.5] - 2026-11-23
 
