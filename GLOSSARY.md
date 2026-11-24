@@ -308,6 +308,13 @@ byte, which file it is or that it is refused. Only HTTP carries it; JSON surface
 pending blob.
 _Avoid_: file stream, push stream, download result
 
+**Spreadsheet record**:
+A `partial` type marked `[SpreadsheetRecord]` whose generated mapping writes it as a worksheet row of an `.xlsx` file
+(or, with no records, a fill-in template) and reads it back from an uploaded workbook, matching columns by header or
+alias. A property the mapping cannot handle is a build error. Reading keeps every row, says which columns the file
+carries, and reports a problem in the file as a coded, located error in the result, never as an exception.
+_Avoid_: Excel model, sheet DTO, export row, import row
+
 **Migration plan**:
 The one ordered sequence in which SQL scripts, C# code steps and EF migrations run, with one version
 sequence, one history and one lock; roll-forward only.
