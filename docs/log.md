@@ -1,7 +1,17 @@
 # Update log
 
+## 2026-11-24
+
+* **Update**: [ADR-0106](decisions/0106-upload-policies-choose-the-staging-limits.md) now raises the request's body-size limit to the cap and never lowers it, and records why: a lowered limit keeps the server from draining an over-cap body, so a client could see a reset instead of the 413.
+
 ## 2026-11-23
 
+* **Creation**: proposed [ADR-0107](decisions/0107-a-shared-entity-names-the-module-that-writes-it.md) — an evaluation of "one writer per table" for a shared data layer: a [WrittenBy] attribute on a shared-kernel entity, an analyzer beside ELMOD002 that reports writes from other modules, and an optional SaveChanges guard; not implemented.
+* **Creation**: [ADR-0106](decisions/0106-upload-policies-choose-the-staging-limits.md) — an upload names a policy that chooses its staging limits and runs a check before the body is read, after an application kept its own upload routes for 100 MB e-mail imports; the upload endpoints set the request's body-size limit to their cap; the [glossary](../GLOSSARY.md) gained *upload policy*.
+* **Update**: [ADR-0098](decisions/0098-streamed-files-for-http-only-endpoints.md) gained an amendment: ElarionStreamedFile.Deferred decides the file after the pipeline and may refuse with an AppError before its first byte, so an attachment found only while parsing a stored message is read once; the [glossary](../GLOSSARY.md) entry *streamed file* mentions it.
+* **Update**: [ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md) gained an amendment: QueryAuthorizers.UnlessClaim, a negated claim gate that withdraws an alternative from sessions carrying a claim (viewing the application as another user), read in both directions.
+* **Update**: [ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md) gained an amendment: WhereAuthorizedForAll lists the principals who may access every row of a selection, from the same relation, and nobody for an empty selection.
+* **Update**: [ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md) gained an amendment: QueryAuthorizers.Via lifts an owner type's rule to the rows that point at its owners, through a navigation or a joined set, in both directions, after an application hand-wrote the inverse of an "assigned to a record the caller may read" rule.
 * **Update**: [ADR-0101](decisions/0101-a-decision-required-answer.md) has an amendment: `Unanswered<TOption>` counts only a declared option and the untyped `Unanswered` only a confirmation, so a handler never skips an item answered with an undeclared option.
 * **Update**: [ADR-0105](decisions/0105-uploaded-files-are-handler-parameters.md) gained an amendment: upload refusals carry the limit as typed data and are implied by `[UploadLimits]`, a member accepts file extensions, the generated `uploadFile` checks the limits of a named method member, and `DeleteAsync` on the PostgreSQL store is documented to save the shared `DbContext`, after an application that moved its imports to uploaded files reported these gaps; the glossary's *upload limits* include file extensions and typed refusals.
 

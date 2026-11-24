@@ -131,6 +131,45 @@ equals a visible contact's id passes. For data whose owners are of several kinds
 owner and combine the queries (`Concat`) before paging. A nullable pointer works with an owner key of the same type
 (`c => (Guid?)c.Id`); rows pointing at no owner are then excluded.
 
+#### Visible through an owner, as part of a rule
+
+`WhereAuthorizedVia` filters one query. When "readable through an owner" is one **alternative** of a type's rule —
+an e-mail is visible to its sender, and to whoever may read a record it is assigned to — state it with
+`QueryAuthorizers.Via`, so it composes with the other alternatives and the [inverse](#who-may-see-a-record) can read
+it. The owner type's own rule, composed or generated, is used as it stands:
+
+```csharp
+// Owners reached by a navigation, or a join through a link table: a static rule.
+public static readonly IQueryAuthorizer<Email> Visibility = QueryAuthorizers.AnyOf(
+    QueryAuthorizers.ForUser<Email, Guid>((email, userId) => email.SenderId == userId),
+    QueryAuthorizers.Via<Email, Contact>(
+        email => email.Links.Select(link => link.Contact), ContactVisibility.Authorizer));
+
+// Owners behind a (kind, id) pointer, which has no navigation: one EXISTS per owner kind, over its set.
+services.AddScoped<IQueryAuthorizer<Email>>(sp => {
+    var db = sp.GetRequiredService<AppDbContext>();
+    return QueryAuthorizers.AnyOf(
+        QueryAuthorizers.ForUser<Email, Guid>((email, userId) => email.SenderId == userId),
+        QueryAuthorizers.Via<Email, Contact>(
+            db.Contacts,
+            (email, contact) => email.Links.Any(l => l.Kind == RecordKind.Contact && l.RecordId == contact.Id),
+            ContactVisibility.Authorizer),
+        QueryAuthorizers.Via<Email, Property>(
+            db.Properties,
+            (email, property) => email.Links.Any(l => l.Kind == RecordKind.Property && l.RecordId == property.Id),
+            PropertyVisibility.Authorizer));
+});
+```
+
+- **A row needs an owner.** A row with none is not visible through `Via`, also to a caller the owner's rule does not
+  restrict — unlike `WhereAuthorizedVia`, which keeps every row for such a caller. Give unassigned rows an alternative
+  of their own.
+- **Narrow a shared pointer to the owner's kind** in the join, as above, for the reason given for `WhereAuthorizedVia`.
+- **The set form belongs to a scope.** `db.Contacts` becomes part of every query the rule filters, so compose that
+  rule where the context lives — a scoped registration — not in a static field.
+- **The owner is asked about the row's operation.** Pass `ownerOperation: ResourceOperation.Read` to let whoever may
+  read the record also change what is assigned to it.
+
 ### Composing filters: membership tables and computed rules
 
 A rule the attribute cannot express — sharing through an application-owned membership table (contact groups), rows
@@ -165,9 +204,17 @@ services.AddSingleton(ContactVisibility.Authorizer);
 | `Unrestricted()` | every row (a `null` filter) |
 | `ForUser<TEntity, TKey>((row, userId) => …)` | the rows related to the caller's id — ownership, membership, an assignment |
 | `When(condition, then)` / `WhenPermission(permission, then)` / `WhenRole(role, then)` | `then`, to callers passing the gate |
+| `UnlessClaim(claimType, then)` / `UnlessClaim(claimType, value, then)` | `then`, to callers **without** the claim ([withdrawing an alternative](#withdrawing-an-alternative-for-a-session)) |
 | `ForOperations(authorizer, operations…)` | `authorizer`, for the listed operations only |
+| `Via(owners, ownerRule)` / `Via(ownerSet, joins, ownerRule)` | the rows with an owner `ownerRule` grants ([through an owner](#visible-through-an-owner-as-part-of-a-rule)) |
 | `AnyOf(…)` / `AllOf(…)` | the union / the intersection |
 | `From((user, operation) => …)` | whatever the delegate returns — **unchecked** |
+
+**Permissions are read from the claims.** `WhenPermission` asks the permission claim, not `IPermissionChecker`: the
+filter is SQL, and its [inverse](#who-may-see-a-record) reads the stored claims. A host whose checker grants more than
+the claims (administrators hold everything) grants those permissions as claims too, or adds the rule as its own
+alternative (`WhenRole("Admin", …)`), so the gate, the filter and the inverse agree — see
+[one place for "administrators hold everything"](/docs/concepts/authorization#one-place-for-administrators-hold-everything).
 
 **They fail closed.** Every building block denies a caller who is not authenticated before the rule is consulted,
 and `ForUser` also denies a caller whose id does not parse as `TKey`, so no alternative repeats that preamble.
@@ -204,6 +251,24 @@ QueryAuthorizers.AnyOf(
 `WhereAuthorized` asks about **`Read` unless told otherwise**. With a rule like this one, a write handler must pass
 its operation (`WhereAuthorized(access, user, ResourceOperation.Update)`) or declare it on `[RequireResource]`, which
 passes it for you.
+
+#### Withdrawing an alternative for a session
+
+`UnlessClaim` is a negated gate: its alternative applies to callers who do **not** hold a claim. It lets one rule drop
+an alternative for sessions the host marks — while an administrator views the application as another user, an `act`
+claim on the session withdraws the administrator's bypass, and the rest of the rule answers as for that user:
+
+```csharp
+QueryAuthorizers.AnyOf(
+    QueryAuthorizers.UnlessClaim("act",
+        QueryAuthorizers.WhenRole("Admin", QueryAuthorizers.Unrestricted<Contact>())),
+    ContactOwnerFilter.Specification)
+```
+
+A negated gate grants when the claim is missing, so use it only to withdraw an alternative from a claim the host adds
+on purpose, never as the only thing between a caller and rows. The [inverse](#who-may-see-a-record) reads the claim
+from the principal directory; a session marker is held by no stored principal, so "who may see this record" answers
+for ordinary sessions.
 
 ### Rows hidden from the caller
 
@@ -406,8 +471,22 @@ var readers = await users.ActiveStaff(now)                       // the candidat
 - **The candidates are yours.** The result is a subset of the principal ids you pass, so you decide who is eligible at
   all (the accounts that can still sign in, the staff of one department) and the rule decides who among them may
   access the rows. With several rows, a principal is returned when it may access at least one.
+- **Every row of a selection: `WhereAuthorizedForAll`.** A selection action — "whom may these 12 e-mails be put in
+  charge of" — needs the principals who may access **all** of them. It reads the same rule, in one statement, and
+  returns nobody for an empty selection:
+
+  ```csharp
+  var assignees = await users.ActiveStaff(now)
+      .WhereAuthorizedForAll(db.Emails.Where(e => selectedIds.Contains(e.Id)), emailAccess, directory)
+      .ToListAsync(ct);
+  ```
+
+  The rows are used as given, so a selected id that no longer names a row (deleted, or hidden by a query filter) is
+  not asked about. Like the complement, "all" is exact under EF Core's default null semantics; with
+  `UseRelationalNulls` a relation that evaluates to SQL `NULL` does not exclude a principal.
 - **The rule is read as a relation** between a row and a principal id. `ForUser` already is one; `Rows`,
-  `Unrestricted`, `WhenPermission`, `WhenRole`, `ForOperations`, `AnyOf`, `AllOf` and the generated `[ResourceFilter]`
+  `Unrestricted`, `WhenPermission`, `WhenRole`, `UnlessClaim`, `ForOperations`, `Via`, `AnyOf`, `AllOf` and the
+  generated `[ResourceFilter]`
   (owner, bypass permission and role, user and role grants) translate to one. Pass the operation to ask who may
   *change* the record.
 - **Complete or refused.** A rule that contains `QueryAuthorizers.From`, `QueryAuthorizers.When`, a hand-written

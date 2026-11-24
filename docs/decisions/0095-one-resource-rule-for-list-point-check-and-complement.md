@@ -164,6 +164,79 @@ simplest one that makes the contract coherent.
   application that registered its own authorizer before `AddElarion` and relied on the generated filter winning now
   gets its own registration.
 
+## Amendment (2026-11-23): a rule through an owner
+
+An application's e-mail feature states visibility as "readable when it is assigned to a record the caller may read",
+across 22 record kinds, one of which (contacts) has a composed rule of its own. `WhereAuthorizedVia` expresses that for
+one query, but it is not a building block: it cannot be an alternative of the e-mail type's rule, and the inverse cannot
+read it. The application wrote the inverse by hand and kept it in step with scenario tests — the mirror this ADR set out
+to remove.
+
+**`QueryAuthorizers.Via` lifts an owner type's rule to the rows that point at its owners.** Its relation is
+`(row, principal) => owners(row).Any(o => ownerRelation(o, principal))`, its filter the same with the owner's filter in
+place of the relation, so both directions read one rule and the owner's rule is used as it stands. Two forms:
+
+- `Via(row => owners, ownerRule)`: the owners are an expression over the row — a collection navigation, a join through
+  a link table. Context-free, so the rule can be a static field.
+- `Via(ownerSet, (row, owner) => joins, ownerRule)`: the owners are a set the row is joined to — a `(kind, id)` pointer
+  with no navigation. The set becomes part of every query the rule filters, so a rule over a `DbContext` set is composed
+  per scope.
+
+Decisions taken, each the simplest coherent one and revisable:
+
+1. **A row needs an owner.** An unrestricted owner rule admits the rows that *have* an owner, not every row: the
+   relation is an existence, and "assigned to a record the caller may read" is false of an unassigned row. This differs
+   from `WhereAuthorizedVia`, which keeps every row for an unrestricted caller; an unassigned row that should be visible
+   gets an alternative of its own.
+2. **The owner is asked about the row's operation** unless `ownerOperation` names another one, so "whoever may read the
+   record may change its notes" is one argument, and the default never widens a write to the owner's read rule.
+3. **It denies an unauthenticated caller itself**, like every other building block, instead of relying on the owner's
+   rule (which may be `From`).
+4. **An opaque owner rule refuses the inverse**, through the same `RelationOf` every composition uses.
+
+Rejected: **a `WhereAuthorizedVia` overload that returns an authorizer** (it would still need the caller's set and
+user at build time, so it could not be a static or composed rule); **an owner-set provider delegate** resolved per
+query (an `IQueryable` cannot be obtained inside an expression without a context, and a delegate is opaque to the
+inverse); **a navigation-only form** (a `(kind, id)` pointer has no navigation, and it is the shape that needed this).
+
+## Amendment (2026-11-23): who may access every row
+
+The same application assigns a selection of e-mails to a colleague, who must be able to read every one of them.
+`WhereAuthorizedFor` answers "may access at least one", so the application wrote "all of them" by hand.
+
+**`principals.WhereAuthorizedForAll(rows, authorizer, directory, operation)`** returns the candidates related to
+**every** row: `principal => rows.Any() && rows.All(row => relation(row, principal))`, one statement, from the same
+relation. Decisions:
+
+1. **An empty selection admits nobody.** "Every row of none" is vacuously everyone; the inverse of `WhereAuthorizedFor`
+   returns nobody for no rows, and an assignment dialog offered every account for an empty selection would be the
+   fail-open reading.
+2. **A separate operator, not a quantifier argument.** `WhereAuthorizedFor` keeps its signature, and the name says at
+   the call site which question is asked.
+3. **"All" is computed at the relation level** (`NOT EXISTS` a row the principal is not related to), never by
+   intersecting per-row answers in memory, so the answer stays one statement for any selection size. Like
+   `WhereNotAuthorized`, it is exact under two-valued predicates; under `UseRelationalNulls` a relation that is SQL
+   `NULL` for a row does not exclude the principal, which the forward filter still catches when the principal reads.
+
+## Amendment (2026-11-23): a negated claim gate
+
+The same application lets an administrator view the application as another user. One rule should then drop its
+administrator alternative, but the gates could only add alternatives for holders of a role or claim.
+
+**`QueryAuthorizers.UnlessClaim(claimType, then)`** (any value) and **`UnlessClaim(claimType, value, then)`** grant
+`then` to an authenticated caller who does *not* hold the claim. Its relation is `!holders.Contains(principal) AND
+then`, read from the principal directory like the positive gates. Decisions:
+
+1. **A claim, not a role or a delegate.** A session marker is a claim the host adds while it builds the principal; a
+   delegate gate (`When`) already exists and has no inverse.
+2. **It still denies an unauthenticated caller**, like every gate, so negation never reaches an anonymous request.
+3. **The inverse answers for ordinary sessions.** A session marker is no stored fact of a principal, so the directory
+   lists it for nobody, and "who may access this row" is asked about principals, not sessions. A claim the directory
+   does store (a suspension) is honoured in both directions.
+
+The page documents the hazard: a negated gate grants when the claim is missing, so it may withdraw an alternative but
+must not stand alone between a caller and the rows.
+
 ## Rejected alternatives
 
 - **A router as the default `IResourceAuthorizer`, with the backend as a second seam.** It needs a fallback service

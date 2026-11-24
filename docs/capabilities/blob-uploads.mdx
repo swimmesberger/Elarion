@@ -204,6 +204,11 @@ content-type allow-list. Ownership is recorded as a dedicated `BlobUploadRequest
 containing the naming separator cannot be forged, and a blob with no recorded owner is denied to everyone.
 The tus transport applies the same owner-exact, fail-closed check to its `HEAD`/`PATCH`/`DELETE`.
 
+When the server's body-size limit is lower than `MaxContentLength`, the endpoint raises it for that request, so a cap
+above the server's default (Kestrel: about 28.6 MB) works for this route without raising it for every route. It never
+lowers a higher server limit: it enforces the cap itself, and a multipart file part over the cap is refused while it is
+read.
+
 `AddElarionBlobUploads` and `AddElarionResumableBlobUploads` register their options through the options pattern, so
 a later `services.Configure<BlobUploadEndpointOptions>(…)` reaches the endpoints too, and code that needs the
 configured values — the route prefix, the container — reads `IOptions<BlobUploadEndpointOptions>` (or
@@ -215,6 +220,45 @@ Both transports bake the current user's id into the upload, so the host must reg
 (via `AddElarionCurrentUser` or the optional Identity integration) and opt the route group into
 `.RequireAuthorization(...)`. Per-endpoint authorization is the host's job, as for all generated routes.
 </Callout>
+
+### Upload policies: a larger limit for one kind of upload
+
+Some uploads are larger than the rest: imported e-mail messages up to 100 MB where 20 MB is enough for everything
+else. Raising the endpoint's cap would let every signed-in user stage 100 MB. An **upload policy** raises it for the
+uploads that name it, and can check the record an upload is for **before its bytes arrive**:
+
+```csharp
+services.AddElarionBlobUploads(o => o.MaxContentLength = 20L * 1024 * 1024);   // the default for every upload
+services.AddElarionUploadPolicy("mail.eml", policy => {
+    policy.MaxBytes = 100L * 1024 * 1024;
+    policy.ContentTypes = ["message/rfc822", "application/octet-stream"];
+    // The draft exists and is the caller's — asked before the body is read.
+    policy.Authorize = static async (context, ct) =>
+        Guid.TryParse(context.ResourceId, out var draftId)
+        && await context.Services.GetRequiredService<AppDbContext>().Drafts
+            .AnyAsync(d => d.Id == draftId && d.OwnerId == context.User.UserId, ct);
+});
+```
+
+The client names the policy, and the record it is for, when it uploads:
+
+| Transport | Names the policy with |
+| --- | --- |
+| Direct endpoint | `POST /_elarion/blobs?policy=mail.eml&resourceId=<draft id>` |
+| tus | the `policy` and `resourceId` keys of `Upload-Metadata` (Uppy: `meta: { policy, resourceId }`) |
+| Generated TypeScript client | `rpc.$uploadFile(file, { policy: 'mail.eml', resourceId: draftId })` |
+
+- **Its limits replace the endpoint's** for that upload: `MaxBytes` the cap (`MaxContentLength`, tus `MaxSize`),
+  `ContentTypes` the allow-list (tus checks it against the declared `filetype`). A limit left `null` is the
+  endpoint's; an upload without a policy gets the endpoint's limits.
+- **`Authorize` runs before the body is read**, with the caller, the request's services, the declared length and the
+  client's `resourceId` — untrusted input, parse it. A refusal answers `404`, so it does not confirm that the record
+  exists; an unknown policy name answers `400`.
+- **It decides what may be staged, not what a handler accepts.** The staged file is an ordinary pending upload. The
+  handler that takes it declares the larger limit (`[UploadLimits(MaxBytes = 100L * 1024 * 1024)]`) and checks the
+  draft again inside its transaction; a handler with a smaller limit refuses the file.
+- **A tus `PATCH` may carry all the bytes the upload still lacks**: its body-size limit is raised to that when the
+  server's is lower, so a 100 MB upload may arrive in one `PATCH` without raising the server's limit for every route.
 
 ### Client adapters
 
@@ -304,8 +348,9 @@ catch (error) {
 }
 ```
 
-The limits are the handler's per operation; the endpoints' `MaxContentLength`/`MaxSize` and `AllowedContentTypes`
-still cap what can be uploaded at all. The content type and the file name are the ones the client declared, not
+The limits are the handler's per operation; the endpoints' `MaxContentLength`/`MaxSize` and `AllowedContentTypes`,
+or the [upload policy](#upload-policies-a-larger-limit-for-one-kind-of-upload) the client named, still cap what can be
+uploaded at all. The content type and the file name are the ones the client declared, not
 sniffed: treat the content as untrusted input.
 
 An upload lives until it is committed, deleted, or collected after the endpoint's `Ttl` (`BlobUploadEndpointOptions.Ttl`,

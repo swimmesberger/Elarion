@@ -8,6 +8,46 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **`QueryAuthorizers.Via`: a rule through an owner** (ADR-0095 amendment). `Via<Email, Contact>(e => e.Links.Select(l =>
+  l.Contact), contactRule)` admits the rows with at least one owner the caller may access under the owner type's own
+  rule; `Via<Email, Contact>(db.Contacts, (e, c) => e.Links.Any(l => l.Kind == "contact" && l.RecordId == c.Id),
+  contactRule)` does the same for a `(kind, id)` pointer without a navigation. It is a building block: it composes in
+  `AnyOf`/`AllOf`, the owner's rule is used as it stands, and `WhereAuthorizedFor` reads it, so "who may read this
+  record" needs no hand-written mirror of an "assigned to a record the caller may read" rule. A row without an owner is
+  not visible through it; `ownerOperation` asks the owner about another operation than the row's. See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#visible-through-an-owner-as-part-of-a-rule).
+- **`WhereAuthorizedForAll`: who may access every row of a selection** (ADR-0095 amendment). The inverse of
+  `WhereAuthorized` for a selection action ("whom may these e-mails be put in charge of"): the candidates related to
+  all of the rows by the entity's rule, in one statement, and nobody for an empty selection. `WhereAuthorizedFor` still
+  answers "at least one". See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#who-may-see-a-record).
+- **`QueryAuthorizers.UnlessClaim`: a negated claim gate** (ADR-0095 amendment). `UnlessClaim("act", adminBypass)`
+  grants its alternative only to callers without the claim, so one rule withdraws an administrator's bypass while the
+  administrator views the application as another user. `UnlessClaim(type, value, then)` matches one value. Both deny an
+  unauthenticated caller and are read by `WhereAuthorizedFor`. See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#withdrawing-an-alternative-for-a-session).
+- **A streamed file decided after the pipeline** (ADR-0098 amendment). `ElarionStreamedFile.Deferred(async ct => …)`
+  runs where the content runs and answers the file to serve — with its own name, type and entity tag — or an
+  `AppError`, which is sent as the ordinary problem response because no byte is written yet. An attachment found only
+  while parsing a stored message answers `404` and is read once. In process, `OpenAsync` answers the file or the
+  refusal. See
+  [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints#streamed-files-http-only-endpoints).
+- **Upload policies: a larger staging limit for one kind of upload** (ADR-0106). `services.AddElarionUploadPolicy(
+  "mail.eml", p => { p.MaxBytes = …; p.ContentTypes = […]; p.Authorize = (context, ct) => … })` registers a named
+  policy; a client names it when it stages a file (`?policy=mail.eml&resourceId=…` on the direct endpoint, the `policy`
+  and `resourceId` keys of the tus `Upload-Metadata`). Its limits replace the endpoint's for that upload, and
+  `Authorize` checks the record the upload is for before the body is read (a refusal answers `404`). The generated
+  TypeScript client's `uploadFile(file, { policy, resourceId })` sends both. See
+  [Blob uploads](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#upload-policies-a-larger-limit-for-one-kind-of-upload).
+
+### Changed
+- **The upload endpoints raise the request's body-size limit to their cap** (ADR-0106). When the server's limit is
+  lower, the direct endpoint raises it to `MaxContentLength` (plus 1 MiB of form overhead for multipart) and a tus
+  `PATCH` to the bytes the upload still lacks, so a cap above the server's default (Kestrel: about 28.6 MB) now works
+  without raising the server's limit for every route. A higher server limit is kept. A multipart file part over the cap
+  is now refused while it is read instead of after the whole form is buffered.
+
 ## [0.4.5] - 2026-11-23
 
 ### Fixed

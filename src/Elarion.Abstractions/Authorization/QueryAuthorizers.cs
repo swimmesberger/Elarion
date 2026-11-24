@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Linq.Expressions;
+using System.Reflection;
 using Elarion.Abstractions.Identity;
 
 namespace Elarion.Abstractions.Authorization;
@@ -12,7 +13,8 @@ namespace Elarion.Abstractions.Authorization;
 /// <remarks>
 /// <para>
 /// <b>Building blocks fail closed.</b> <see cref="Rows{TEntity}"/>, <see cref="Unrestricted{TEntity}"/>,
-/// <see cref="ForUser{TEntity,TKey}"/> and the <c>When…</c> gates deny a caller who is not authenticated (and, for
+/// <see cref="ForUser{TEntity,TKey}"/>, the <c>Via</c> rules and the <c>When…</c> and <c>Unless…</c> gates deny a
+/// caller who is not authenticated (and, for
 /// <see cref="ForUser{TEntity,TKey}"/>, whose id does not parse) before the rule is consulted. Only
 /// <see cref="From{TEntity}"/> hands the caller to a delegate unchecked.
 /// </para>
@@ -162,6 +164,61 @@ public static class QueryAuthorizers {
             new ClaimGateRelation<TEntity>(claimType, permission, then));
     }
 
+    /// <summary>
+    /// <paramref name="then"/> for an authenticated caller who holds <b>no</b> claim of <paramref name="claimType"/>;
+    /// nothing for one who does — so a session marked by a claim drops an alternative: while an administrator views the
+    /// application as another user (an <c>act</c> claim on the session), the administrator's bypass does not apply.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A negated gate grants when the claim is <b>missing</b>. Use it to withdraw an alternative from sessions that
+    /// carry a claim the host adds deliberately, never to deny what a claim the host might fail to add would deny.
+    /// </para>
+    /// <para>
+    /// The inverse reads the claim from the principal directory. A session claim such as an impersonation marker is not
+    /// a fact of the principal, so the directory lists it for nobody and "who may access this row" answers for ordinary
+    /// sessions, which is the question it asks.
+    /// </para>
+    /// </remarks>
+    /// <param name="claimType">The claim type whose presence, with any value, withdraws <paramref name="then"/>.</param>
+    /// <param name="then">What a caller without the claim may access.</param>
+    /// <typeparam name="TEntity">The entity type being authorized.</typeparam>
+    /// <example>
+    /// <code>
+    /// QueryAuthorizers.AnyOf(
+    ///     QueryAuthorizers.UnlessClaim("act", QueryAuthorizers.WhenRole("Admin", QueryAuthorizers.Unrestricted&lt;Contact&gt;())),
+    ///     ContactOwnerFilter.Specification)
+    /// </code>
+    /// </example>
+    public static IQueryAuthorizer<TEntity> UnlessClaim<TEntity>(string claimType, IQueryAuthorizer<TEntity> then)
+        where TEntity : class {
+        ArgumentException.ThrowIfNullOrEmpty(claimType);
+        ArgumentNullException.ThrowIfNull(then);
+        return new InvertibleAuthorizer<TEntity>(
+            Gate(user => !user.GetClaimValues(claimType).Any(), then),
+            new NegatedClaimGateRelation<TEntity>(claimType, null, then));
+    }
+
+    /// <summary>
+    /// <paramref name="then"/> for an authenticated caller who does <b>not</b> hold the claim <paramref name="claimType"/>
+    /// with <paramref name="value"/>; nothing for one who does. See
+    /// <see cref="UnlessClaim{TEntity}(string, IQueryAuthorizer{TEntity})"/> for when a negated gate fits.
+    /// </summary>
+    /// <param name="claimType">The claim type.</param>
+    /// <param name="value">The claim value whose presence withdraws <paramref name="then"/>.</param>
+    /// <param name="then">What a caller without the claim may access.</param>
+    /// <typeparam name="TEntity">The entity type being authorized.</typeparam>
+    public static IQueryAuthorizer<TEntity> UnlessClaim<TEntity>(
+        string claimType, string value, IQueryAuthorizer<TEntity> then)
+        where TEntity : class {
+        ArgumentException.ThrowIfNullOrEmpty(claimType);
+        ArgumentNullException.ThrowIfNull(value);
+        ArgumentNullException.ThrowIfNull(then);
+        return new InvertibleAuthorizer<TEntity>(
+            Gate(user => !user.HasClaim(claimType, value), then),
+            new NegatedClaimGateRelation<TEntity>(claimType, value, then));
+    }
+
     /// <summary><paramref name="then"/> for callers in <paramref name="role"/>; nothing for anyone else.</summary>
     public static IQueryAuthorizer<TEntity> WhenRole<TEntity>(string role, IQueryAuthorizer<TEntity> then)
         where TEntity : class {
@@ -200,6 +257,103 @@ public static class QueryAuthorizers {
             (user, operation) =>
                 Array.IndexOf(allowed, operation) >= 0 ? authorizer.GetFilter(user, operation) : Deny<TEntity>.Filter,
             new OperationsRelation<TEntity>(allowed, authorizer));
+    }
+
+    /// <summary>
+    /// The rows with <b>at least one owner</b> the caller may access under <paramref name="owner"/> — "an e-mail is
+    /// readable when it is assigned to a record the caller may read" — with the owners reached from the row: a
+    /// collection navigation (<c>e =&gt; e.Contacts</c>) or a join through a link table
+    /// (<c>e =&gt; e.Links.Select(link =&gt; link.Contact)</c>). Denies a caller who is not authenticated.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The owner's rule is used as it stands, composed or generated, so a change to it reaches every type that is
+    /// visible through it. Both directions read it: the filter is
+    /// <c>row =&gt; owners(row).Any(o =&gt; ownerFilter(o))</c>, and the relation the inverse reads is
+    /// <c>(row, principal) =&gt; owners(row).Any(o =&gt; ownerRelation(o, principal))</c>.
+    /// </para>
+    /// <para>
+    /// A row needs an owner: a row with none is not visible through this rule, also to a caller for whom the owner's
+    /// rule is unrestricted. Unlike <c>WhereAuthorizedVia</c>, which keeps every row for such a caller, this states
+    /// "assigned to a record the caller may access"; give unassigned rows an alternative of their own.
+    /// </para>
+    /// <para>
+    /// For owners that have no navigation — a <c>(kind, id)</c> pointer — use
+    /// <see cref="Via{TEntity,TOwner}(IQueryable{TOwner}, Expression{Func{TEntity,TOwner,bool}}, IQueryAuthorizer{TOwner}, ResourceOperation?)"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="owners">The row's owners, as an expression the query provider translates.</param>
+    /// <param name="owner">The owner type's rule.</param>
+    /// <param name="ownerOperation">
+    /// The operation asked of the owner. Defaults to the operation asked of the row; pass
+    /// <see cref="ResourceOperation.Read"/> for "whoever may read the record may change its notes".
+    /// </param>
+    /// <typeparam name="TEntity">The entity type being authorized.</typeparam>
+    /// <typeparam name="TOwner">The owner type.</typeparam>
+    /// <example>
+    /// <code>
+    /// // An e-mail is visible to whoever may read a contact it is assigned to.
+    /// QueryAuthorizers.Via&lt;Email, Contact&gt;(e =&gt; e.Links.Select(link =&gt; link.Contact), ContactVisibility.Authorizer)
+    /// </code>
+    /// </example>
+    public static IQueryAuthorizer<TEntity> Via<TEntity, TOwner>(
+        Expression<Func<TEntity, IEnumerable<TOwner>>> owners,
+        IQueryAuthorizer<TOwner> owner,
+        ResourceOperation? ownerOperation = null)
+        where TEntity : class
+        where TOwner : class {
+        ArgumentNullException.ThrowIfNull(owners);
+        return Via(new NavigationOwners<TEntity, TOwner>(owners), owner, ownerOperation);
+    }
+
+    /// <summary>
+    /// The rows with <b>at least one owner</b> in <paramref name="owners"/> that <paramref name="joins"/> relates to the
+    /// row and the caller may access under <paramref name="owner"/> — for owners the row points at without a
+    /// navigation, such as a <c>(kind, id)</c> pointer shared by several owner types. Denies a caller who is not
+    /// authenticated.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The filter is <c>row =&gt; owners.Any(o =&gt; joins(row, o) &amp;&amp; ownerFilter(o))</c>, one <c>EXISTS</c> in the same
+    /// statement; the relation the inverse reads is the same with the owner's relation in place of its filter. A row
+    /// with no matching owner is not visible through this rule (see
+    /// <see cref="Via{TEntity,TOwner}(Expression{Func{TEntity,IEnumerable{TOwner}}}, IQueryAuthorizer{TOwner}, ResourceOperation?)"/>).
+    /// </para>
+    /// <para>
+    /// <b>Narrow a shared pointer to the owner's kind in <paramref name="joins"/></b>: without it, a row pointing at an
+    /// invoice whose id equals a visible contact's id passes.
+    /// </para>
+    /// <para>
+    /// <paramref name="owners"/> becomes part of every query the rule filters, so it must belong to the store those
+    /// queries run against. For a <c>DbContext</c> set, compose the rule where the context lives — in a scoped
+    /// registration (<c>services.AddScoped&lt;IQueryAuthorizer&lt;Email&gt;&gt;(sp =&gt; …)</c>), not in a static field.
+    /// </para>
+    /// </remarks>
+    /// <param name="owners">The owners' set (<c>db.Contacts</c>).</param>
+    /// <param name="joins">Whether an owner is one of the row's owners.</param>
+    /// <param name="owner">The owner type's rule.</param>
+    /// <param name="ownerOperation">The operation asked of the owner; defaults to the operation asked of the row.</param>
+    /// <typeparam name="TEntity">The entity type being authorized.</typeparam>
+    /// <typeparam name="TOwner">The owner type.</typeparam>
+    /// <example>
+    /// <code>
+    /// // An e-mail is visible to whoever may read a contact one of its links points at.
+    /// QueryAuthorizers.Via&lt;Email, Contact&gt;(
+    ///     db.Contacts,
+    ///     (e, contact) =&gt; e.Links.Any(link =&gt; link.Kind == RecordKind.Contact &amp;&amp; link.RecordId == contact.Id),
+    ///     ContactVisibility.Authorizer)
+    /// </code>
+    /// </example>
+    public static IQueryAuthorizer<TEntity> Via<TEntity, TOwner>(
+        IQueryable<TOwner> owners,
+        Expression<Func<TEntity, TOwner, bool>> joins,
+        IQueryAuthorizer<TOwner> owner,
+        ResourceOperation? ownerOperation = null)
+        where TEntity : class
+        where TOwner : class {
+        ArgumentNullException.ThrowIfNull(owners);
+        ArgumentNullException.ThrowIfNull(joins);
+        return Via(new JoinedOwners<TEntity, TOwner>(owners, joins), owner, ownerOperation);
     }
 
     /// <summary>A row is visible when <b>any</b> authorizer makes it visible (OR); one unrestricted authorizer lifts the restriction.</summary>
@@ -272,6 +426,31 @@ public static class QueryAuthorizers {
     /// <summary>Whether <paramref name="filter"/> is the constant deny-all predicate (<c>_ =&gt; false</c>).</summary>
     internal static bool IsDenyAll<TEntity>(Expression<Func<TEntity, bool>> filter) {
         return filter.Body is ConstantExpression { Value: false };
+    }
+
+    private static IQueryAuthorizer<TEntity> Via<TEntity, TOwner>(
+        OwnerSource<TEntity, TOwner> owners, IQueryAuthorizer<TOwner> owner, ResourceOperation? ownerOperation)
+        where TEntity : class
+        where TOwner : class {
+        ArgumentNullException.ThrowIfNull(owner);
+        if (ownerOperation is { Name: null })
+            throw new ArgumentException("The owner operation is the invalid default value.", nameof(ownerOperation));
+
+        return new InvertibleAuthorizer<TEntity>(
+            (user, operation) => {
+                if (!user.IsAuthenticated) return Deny<TEntity>.Filter;
+
+                var filter = owner.GetFilter(user, ownerOperation ?? operation);
+                if (filter is not null && IsDenyAll(filter)) return Deny<TEntity>.Filter;
+
+                var row = Expression.Parameter(typeof(TEntity), "row");
+                var candidate = Expression.Parameter(typeof(TOwner), "owner");
+                var condition = filter is null
+                    ? null
+                    : new Rebinder(filter.Parameters[0], candidate).Visit(filter.Body);
+                return Expression.Lambda<Func<TEntity, bool>>(owners.Exists(row, candidate, condition), row);
+            },
+            new ViaRelation<TEntity, TOwner>(owners, owner, ownerOperation));
     }
 
     private static Func<ICurrentUser, ResourceOperation, Expression<Func<TEntity, bool>>?> Gate<TEntity>(
@@ -351,15 +530,16 @@ public static class QueryAuthorizers {
             return relation.Body is ConstantExpression constant && Equals(constant.Value, value);
         }
 
-        // A predicate over the principal alone (membership of a holder set), widened to a relation and AND-ed with
-        // what the gate lets its holders access.
+        // A predicate over the principal alone (membership of a holder set, or its absence), widened to a relation and
+        // AND-ed with what the gate lets the principals it admits access.
         protected static Expression<Func<TEntity, TKey, bool>> Gated<TKey>(
-            IQueryable<TKey> holders, Expression<Func<TEntity, TKey, bool>> then) {
+            IQueryable<TKey> holders, Expression<Func<TEntity, TKey, bool>> then, bool negate = false) {
             if (IsConstant(then, false)) return then;
 
             Expression<Func<TKey, bool>> holds = principal => holders.Contains(principal);
             var principalParameter = then.Parameters[1];
             var holdsBody = new Rebinder(holds.Parameters[0], principalParameter).Visit(holds.Body);
+            if (negate) holdsBody = Expression.Not(holdsBody);
             var body = IsConstant(then, true) ? holdsBody : Expression.AndAlso(holdsBody, then.Body);
             return Expression.Lambda<Func<TEntity, TKey, bool>>(body, then.Parameters);
         }
@@ -402,6 +582,18 @@ public static class QueryAuthorizers {
         }
     }
 
+    // UnlessClaim: the principals without the claim (any value when value is null), AND-ed with what then grants.
+    private sealed class NegatedClaimGateRelation<TEntity>(string claimType, string? value, IQueryAuthorizer<TEntity> then)
+        : Relation<TEntity>
+        where TEntity : class {
+        public override Expression<Func<TEntity, TKey, bool>> Build<TKey>(
+            IPrincipalDirectory<TKey> directory, ResourceOperation operation) {
+            var claims = directory.Claims.Where(claim => claim.Type == claimType);
+            if (value is not null) claims = claims.Where(claim => claim.Value == value);
+            return Gated(claims.Select(claim => claim.PrincipalId), RelationOf(then, directory, operation), negate: true);
+        }
+    }
+
     private sealed class RoleGateRelation<TEntity>(string role, IQueryAuthorizer<TEntity> then) : Relation<TEntity>
         where TEntity : class {
         public override Expression<Func<TEntity, TKey, bool>> Build<TKey>(
@@ -421,6 +613,81 @@ public static class QueryAuthorizers {
                 ? RelationOf(authorizer, directory, operation)
                 : Constant<TKey>(false);
         }
+    }
+
+    // Via: the owner's relation, asked of the row's owners — (row, principal) => owners(row).Any(o => relation(o, principal)).
+    private sealed class ViaRelation<TEntity, TOwner>(
+        OwnerSource<TEntity, TOwner> owners, IQueryAuthorizer<TOwner> owner, ResourceOperation? ownerOperation)
+        : Relation<TEntity>
+        where TEntity : class
+        where TOwner : class {
+        public override Expression<Func<TEntity, TKey, bool>> Build<TKey>(
+            IPrincipalDirectory<TKey> directory, ResourceOperation operation) {
+            var relation = RelationOf(owner, directory, ownerOperation ?? operation);
+            if (IsConstantBody(relation, false)) return Constant<TKey>(false);
+
+            // Fresh parameters: the owner's relation may reuse parameter instances of its own parts.
+            var row = Expression.Parameter(typeof(TEntity), "row");
+            var principal = Expression.Parameter(typeof(TKey), "principal");
+            var candidate = Expression.Parameter(typeof(TOwner), "owner");
+            Expression? condition = null;
+            if (!IsConstantBody(relation, true)) {
+                condition = new Rebinder(relation.Parameters[0], candidate).Visit(relation.Body);
+                condition = new Rebinder(relation.Parameters[1], principal).Visit(condition);
+            }
+
+            return Expression.Lambda<Func<TEntity, TKey, bool>>(owners.Exists(row, candidate, condition), row, principal);
+        }
+    }
+
+    // Where a Via rule finds a row's owners: "some owner of the row satisfies the condition" as an expression over the row.
+    private abstract class OwnerSource<TEntity, TOwner> {
+        /// <summary>
+        /// "Some owner of <paramref name="row"/> satisfies <paramref name="condition"/>", the condition an expression over
+        /// <paramref name="owner"/>; a <see langword="null"/> condition asks only whether the row has an owner.
+        /// </summary>
+        public abstract Expression Exists(ParameterExpression row, ParameterExpression owner, Expression? condition);
+    }
+
+    // The owners are a collection the row reaches: owners(row).Any(o => condition).
+    private sealed class NavigationOwners<TEntity, TOwner>(Expression<Func<TEntity, IEnumerable<TOwner>>> owners)
+        : OwnerSource<TEntity, TOwner> {
+        // Compiler-built templates close the generic Enumerable.Any at compile time (no MakeGenericMethod), AOT-safe.
+        private static readonly MethodInfo AnyMethod = CalledMethod<Func<IEnumerable<TOwner>, bool>>(static s => s.Any());
+
+        private static readonly MethodInfo AnyWhereMethod =
+            CalledMethod<Func<IEnumerable<TOwner>, Func<TOwner, bool>, bool>>(static (s, predicate) => s.Any(predicate));
+
+        public override Expression Exists(ParameterExpression row, ParameterExpression owner, Expression? condition) {
+            var source = new Rebinder(owners.Parameters[0], row).Visit(owners.Body);
+            return condition is null
+                ? Expression.Call(AnyMethod, source)
+                : Expression.Call(AnyWhereMethod, source, Expression.Lambda<Func<TOwner, bool>>(condition, owner));
+        }
+    }
+
+    // The owners are a set the row joins: owners.Any(o => joins(row, o) && condition).
+    private sealed class JoinedOwners<TEntity, TOwner>(
+        IQueryable<TOwner> owners, Expression<Func<TEntity, TOwner, bool>> joins) : OwnerSource<TEntity, TOwner> {
+        private static readonly MethodInfo AnyWhereMethod =
+            CalledMethod<Func<IQueryable<TOwner>, Expression<Func<TOwner, bool>>, bool>>(
+                static (s, predicate) => s.Any(predicate));
+
+        public override Expression Exists(ParameterExpression row, ParameterExpression owner, Expression? condition) {
+            var joined = new Rebinder(joins.Parameters[0], row).Visit(joins.Body);
+            joined = new Rebinder(joins.Parameters[1], owner).Visit(joined);
+            var body = condition is null ? joined : Expression.AndAlso(joined, condition);
+            return Expression.Call(
+                AnyWhereMethod, owners.Expression, Expression.Quote(Expression.Lambda<Func<TOwner, bool>>(body, owner)));
+        }
+    }
+
+    private static bool IsConstantBody(LambdaExpression lambda, bool value) {
+        return lambda.Body is ConstantExpression { Value: bool constant } && constant == value;
+    }
+
+    private static MethodInfo CalledMethod<TDelegate>(Expression<TDelegate> template) {
+        return ((MethodCallExpression)template.Body).Method;
     }
 
     // AnyOf / AllOf: the parts' relations OR-ed / AND-ed over one pair of parameters. Every part is asked, so a part
