@@ -24,8 +24,9 @@ public static class ResumableBlobUploadEndpointsExtensions {
     /// <remarks>
     /// A creation may name an <see cref="UploadPolicy"/> with the <c>policy</c> key of <c>Upload-Metadata</c> (and the
     /// record it is for with <c>resourceId</c>): its <see cref="UploadPolicy.MaxBytes"/> replaces <c>MaxSize</c>, its
-    /// content types are checked against the declared <c>filetype</c>, and its check runs before the session exists. Each
-    /// <c>PATCH</c> may carry at most the bytes the upload still lacks, which is also the request's body-size limit.
+    /// content types are checked against the declared <c>filetype</c>, and its check runs before the session exists. A
+    /// <c>PATCH</c> may carry all the bytes the upload still lacks: the request's body-size limit is raised to that when
+    /// the server's is lower.
     /// </remarks>
     public static RouteGroupBuilder MapElarionResumableBlobUploads(this IEndpointRouteBuilder endpoints) {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -350,10 +351,13 @@ public static class ResumableBlobUploadEndpointsExtensions {
             return;
         }
 
-        // A chunk carries at most the bytes the upload still lacks: that is this request's body limit, so an upload
-        // whose length a policy allows arrives in one PATCH without raising the server's limit for every route.
+        // A chunk may carry the bytes the upload still lacks: the request's body limit is raised to that when the
+        // server's is lower, so an upload whose length a policy allows arrives in one PATCH without raising the server's
+        // limit for every route. Never lowered: the store reads no more than the upload lacks anyway.
         if (upload.Length is long declaredLength
-            && context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } bodyLimit)
+            && context.Features.Get<IHttpMaxRequestBodySizeFeature>() is
+                { IsReadOnly: false, MaxRequestBodySize: { } current } bodyLimit
+            && current < declaredLength - upload.Offset)
             bodyLimit.MaxRequestBodySize = declaredLength - upload.Offset;
 
         StagedUpload updated;
@@ -370,7 +374,7 @@ public static class ResumableBlobUploadEndpointsExtensions {
             return;
         }
         catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge) {
-            // More bytes than the upload lacks; the store keeps only the committed offset.
+            // More bytes than the server accepts in one request; the store keeps only the committed offset.
             response.StatusCode = StatusCodes.Status413PayloadTooLarge;
             return;
         }

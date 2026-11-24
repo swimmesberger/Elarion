@@ -1,5 +1,9 @@
 # Update log
 
+## 2026-11-24
+
+* **Update**: [ADR-0106](decisions/0106-upload-policies-choose-the-staging-limits.md) now raises the request's body-size limit to the cap and never lowers it, and records why: a lowered limit keeps the server from draining an over-cap body, so a client could see a reset instead of the 413.
+
 ## 2026-11-23
 
 * **Creation**: proposed [ADR-0107](decisions/0107-a-shared-entity-names-the-module-that-writes-it.md) — an evaluation of "one writer per table" for a shared data layer: a [WrittenBy] attribute on a shared-kernel entity, an analyzer beside ELMOD002 that reports writes from other modules, and an optional SaveChanges guard; not implemented.

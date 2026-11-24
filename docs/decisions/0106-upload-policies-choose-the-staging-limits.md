@@ -40,10 +40,11 @@ not exist or is not the caller's.
    raw body on the direct endpoint, before the session is created on tus. It receives the policy name, the client's
    `resourceId` (untrusted), the caller, the request's services and the declared length. A refusal answers `404`, so the
    record it names is not confirmed to exist; an unknown policy name answers `400`, because it is a client bug.
-5. **The endpoint sets the request's body-size limit to the cap that applies** (`IHttpMaxRequestBodySizeFeature`, as
-   ASP.NET's `[RequestSizeLimit]` does): the cap for a raw body, the cap plus 1 MiB for a form, whose file part is
-   limited to the cap while it is read instead of after the form is buffered. A tus `PATCH` may carry at most the bytes
-   the upload still lacks, which becomes its limit. This applies with and without a policy.
+5. **The endpoint raises the request's body-size limit to the cap that applies, and never lowers it**
+   (`IHttpMaxRequestBodySizeFeature`, as ASP.NET's `[RequestSizeLimit]` sets it): to the cap for a raw body, to the cap
+   plus 1 MiB for a form, and for a tus `PATCH` to the bytes the upload still lacks — each only when the server's limit
+   is lower. The endpoint enforces the cap itself (the declared length, the read, and a form's file part, which is now
+   limited to the cap while it is read instead of after the form is buffered). This applies with and without a policy.
 6. **The staged blob is the same pending upload.** Nothing records which policy staged it; the handler that takes it
    still checks its `[UploadLimits]` when it reads or keeps it, and still re-checks the record inside its transaction.
 
@@ -55,10 +56,10 @@ not exist or is not the caller's.
   when it reads them. A policy only widens what can be *staged*.
 - A file staged under a policy can be passed to any handler that takes an `UploadedFile`. That handler's own limits
   decide, as for any upload; nothing ties a file to the policy it was staged under.
-- **Behavior change.** The direct endpoint now enforces its cap through the server's body limit, which raises a lower
-  server default (a `MaxContentLength` above Kestrel's 28.6 MB now works) and lowers a higher one for this route. A
-  multipart upload over the cap is refused while it is read. A tus `PATCH` that carries more bytes than the upload lacks
-  answers `413` instead of having its excess ignored.
+- **Behavior change.** A cap above the server's body limit now works for the upload routes (a `MaxContentLength` above
+  Kestrel's 28.6 MB, a tus upload sent in one `PATCH` larger than that), where it used to fail at the server's limit. A
+  host that relied on a lower server limit to stop uploads below the endpoint's cap now gets the endpoint's cap. A
+  multipart upload over the cap is refused while it is read.
 - The generated client's automatic staging of `File` params uses no policy; a member that needs one is uploaded with
   `uploadFile(file, { policy, resourceId })` and called with the reference.
 
@@ -76,5 +77,9 @@ not exist or is not the caller's.
   a policy name is one query parameter on the same endpoint.
 - **A check delegate on the endpoint options instead of named policies.** It would see every upload and could not
   raise the cap for one kind only.
+- **Setting the request's body limit to the cap exactly, lowering a higher server limit.** It enforces the cap in the
+  server, but an over-cap body the endpoint refuses by its declared length can then no longer be drained: the server
+  closes the connection after the `413`, and a client still sending sees a reset instead of the answer (observed on
+  Linux). With the server's higher limit kept, the server drains the rest and the client reads the `413`.
 - **Answering a refused check with `403`.** It would confirm that the named record exists; the upload endpoints answer
   every ownership failure as not found.

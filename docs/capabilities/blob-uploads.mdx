@@ -204,9 +204,10 @@ content-type allow-list. Ownership is recorded as a dedicated `BlobUploadRequest
 containing the naming separator cannot be forged, and a blob with no recorded owner is denied to everyone.
 The tus transport applies the same owner-exact, fail-closed check to its `HEAD`/`PATCH`/`DELETE`.
 
-The endpoint's `MaxContentLength` is also the request's body-size limit: it is set per request, so a cap above the
-server's default (Kestrel: about 28.6 MB) works for this route without raising it for every route, and a multipart
-file part over the cap is refused while it is read.
+When the server's body-size limit is lower than `MaxContentLength`, the endpoint raises it for that request, so a cap
+above the server's default (Kestrel: about 28.6 MB) works for this route without raising it for every route. It never
+lowers a higher server limit: it enforces the cap itself, and a multipart file part over the cap is refused while it is
+read.
 
 `AddElarionBlobUploads` and `AddElarionResumableBlobUploads` register their options through the options pattern, so
 a later `services.Configure<BlobUploadEndpointOptions>(…)` reaches the endpoints too, and code that needs the
@@ -256,8 +257,8 @@ The client names the policy, and the record it is for, when it uploads:
 - **It decides what may be staged, not what a handler accepts.** The staged file is an ordinary pending upload. The
   handler that takes it declares the larger limit (`[UploadLimits(MaxBytes = 100L * 1024 * 1024)]`) and checks the
   draft again inside its transaction; a handler with a smaller limit refuses the file.
-- **A tus `PATCH` carries at most the bytes the upload still lacks**, which is also that request's body-size limit, so
-  a 100 MB upload may arrive in one `PATCH` without raising the server's limit.
+- **A tus `PATCH` may carry all the bytes the upload still lacks**: its body-size limit is raised to that when the
+  server's is lower, so a 100 MB upload may arrive in one `PATCH` without raising the server's limit for every route.
 
 ### Client adapters
 

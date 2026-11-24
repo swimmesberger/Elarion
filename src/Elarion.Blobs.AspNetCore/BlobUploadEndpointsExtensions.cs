@@ -26,8 +26,8 @@ public static class BlobUploadEndpointsExtensions {
     /// <remarks>
     /// An upload may name an <see cref="UploadPolicy"/> with <c>?policy=</c> (and the record it is for with
     /// <c>&amp;resourceId=</c>): its limits replace the endpoint's, and its check runs before the body is read. The
-    /// request's body-size limit is set to the cap that applies, so a cap above the server's default works for this
-    /// request without raising it for every route.
+    /// request's body-size limit is raised to the cap that applies when the server's is lower, so a cap above the
+    /// server's default works for this request without raising it for every route.
     /// </remarks>
     /// <param name="endpoints">The endpoint route builder to map onto.</param>
     /// <returns>
@@ -147,7 +147,7 @@ public static class BlobUploadEndpointsExtensions {
         }
 
         if (maxBytes is long bodyCap)
-            LimitRequestBody(request.HttpContext, request.HasFormContentType ? bodyCap + FormOverhead : bodyCap);
+            RaiseRequestBodyLimit(request.HttpContext, request.HasFormContentType ? bodyCap + FormOverhead : bodyCap);
 
         string contentType;
         string clientName;
@@ -220,15 +220,18 @@ public static class BlobUploadEndpointsExtensions {
         }
         catch (BadHttpRequestException ex) when (maxBytes is long readCap
                                                  && ex.StatusCode == StatusCodes.Status413PayloadTooLarge) {
-            // The server's body limit (set to the cap above) stopped a body without a declared length.
+            // The server's body limit (raised to the cap above) stopped a body without a declared length.
             return TooLarge(readCap);
         }
     }
 
-    // Sets this request's body-size limit, which the server enforces while the body is read. Only before the first
-    // read, and only where the server lets the application change it.
-    private static void LimitRequestBody(HttpContext context, long limit) {
-        if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } feature)
+    // Raises this request's body-size limit to the cap when the server's is lower, so the cap can be reached. Never
+    // lowers it: the endpoint enforces the cap itself, and a server limit above the cap lets the server drain an
+    // over-cap body after the 413, so the client reads the answer instead of a closed connection. Only before the
+    // first read, and only where the server lets the application change it.
+    private static void RaiseRequestBodyLimit(HttpContext context, long limit) {
+        if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false, MaxRequestBodySize: { } current } feature
+            && current < limit)
             feature.MaxRequestBodySize = limit;
     }
 

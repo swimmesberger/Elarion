@@ -42,11 +42,11 @@ minor releases may include breaking changes.
   [Blob uploads](https://elarion.wimmesberger.dev/docs/capabilities/blob-uploads#upload-policies-a-larger-limit-for-one-kind-of-upload).
 
 ### Changed
-- **The upload endpoints set the request's body-size limit to their cap** (ADR-0106). The direct endpoint limits the
-  request body to `MaxContentLength` (plus 1 MiB of form overhead for multipart, whose file part is capped while it is
-  read), so a cap above the server's default (Kestrel: about 28.6 MB) now works without raising the server's limit for
-  every route, and a server limit above the cap no longer applies to this route. A tus `PATCH` is limited to the bytes
-  the upload still lacks: one that carries more answers `413` instead of having the excess ignored.
+- **The upload endpoints raise the request's body-size limit to their cap** (ADR-0106). When the server's limit is
+  lower, the direct endpoint raises it to `MaxContentLength` (plus 1 MiB of form overhead for multipart) and a tus
+  `PATCH` to the bytes the upload still lacks, so a cap above the server's default (Kestrel: about 28.6 MB) now works
+  without raising the server's limit for every route. A higher server limit is kept. A multipart file part over the cap
+  is now refused while it is read instead of after the whole form is buffered.
 
 ## [0.4.5] - 2026-11-23
 

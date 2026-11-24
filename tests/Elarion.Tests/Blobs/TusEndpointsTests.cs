@@ -291,19 +291,6 @@ public sealed class TusEndpointsTests {
     }
 
     [Fact]
-    public async Task Patch_CarryingMoreThanTheUploadLacks_Returns413_AndKeepsTheOffset() {
-        var ct = TestContext.Current.CancellationToken;
-        await using var host = await StartAsync(ct);
-        var uploadPath = await CreateAsync(host.Client, 4, "doc.bin", "application/octet-stream", ct);
-
-        var patch = await host.Client.SendAsync(Patch(uploadPath, 0, new byte[10]), ct);
-        var head = await host.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, uploadPath), ct);
-
-        patch.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
-        Header(head, "Upload-Offset").Should().Be("0");
-    }
-
-    [Fact]
     public async Task Create_UnderAPolicy_RefusedByItsCheck_Returns404_AndCreatesNoSession() {
         var ct = TestContext.Current.CancellationToken;
         UploadPolicyContext? asked = null;

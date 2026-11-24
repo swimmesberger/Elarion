@@ -333,21 +333,38 @@ public sealed class BlobUploadEndpointsTests {
     }
 
     [Fact]
-    public async Task Upload_UnderAPolicy_TakesItsCap_AndRaisesTheBodyLimitForThatRequestOnly() {
+    public async Task Upload_UnderAPolicy_TakesItsCap_AndRaisesTheServersBodyLimitForThatRequestOnly() {
         var ct = TestContext.Current.CancellationToken;
-        // The server accepts 1,000-byte bodies, the endpoint 500 bytes; the policy 4,000 bytes.
+        // The server accepts 1,000-byte bodies, the endpoint 500 bytes; the policy 4,000 bytes. The bodies refused stay
+        // within the server's limit, which the server drains after the 413, so the client always reads the answer.
         await using var host = await StartAsync(ct, options => options.MaxContentLength = 500,
             services: services => services.AddElarionUploadPolicy("large", policy => policy.MaxBytes = 4000),
             serverBodyLimit: 1000);
 
-        var plain = await host.Client.PostAsync("/_elarion/blobs", Raw(2000), ct);
+        var plain = await host.Client.PostAsync("/_elarion/blobs", Raw(800), ct);
+        var chunkedPlain = await host.Client.SendAsync(Chunked("/_elarion/blobs", 800), ct);
         var underPolicy = await host.Client.PostAsync("/_elarion/blobs?policy=large", Raw(2000), ct);
-        var chunkedOverPolicy = await host.Client.SendAsync(Chunked("/_elarion/blobs?policy=large", 5000), ct);
 
         plain.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
-        underPolicy.StatusCode.Should().Be(HttpStatusCode.OK);
+        chunkedPlain.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        underPolicy.StatusCode.Should().Be(HttpStatusCode.OK, "the policy raised the server's limit for this request");
         host.Store.SavedContent(await underPolicy.Content.ReadAsStringAsync(ct)).Should().HaveCount(2000);
-        chunkedOverPolicy.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+    }
+
+    [Fact]
+    public async Task Upload_UnderAPolicy_OverItsCap_Returns413_AndKeepsTheServersHigherLimit() {
+        var ct = TestContext.Current.CancellationToken;
+        // The server's default limit is far above the policy's cap; the endpoint enforces the cap itself and does not
+        // lower the server's limit, so the server drains the rest of the body and the client reads the 413.
+        await using var host = await StartAsync(ct, services: services =>
+            services.AddElarionUploadPolicy("small", policy => policy.MaxBytes = 4000));
+
+        var declared = await host.Client.PostAsync("/_elarion/blobs?policy=small", Raw(5000), ct);
+        var chunked = await host.Client.SendAsync(Chunked("/_elarion/blobs?policy=small", 5000), ct);
+
+        declared.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        chunked.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        host.Store.SavedLengths.Should().NotContain(5000);
     }
 
     [Fact]
@@ -516,6 +533,8 @@ public sealed class BlobUploadEndpointsTests {
         public byte[] SavedContent(string id) {
             return _blobs[id].Data;
         }
+
+        public IEnumerable<int> SavedLengths => _blobs.Values.Select(blob => blob.Data.Length);
 
         public async Task<BlobRef> SaveAsync(BlobUploadRequest request, Stream content,
             CancellationToken cancellationToken) {
