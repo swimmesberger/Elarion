@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-11-24
+
 ### Added
 - **`QueryAuthorizers.Via`: a rule through an owner** (ADR-0095 amendment). `Via<Email, Contact>(e => e.Links.Select(l =>
   l.Contact), contactRule)` admits the rows with at least one owner the caller may access under the owner type's own
@@ -2748,7 +2750,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.5...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.6...HEAD
+[0.4.6]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.6
 [0.4.5]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.5
 [0.4.4]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.4
 [0.4.3]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.3
