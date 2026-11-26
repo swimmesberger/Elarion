@@ -6,6 +6,7 @@ okf_version: "0.2"
 * [How this knowledge folder is kept](guide.md) - what lives where, the two kinds of pages under docs/, and the rules for the index and the log.
 * [How we work with coding agents](workflow.md) - the process from idea to merge, how much of it a change needs, practices, and which skill does what.
 * [Architecture](architecture.md) - how the framework is shaped and why, with the decisions behind it.
+* [Packaged modules](packaged-modules.md) - proposed direction: modules that own their data and ship as NuGet and npm packages from a module suite, composed by several applications in their own look; what Elarion must add, in order.
 * [Decisions](decisions/index.md) - the architecture decision records and their format.
 * [Glossary](../GLOSSARY.md) - the framework's terms with the words to avoid; at the repository root, where the domain-modeling skills look.
 * [Specifications](../specs/README.md) - the spec format; one file per feature next to it.
