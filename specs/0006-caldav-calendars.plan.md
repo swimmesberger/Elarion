@@ -111,6 +111,9 @@ Three tables, snake_case, mapped onto the application's context by the bundled g
 - **Replace**: stream the set, compute names and ETags, compare against a `(name, etag)` listing of the collection,
   apply the differences under one counter increment per changed object (the journal needs one seq per change for the
   sync answer's ordering; one row lock for the whole replace).
+- **Timestamps**: the publisher never passes a clock value to the writer, so `DTSTAMP` comes from the item or its
+  `LAST-MODIFIED` (ADR-0109); an item with neither fails the write, and publishing throws (FR-009), because a clock
+  value would change the bytes, and so the ETag and the token, on every re-publish.
 - **Object name**: the UID if it matches `[A-Za-z0-9._@-]{1,200}`, else `sha256(uid)` in base32; `.ics` appended. Stable
   across publishes, so re-publishing a UID never moves its URL.
 - **Bounds**: `range_start`/`range_end` from `CalendarRecurrence.Expand` over a capped window (first and last
@@ -151,8 +154,13 @@ Three tables, snake_case, mapped onto the application's context by the bundled g
   matched by the filter tree in `Elarion.CalDav` (`CalDavFilterEvaluator`): `comp-filter`, `prop-filter`,
   `param-filter`, `text-match` with `i;ascii-casemap` and `i;unicode-casemap` (default) and `negate-condition`,
   `is-not-defined`, `time-range` per the RFC 4791 §9.9 table using occurrences from `CalendarRecurrence.Expand`.
-  `expand` and `limit-recurrence-set` rewrite the component tree (the building and cloning of trees agreed with the
-  iCalendar design); partial `calendar-data` prunes it. Both write through the `Elarion.Calendars` writer.
+  `expand` and `limit-recurrence-set` rewrite the component tree (`CalendarComponent` is mutable with public
+  constructors and `Clone()`); partial `calendar-data` prunes a clone. Both write through `CalendarWriter`. The
+  `time-range` rows of the RFC table pick their rule from `CalendarOccurrence.EndKind` (`Stated`, `Duration`,
+  `DefaultDay`, `DefaultZero`); recurring `VTODO`s expand with `DUE` as the end; the `VALARM` test uses
+  `CalendarAlarm.GetTriggerTimes(occurrence)`; floating times use `CalendarExpandOptions.FloatingTimeZone` set to the
+  calendar's time zone. A request with `CalDAV-Timezones: F` (RFC 7809) is answered with
+  `CalendarWriteOptions.IncludeTimeZones = false`.
 - `free-busy-query`: occurrences of every `VEVENT` without `TRANSP:TRANSPARENT` and not `CANCELLED`, merged into one
   `VFREEBUSY` built on the tree.
 - Host (`MapElarionDav`): `MapMethods` on one catch-all route below the prefix for `OPTIONS`, `GET`, `HEAD`,
