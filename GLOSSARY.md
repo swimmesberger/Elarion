@@ -320,6 +320,30 @@ alias. A property the mapping cannot handle is a build error. Reading keeps ever
 carries, and reports a problem in the file as a coded, located error in the result, never as an exception.
 _Avoid_: Excel model, sheet DTO, export row, import row
 
+**Published calendar**:
+A calendar whose objects an application publishes into Elarion's store (`ICalendarPublisher`) in the transaction that
+changed its own data, and which Elarion serves to calendar apps over CalDAV and as an ICS feed, with exact sync. It
+is a projection of the application's data, read-only to the apps; the application stays the source.
+_Avoid_: shared calendar (sharing is the calendar source's decision), calendar export, CalDAV collection (in
+application code)
+
+**Calendar source**:
+A query request implementing `ICalendarSource<TSelf>` whose handler returns the published calendars of that source
+the current user may see. It decides access per calendar through the handler pipeline, so authorization, resource
+rules, feature gates and module enablement apply to calendar apps as to the application.
+_Avoid_: calendar provider, calendar backend, calendar collection
+
+**App password**:
+A credential Elarion issues to a person for one device or client: a random secret returned once, stored as a hash,
+revocable on its own, and accepted only by the routes of its scope (a calendar app over HTTP Basic, or one feed).
+It never signs in to the application itself.
+_Avoid_: API key, token (for the Basic credential), device password
+
+**Feed token**:
+An app password scoped to one published calendar and carried in the path of its ICS feed URL, for calendar apps that
+can subscribe to a URL but cannot send a password.
+_Avoid_: secret link, calendar token, webcal password
+
 **Migration plan**:
 The one ordered sequence in which SQL scripts, C# code steps and EF migrations run, with one version
 sequence, one history and one lock; roll-forward only.

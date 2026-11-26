@@ -21,6 +21,7 @@ okf_version: "0.2"
 * [Live dashboards and fan-out](research/2026-10-25-live-dashboards-and-fan-out.md) - how other systems deliver, fan out and throttle live updates over a relational database; input for ADR-0091.
 * [Typst in-process concurrency](research/2026-11-18-typst-in-process-concurrency.md) - profiling of Typst compiled in-process under concurrent load, and the upstream fix; input for ADR-0094.
 * [XLSX libraries for NativeAOT](research/2026-11-24-xlsx-libraries-for-native-aot.md) - which .NET spreadsheet readers and writers are AOT-compatible and maintained, and where typed row mapping breaks under AOT; input for ADR-0108.
+* [CalDAV clients and .NET libraries](research/2026-11-26-caldav-servers-clients-and-dotnet.md) - what iOS, macOS, Thunderbird, DAVx5 and Outlook require of a CalDAV server, the quirks of the servers a client meets, and which .NET libraries fit NativeAOT; input for ADR-0111.
 
 # Published documentation
 

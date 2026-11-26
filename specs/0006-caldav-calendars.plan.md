@@ -1,0 +1,264 @@
+---
+type: Plan
+title: "Plan 0006: CalDAV calendars"
+description: "How the CalDAV support of spec 0006 is built: projects, public surface, the published-collection store and its journal, the WebDAV dispatcher and host, calendar sources, feeds, app passwords, the client, tests and slices."
+generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T18:30:00Z }
+status: draft
+---
+# Plan 0006: CalDAV calendars
+
+How [spec 0006](0006-caldav-calendars.md) is built. The decisions behind it are
+[ADR-0111](../docs/decisions/0111-caldav.md); the calendar model is `Elarion.Calendars`
+([ADR-0109](../docs/decisions/0109-icalendar-model-reader-and-writer.md)), which must ship first or together with
+slice 3. The evidence for every client rule below is the research note
+[CalDAV clients and .NET libraries](../docs/research/2026-11-26-caldav-servers-clients-and-dotnet.md).
+
+## Projects
+
+| Project | Notes |
+| --- | --- |
+| `src/Elarion.WebDav` | `IsAotCompatible`. XML codec, dispatcher, properties, `sync-collection`, store seam, collection-source seam. |
+| `src/Elarion.WebDav.EntityFrameworkCore` (+ `.Generators`) | Store and journal; `[GenerateElarionDavStore]` on the application's `DbContext` (the pattern of `[GenerateElarionResourceGrants]`). |
+| `src/Elarion.WebDav.AspNetCore` | `MapElarionDav()`, `/.well-known/*`, method routing, scope seeding, cross-origin exemption. |
+| `src/Elarion.CalDav` | `IsAotCompatible`. Calendar sources, `ICalendarPublisher`, calendar properties and reports, feeds, `CalDavClient`. |
+| `src/Elarion.AppPasswords` | `IsAotCompatible`. `IAppPasswords`, hashing, `IAppPasswordStore` and `IAppPasswordPrincipalFactory` seams. |
+| `src/Elarion.AppPasswords.EntityFrameworkCore` (+ `.Generators`) | Store; `[GenerateElarionAppPasswords]`. |
+| `src/Elarion.AppPasswords.AspNetCore` | `AddElarionAppPasswordAuthentication()`: the Basic and feed-token scheme; an Identity principal factory as `AddElarionIdentityAppPasswordPrincipals<TUser>()`. |
+| `tests/Elarion.Tests/WebDav`, `CalDav`, `AppPasswords` | One folder per package, as `Spreadsheets/`. |
+| `samples/` | The NativeAOT sample (SC-005) gains a published calendar and a feed. |
+
+All runtime projects build for `net10.0` and `net11.0`. No outside package beyond EF Core relational in the EF projects.
+
+## Public surface
+
+```csharp
+// --- Elarion.CalDav: declaring a source (in a module) ---
+public sealed record MyShiftCalendars : ICalendarSource<MyShiftCalendars> {
+    public static string SourceName => "shifts";
+}
+
+[Handler]
+[RequirePermission("shifts", Verbs.Read)]
+public sealed class ListMyShiftCalendars(ICurrentUser user)
+    : IHandler<MyShiftCalendars, Result<CalendarSourceListing>> {
+    public ValueTask<Result<CalendarSourceListing>> HandleAsync(MyShiftCalendars query, CancellationToken ct) =>
+        ValueTask.FromResult(Result.Success(new CalendarSourceListing([
+            new PublishedCalendarInfo(Key: $"u-{user.Id}", DisplayName: "My shifts") {
+                Color = "#2E7D32", Components = CalendarComponentKinds.Event, TimeZone = "Europe/Vienna",
+            },
+        ])));
+}
+
+// module ConfigureServices
+services.AddElarionCalendarSource<MyShiftCalendars>();
+
+// --- publishing, inside a command handler ---
+public sealed class CreateShift(AppDbContext db, ICalendarPublisher calendars) {
+    public async ValueTask<Result<Guid>> HandleAsync(Command command, CancellationToken ct) {
+        // ... write the shift
+        await calendars.PublishAsync(new CalendarAddress("shifts", $"u-{shift.UserId}"), ToEvent(shift), ct);
+        return Result.Success(shift.Id);
+    }
+}
+// also: RemoveAsync(address, uid, ct); ReplaceAsync(address, IAsyncEnumerable<CalendarObject>, ct)
+// CalendarObject: implicit from Elarion.Calendars' CalendarEvent / CalendarTodo / a component tree with one UID.
+
+// --- host ---
+builder.Services.AddElarionWebDav(builder.Configuration);
+builder.Services.AddElarionCalDav(builder.Configuration);
+builder.Services.AddElarionAppPasswords(builder.Configuration);
+builder.Services.AddAuthentication().AddElarionAppPasswordAuthentication();
+app.MapElarionDav();                      // /dav, /.well-known/caldav, feeds; requires the app-password scheme
+
+// --- app passwords, inside the application's own-account handlers ---
+AppPasswordIssued issued = await appPasswords.CreateAsync(user.Id, "iPhone", AppPasswordScope.Dav, ct);
+AppPasswordIssued feed   = await appPasswords.CreateAsync(user.Id, "Outlook", AppPasswordScope.CalendarFeed(address), ct);
+Uri feedUrl = davLinks.FeedUrl(feed);     // https://host/dav/feeds/<secret>.ics
+
+// --- client ---
+var client = new CalDavClient(httpClient, new CalDavClientOptions {
+    Authorization = ct => ValueTask.FromResult(new AuthenticationHeaderValue("Bearer", token)),
+});
+CalDavAccountResult account = await client.DiscoverAsync(new Uri("https://caldav.example.com"), ct);
+CalDavSyncResult step = await client.SyncAsync(account.Value.Calendars[0], previousState, ct);
+// step.Changed: IReadOnlyList<CalDavObject(Name, ETag, CalendarReadResult)>; step.Removed; step.State (string-serializable)
+CalDavWriteResult put = await client.PutAsync(calendar, name, calendarObject, ifMatch: etag, ct);
+```
+
+Options bags: `WebDavOptions` (prefix, XML limits: 1 MiB body, depth 32, 10,000 elements; journal retention 90 days
+and 10,000 rows per calendar; max multiget hrefs 1,000), `CalDavOptions` (calendar-data limits passed to
+`CalendarReadOptions`, expansion caps per report, feed enabled), `AppPasswordOptions` (prefix `elap_`, max per user 10,
+last-use interval 15 minutes), `CalDavClientOptions` (response limit 32 MiB, multiget batch 100, objects per step
+5,000, timeouts).
+
+## The store
+
+Three tables, snake_case, mapped onto the application's context by the bundled generator; published names are
+`elarion_dav_collections`, `elarion_dav_objects`, `elarion_dav_changes`.
+
+| Table | Columns | Keys and indexes |
+| --- | --- | --- |
+| collections | `id` (uuid v7), `kind` (`calendar`), `source`, `key`, `sync_seq` bigint, `low_water` bigint | unique (`kind`, `source`, `key`) |
+| objects | `collection_id`, `name`, `uid`, `etag`, `content` bytea, `content_type`, `range_start` timestamptz null, `range_end` timestamptz null, `size` | pk (`collection_id`, `name`); unique (`collection_id`, `uid`); index (`collection_id`, `range_start`, `range_end`) |
+| changes | `collection_id`, `seq`, `name`, `op` (1 added, 2 changed, 3 removed) | pk (`collection_id`, `seq`) |
+
+- **Publish**: compute bytes and ETag in memory; select the stored ETag; equal → return. Else `UPDATE collections SET
+  sync_seq = sync_seq + 1 … RETURNING sync_seq` (row lock serializes concurrent publishers of one calendar), upsert the
+  object, insert the change row, delete change rows of that collection older than the retention or beyond the row cap
+  and set `low_water` to the smallest remaining seq minus one. A missing collection row is inserted with `ON CONFLICT DO
+  NOTHING` first. All through the application's `DbContext` connection and transaction (the pattern of
+  `Elarion.Blobs.PostgreSql`), so FR-005 holds without a second connection.
+- **Replace**: stream the set, compute names and ETags, compare against a `(name, etag)` listing of the collection,
+  apply the differences under one counter increment per changed object (the journal needs one seq per change for the
+  sync answer's ordering; one row lock for the whole replace).
+- **Object name**: the UID if it matches `[A-Za-z0-9._@-]{1,200}`, else `sha256(uid)` in base32; `.ics` appended. Stable
+  across publishes, so re-publishing a UID never moves its URL.
+- **Bounds**: `range_start`/`range_end` from `CalendarRecurrence.Expand` over a capped window (first and last
+  occurrence; `range_end` null for an unbounded rule); floating times widened by ±14 hours; a component kind without a
+  time (a `VTODO` with neither `DTSTART` nor `DUE`) stores nulls and is always a candidate.
+- **Sync token**: `urn:elarion:sync:{collection id}:{seq}`. Parsing checks the collection id (foreign → invalid) and
+  `seq >= low_water` (else invalid).
+- **Seam**: `IDavCollectionStore` in `Elarion.WebDav` (list members with ETags, get objects by names, changes since
+  seq, candidates by range, publish, remove, replace). The EF store is its only implementation now; tests run it on
+  PostgreSQL through Testcontainers, never on an in-memory provider.
+
+## The WebDAV dispatcher and host
+
+- `Elarion.WebDav` exposes `DavDispatcher.HandleAsync(DavRequest, IServiceProvider, CancellationToken) →
+  DavResponse`: a method, a path below the prefix, headers it needs (`Depth`, `If-Match`, `If-None-Match`, `Brief`,
+  `Prefer`), and the body as a `Stream`. The response writes itself to a `Stream`. No ASP.NET type crosses the seam,
+  so dispatcher tests run without a server.
+- Path resolution: `principals/{user}/`, `calendars/{user}/`, `calendars/{user}/{source}.{key}/`,
+  `…/{name}.ics`, `feeds/{secret}.ics`. `{user}` must equal `ICurrentUser.Id` (else 404, FR-012). Protocol modules
+  (CalDAV now, CardDAV later) register the path segments and properties they own through
+  `IDavProtocol` implementations; the host does not know them.
+- Calendar sources are resolved once per request: every registered `ICalendarSource<T>` handler is invoked through
+  `HandlerInvoker` in the request's dispatch scope (FR-011); `NotFound`, `Forbidden` and `Unauthorized` from a source
+  mean "no calendars from this source", any other error answers `500` through the framework's error answer. The
+  result is a request-scoped map `address → PublishedCalendarInfo`.
+- XML: `XmlReader` with `DtdProcessing.Prohibit`, `XmlResolver = null`, `MaxCharactersInDocument` from the body limit,
+  a depth counter; parsed into small request records (`PropFindRequest`, `SyncCollectionRequest`,
+  `CalendarQueryRequest`, `MultigetRequest`, `FreeBusyRequest`). Unknown elements are ignored where the RFCs allow it.
+  Responses are written with `XmlWriter` (async, UTF-8, no BOM), with namespace prefixes `D`, `C`, `CS`, `ICAL`
+  fixed so diffs in tests stay readable. `calendar-data` is written as text content of the object's bytes.
+- Properties are a table per resource kind: name → writer, so `allprop`, `propname` and `prop` share one path and an
+  unknown property lands in the `404` propstat (FR-017).
+- `sync-collection`: `sync-level` 1 only (`infinity` → `403` with the `sync-traversal-supported` precondition of
+  RFC 6578, since calendars have no child collections); a `limit` lower than the change count answers the first N with a token at the Nth change and
+  `507` on the request-URI, which DAVx5 and Thunderbird continue from (the research note's Nextcloud finding shows why
+  silently cutting is wrong).
+- `calendar-query`: candidates by range from the store, then each candidate parsed with `Elarion.Calendars` and
+  matched by the filter tree in `Elarion.CalDav` (`CalDavFilterEvaluator`): `comp-filter`, `prop-filter`,
+  `param-filter`, `text-match` with `i;ascii-casemap` and `i;unicode-casemap` (default) and `negate-condition`,
+  `is-not-defined`, `time-range` per the RFC 4791 §9.9 table using occurrences from `CalendarRecurrence.Expand`.
+  `expand` and `limit-recurrence-set` rewrite the component tree (the building and cloning of trees agreed with the
+  iCalendar design); partial `calendar-data` prunes it. Both write through the `Elarion.Calendars` writer.
+- `free-busy-query`: occurrences of every `VEVENT` without `TRANSP:TRANSPARENT` and not `CANCELLED`, merged into one
+  `VFREEBUSY` built on the tree.
+- Host (`MapElarionDav`): `MapMethods` on one catch-all route below the prefix for `OPTIONS`, `GET`, `HEAD`,
+  `PROPFIND`, `REPORT`, and the write methods (answered `403` by the dispatcher); `/.well-known/caldav` mapped at the
+  root (not inside the group) redirecting `301` to the prefix for every method (FR-015). The group requires the
+  schemes named in `WebDavHostOptions.AuthenticationSchemes` (default: the app-password scheme), calls `SeedScope` after
+  authentication so `ICurrentUser` holds the DAV principal (the friction the consuming application reported), and
+  carries an endpoint marker that `UseElarionCrossOriginProtection` skips (FR-035). The feed path is anonymous at the
+  ASP.NET level up to the scheme: the scheme reads the secret from the path itself.
+- Responses stream: `multistatus` is written forward into the response body; objects come from the store as
+  `content` bytes per row, never the whole calendar at once (feeds stream object by object, deduplicating
+  `VTIMEZONE`s by `TZID`, which needs each object's tree parsed once: the feed is the one place that parses every
+  object; acceptable at the tier and cached by the HTTP `ETag` of the feed, which is the collection's seq).
+
+## App passwords
+
+- Secret: prefix + 32 bytes `RandomNumberGenerator`, base64url without padding. Stored: `SHA-256` base64 in a unique
+  index; also `id` (uuid v7), `user_id` (string, as `ICurrentUser.Id`), `name`, `scope`, `created_at`,
+  `last_used_at`. Revoke is a hard delete scoped to the user.
+- `IAppPasswords.VerifyAsync(secret, requiredScope)` → `AppPasswordMatch?` (id, user, scope); writes `last_used_at`
+  only when older than the interval.
+- `IAppPasswordPrincipalFactory.CreateAsync(userId, ct) → ClaimsPrincipal?`: `null` refuses (deactivated, deleted).
+  The Identity default uses `UserManager<TUser>` and `IUserClaimsPrincipalFactory<TUser>`; applications on proxy
+  identity or OIDC implement it from their own user table. The scheme adds the claims `elarion:app_password_id` and
+  `elarion:app_password_scope`.
+- Scheme (`AppPasswordAuthenticationHandler`, hand-written over `AuthenticationHandler<T>`, no outside package):
+  Basic → split at the first colon, the user name ignored, the secret verified with scope `dav`; feed paths → secret
+  from the path, scope must be `calendar-feed:{source}.{key}` and the dispatcher checks it equals the requested
+  calendar. Challenge `401` with `Basic realm="{Realm}", charset="UTF-8"`; forbidden `403` without a challenge.
+  Whether it compiles warning-free under `PublishAot` is checked in slice 1 (the research note could not verify it).
+
+## The client
+
+- `CalDavClient` over an injected `HttpClient`; requests built with the same XML writer, responses read with the same
+  hardened reader and size limits (FR-042).
+- Discovery: `PROPFIND` `current-user-principal` on the base URL; on `404`/`405` or no answer, `/.well-known/caldav`
+  following up to 5 redirects; then `calendar-home-set` from the principal (depth 0; never depth 1 on the principal,
+  which iCloud answers with `400`), then depth 1 on the home.
+- Sync step, with state `{ syncToken?, ctag?, etags: name → etag }` serialized as compact JSON through a source-
+  generated context (base64url string): with a token, `sync-collection`; on `403`/`409`/`412` with
+  `valid-sync-token`, or `507` truncation handled by continuing, as the research note describes per server; without
+  token support, `getctag` then a depth-1 `PROPFIND` of ETags and a diff. Changed names fetched by
+  `calendar-multiget` in batches; servers known to return deleted objects in multiget (Zimbra) are handled by treating a
+  `404` propstat as a removal.
+- Results: `CalDavSyncResult` with `Status` (`Ok`, or a code: `caldav.unauthorized`, `caldav.not_found`,
+  `caldav.server_error` with the status, `caldav.invalid_response`), the objects with their `CalendarReadResult`
+  (errors coded `calendar.*` by the reader), and the state; the state is unchanged unless `Status` is `Ok`.
+- Writes: `PUT` with `If-Match` or `If-None-Match: *`, `DELETE` with `If-Match`; `412` → `caldav.conflict`; the new
+  ETag when the server returns one, else `null` (RFC 4791 §5.3.4), in which case the next sync step fetches it.
+
+## Tests
+
+The seams: `DavDispatcher` in-process (request records in, bytes out), the EF store on Testcontainers PostgreSQL,
+the ASP.NET host through `WebApplicationFactory`, the client against the host of this very package (round trip) and
+against recorded responses of iCloud, Google, Nextcloud, Fastmail and Zimbra quirks.
+
+- One test per acceptance scenario of the spec, named after it.
+- **Client replays**: the discovery and sync sequences of iOS, macOS, Thunderbird, DAVx5 and Evolution, transcribed as
+  request lists from the research note's sources (their code paths, sabre/dav's client notes), each asserted against
+  the host: the status codes, the properties each client reads, the read-only privilege set.
+- **Conformance oracle**: Shiny.AspNet.CalDav as a test-only reference for the XML shapes of the reports (no runtime
+  dependency), and Apple's CalDAVTester scripts (`well-known`, `options`, `propfind`, `sync-report`, `ctag`) run against
+  a sample host in a separate, manually triggered CI job, since they need their own Python tooling.
+- **Sync properties**: a randomized test publishes, changes, removes and replaces objects in random order while a
+  simulated client syncs at random points, with pruning in between; the client's copy must always equal the store
+  after its last sync (FR-006, FR-007, FR-020).
+- **Concurrency**: two publishers of one calendar in parallel transactions; tokens strictly increase and no change is
+  lost; a rolled-back publish leaves no journal row.
+- **Hostile input**: DTD, entity expansion, a 100 MB body, depth 10,000, a `calendar-query` whose expansion exceeds the
+  cap.
+- **AOT**: the NativeAOT sample publishes in CI (`ci: publish the EdgeTelemetry sample with NativeAOT` exists), with
+  `IsAotCompatible` on the three protocol packages.
+- **Benchmarks** in `tests/Elarion.Benchmarks`: an unchanged `sync-collection` on 1,000 objects (SC-004) and a
+  publish of an unchanged object (no write).
+
+## Documentation
+
+- `docs/capabilities/calendars/caldav.mdx` (publishing, sources, feeds, the host, client), `docs/capabilities/app-
+  passwords.mdx`, both in their `meta.json`; `docs/reference/packages.mdx` rows for the seven packages; diagnostics
+  and configuration reference tables; `CHANGELOG.md`; the glossary terms (calendar source, published calendar, app
+  password, feed token) land with this design. The authorization page's sentence that Elarion does not issue
+  credentials gets the two exceptions.
+
+## Slices
+
+Each slice is one pull request, green on its own, in this order:
+
+1. `Elarion.AppPasswords` + EF store + ASP.NET scheme, with the Identity principal factory (FR-028–FR-035). Useful on
+   its own; settles the AOT question of the authentication handler.
+2. `Elarion.WebDav` core: XML codec, dispatcher, properties, principals and home, `OPTIONS`/`PROPFIND`, the store seam
+   and the EF store with journal and `sync-collection` (FR-014–FR-018, FR-020, FR-021, FR-023–FR-025), tested with a
+   test-only collection kind.
+3. `Elarion.CalDav` server: sources, publisher, calendar properties, multiget, `calendar-query`, `free-busy-query`,
+   `expand` (FR-004–FR-013, FR-019, FR-022). Needs `Elarion.Calendars`.
+4. `Elarion.WebDav.AspNetCore` host and well-known, then the client replays and the sample (FR-015, FR-016, FR-032,
+   FR-035; SC-001, SC-002, SC-005).
+5. Feeds (FR-026, FR-027).
+6. `CalDavClient` (FR-036–FR-042).
+
+## Risks
+
+- **Clients we cannot run in CI.** iOS and macOS behaviour rests on documentation and bug trackers; SC-001 is a manual
+  check before release, and the replays encode what we know.
+- **`Elarion.Calendars` timing.** Slice 3 depends on its writer, recurrence engine and tree building; slices 1 and 2
+  do not.
+- **Per-viewer calendars multiply rows.** At 2,000 users with 500 objects each the store holds a million objects;
+  within one PostgreSQL, but the sample should publish per-viewer calendars to keep the cost visible.
+- **Store drift.** A handler that forgets to publish leaves a stale calendar. The capability page shows the pattern of
+  publishing from a domain event consumer in the same transaction, and `ReplaceAsync` as the repair.
