@@ -75,6 +75,12 @@ FlexCel documents that its reporting engine is not fully compatible with NativeA
   `workbook.xml`, `styles.xml` and the relationship parts with `XmlDocument.Load` (which parses DTDs), and throws bare
   framework exceptions (`InvalidDataException`, `XmlException`, …) on broken input. No handling of encrypted `.xls`
   (BIFF `FilePass`) was found.
+- **Spike, 2026-11-26** (the plan of spec 0003 has the full table): on .NET 10 with NativeAOT the library publishes
+  with zero trimming or AOT warnings when the whole assembly is rooted. Its `.xls` reader fails in a static
+  initializer unless `CodePagesEncodingProvider` is registered, and then stays broken for the process. .NET's
+  `ZipArchive` ends an entry's stream at the size the central directory declares, so a lying size truncates the part
+  instead of inflating past it. An entity bomb in `workbook.xml` is stopped by .NET's default entity cap after about
+  170 MB of allocation.
 - **.NET 10** reference assemblies (`Microsoft.NETCore.App.Ref` 10.0.2) contain `ZipArchive.CreateAsync`,
   `ZipArchive.DisposeAsync` and `ZipArchiveEntry.OpenAsync`.
 

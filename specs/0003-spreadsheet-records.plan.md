@@ -192,25 +192,33 @@ visibility, iterate a worksheet's rows, typed cell access). `SylvanWorkbookSourc
 Sylvan.Data.Excel 0.5.8 shows it already skips hidden worksheets (`ReadHiddenWorksheets` defaults to false) in all
 three formats, detects dates by built-in and custom number formats (`GetFormat(i).Kind`), honours the 1904 system,
 reads cached formula values without evaluating them, maps Strict OOXML, and exposes `RowNumber`. What it lacks is
-hardening at the boundary, which the package owns in one pre-pass (below). Task 1 confirms this against fixtures.
+hardening at the boundary, which the package owns in one pre-pass (below). The task-1 spike confirmed this; its
+results are under [Reader spike result](#reader-spike-result).
 
 - **Open once, behind one pre-pass** (FR-069): `OpenAsync` buffers the input (bounded by the upload limits) and detects
-  the format from the magic bytes. `PK` → zip, and the pre-pass inflates every entry once through a counting stream,
-  stopping at `MaxUnpackedBytes` (FR-055) — the library opens a plain `ZipArchive` with no size check — scans the XML
-  parts for `<!DOCTYPE` and refuses one (FR-057: the library loads `workbook.xml`, `styles.xml` and the `.rels` parts
-  with `XmlDocument`, which parses DTDs), and reads each sheet's `state` from `xl/workbook.xml`, because the library
-  treats `veryHidden` as visible (an upstream fix is offered as a small pull request). Then `.xlsb` when
+  the format from the magic bytes. `PK` → zip, and the pre-pass sums the uncompressed sizes the central directory
+  declares and refuses the file above `MaxUnpackedBytes` (FR-055) — .NET's zip reader ends each entry at its declared
+  size, so a lying size truncates the part (an `XmlException`, caught) instead of inflating past it —, scans
+  `workbook.xml`, `styles.xml` and the `.rels` parts for `<!DOCTYPE` and refuses one (FR-057: the library loads them with
+  `XmlDocument`, which parses DTDs; worksheet and shared-string parts already prohibit them), and reads each sheet's
+  `state` from `xl/workbook.xml`, because the library treats `veryHidden` as visible (an upstream fix is offered as a
+  small pull request). Then `.xlsb` when
   `xl/workbook.bin` exists, else `.xlsx`. `D0 CF 11 E0` → compound file: `EncryptedPackage` means password-protected
   (`spreadsheet.unreadable`), else `.xls`. The library gets the verified buffer through its synchronous
   `Create(Stream, type)`, which reads a seekable stream in place; `CreateAsync` would copy it again. Every exception the
   library throws on broken input (`InvalidDataException`, `XmlException`, `InvalidCastException`, …) is caught at the
   adapter and becomes `spreadsheet.unreadable` (FR-049, FR-053). `SpreadsheetReadDocument` keeps the opened source.
+- **Code pages** (FR-028): the library's `.xls` reader needs Windows-1252 in a static initializer; without the
+  code-page provider it fails with a `TypeInitializationException` that stays for the life of the process. The package
+  registers `CodePagesEncodingProvider` (process-wide, idempotent) before its first read.
 - **Worksheet choice** (FR-029, FR-067): first visible unless named; the library's hidden-sheet skipping plus the
   pre-pass's `veryHidden` list for `.xlsx`.
 - **Header row and columns** (FR-030–FR-033, FR-005, FR-036): first non-empty row unless named; trim and invariant
   lower case; header, then alias unless the own header is present; `spreadsheet.column_duplicated`,
   `spreadsheet.column_missing`. A `ColumnMap` holds an ordinal per record column or −1.
-- **Cells** (FR-037–FR-046): typed getters per kind; the lenient rules in one internal `LenientText` class (grouping in
+- **Cells** (FR-037–FR-046): typed getters per kind; a `TimeOnly` comes from the fractional part of the number
+  (`GetDouble`), because the library's `GetDateTime` of a time-only value depends on the date system and the file
+  format (year 1, 1900 or 1904), and a value of a day or more is an error for it; the lenient rules in one internal `LenientText` class (grouping in
   threes, `d.M.yy` as 20yy, configured formats and words, ISO offsets). Number cells to `decimal` via `(decimal)double`
   (15 significant digits); number text without an exponent.
 - **Every row** (FR-034, FR-052, FR-056): row number, cells, errors, record when error-free; no error cap; the row limit
@@ -290,11 +298,29 @@ If a fix needs a fork, or `.xls` cannot be bounded from outside, switch to an ow
 interface and amend FR-028 to drop `.xls` and `.xlsb` (with the ADR and the upload example), rather than keeping the
 library for the binary formats only: two readers in parity cost more than either.
 
+## Reader spike result
+
+Run on 2026-11-26 against Sylvan.Data.Excel 0.5.8, .NET 10.0.404, osx-arm64, with a throwaway probe outside the
+repository. **Go**, with the corpus still to complete in task 6.
+
+| Criterion | Result |
+| --- | --- |
+| 1. Corpus through the public API | Passes for hand-written `.xlsx` (shared and rich-text strings, inline strings, cells without references, custom and locale date formats, `[h]:mm`, the text format, booleans, error cells, formulas with and without cached values, a `_x0001_` escape, missing rows), the same file saved by LibreOffice as `.xlsx` and `.xls`, the 1904 system in `.xlsx` and `.xls`, and Strict OOXML. Not yet covered: `.xlsb` (LibreOffice cannot write it), files saved by Excel and Google Sheets, password-protected files (LibreOffice's headless conversion ignored the password) |
+| 2. Hostile files | All caught, none hung: truncated zip and garbage BIFF (`InvalidDataException`), an entity bomb in `workbook.xml` (`XmlException` after .NET's entity cap, ~170 MB allocated and 0.7 s — the DOCTYPE pre-scan avoids this), DTDs in `styles.xml` and `.rels` (accepted silently — the pre-scan refuses them), a DTD in a worksheet (prohibited by the library), a 400 MB part declared as 1,000 bytes (truncated at 1,000, `XmlException`), the same part declared honestly (streamed in 1.2 s with ~1 MB allocated; the size check refuses it first) |
+| 3. NativeAOT | `dotnet publish -p:PublishAot=true -p:TrimmerRootAssembly=Sylvan.Data.Excel`: zero warnings with the whole library analyzed; the native binary reads the fixtures identically |
+| 4. Adapter size | Not measured yet; the pre-pass is now a size sum, three DOCTYPE scans and one `state` read, well inside 200 lines |
+
+Findings that shape the code beyond the pre-pass: the code-page registration and the `TimeOnly` rule above; a workbook
+whose sheets are all hidden reports no worksheets (→ `spreadsheet.no_visible_worksheet`); a format with a color and two
+sections (`[Red]dd/mm/yy;[Blue]0.00`) is not recognized as a date (accepted: such a cell reads as a number); a rich-text
+run without `xml:space="preserve"` loses its trailing space, as the format allows; a cell with the text format `@`
+reports its format kind as text even when it holds a number.
+
 ## Risks
 
 - **The reader library may need more workarounds than it saves.** Today they are one pre-pass; task 1 decides with
-  the criteria above, and the internal interface keeps the choice inside the package. Encrypted `.xls` (BIFF
-  `FilePass`) has no handling in the library; its behavior is a hostile fixture of task 1.
+  the criteria above, and the internal interface keeps the choice inside the package. Password-protected `.xlsx` and
+  `.xls` (BIFF `FilePass`) are still untested; they join the corpus in task 6, saved from Excel.
 - **The validator seam changes** (`HasMetadata`): every `IRequestValidator` implementation must answer it; the only
   one shipped is `Elarion.Validation`'s, and a default interface member answering `true` would fail open, so it is
   abstract.

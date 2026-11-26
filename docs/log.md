@@ -1,5 +1,9 @@
 # Update log
 
+## 2026-11-26
+
+* **Update**: the reader spike of [plan 0003](../specs/0003-spreadsheet-records.plan.md) passed (zero AOT warnings, every hostile file caught); [ADR-0108](decisions/0108-spreadsheet-records.md), the plan and the [research note](research/2026-11-24-xlsx-libraries-for-native-aot.md) now replace the counted inflation with a declared-size check, because .NET's zip reader ends entries at their declared size, and add the code-page registration the .xls reader needs; .xlsb and Excel- or Google-saved files stay for task 6.
+
 ## 2026-11-24
 
 * **Update**: after a review round, [ADR-0108](decisions/0108-spreadsheet-records.md), [spec 0003](../specs/0003-spreadsheet-records.md) and its [plan](../specs/0003-spreadsheet-records.plan.md) make validation fail closed through a `[ValidationRoot]` marker and a positive metadata question on `IRequestValidator` (`ELVAL004`), fold the writer into one SpreadsheetWorkbook type with options, open an upload once for several worksheets, let the application add located errors, cap and format ToAppError, write text columns with the text format, refuse unrepresentable values, and bound the reader with one pre-pass (counted inflation, DTD refusal, veryHidden) in front of Sylvan.Data.Excel, which a source read confirmed and the [research note](research/2026-11-24-xlsx-libraries-for-native-aot.md) records, with go/no-go criteria for the spike; FR-062 to FR-070 added.

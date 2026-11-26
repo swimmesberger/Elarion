@@ -88,9 +88,11 @@ abstractions and Sylvan.Data.Excel, and bundles its generator. It does not depen
 3. **Reading goes through Sylvan.Data.Excel, behind an internal interface.** It reads `.xlsx`, `.xlsb` and `.xls`,
    recognized from the content, takes the first visible worksheet and, as the header row, the first non-empty row,
    unless the read options name others. A workbook is opened once and can then be read as several worksheets and
-   record types. Before the library sees a zip-based file, the reader inflates it once into a buffer while counting the
-   bytes against the unpacked-size limit — declared sizes can lie, and the library inflates internally where no limit
-   can be applied — and hands the library that buffer through its synchronous entry point, which reads it in place. The
+   record types. Before the library sees a zip-based file, the reader refuses it when the entry sizes its central
+   directory declares exceed the unpacked-size limit: the spike showed that .NET's zip reader ends an entry's stream at
+   its declared size, so a size that lies truncates the part instead of inflating past it. The reader hands the library
+   its buffer through the synchronous entry point, which reads it in place, and registers the code-page encodings the
+   library's `.xls` reader needs before its first use. The
    generated reader resolves the columns by header and alias once per
    worksheet and reads cells through the library's typed `DbDataReader` getters, never through Sylvan.Data's binder. No
    Sylvan type appears in the public API, so replacing the reader (a fork, another library, an own reader) changes
@@ -182,7 +184,8 @@ needs a formatted report references a spreadsheet library itself; nothing in the
   remains is the zip and XML writing — the cheapest part to own. Rejected: a dependency for the smallest part.
 - **An own reader as well.** Reconsidered after a source read of the library: it already handles hidden sheets, date
   detection by custom formats, the 1904 system, cached formulas and Strict OOXML in three formats, and what it lacks
-  (bounded inflation, DTD refusal, `veryHidden`) is one pre-pass the package owns in front of any reader. Removes the
+  (a size check, DTD refusal, `veryHidden`, code-page registration) is one pre-pass the package owns in front of any
+  reader; the spike confirmed this against fixtures and a NativeAOT publish. Removes the
   last dependency, but reading untrusted files from Excel, LibreOffice, Google
   Sheets, Numbers and business software is a long tail: shared strings with rich-text runs, dates recognized only by a
   built-in or custom number format, the 1904 date system, Strict OOXML namespaces, cells without references, cached
