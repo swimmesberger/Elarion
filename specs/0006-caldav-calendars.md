@@ -3,7 +3,7 @@ type: Specification
 title: "Spec 0006: CalDAV calendars"
 description: "What Elarion's CalDAV support must do: publish an application's calendars read-only to iOS, macOS, Thunderbird and Android calendar apps and as ICS feeds, authenticate those apps with app passwords, and sync external CalDAV calendars into an application one step at a time, under NativeAOT."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T18:00:00Z }
-status: draft
+status: stable
 ---
 # Spec 0006: CalDAV calendars
 

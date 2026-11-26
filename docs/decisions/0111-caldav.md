@@ -3,11 +3,11 @@ type: Architecture Decision Record
 title: "ADR-0111: CalDAV — published calendars served from a store, calendar sources as handlers, app passwords, and a sync-step client"
 description: "Elarion serves an application's calendars over CalDAV and as ICS feeds from a framework-owned store the application publishes to in its own transaction, decides who sees which calendar in an ordinary handler, authenticates calendar apps with app passwords over HTTP Basic, and syncs external CalDAV calendars one step at a time, on a WebDAV core that CardDAV can reuse."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T17:30:00Z }
-status: draft
+status: stable
 ---
 # ADR-0111: CalDAV — published calendars served from a store, calendar sources as handlers, app passwords, and a sync-step client
 
-- Status: Proposed
+- Status: Accepted (2026-11-26)
 - Date: 2026-11-26
 - Related: [ADR-0109](0109-icalendar-model-reader-and-writer.md) (the iCalendar model, reader, writer and recurrence
   engine this builds on; `Elarion.Calendars`), [ADR-0110](0110-vcard-contacts.md) (vCard; CardDAV later reuses the

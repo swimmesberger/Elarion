@@ -2,6 +2,7 @@
 
 ## 2026-11-26
 
+* **Update**: [ADR-0111](decisions/0111-caldav.md) accepted and [spec 0006](../specs/0006-caldav-calendars.md) approved, after the pluggable app-password checks and the Elarion.Calendars type names were worked in.
 * **Creation**: [ADR-0111](decisions/0111-caldav.md) (proposed), CalDAV and ICS feeds served from a published-calendar store, calendar sources as handlers, app passwords and a sync-step client, with [spec 0006](../specs/0006-caldav-calendars.md) and its plan; the [glossary](../GLOSSARY.md) gains published calendar, calendar source, app password and feed token.
 * **Creation**: the research note [CalDAV clients and .NET libraries](research/2026-11-26-caldav-servers-clients-and-dotnet.md), input for ADR-0111.
 * **Update**: [spec 0003](../specs/0003-spreadsheet-records.md) gained FR-071 and FR-072 and [ADR-0108](decisions/0108-spreadsheet-records.md) decision 1 the `[SpreadsheetChoice]` aliases: extra spellings that read as an enum member (an older label, a word without umlauts, a short form) and are never written, after a comparison with an application whose imports accept several spellings per choice.
