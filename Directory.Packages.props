@@ -46,6 +46,8 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.15"/>
     <PackageVersion Include="Microsoft.Extensions.Caching.Postgres" Version="1.2.2"/>
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5"/>
+    <!-- Elarion.Spreadsheets reads .xlsx, .xlsb and .xls through it, behind an internal interface (ADR-0108). -->
+    <PackageVersion Include="Sylvan.Data.Excel" Version="0.5.8"/>
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.4.0"/>
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="11.0.100"/>
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.12.0"/>
@@ -87,6 +89,7 @@
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.15"/>
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.15"/>
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.15"/>
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.15"/>
     <PackageVersion Include="Microsoft.Extensions.Resilience" Version="10.11.0"/>
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.11.0"/>
     <PackageVersion Include="Microsoft.Extensions.Validation" Version="10.0.15"/>
@@ -109,6 +112,7 @@
     <PackageVersion Include="Microsoft.Extensions.Http" Version="11.0.0"/>
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="11.0.0"/>
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="11.0.0"/>
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="11.0.0"/>
     <PackageVersion Include="Microsoft.Extensions.Resilience" Version="11.0.0"/>
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0"/>
     <PackageVersion Include="Microsoft.Extensions.Validation" Version="11.0.0"/>

@@ -35,6 +35,8 @@
     <!-- Long-running-test detection: with diagnostics on, the runner names any test exceeding the
          threshold — a hanging test is identified instead of silently stalling the whole run. -->
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest"/>
+    <!-- Workbooks saved by other applications, which the spreadsheet reader tests read from the output directory. -->
+    <None Include="Spreadsheets/Fixtures/**" CopyToOutputDirectory="PreserveNewest"/>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Elarion.Abstractions/Elarion.Abstractions.csproj"/>
