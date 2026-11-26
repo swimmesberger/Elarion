@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using Elarion.Abstractions;
 using Elarion.Spreadsheets.Generated;
 using Elarion.Spreadsheets.Writing;
 
@@ -64,13 +65,7 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         ArgumentNullException.ThrowIfNull(destination);
         if (!destination.CanWrite) throw new ArgumentException("The destination stream is not writable.", nameof(destination));
 
-        options ??= SpreadsheetWriteOptions.Default;
-        ArgumentOutOfRangeException.ThrowIfNegative(options.WidthSampleRows, nameof(options));
-        ArgumentOutOfRangeException.ThrowIfNegative(options.DropdownRows, nameof(options));
-        if (!(options.MaxColumnWidth >= 1))
-            throw new ArgumentOutOfRangeException(nameof(options), options.MaxColumnWidth, "MaxColumnWidth must be one or more.");
-
-        return new SpreadsheetWorkbook(destination, options);
+        return new SpreadsheetWorkbook(destination, ValidateOptions(options));
     }
 
     /// <summary>Writes <paramref name="records"/> as a workbook with one worksheet to <paramref name="destination"/>.</summary>
@@ -103,6 +98,134 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         await using (workbook.ConfigureAwait(false)) {
             await workbook.AddWorksheetAsync(records, null, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Writes <paramref name="records"/> as a workbook with one worksheet into memory and returns it as a file with the
+    /// <c>.xlsx</c> content type, for a handler that returns a small export to any transport.
+    /// </summary>
+    /// <param name="records">The records, one row each.</param>
+    /// <param name="fileName">The name the caller saves the file with, such as <c>contacts.xlsx</c>.</param>
+    /// <param name="options">The write options.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <remarks>
+    /// The whole workbook is held in memory, as an <see cref="ElarionFile"/> always is; for a large export return
+    /// <see cref="ToStreamedFile{T}"/> from an HTTP endpoint instead.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// return await SpreadsheetWorkbook.ToFileAsync(contacts, "contacts.xlsx", cancellationToken: ct);
+    /// </code>
+    /// </example>
+    public static async ValueTask<ElarionFile> ToFileAsync<T>(
+        IEnumerable<T> records,
+        string fileName,
+        SpreadsheetWriteOptions? options = null,
+        CancellationToken cancellationToken = default) where T : class, ISpreadsheetRecord<T> {
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+
+        using var stream = new MemoryStream();
+        await WriteAsync(stream, records, options, cancellationToken).ConfigureAwait(false);
+        return ToFile(stream, fileName);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="records"/> as a workbook with one worksheet into memory and returns it as a file with the
+    /// <c>.xlsx</c> content type, for a handler that returns a small export to any transport.
+    /// </summary>
+    /// <param name="records">The records, one row each, produced one at a time.</param>
+    /// <param name="fileName">The name the caller saves the file with, such as <c>contacts.xlsx</c>.</param>
+    /// <param name="options">The write options.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <remarks>
+    /// The whole workbook is held in memory, as an <see cref="ElarionFile"/> always is; for a large export return
+    /// <see cref="ToStreamedFile{T}"/> from an HTTP endpoint instead.
+    /// </remarks>
+    public static async ValueTask<ElarionFile> ToFileAsync<T>(
+        IAsyncEnumerable<T> records,
+        string fileName,
+        SpreadsheetWriteOptions? options = null,
+        CancellationToken cancellationToken = default) where T : class, ISpreadsheetRecord<T> {
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+
+        using var stream = new MemoryStream();
+        await WriteAsync(stream, records, options, cancellationToken).ConfigureAwait(false);
+        return ToFile(stream, fileName);
+    }
+
+    /// <summary>
+    /// A streamed file with the <c>.xlsx</c> content type whose workbook holds <paramref name="records"/> in one
+    /// worksheet, written to the response body as the records come, for an HTTP endpoint that exports more than fits a
+    /// buffered <see cref="ElarionFile"/>.
+    /// </summary>
+    /// <param name="records">
+    /// The records, enumerated once when the response is written: after the handler's pipeline and transaction, so they
+    /// must not depend on a scope that has ended by then.
+    /// </param>
+    /// <param name="fileName">The name the client saves the file with, such as <c>contacts.xlsx</c>.</param>
+    /// <param name="options">The write options.</param>
+    /// <example>
+    /// <code>
+    /// return SpreadsheetWorkbook.ToStreamedFile(db.Contacts.AsNoTracking().Select(…).AsAsyncEnumerable(), "contacts.xlsx");
+    /// </code>
+    /// </example>
+    public static ElarionStreamedFile ToStreamedFile<T>(
+        IAsyncEnumerable<T> records,
+        string fileName,
+        SpreadsheetWriteOptions? options = null) where T : class, ISpreadsheetRecord<T> {
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+        options = ValidateOptions(options);
+
+        return ElarionStreamedFile.FromWriter(
+            (body, cancellationToken) => WriteAsync(body, records, options, cancellationToken).AsTask(),
+            ContentType) with { FileName = fileName };
+    }
+
+    /// <summary>
+    /// A streamed file with the <c>.xlsx</c> content type whose workbook <paramref name="write"/> fills with any number
+    /// of worksheets, written to the response body as they come.
+    /// </summary>
+    /// <param name="fileName">The name the client saves the file with, such as <c>customers.xlsx</c>.</param>
+    /// <param name="write">
+    /// Adds the worksheets; it runs when the response is written, after the handler's pipeline and transaction, and
+    /// must add at least one. The workbook is completed after it returns; do not dispose it.
+    /// </param>
+    /// <param name="options">The write options.</param>
+    /// <example>
+    /// <code>
+    /// return SpreadsheetWorkbook.ToStreamedFile("customers.xlsx", async (workbook, ct) => {
+    ///     await workbook.AddWorksheetAsync(contacts, cancellationToken: ct);
+    ///     await workbook.AddWorksheetAsync(bankAccounts, cancellationToken: ct);
+    /// });
+    /// </code>
+    /// </example>
+    public static ElarionStreamedFile ToStreamedFile(
+        string fileName,
+        Func<SpreadsheetWorkbook, CancellationToken, ValueTask> write,
+        SpreadsheetWriteOptions? options = null) {
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+        ArgumentNullException.ThrowIfNull(write);
+        options = ValidateOptions(options);
+
+        return ElarionStreamedFile.FromWriter(
+            async (body, cancellationToken) => {
+                var workbook = new SpreadsheetWorkbook(body, options);
+                try {
+                    await write(workbook, cancellationToken).ConfigureAwait(false);
+                }
+                catch {
+                    // Close what was written without the dispose's "no worksheet" error hiding the writer's own.
+                    workbook._faulted = true;
+                    await workbook.DisposeAsync().ConfigureAwait(false);
+                    throw;
+                }
+
+                await workbook.DisposeAsync().ConfigureAwait(false);
+            },
+            ContentType) with { FileName = fileName };
     }
 
     /// <summary>Adds a worksheet holding <paramref name="records"/>, one row each, after the worksheets already added.</summary>
@@ -161,6 +284,21 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         finally {
             await _archive.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    private static SpreadsheetWriteOptions ValidateOptions(SpreadsheetWriteOptions? options) {
+        options ??= SpreadsheetWriteOptions.Default;
+        ArgumentOutOfRangeException.ThrowIfNegative(options.WidthSampleRows, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfNegative(options.DropdownRows, nameof(options));
+        if (!(options.MaxColumnWidth >= 1))
+            throw new ArgumentOutOfRangeException(nameof(options), options.MaxColumnWidth, "MaxColumnWidth must be one or more.");
+
+        return options;
+    }
+
+    // The buffer itself, not a copy: the stream is not used again.
+    private static ElarionFile ToFile(MemoryStream stream, string fileName) {
+        return new ElarionFile(stream.GetBuffer().AsMemory(0, (int)stream.Length), ContentType) { FileName = fileName };
     }
 
     private async ValueTask AddWorksheetCoreAsync<T>(
