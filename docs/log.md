@@ -1,5 +1,9 @@
 # Update log
 
+## 2026-11-26
+
+* **Creation**: proposed [ADR-0110](decisions/0110-vcard-contacts.md) — an opt-in Elarion.VCards package: a fixed contact model instead of a generated record mapping (a documented exception to the file-format rule), Elarion's own bounded content-line reader and writer instead of FolkerKinzel.VCards, a per-value encoding ladder (BOM, CHARSET, UTF-8, a configurable Windows-1252 fallback) without global provider registration, a read result that keeps every contact and locates each coded problem by contact and line, inline photos sniffed and bounded with photo URLs never fetched, vCard 3.0 written by default and 4.0 on request; with [spec 0005](../specs/0005-vcard-contacts.md), its [plan](../specs/0005-vcard-contacts.plan.md), the research note [vCard libraries and producers](research/2026-11-26-vcard-libraries-and-producers.md) and the [glossary](../GLOSSARY.md) term *vCard contact*; not implemented.
+
 ## 2026-11-24
 
 * **Update**: [ADR-0106](decisions/0106-upload-policies-choose-the-staging-limits.md) now raises the request's body-size limit to the cap and never lowers it, and records why: a lowered limit keeps the server from draining an over-cap body, so a client could see a reset instead of the 413.

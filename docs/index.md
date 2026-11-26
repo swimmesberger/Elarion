@@ -20,6 +20,7 @@ okf_version: "0.2"
 * [Change detection for live queries](research/2026-10-25-change-detection-for-live-queries.md) - where frameworks detect that data changed, what each layer misses, and when it publishes; input for ADR-0091.
 * [Live dashboards and fan-out](research/2026-10-25-live-dashboards-and-fan-out.md) - how other systems deliver, fan out and throttle live updates over a relational database; input for ADR-0091.
 * [Typst in-process concurrency](research/2026-11-18-typst-in-process-concurrency.md) - profiling of Typst compiled in-process under concurrent load, and the upstream fix; input for ADR-0094.
+* [vCard libraries and producers](research/2026-11-26-vcard-libraries-and-producers.md) - which .NET vCard libraries are AOT-safe and safe against hostile uploads, and what Android, Google, Apple, Outlook, Thunderbird and Nextcloud write into .vcf files; input for ADR-0110.
 
 # Published documentation
 

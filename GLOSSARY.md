@@ -308,6 +308,14 @@ byte, which file it is or that it is refused. Only HTTP carries it; JSON surface
 pending blob.
 _Avoid_: file stream, push stream, download result
 
+**vCard contact**:
+A contact in the fixed model of `Elarion.VCards` (`VCardContact`), the same for reading and writing: names,
+organization, typed phone numbers, e-mail, postal and web addresses, dates that may lack a year, a photo, and the
+properties the model does not map. Reading an uploaded `.vcf` of any version keeps every contact and reports each
+problem as a coded problem located by contact and line, never as an exception. The application maps it to its own
+entity in code.
+_Avoid_: vCard record, contact DTO, card (for the model)
+
 **Migration plan**:
 The one ordered sequence in which SQL scripts, C# code steps and EF migrations run, with one version
 sequence, one history and one lock; roll-forward only.
