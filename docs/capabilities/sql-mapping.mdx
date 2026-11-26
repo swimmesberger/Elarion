@@ -260,7 +260,7 @@ decorator.
 | `QueryUnbufferedAsync<T>($"…")` | `IAsyncEnumerable<T>` — unbuffered streaming for large exports |
 | `ExecuteAsync($"…")` / `ExecuteScalarAsync<T>($"…")` | affected rows / first scalar |
 | `InsertAsync(row)` | one full-row insert |
-| `InsertManyAsync(rows, sqlSuffix?)` | batch insert in one transaction (a reused prepared command; `sqlSuffix` appends `ON CONFLICT …`) |
+| `InsertManyAsync(rows, sqlSuffix?)` | batch insert in one transaction (one command per row on the auto-prepared statement; `sqlSuffix` appends `ON CONFLICT …`) |
 
 `InsertManyAsync` is a *convenience* batch (Npgsql auto-prepare), not bulk COPY — for high-throughput
 bulk load on the **EF tier**, use the binary-COPY path ([bulk operations](/docs/capabilities/bulk-operations),

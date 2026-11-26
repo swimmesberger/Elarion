@@ -250,7 +250,7 @@ The framework's contribution beyond the handoff is the flush target, per host ti
 | Tier | Batched upsert path |
 | --- | --- |
 | EF | [`ExecuteInsertAsync`](/docs/capabilities/bulk-operations) with `OnConflict = BulkInsertConflictBehavior.Update` — binary COPY staged through a temp table, merged with native `ON CONFLICT` |
-| EF-free / AOT | [`InsertManyAsync`](/docs/capabilities/sql-mapping#reads-and-writes) with an `ON CONFLICT …` suffix — one reused prepared command per flush; source-generated binary COPY for this tier is proposed in [ADR-0068](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0068-aot-sql-binary-copy.md) |
+| EF-free / AOT | [`InsertManyAsync`](/docs/capabilities/sql-mapping#reads-and-writes) with an `ON CONFLICT …` suffix — one auto-prepared statement per flush; source-generated binary COPY for this tier is proposed in [ADR-0068](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0068-aot-sql-binary-copy.md) |
 
 There is still deliberately no `DirtySweep<T>` helper. The dirty bit and the iteration structure
 belong to the application's entity representation, and any framework intermediary between the update

@@ -157,7 +157,8 @@ public static class SqlSessionExtensions {
     }
 
     /// <summary>
-    /// Inserts every row via the generated full-row INSERT, reusing one prepared command. With a session
+    /// Inserts every row via the generated full-row INSERT, one command per row running the provider's
+    /// auto-prepared statement. With a session
     /// transaction active the batch enlists it; without one the batch runs in its own transaction (a batch is
     /// atomic on its own). <paramref name="sqlSuffix"/> is appended verbatim to the INSERT
     /// (e.g. <c>" ON CONFLICT DO NOTHING"</c>). Returns the total affected row count. A convenience batch,
