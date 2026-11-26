@@ -169,6 +169,33 @@ it uses. Add `Elarion.Abstractions` only to contract-only assemblies that cannot
 - The migration core is database-neutral and roll-forward only. A provider is a new package, not a dialect
   configuration flag; keep no-transaction behavior explicit and fail closed on an unresolved migration.
 
+### File formats, import and export
+
+A package that reads or writes a file format (spreadsheets, PDFs, contacts, calendars, and any that follow) keeps one
+design language, so an application learns it once. `Elarion.Spreadsheets` (ADR-0108) is the reference; `Elarion.Typst`
+(ADR-0093) for rendering.
+
+- **Shape.** An opt-in `Elarion.<Area>` package that depends on `Elarion.Abstractions`, `Microsoft.Extensions`
+  abstractions and at most one outside library, kept behind an internal interface: no third-party type in the public
+  API. `IsAotCompatible`; registration is `AddElarion<Area>(IConfiguration?, Action<<Area>Options>?)`, bound through
+  the configuration-binding generator, with limits and read defaults in one options bag and per-call options of the
+  same type.
+- **Typed records.** An attribute on a `partial` class (`[<Area>Record]`) and a bundled generator that emits the
+  mapping, an `I<Area>Record<TSelf>` with a static mapper, and constants per field, as `[SqlRecord]` does. An
+  unsupported member is a build error with the package's own diagnostic prefix, never a reflection fallback.
+- **Files travel through the existing tiers.** Streams in and out; `ElarionFile` for small files,
+  `ElarionStreamedFile` for large exports, `UploadedFile` read through `IUploadedFiles` for uploads. A format package
+  adds no upload or download endpoints of its own.
+- **A user's file is input, not infrastructure.** Reading returns a result and throws only on cancellation and
+  misconfiguration. It keeps every item for a preview, says what the file states, and reports each problem as a
+  located error with a stable `<area>.<snake_case>` code, its data and an English default message, so the
+  application words it. The application can add its own errors; `ToAppError` converts with a formatter and a cap.
+- **Hostile input is bounded.** Size, item and nesting limits as options, DTDs and external entities refused, the
+  outside library's exceptions caught and mapped.
+- **Validation fails closed.** Records use DataAnnotations through `IRequestValidator`; the record attribute carries
+  `[ValidationRoot]`, and reading a validated record without metadata throws.
+- **Writing is deterministic and reading lenient by one documented rule**, the same for every application.
+
 ### TypeScript client and frontend contributions
 
 - Generated TypeScript output is deterministic and portable: keep the ergonomic direct API and generic
