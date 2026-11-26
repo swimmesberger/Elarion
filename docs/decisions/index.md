@@ -109,3 +109,6 @@
 * [ADR-0106](0106-upload-policies-choose-the-staging-limits.md) - An upload names a policy that chooses its staging limits (proposed)
 * [ADR-0107](0107-a-shared-entity-names-the-module-that-writes-it.md) - A shared entity may name the one module that writes it (proposed)
 * [ADR-0108](0108-spreadsheet-records.md) - Spreadsheet records — a generated mapping in both directions, Elarion's own .xlsx writer, a library behind the reader
+* [ADR-0109](0109-icalendar-model-reader-and-writer.md) - iCalendar — a fixed model over a lossless component tree, with Elarion's own reader, writer and recurrence engine
+* [ADR-0110](0110-vcard-contacts.md) - vCard contacts — a fixed contact model over a lossless property list, Elarion's own reader and writer
+* [ADR-0111](0111-caldav.md) - CalDAV — published calendars served from a store, calendar sources as handlers, app passwords, and a sync-step client
