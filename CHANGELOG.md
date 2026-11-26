@@ -20,6 +20,12 @@ minor releases may include breaking changes.
   type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
   member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
 
+### Fixed
+- **A NativeAOT application with a body-bound `[HttpEndpoint]` published with trimming warnings.** The generated
+  mapping resolved the request body's JSON metadata with a fallback to the reflection-based
+  `JsonSerializerOptions.Default`, which made the publish report `IL2026` and `IL3050`. The fallback is gone; a missing
+  type still fails at mapping time with the same message.
+
 ## [0.4.6] - 2026-11-24
 
 ### Added

@@ -82,9 +82,10 @@ public static class ElarionHttpEndpointBinder {
     /// mapping time — the generated registration captures it, so no per-request options lookup happens.
     /// </summary>
     public static JsonTypeInfo<T> ResolveBodyTypeInfo<T>(IEndpointRouteBuilder endpoints) {
-        var options = endpoints.ServiceProvider.GetService<IOptions<HttpJsonOptions>>()?.Value.SerializerOptions
-                      ?? JsonSerializerOptions.Default;
-        if (options.TryGetTypeInfo(typeof(T), out var typeInfo) && typeInfo is JsonTypeInfo<T> typed)
+        // No fallback to JsonSerializerOptions.Default: it is reflection-based, and touching it makes every NativeAOT
+        // application that maps a body-bound endpoint warn (IL2026/IL3050). An ASP.NET Core host always has these options.
+        var options = endpoints.ServiceProvider.GetService<IOptions<HttpJsonOptions>>()?.Value.SerializerOptions;
+        if (options is not null && options.TryGetTypeInfo(typeof(T), out var typeInfo) && typeInfo is JsonTypeInfo<T> typed)
             return typed;
 
         throw new InvalidOperationException(
