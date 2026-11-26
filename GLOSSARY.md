@@ -344,6 +344,13 @@ An app password scoped to one published calendar and carried in the path of its 
 can subscribe to a URL but cannot send a password.
 _Avoid_: secret link, calendar token, webcal password
 
+**Calendar item**:
+An event or to-do of an `.ics` calendar as `Elarion.Calendars` models it: a typed view over the item's component that
+keeps every property it does not model, so other programs' properties survive a round trip. Items with one `UID` form
+a series (a master and its overrides), which expansion turns into occurrences within a window. Reading keeps every item
+with its coded, located errors; only a broken time or time zone leaves an item without its typed view.
+_Avoid_: appointment, entry (for the typed item), calendar record, VEVENT (for the model type)
+
 **Migration plan**:
 The one ordered sequence in which SQL scripts, C# code steps and EF migrations run, with one version
 sequence, one history and one lock; roll-forward only.

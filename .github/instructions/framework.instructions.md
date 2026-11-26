@@ -182,7 +182,10 @@ design language, so an application learns it once. `Elarion.Spreadsheets` (ADR-0
   same type.
 - **Typed records.** An attribute on a `partial` class (`[<Area>Record]`) and a bundled generator that emits the
   mapping, an `I<Area>Record<TSelf>` with a static mapper, and constants per field, as `[SqlRecord]` does. An
-  unsupported member is a build error with the package's own diagnostic prefix, never a reflection fallback.
+  unsupported member is a build error with the package's own diagnostic prefix, never a reflection fallback. This is
+  for formats whose fields the application chooses (worksheet columns). Where a standard fixes the fields (calendars,
+  contacts), the package has a fixed public model instead, as a view over a public, lossless tree of the file's
+  components that keeps what the model does not cover (ADR-0109); no generator.
 - **Files travel through the existing tiers.** Streams in and out; `ElarionFile` for small files,
   `ElarionStreamedFile` for large exports, `UploadedFile` read through `IUploadedFiles` for uploads. A format package
   adds no upload or download endpoints of its own.
@@ -192,7 +195,7 @@ design language, so an application learns it once. `Elarion.Spreadsheets` (ADR-0
   application words it. The application can add its own errors; `ToAppError` converts with a formatter and a cap.
 - **Hostile input is bounded.** Size, item and nesting limits as options, DTDs and external entities refused, the
   outside library's exceptions caught and mapped.
-- **Validation fails closed.** Records use DataAnnotations through `IRequestValidator`; the record attribute carries
+- **Validation fails closed.** Generated records use DataAnnotations through `IRequestValidator`; the record attribute carries
   `[ValidationRoot]`, and reading a validated record without metadata throws.
 - **Writing is deterministic and reading lenient by one documented rule**, the same for every application.
 
