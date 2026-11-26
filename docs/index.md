@@ -23,6 +23,7 @@ okf_version: "0.2"
 * [XLSX libraries for NativeAOT](research/2026-11-24-xlsx-libraries-for-native-aot.md) - which .NET spreadsheet readers and writers are AOT-compatible and maintained, and where typed row mapping breaks under AOT; input for ADR-0108.
 * [CalDAV clients and .NET libraries](research/2026-11-26-caldav-servers-clients-and-dotnet.md) - what iOS, macOS, Thunderbird, DAVx5 and Outlook require of a CalDAV server, the quirks of the servers a client meets, and which .NET libraries fit NativeAOT; input for ADR-0111.
 * [iCalendar in .NET](research/2026-11-26-icalendar-libraries-and-producers.md) - which .NET iCalendar libraries work under NativeAOT, how .NET resolves time zones, and what Google, Outlook, Apple and municipal calendars publish; input for ADR-0109.
+* [vCard libraries and producers](research/2026-11-26-vcard-libraries-and-producers.md) - which .NET vCard libraries are AOT-safe and safe against hostile uploads, and what Android, Google, Apple, Outlook, Thunderbird and Nextcloud write into .vcf files; input for ADR-0110.
 
 # Published documentation
 
