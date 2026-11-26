@@ -2,6 +2,7 @@
 
 ## 2026-11-26
 
+* **Update**: [ADR-0108](decisions/0108-spreadsheet-records.md) decision 8 and [plan 0003](../specs/0003-spreadsheet-records.plan.md) put the `[ValidationRoot]` marker on the `[SpreadsheetRecord]` attribute class instead of the generated record half, because the validation generator never sees another generator's output; the validator's paths map to columns through the host's naming policy at read time.
 * **Update**: the reader spike of [plan 0003](../specs/0003-spreadsheet-records.plan.md) passed (zero AOT warnings, every hostile file caught); [ADR-0108](decisions/0108-spreadsheet-records.md), the plan and the [research note](research/2026-11-24-xlsx-libraries-for-native-aot.md) now replace the counted inflation with a declared-size check, because .NET's zip reader ends entries at their declared size, and add the code-page registration the .xls reader needs; .xlsb and Excel- or Google-saved files stay for task 6.
 
 ## 2026-11-24

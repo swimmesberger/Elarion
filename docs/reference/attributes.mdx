@@ -562,7 +562,8 @@ See [Validation](/docs/concepts/validation).
   namespace contains it, so the validation generator emits the same constant-constructed metadata for it as for a
   handler request and `IRequestValidator.HasMetadata` answers `true` for it while the module is enabled. A marked type
   with validation attributes outside every module is `ELVAL004`; one in a compilation without `Elarion.Validation` is
-  `ELVAL002`. A generic type is not a root. See
+  `ELVAL002`. A generic type is not a root. On an attribute class, it makes every type that carries that attribute a
+  root, as `[SpreadsheetRecord]` does for spreadsheet records. See
   [Validating outside a handler request](/docs/concepts/validation#validating-outside-a-handler-request).
 
 No parameters.

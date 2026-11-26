@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Elarion.Spreadsheets.Reading;
 
 namespace Elarion.Spreadsheets;
@@ -12,7 +13,7 @@ namespace Elarion.Spreadsheets;
 /// rows (FR-053, FR-067). Dispose the document when done. An instance is not thread-safe: read its worksheets one after
 /// the other.
 /// </remarks>
-public sealed partial class SpreadsheetReadDocument : IDisposable {
+public sealed class SpreadsheetReadDocument : IDisposable {
     private readonly IWorkbookSource? _source;
     private readonly SpreadsheetReader _reader;
     private readonly SpreadsheetReadOptions _options;
@@ -38,6 +39,27 @@ public sealed partial class SpreadsheetReadDocument : IDisposable {
     /// <summary>The names of the visible worksheets, in workbook order; empty when <see cref="FileErrors"/> has one.</summary>
     public IReadOnlyList<string> VisibleWorksheets { get; }
 
+    /// <summary>
+    /// Reads the selected worksheet — the first visible one unless <paramref name="selection"/> names one — as records of
+    /// <typeparamref name="T"/>, with every row, every located error and the columns the file contains.
+    /// </summary>
+    /// <param name="selection">The worksheet and its header row; <see langword="null"/> takes the first visible worksheet and its first non-empty row.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <exception cref="InvalidOperationException">
+    /// <typeparamref name="T"/> carries validation attributes, but no request validator is registered or it holds no
+    /// metadata for the record (FR-048).
+    /// </exception>
+    public async ValueTask<SpreadsheetReadResult<T>> ReadAsync<T>(
+        SpreadsheetWorksheetSelection? selection = null, CancellationToken cancellationToken = default)
+        where T : class, ISpreadsheetRecord<T> {
+        RecordReader.EnsureValidationConfigured<T>(_reader.Validator);
+        if (!TryOpenWorksheet(selection, out var source, out var worksheet, out var error))
+            return new SpreadsheetReadResult<T>(error.Worksheet ?? (worksheet.Length > 0 ? worksheet : null), [], [error]);
+
+        return await RecordReader.ReadAsync<T>(
+            source, worksheet, selection, _options, _reader.Validator, _reader.NamingPolicy, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <inheritdoc />
     public void Dispose() {
         if (_disposed) return;
@@ -51,7 +73,8 @@ public sealed partial class SpreadsheetReadDocument : IDisposable {
     /// error, or a name no visible worksheet has.
     /// </summary>
     private bool TryOpenWorksheet(
-        SpreadsheetWorksheetSelection? selection, out IWorkbookSource source, out string worksheet, out SpreadsheetError? error) {
+        SpreadsheetWorksheetSelection? selection, out IWorkbookSource source, out string worksheet,
+        [NotNullWhen(false)] out SpreadsheetError? error) {
         ObjectDisposedException.ThrowIf(_disposed, this);
         source = _source!;
         worksheet = "";

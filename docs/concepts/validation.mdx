@@ -221,6 +221,10 @@ if (!validator.HasMetadata(typeof(ProductRow)))
 var errors = await validator.ValidateAsync(typeof(ProductRow), row, cancellationToken);
 ```
 
+A package that defines its own kind of validated type marks its attribute class instead: a type that carries an
+attribute whose class is marked `[ValidationRoot]` is a root too. `[SpreadsheetRecord]` is marked this way, so every
+spreadsheet record with validation attributes gets its module's metadata without a marker of its own.
+
 `ValidateAsync` answers "valid" for a type it holds no metadata for, and metadata exists only while the module is
 enabled, so code that validates outside the pipeline asks `IRequestValidator.HasMetadata(type)` first and fails when
 the answer is no. A root outside every module is `ELVAL004`; without `Elarion.Validation` it is `ELVAL002`.

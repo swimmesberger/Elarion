@@ -566,6 +566,47 @@ public sealed class ValidationResolverGeneratorTests {
     }
 
     [Fact]
+    public void TypeCarryingAnAttributeWhoseClassIsMarkedValidationRoot_IsARootOfItsModule() {
+        // How [SpreadsheetRecord] makes its records roots: the marker sits on the attribute class, which the validation
+        // generator sees, instead of on generated code, which it never sees.
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.Imports {
+                                  [Elarion.Abstractions.Validation.ValidationRoot]
+                                  [System.AttributeUsage(System.AttributeTargets.Class)]
+                                  public sealed class ImportRecordAttribute : System.Attribute { }
+                              }
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+
+                                  [Sample.Imports.ImportRecord]
+                                  public sealed partial class ImportRow {
+                                      [StringLength(10, MinimumLength = 2)]
+                                      public required string Code { get; init; }
+                                  }
+                              }
+
+                              namespace Sample.Shared {
+                                  [Sample.Imports.ImportRecord]
+                                  public sealed class StrayRow {
+                                      [Range(1, 9)]
+                                      public int Level { get; init; }
+                                  }
+                              }
+                              """;
+
+        var result = Run(source);
+
+        GetGenerated(result, "AppValidatableInfoResolver.g.cs")
+            .Should().Contain("if (type == typeof(global::Sample.App.ImportRow))");
+        result.Diagnostics.Should().ContainSingle().Which.Should().Match<Diagnostic>(diagnostic =>
+            diagnostic.Id == "ELVAL004" && diagnostic.GetMessage(null).Contains("global::Sample.Shared.StrayRow"));
+    }
+
+    [Fact]
     public void IrrelevantEdit_ReusesPipeline() {
         const string source = Preamble +
                               """

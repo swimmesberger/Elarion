@@ -44,7 +44,8 @@ public sealed partial class SpreadsheetRecordGenerator {
                 .Append(SourceLiterals.String(column.Format)).Append(", ")
                 .Append(DoubleLiteral(column.Width)).Append(", ")
                 .Append(StringArray(column.Aliases)).Append(", ")
-                .Append(StringArray(column.Choices)).AppendLine("),");
+                .Append(StringArray(column.Choices))
+                .Append(IsReadable(model, column) ? "" : ", isReadable: false").AppendLine("),");
         }
 
         builder.AppendLine($$"""
@@ -62,6 +63,11 @@ public sealed partial class SpreadsheetRecordGenerator {
             builder.Append("        ").Append(WriteStatement(column)).AppendLine();
 
         builder.AppendLine("    }");
+        builder.AppendLine();
+        builder.AppendLine("    /// <inheritdoc />");
+        builder.AppendLine($"    public bool HasValidation => {(model.HasValidation ? "true" : "false")};");
+        builder.AppendLine();
+        AppendReadRow(builder, model);
 
         foreach (var column in model.Columns) {
             if (column.WriteKind != WriteKind.Enum) continue;
@@ -77,10 +83,120 @@ public sealed partial class SpreadsheetRecordGenerator {
             builder.AppendLine("            _ => value.ToString()");
             builder.AppendLine("        };");
             builder.AppendLine("    }");
+
+            if (!IsReadable(model, column)) continue;
+
+            // Reading takes a member's label or its name, ignoring case and surrounding white space (FR-009).
+            builder.AppendLine();
+            builder.AppendLine($"    private static {column.EnumTypeFqn}? Parse{column.PropertyName}(string text) {{");
+            foreach (var (text, member) in column.EnumMembers.Select(static member => (member.Label, member.Name))
+                         .Concat(column.EnumMembers.Select(static member => (member.Name, member.Name)))
+                         .GroupBy(static pair => pair.Item1, StringComparer.OrdinalIgnoreCase)
+                         .Select(static group => group.First()))
+                builder.AppendLine(
+                    $"        if (string.Equals(text, {SourceLiterals.String(text)}, global::System.StringComparison.OrdinalIgnoreCase)) return {column.EnumTypeFqn}.{Identifier(member)};");
+
+            builder.AppendLine("        return null;");
+            builder.AppendLine("    }");
         }
 
         builder.AppendLine("}");
         context.AddSource($"{model.HintName}.SpreadsheetRowMapper.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
+    }
+
+    /// <summary>Whether reading sets the column's property: settable, or passed to the constructor (FR-042).</summary>
+    private static bool IsReadable(SpreadsheetRecordModel model, ColumnModel column) {
+        return column.CanSet || model.ConstructorArguments.Contains(column.PropertyName);
+    }
+
+    /// <summary>
+    /// Emits <c>ReadRow</c>: one typed read per readable column into a local, then, when the row has no error, the
+    /// record built through its constructor and an object initializer. A non-nullable property is only reached with a
+    /// value, because an empty cell or a missing column is an error first.
+    /// </summary>
+    private static void AppendReadRow(StringBuilder builder, SpreadsheetRecordModel model) {
+        var type = model.TypeFqn;
+        builder.AppendLine("    /// <inheritdoc />");
+        builder.AppendLine($"    public {type}? ReadRow(global::Elarion.Spreadsheets.Generated.SpreadsheetCellReader reader) {{");
+        if (model.ConstructionProblem is { } problem) {
+            builder.AppendLine(
+                $"        throw new global::System.NotSupportedException({SourceLiterals.String($"The spreadsheet record '{type.Replace("global::", "")}' cannot be read: {problem}.")});");
+            builder.AppendLine("    }");
+            return;
+        }
+
+        var readable = new List<(int Index, ColumnModel Column)>();
+        for (var i = 0; i < model.Columns.Count; i++)
+            if (IsReadable(model, model.Columns[i]))
+                readable.Add((i, model.Columns[i]));
+
+        foreach (var (index, column) in readable)
+            builder.Append(ReadStatement(index, column));
+
+        builder.AppendLine("        if (reader.HasErrors) return null;");
+        builder.AppendLine();
+
+        var arguments = model.ConstructorArguments.Select(name => Value(model.Columns.First(column => column.PropertyName == name)));
+        var initialized = readable
+            .Select(static pair => pair.Column)
+            .Where(column => !model.ConstructorArguments.Contains(column.PropertyName))
+            .ToList();
+        builder.Append("        return new ").Append(type).Append('(').Append(string.Join(", ", arguments)).Append(')');
+        if (initialized.Count == 0) {
+            builder.AppendLine(";");
+        }
+        else {
+            builder.AppendLine(" {");
+            foreach (var column in initialized)
+                builder.Append("            ").Append(Identifier(column.PropertyName)).Append(" = ").Append(Value(column)).AppendLine(",");
+
+            builder.AppendLine("        };");
+        }
+
+        builder.AppendLine("    }");
+    }
+
+    /// <summary>The local of a column, as its property's type: non-nullable ones were checked present.</summary>
+    private static string Value(ColumnModel column) {
+        var local = Local(column);
+        if (column.IsNullable) return local;
+
+        return column.WriteKind == WriteKind.Text ? local + "!" : local + ".GetValueOrDefault()";
+    }
+
+    private static string ReadStatement(int index, ColumnModel column) {
+        var i = index.ToString(CultureInfo.InvariantCulture);
+        var local = Local(column);
+        var valueType = column.ValueTypeFqn;
+        switch (column.WriteKind) {
+            case WriteKind.Enum:
+                return $$"""
+                                 {{valueType}}? {{local}} = null;
+                                 if (reader.ReadChoice({{i}}) is { } {{local}}Text) {
+                                     {{local}} = Parse{{column.PropertyName}}({{local}}Text);
+                                     if ({{local}} is null) reader.RejectChoice({{i}});
+                                 }
+
+                         """;
+            case WriteKind.Integer:
+                return $"        var {local} = ({valueType}?)reader.ReadInteger({i}, {valueType}.MinValue, {valueType}.MaxValue);\n";
+        }
+
+        var call = column.WriteKind switch {
+            WriteKind.Text => "ReadText",
+            WriteKind.Boolean or WriteKind.LabelledBoolean => "ReadBoolean",
+            WriteKind.UnsignedInteger => "ReadUnsignedInteger",
+            WriteKind.Single => "ReadSingle",
+            WriteKind.Double => "ReadDouble",
+            WriteKind.Decimal => "ReadDecimal",
+            WriteKind.DateTime => "ReadDateTime",
+            WriteKind.Date => "ReadDate",
+            WriteKind.Time => "ReadTime",
+            WriteKind.DateTimeOffset => "ReadDateTimeOffset",
+            WriteKind.Guid => "ReadGuid",
+            _ => throw new InvalidOperationException("Unknown read kind " + column.WriteKind)
+        };
+        return $"        var {local} = reader.{call}({i});\n";
     }
 
     private static void EmitSelfMapping(SourceProductionContext context, SpreadsheetRecordModel model) {

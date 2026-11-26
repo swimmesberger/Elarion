@@ -15,7 +15,8 @@ public sealed class SpreadsheetColumn<T> where T : class {
         string? format,
         double? width,
         IReadOnlyList<string> aliases,
-        IReadOnlyList<string> choices) {
+        IReadOnlyList<string> choices,
+        bool isReadable) {
         Index = index;
         Header = header;
         PropertyName = propertyName;
@@ -25,6 +26,7 @@ public sealed class SpreadsheetColumn<T> where T : class {
         Width = width;
         Aliases = aliases;
         Choices = choices;
+        IsReadable = isReadable;
     }
 
     /// <summary>The zero-based position of the column in the worksheet.</summary>
@@ -56,6 +58,12 @@ public sealed class SpreadsheetColumn<T> where T : class {
     /// true and the false label of a boolean); empty for every other kind.
     /// </summary>
     public IReadOnlyList<string> Choices { get; }
+
+    /// <summary>
+    /// Whether reading sets the property: <see langword="false"/> for a property without an accessible setter or
+    /// <c>init</c>, such as a computed one, whose column is written but never read (FR-042) and never missing.
+    /// </summary>
+    public bool IsReadable { get; }
 
     /// <inheritdoc />
     public override string ToString() {

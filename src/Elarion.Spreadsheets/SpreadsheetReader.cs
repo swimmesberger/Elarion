@@ -1,3 +1,6 @@
+using System.Text.Json;
+using Elarion.Abstractions.Serialization;
+using Elarion.Abstractions.Validation;
 using Elarion.Spreadsheets.Reading;
 using Microsoft.Extensions.Options;
 
@@ -18,13 +21,58 @@ namespace Elarion.Spreadsheets;
 /// definition (FR-055, FR-057).
 /// </para>
 /// </remarks>
-public sealed partial class SpreadsheetReader {
+public sealed class SpreadsheetReader {
     private readonly SpreadsheetReadOptions _defaults;
 
-    /// <summary>Creates a reader with the application's options; every argument is optional.</summary>
+    /// <summary>Creates a reader; every argument is optional, and dependency injection supplies the registered ones.</summary>
     /// <param name="options">The application's options; <see langword="null"/> uses the defaults.</param>
-    public SpreadsheetReader(IOptions<SpreadsheetOptions>? options = null) {
+    /// <param name="validator">
+    /// The request validator that checks each record read (FR-047); required for a record that carries validation
+    /// attributes.
+    /// </param>
+    /// <param name="jsonSerialization">
+    /// The canonical JSON settings, whose naming policy turns the validator's wire-named paths back into columns.
+    /// </param>
+    public SpreadsheetReader(
+        IOptions<SpreadsheetOptions>? options = null,
+        IRequestValidator? validator = null,
+        IElarionJsonSerialization? jsonSerialization = null) {
         _defaults = options?.Value.ReadDefaults ?? new SpreadsheetReadOptions();
+        Validator = validator;
+        NamingPolicy = jsonSerialization?.Options.PropertyNamingPolicy;
+    }
+
+    internal IRequestValidator? Validator { get; }
+
+    internal JsonNamingPolicy? NamingPolicy { get; }
+
+    /// <summary>
+    /// Opens <paramref name="workbook"/>, reads one worksheet as records of <typeparamref name="T"/>, and releases the
+    /// workbook: the shortcut for a file with one worksheet of interest.
+    /// </summary>
+    /// <param name="workbook">The uploaded file; read to its end, and left open.</param>
+    /// <param name="options">The read options; <see langword="null"/> uses <see cref="SpreadsheetOptions.ReadDefaults"/>.</param>
+    /// <param name="selection">The worksheet and its header row; <see langword="null"/> takes the first visible worksheet.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <exception cref="InvalidOperationException">
+    /// <typeparamref name="T"/> carries validation attributes, but no request validator is registered or it holds no
+    /// metadata for the record (FR-048).
+    /// </exception>
+    /// <example>
+    /// <code>
+    /// var result = await reader.ReadAsync&lt;ContactRow&gt;(request.Workbook.OpenReadStream(), cancellationToken: ct);
+    /// if (result.HasErrors) return result.ToAppError("workbook");
+    /// </code>
+    /// </example>
+    public async ValueTask<SpreadsheetReadResult<T>> ReadAsync<T>(
+        Stream workbook,
+        SpreadsheetReadOptions? options = null,
+        SpreadsheetWorksheetSelection? selection = null,
+        CancellationToken cancellationToken = default)
+        where T : class, ISpreadsheetRecord<T> {
+        RecordReader.EnsureValidationConfigured<T>(Validator);
+        using var document = await OpenAsync(workbook, options, cancellationToken).ConfigureAwait(false);
+        return await document.ReadAsync<T>(selection, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

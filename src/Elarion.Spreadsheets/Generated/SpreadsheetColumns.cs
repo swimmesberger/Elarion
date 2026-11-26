@@ -18,6 +18,7 @@ public static class SpreadsheetColumns {
     /// <param name="width">The declared width in characters; zero or less when the writer measures it.</param>
     /// <param name="aliases">Older headers that still read as the column.</param>
     /// <param name="choices">The labels of a choice column; empty otherwise.</param>
+    /// <param name="isReadable">Whether reading sets the property; <see langword="false"/> for a write-only column.</param>
     public static SpreadsheetColumn<T> Create<T>(
         int index,
         string header,
@@ -27,8 +28,9 @@ public static class SpreadsheetColumns {
         string? format,
         double width,
         string[] aliases,
-        string[] choices) where T : class {
+        string[] choices,
+        bool isReadable = true) where T : class {
         return new SpreadsheetColumn<T>(
-            index, header, propertyName, kind, isNullable, format, width > 0 ? width : null, aliases, choices);
+            index, header, propertyName, kind, isNullable, format, width > 0 ? width : null, aliases, choices, isReadable);
     }
 }

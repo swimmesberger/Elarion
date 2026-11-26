@@ -1,3 +1,5 @@
+using Elarion.Abstractions.Validation;
+
 namespace Elarion.Spreadsheets;
 
 /// <summary>
@@ -18,6 +20,12 @@ namespace Elarion.Spreadsheets;
 /// The attribute accepts structs only so that the generator can report <c>ELSHEET006</c> with an explanation instead
 /// of the compiler's generic attribute-target error.
 /// </para>
+/// <para>
+/// The attribute is itself marked <see cref="ValidationRootAttribute"/>, so a record that carries DataAnnotations or
+/// implements <c>IValidatableObject</c> gets the validation metadata of the module whose namespace contains it, and each
+/// record read is validated through the request validator (FR-047). Such a record outside every module's namespace is
+/// the build error <c>ELVAL004</c>.
+/// </para>
 /// </remarks>
 /// <example>
 /// <code>
@@ -34,6 +42,7 @@ namespace Elarion.Spreadsheets;
 /// </code>
 /// </example>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, Inherited = false)]
+[ValidationRoot]
 public sealed class SpreadsheetRecordAttribute(string? worksheetName = null) : Attribute {
     /// <summary>
     /// The worksheet's name; <see langword="null"/> uses the type's name. It must be 1 to 31 characters long, must not

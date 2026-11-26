@@ -132,10 +132,12 @@ abstractions and Sylvan.Data.Excel, and bundles its generator. It does not depen
    only while the module is enabled, so "a validator is registered" is not enough: the seam gains a question whether it
    holds metadata for a type, and a record that carries validation attributes fails its read with an exception naming
    the cause when the answer is no. The spreadsheet package does not teach the core generator its attribute: a neutral
-   marker in `Elarion.Abstractions`, which the generated record half carries, makes a type a validation root for the
-   module that contains it, and the validation generator, which knows the modules, reports a validated root outside
-   every module (`ELVAL004`) and a missing `Elarion.Validation` reference (`ELVAL002`). An import is never silently
-   unchecked.
+   marker in `Elarion.Abstractions` makes a type a validation root for the module that contains it, and the validation
+   generator, which knows the modules, reports a validated root outside every module (`ELVAL004`) and a missing
+   `Elarion.Validation` reference (`ELVAL002`). The marker sits on the `[SpreadsheetRecord]` attribute class, and a type
+   that carries an attribute so marked is a root: a source generator never sees another generator's output, so a marker
+   the record generator emitted would be invisible to the validation generator (and would collide with one the author
+   wrote). An import is never silently unchecked.
 9. **A worksheet can be read without a record.** For a foreign layout the reader returns the non-empty rows of a
    worksheet as typed cells (blank, text, number, boolean, date, error) with their row numbers, under the same format
    detection, worksheet choice, cell rules and limits, plus a column limit. Finding the header row of such a layout is

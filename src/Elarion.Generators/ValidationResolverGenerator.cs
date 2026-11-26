@@ -29,7 +29,8 @@ namespace Elarion.Generators;
 /// </para>
 /// <para>
 /// A type marked <c>[ValidationRoot]</c> (validated outside a handler request) is a root too, of the module whose
-/// namespace contains it, matched by metadata name like every other Abstractions attribute. One that carries
+/// namespace contains it, matched by metadata name like every other Abstractions attribute; so is a type that carries
+/// an attribute whose class is marked <c>[ValidationRoot]</c>, such as <c>[SpreadsheetRecord]</c>. One that carries
 /// validation attributes outside every module's namespace would be validated by nothing, reported as
 /// <c>ELVAL004</c>.
 /// </para>
@@ -159,7 +160,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
             .WithTrackingName(TrackingNames.Candidates);
 
         // Stage one, too: the [ValidationRoot] types, as sorted distinct metadata names.
-        var validationRoots = context.SyntaxProvider
+        var markedRoots = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 ValidationRootAttributeMetadataName,
                 static (node, _) => node is TypeDeclarationSyntax,
@@ -167,8 +168,26 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
                     ? ModuleScanner.BuildMetadataName(type)
                     : null)
             .Where(static name => name is not null)
-            .Collect()
-            .Select(static (names, _) => names
+            .Collect();
+
+        // And the types carrying an attribute whose class is itself marked [ValidationRoot], such as
+        // [SpreadsheetRecord]: a package makes its own records roots without the core generator learning its attribute,
+        // and without emitting the marker from its generator, whose output this generator never sees.
+        var metaMarkedRoots = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                static (node, _) => node is ClassDeclarationSyntax { AttributeLists.Count: > 0 }
+                    or RecordDeclarationSyntax { AttributeLists.Count: > 0 }
+                    or StructDeclarationSyntax { AttributeLists.Count: > 0 },
+                static (ctx, ct) => ctx.SemanticModel.GetDeclaredSymbol(ctx.Node, ct) is INamedTypeSymbol type
+                                    && CarriesMetaMarkedAttribute(type)
+                    ? ModuleScanner.BuildMetadataName(type)
+                    : null)
+            .Where(static name => name is not null)
+            .Collect();
+
+        var validationRoots = markedRoots
+            .Combine(metaMarkedRoots)
+            .Select(static (names, _) => names.Left.Concat(names.Right)
                 .Select(static name => name!)
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(static name => name, StringComparer.Ordinal)
@@ -319,6 +338,19 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
         }
 
         return new ValidationModel(moduleModels.ToImmutable(), diagnostics.ToImmutable());
+    }
+
+    /// <summary>Whether one of <paramref name="type"/>'s attributes has a class marked <c>[ValidationRoot]</c>.</summary>
+    private static bool CarriesMetaMarkedAttribute(INamedTypeSymbol type) {
+        foreach (var attribute in type.GetAttributes()) {
+            if (attribute.AttributeClass is not { } attributeClass) continue;
+
+            foreach (var marker in attributeClass.GetAttributes())
+                if (marker.AttributeClass?.ToDisplayString() == ValidationRootAttributeMetadataName)
+                    return true;
+        }
+
+        return false;
     }
 
     private static void AddRoot(

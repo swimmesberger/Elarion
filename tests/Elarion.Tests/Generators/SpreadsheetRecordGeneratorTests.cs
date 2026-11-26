@@ -376,6 +376,148 @@ public sealed class SpreadsheetRecordGeneratorTests {
     }
 
     [Fact]
+    public void SpreadsheetRecord_EmitsTypedReadCodeAndAnObjectInitializer() {
+        var result = Generate(ContactSource);
+
+        var source = GetGenerated(result, "Sample_Contacts_ContactRow.SpreadsheetRowMapper.g.cs");
+
+        source.Should().Contain(
+            "public global::Sample.Contacts.ContactRow? ReadRow(global::Elarion.Spreadsheets.Generated.SpreadsheetCellReader reader) {");
+        source.Should().Contain("var __Name = reader.ReadText(0);");
+        source.Should().Contain("var __CustomerSince = reader.ReadDate(3);");
+        source.Should().Contain("var __Balance = reader.ReadDecimal(4);");
+        source.Should().Contain("var __Active = reader.ReadBoolean(7);");
+        source.Should().Contain("if (reader.ReadChoice(5) is { } __KindText) {");
+        source.Should().Contain("__Kind = ParseKind(__KindText);");
+        source.Should().Contain("if (__Kind is null) reader.RejectChoice(5);");
+        source.Should().Contain("if (reader.HasErrors) return null;");
+        source.Should().Contain("return new global::Sample.Contacts.ContactRow() {");
+        source.Should().Contain("Name = __Name!,");
+        source.Should().Contain("Email = __Email,");
+        source.Should().Contain("Balance = __Balance.GetValueOrDefault(),");
+        source.Should().Contain("PreviousKind = __PreviousKind,");
+        source.Should().NotContain("NameLength =", "a computed property is not read");
+        source.Should().Contain("public bool HasValidation => false;");
+    }
+
+    [Fact]
+    public void ComputedProperty_IsMarkedWriteOnlyInTheColumnTable() {
+        var source = GetGenerated(Generate(ContactSource), "Sample_Contacts_ContactRow.SpreadsheetRowMapper.g.cs");
+
+        source.Should().Contain(
+            "(8, \"NameLength\", \"NameLength\", global::Elarion.Spreadsheets.SpreadsheetValueKind.Integer, false, null, 0d, global::System.Array.Empty<string>(), global::System.Array.Empty<string>(), isReadable: false),");
+    }
+
+    [Fact]
+    public void EnumColumn_ReadsLabelThenMemberNameIgnoringCase() {
+        var source = GetGenerated(Generate(ContactSource), "Sample_Contacts_ContactRow.SpreadsheetRowMapper.g.cs");
+
+        source.Should().Contain("private static global::Sample.Contacts.ContactKind? ParseKind(string text) {");
+        source.Should().Contain(
+            "if (string.Equals(text, \"Private person\", global::System.StringComparison.OrdinalIgnoreCase)) return global::Sample.Contacts.ContactKind.Person;");
+        source.Should().Contain(
+            "if (string.Equals(text, \"Person\", global::System.StringComparison.OrdinalIgnoreCase)) return global::Sample.Contacts.ContactKind.Person;");
+        // "Company" is both a label and a name: one case in each of ParseKind and ParsePreviousKind.
+        source.Split("\"Company\", global::System.StringComparison").Length.Should().Be(3);
+    }
+
+    [Fact]
+    public void IntegralColumn_ReadsWithinItsTypesRange() {
+        var result = Generate(
+            """
+            namespace Sample {
+                [Elarion.Spreadsheets.SpreadsheetRecord]
+                public sealed partial class Counts {
+                    public byte Small { get; set; }
+                    public int? Count { get; set; }
+                    public ulong Big { get; set; }
+                }
+            }
+            """);
+
+        var source = GetGenerated(result, "Sample_Counts.SpreadsheetRowMapper.g.cs");
+        source.Should().Contain("var __Small = (byte?)reader.ReadInteger(0, byte.MinValue, byte.MaxValue);");
+        source.Should().Contain("var __Count = (int?)reader.ReadInteger(1, int.MinValue, int.MaxValue);");
+        source.Should().Contain("var __Big = reader.ReadUnsignedInteger(2);");
+    }
+
+    [Fact]
+    public void PositionalRecord_IsBuiltThroughItsConstructor() {
+        const string source =
+            """
+            namespace Sample {
+                [Elarion.Spreadsheets.SpreadsheetRecord]
+                public sealed partial record AccountRow(string Iban, decimal Balance) {
+                    public string? Holder { get; init; }
+                }
+            }
+            """;
+        var result = Generate(source);
+
+        NoErrors(result);
+        GetGenerated(result, "Sample_AccountRow.SpreadsheetRowMapper.g.cs").Should()
+            .Contain("return new global::Sample.AccountRow(__Iban!, __Balance.GetValueOrDefault()) {")
+            .And.Contain("Holder = __Holder,");
+        CompileErrors([source, .. result.GeneratedTrees.Select(tree => tree.GetText().ToString())]).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RequiredMemberThatIsNoReadColumn_MakesReadingThrow() {
+        const string source =
+            """
+            namespace Sample {
+                [Elarion.Spreadsheets.SpreadsheetRecord]
+                public sealed partial class Secret {
+                    public string? Name { get; init; }
+                    [Elarion.Spreadsheets.SpreadsheetIgnore]
+                    public required string Token { get; init; }
+                }
+            }
+            """;
+        var result = Generate(source);
+
+        NoErrors(result);
+        GetGenerated(result, "Sample_Secret.SpreadsheetRowMapper.g.cs").Should().Contain(
+            "throw new global::System.NotSupportedException(\"The spreadsheet record 'Sample.Secret' cannot be read: its required member 'Token' is not a column the reader sets.\");");
+        CompileErrors([source, .. result.GeneratedTrees.Select(tree => tree.GetText().ToString())]).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("[System.ComponentModel.DataAnnotations.Required] public string? Name { get; init; }", "true")]
+    [InlineData("[System.ComponentModel.DataAnnotations.Display(Name = \"N\")] public string? Name { get; init; }", "false")]
+    [InlineData("[Elarion.Spreadsheets.SpreadsheetIgnore][System.ComponentModel.DataAnnotations.Range(1, 2)] public int Hidden { get; init; }", "true")]
+    public void RecordWithDataAnnotations_SaysItCarriesValidation(string member, string expected) {
+        var result = Generate($$"""
+                                namespace Sample {
+                                    [Elarion.Spreadsheets.SpreadsheetRecord]
+                                    public sealed partial class Row {
+                                        public string? Other { get; init; }
+                                        {{member}}
+                                    }
+                                }
+                                """);
+
+        GetGenerated(result, "Sample_Row.SpreadsheetRowMapper.g.cs").Should().Contain($"public bool HasValidation => {expected};");
+    }
+
+    [Fact]
+    public void ValidatableObject_CarriesValidation() {
+        var result = Generate(
+            """
+            namespace Sample {
+                [Elarion.Spreadsheets.SpreadsheetRecord]
+                public sealed partial class Row : System.ComponentModel.DataAnnotations.IValidatableObject {
+                    public string? Name { get; init; }
+                    public System.Collections.Generic.IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> Validate(
+                        System.ComponentModel.DataAnnotations.ValidationContext context) => [];
+                }
+            }
+            """);
+
+        GetGenerated(result, "Sample_Row.SpreadsheetRowMapper.g.cs").Should().Contain("public bool HasValidation => true;");
+    }
+
+    [Fact]
     public void IrrelevantEditReusesTrackedOutputs() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(
             new SpreadsheetRecordGenerator(), ContactSource, "SpreadsheetRecords");

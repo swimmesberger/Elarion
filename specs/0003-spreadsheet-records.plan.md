@@ -42,8 +42,8 @@ public interface ISpreadsheetRecord<TSelf> where TSelf : class, ISpreadsheetReco
     static abstract ISpreadsheetRowMapper<TSelf> SpreadsheetMapper { get; }
 }
 //   T.Columns.Email : SpreadsheetColumn<T>  — one constant per column (FR-035); members named Columns or
-//   SpreadsheetMapper on T are ELSHEET007 (FR-070). The generated half also carries [ValidationRoot] when T has
-//   validation attributes. A sealed {T}SpreadsheetRowMapper holds the column table and the row code.
+//   SpreadsheetMapper on T are ELSHEET007 (FR-070). [SpreadsheetRecord] itself is marked [ValidationRoot], which makes
+//   every record a validation root. A sealed {T}SpreadsheetRowMapper holds the column table and the row code.
 
 // Writing (FR-012–FR-027, FR-063, FR-064): one type
 public sealed class SpreadsheetWorkbook : IAsyncDisposable {
@@ -75,9 +75,11 @@ services.AddElarionSpreadsheets(configuration?);   // binds SpreadsheetOptions {
 public sealed class SpreadsheetReader {
     public ValueTask<SpreadsheetReadDocument> OpenAsync(Stream workbook, SpreadsheetReadOptions? options = null, CancellationToken ct = default);
     // Shortcuts: open, read one worksheet, dispose
-    public ValueTask<SpreadsheetReadResult<T>> ReadAsync<T>(Stream workbook, SpreadsheetReadOptions? options = null, CancellationToken ct = default)
+    public ValueTask<SpreadsheetReadResult<T>> ReadAsync<T>(Stream workbook, SpreadsheetReadOptions? options = null,
+        SpreadsheetWorksheetSelection? selection = null, CancellationToken ct = default)
         where T : class, ISpreadsheetRecord<T>;
-    public ValueTask<SpreadsheetRowsResult> ReadRowsAsync(Stream workbook, SpreadsheetReadOptions? options = null, CancellationToken ct = default);
+    public ValueTask<SpreadsheetRowsResult> ReadRowsAsync(Stream workbook, SpreadsheetReadOptions? options = null,
+        SpreadsheetWorksheetSelection? selection = null, CancellationToken ct = default);
 }
 public sealed class SpreadsheetReadDocument : IDisposable {          // FR-069: parsed once
     public IReadOnlyList<SpreadsheetError> FileErrors { get; }       // unreadable, too large (FR-053, FR-055)
@@ -153,10 +155,12 @@ Incremental, `ForAttributeWithMetadataName("Elarion.Spreadsheets.SpreadsheetReco
 - **Diagnostics**, in `AnalyzerReleases.Unshipped.md`: `ELSHEET001` unsupported property type, `ELSHEET002` not
   `partial`, `ELSHEET003` duplicate header or alias, `ELSHEET004` invalid worksheet name, `ELSHEET005` boolean labels
   misused (FR-060), `ELSHEET006` a struct (FR-062), `ELSHEET007` a member named like a generated one (FR-070).
-- **Emitted per record**: the self-mapping half (`ISpreadsheetRecord<T>`, `Columns`, `[ValidationRoot]` when the type
-  graph carries DataAnnotations or `IValidatableObject`) and `{T}SpreadsheetRowMapper` with a static column table, typed
-  write and read code per column, and enum label switches in both directions (FR-009). Reading constructs the record
-  with an object initializer; a property without a setter or `init` is write-only (FR-042).
+- **Emitted per record**: the self-mapping half (`ISpreadsheetRecord<T>`, `Columns`) and `{T}SpreadsheetRowMapper`
+  with a static column table, typed write and read code per column, enum label switches in both directions (FR-009),
+  and `HasValidation` when the type carries DataAnnotations or `IValidatableObject`. Reading constructs the record with
+  an object initializer, or through the constructor whose parameters all name columns (a positional record); a
+  property without a setter or `init` is write-only (FR-042). A `required` member that is no read column makes
+  `ReadRow` throw `NotSupportedException`, a misconfiguration.
 - Generated code calls only `Elarion.Spreadsheets.Generated` members (`[EditorBrowsable(Never)]`), as the SQL mappers
   do. No reflection (FR-011).
 
@@ -229,8 +233,10 @@ results are under [Reader spike result](#reader-spike-result).
 
 ## Validation
 
-- `Elarion.Abstractions` gains `[ValidationRoot]`: a type that is validated outside a handler request. The spreadsheet
-  generator puts it on the generated half of a record that carries validation attributes.
+- `Elarion.Abstractions` gains `[ValidationRoot]`: a type that is validated outside a handler request. On an attribute
+  class it makes every type carrying that attribute a root; `[SpreadsheetRecord]` is marked so. The spreadsheet generator
+  cannot emit the marker on the generated half instead: the validation generator never sees another generator's output,
+  and an author's own `[ValidationRoot]` would collide with it.
 - `ValidationResolverGenerator` adds `[ValidationRoot]` types to the roots of the module whose namespace contains them,
   reports `ELVAL004` (error) for one outside every module (FR-061), and extends `ELVAL002` (warning) to roots in an
   assembly without `Elarion.Validation` (FR-065). The core generator learns a neutral marker, not the package.
@@ -238,8 +244,10 @@ results are under [Reader spike result](#reader-spike-result).
   registered resolvers, so a disabled module answers no.
 - At read time, for a record whose mapper says it carries validation attributes: no `IRequestValidator`, or
   `HasMetadata(typeof(T))` false, throws `InvalidOperationException` naming the cause (FR-048). Each error-free record is
-  validated with `ValidateAsync(typeof(T), record)`; wire-named paths map to columns through the mapper's wire-name
-  table; a path that names no column becomes a row-level error (FR-047).
+  validated with `ValidateAsync(typeof(T), record)`; a wire-named path's first segment maps to the column whose
+  property name the canonical naming policy (`IElarionJsonSerialization`) turns into it, at read time rather than
+  through a generated table, because the policy is the host's choice; a path that names no column becomes a row-level
+  error (FR-047). A row that fails validation holds no record.
 
 ## Tests
 

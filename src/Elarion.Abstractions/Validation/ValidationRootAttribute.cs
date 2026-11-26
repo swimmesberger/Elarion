@@ -14,6 +14,11 @@ namespace Elarion.Abstractions.Validation;
 /// validator answers "valid" for a type it holds no metadata for.
 /// </para>
 /// <para>
+/// On an attribute class, the marker makes every type that carries that attribute a root, so a package declares its
+/// own kind of root once — <c>[SpreadsheetRecord]</c> is marked this way — instead of emitting the marker from a source
+/// generator, whose output the validation generator never sees.
+/// </para>
+/// <para>
 /// A marked type that carries validation attributes and lies outside every module's namespace is a build error
 /// (<c>ELVAL004</c>); one in a compilation that does not reference <c>Elarion.Validation</c> raises the build
 /// warning <c>ELVAL002</c>. A marked type without validation attributes gets no metadata, and a generic type is not

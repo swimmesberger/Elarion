@@ -18,6 +18,8 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
     private const string ColumnAttributeName = "Elarion.Spreadsheets.SpreadsheetColumnAttribute";
     private const string IgnoreAttributeName = "Elarion.Spreadsheets.SpreadsheetIgnoreAttribute";
     private const string DisplayAttributeName = "System.ComponentModel.DataAnnotations.DisplayAttribute";
+    private const string ValidationAttributeName = "System.ComponentModel.DataAnnotations.ValidationAttribute";
+    private const string ValidatableObjectName = "System.ComponentModel.DataAnnotations.IValidatableObject";
     private const string Category = "Elarion.Spreadsheets";
     private const int MaxWorksheetNameLength = 31;
 
@@ -142,7 +144,12 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
         EquatableArray<string> Choices,
         string? TrueLabel,
         string? FalseLabel,
-        int Order);
+        int Order,
+        // The property's type without Nullable<>, and as declared, both fully qualified.
+        string ValueTypeFqn,
+        string PropertyTypeFqn,
+        // Whether the generated mapper can set the property in an object initializer.
+        bool CanSet);
 
     private sealed record SpreadsheetRecordModel(
         string Namespace,
@@ -156,7 +163,12 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
         bool Emit,
         bool EmitSelfMapping,
         EquatableArray<ColumnModel> Columns,
-        EquatableArray<DiagnosticInfo> Diagnostics);
+        EquatableArray<DiagnosticInfo> Diagnostics,
+        bool HasValidation,
+        // How ReadRow builds the record: the properties passed to a constructor, in parameter order (empty for the
+        // parameterless one), or the reason it cannot build one.
+        EquatableArray<string> ConstructorArguments,
+        string? ConstructionProblem);
 
     private static SpreadsheetRecordModel? GetModel(GeneratorAttributeSyntaxContext ctx) {
         if (ctx.TargetSymbol is not INamedTypeSymbol type) return null;
@@ -210,16 +222,22 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
                 diagnostics.Add(DiagnosticInfo.Create(ReservedMemberName, LocationInfo.From(type), typeFqn, reserved));
             }
 
+        var arranged = Arrange(columns);
+        var constructorArguments = ChooseConstruction(type, arranged, out var constructionProblem);
         return new SpreadsheetRecordModel(
             ns, typeName, typeFqn, mapperName, hintName, accessibility, keyword, worksheetName,
             true, isPartial && !hasReservedCollision,
-            Arrange(columns).ToEquatableArray(),
-            diagnostics.ToImmutable().ToEquatableArray());
+            arranged.ToEquatableArray(),
+            diagnostics.ToImmutable().ToEquatableArray(),
+            HasValidation(type),
+            constructorArguments.ToEquatableArray(),
+            constructionProblem);
 
         SpreadsheetRecordModel Invalid() {
             return new SpreadsheetRecordModel(
                 ns, typeName, typeFqn, mapperName, hintName, accessibility, keyword, worksheetName,
-                false, false, EquatableArray<ColumnModel>.Empty, diagnostics.ToImmutable().ToEquatableArray());
+                false, false, EquatableArray<ColumnModel>.Empty, diagnostics.ToImmutable().ToEquatableArray(),
+                false, EquatableArray<string>.Empty, null);
         }
     }
 
@@ -380,6 +398,13 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
             isNullable = !propertyType.IsValueType && propertyType.NullableAnnotation != NullableAnnotation.NotAnnotated;
         }
 
+        var canSet = !property.IsReadOnly
+                     && property.SetMethod is {
+                         DeclaredAccessibility: Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal
+                     };
+        var valueTypeFqn = effective.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var propertyTypeFqn = propertyType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
         var hasLabels = trueLabel is not null || falseLabel is not null;
         var isBoolean = effective.SpecialType == SpecialType.System_Boolean;
         if (hasLabels) {
@@ -405,14 +430,15 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
                 property.Name, header, "Choice", WriteKind.Enum, isNullable, format, width,
                 aliases.ToEquatableArray(), enumType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 members.ToEquatableArray(), members.Select(static member => member.Label).ToEquatableArray(),
-                null, null, order);
+                null, null, order, valueTypeFqn, propertyTypeFqn, canSet);
         }
 
         if (isBoolean && hasLabels)
             return new ColumnModel(
                 property.Name, header, "Choice", WriteKind.LabelledBoolean, isNullable, format, width,
                 aliases.ToEquatableArray(), null, EquatableArray<EnumMemberModel>.Empty,
-                ImmutableArray.Create(trueLabel!, falseLabel!).ToEquatableArray(), trueLabel, falseLabel, order);
+                ImmutableArray.Create(trueLabel!, falseLabel!).ToEquatableArray(), trueLabel, falseLabel, order,
+                valueTypeFqn, propertyTypeFqn, canSet);
 
         var mapped = MapScalar(effective);
         if (mapped is null) {
@@ -425,7 +451,7 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
         return new ColumnModel(
             property.Name, header, mapped.Value.Kind, mapped.Value.WriteKind, isNullable, format, width,
             aliases.ToEquatableArray(), null, EquatableArray<EnumMemberModel>.Empty, EquatableArray<string>.Empty,
-            null, null, order);
+            null, null, order, valueTypeFqn, propertyTypeFqn, canSet);
     }
 
     private static (string Kind, WriteKind WriteKind)? MapScalar(ITypeSymbol type) {
@@ -496,6 +522,79 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
                 return true;
 
         return false;
+    }
+
+    /// <summary>
+    /// Whether the record's validator would check anything: a DataAnnotations attribute on the type or on one of its
+    /// public instance properties (mapped or not, base types included), or <c>IValidatableObject</c>.
+    /// </summary>
+    private static bool HasValidation(INamedTypeSymbol type) {
+        if (type.AllInterfaces.Any(static candidate => candidate.ToDisplayString() == ValidatableObjectName)) return true;
+
+        for (var current = type;
+             current is not null && current.SpecialType != SpecialType.System_Object;
+             current = current.BaseType) {
+            if (current.GetAttributes().Any(IsValidationAttribute)) return true;
+
+            foreach (var member in current.GetMembers())
+                if (member is IPropertySymbol { IsStatic: false, DeclaredAccessibility: Accessibility.Public } property
+                    && property.GetAttributes().Any(IsValidationAttribute))
+                    return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsValidationAttribute(AttributeData attribute) {
+        for (var current = attribute.AttributeClass; current is not null; current = current.BaseType)
+            if (current.ToDisplayString() == ValidationAttributeName)
+                return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// How the generated reader builds a record: with an object initializer after the parameterless constructor (an
+    /// empty list), or through the constructor whose parameters all name columns of the same type, such as a positional
+    /// record's (their property names in parameter order). Every <c>required</c> member must be a column the reader
+    /// sets; otherwise <paramref name="problem"/> says why the record cannot be read.
+    /// </summary>
+    private static List<string> ChooseConstruction(INamedTypeSymbol type, List<ColumnModel> columns, out string? problem) {
+        problem = null;
+        var accessible = type.InstanceConstructors
+            .Where(static constructor => constructor.DeclaredAccessibility is Accessibility.Public or Accessibility.Internal
+                or Accessibility.ProtectedOrInternal)
+            .ToList();
+        var arguments = new List<string>();
+        if (!accessible.Any(static constructor => constructor.Parameters.Length == 0)) {
+            var match = accessible
+                .Where(constructor => constructor.Parameters.All(parameter => columns.Any(column =>
+                    string.Equals(column.PropertyName, parameter.Name, StringComparison.OrdinalIgnoreCase)
+                    && column.PropertyTypeFqn == parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))))
+                .OrderByDescending(static constructor => constructor.Parameters.Length)
+                .FirstOrDefault();
+            if (match is null) {
+                problem = "it has no parameterless constructor and no constructor whose parameters all name its columns";
+                return arguments;
+            }
+
+            arguments.AddRange(match.Parameters.Select(parameter => columns.First(column =>
+                string.Equals(column.PropertyName, parameter.Name, StringComparison.OrdinalIgnoreCase)).PropertyName));
+        }
+
+        for (var current = type;
+             current is not null && current.SpecialType != SpecialType.System_Object;
+             current = current.BaseType)
+            foreach (var member in current.GetMembers()) {
+                var isRequired = member is IPropertySymbol { IsRequired: true } or IFieldSymbol { IsRequired: true };
+                if (!isRequired || arguments.Contains(member.Name)) continue;
+                if (columns.Any(column => column.PropertyName == member.Name && column.CanSet)) continue;
+
+                problem = $"its required member '{member.Name}' is not a column the reader sets";
+                return arguments;
+            }
+
+        return arguments;
     }
 
     private static void ReportDuplicateHeaders(

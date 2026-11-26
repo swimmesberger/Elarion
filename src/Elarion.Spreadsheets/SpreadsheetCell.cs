@@ -108,7 +108,7 @@ public readonly struct SpreadsheetCell : IEquatable<SpreadsheetCell> {
     /// <returns><see langword="false"/> when the cell is not a number, or the number exceeds the decimal range.</returns>
     public bool TryGetNumber(out decimal value) {
         if (Kind == SpreadsheetCellKind.Number && Math.Abs(_number) < 7.9e28) {
-            value = (decimal)_number;
+            value = ToDecimal(_number);
             return true;
         }
 
@@ -182,11 +182,15 @@ public readonly struct SpreadsheetCell : IEquatable<SpreadsheetCell> {
         return DateOrigin.AddTicks((long)milliseconds * TimeSpan.TicksPerMillisecond);
     }
 
+    /// <summary>The decimal of the 15 significant digits, not of the binary fraction: 1234.56, not 1234.5599999….</summary>
+    private static decimal ToDecimal(double value) {
+        return decimal.Parse(value.ToString("G15", CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture);
+    }
+
     private static string FormatNumber(double value) {
-        // (decimal)double keeps 15 significant digits and never formats with an exponent; beyond the decimal range the
-        // fixed-point form of the double does the same.
+        // A decimal never formats with an exponent; beyond the decimal range the fixed-point form of the double does.
         return Math.Abs(value) < 7.9e28
-            ? ((decimal)value).ToString(CultureInfo.InvariantCulture)
+            ? ToDecimal(value).ToString(CultureInfo.InvariantCulture)
             : value.ToString("F0", CultureInfo.InvariantCulture);
     }
 
