@@ -28,9 +28,16 @@ namespace Elarion.Generators;
 /// the split <c>IValidatableTypeInfo</c>/<c>IValidatableParameterInfo</c> resolver contract.
 /// </para>
 /// <para>
+/// A type marked <c>[ValidationRoot]</c> (validated outside a handler request) is a root too, of the module whose
+/// namespace contains it, matched by metadata name like every other Abstractions attribute. One that carries
+/// validation attributes outside every module's namespace would be validated by nothing, reported as
+/// <c>ELVAL004</c>.
+/// </para>
+/// <para>
 /// Generation is conditional on the compilation referencing <c>Elarion.Validation</c>. When validatable request
 /// types exist without that reference, the attributes would be documented in the exported schemas but silently
-/// unenforced — reported as <c>ELVAL002</c> so it is a visible choice.
+/// unenforced — reported as <c>ELVAL002</c> so it is a visible choice; likewise for a validatable
+/// <c>[ValidationRoot]</c> type.
 /// </para>
 /// <para>
 /// Trigger: annotate the Application assembly with <c>[assembly: UseElarion]</c> or
@@ -46,6 +53,9 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
     /// <summary>The reference probe: present only when the compilation references <c>Elarion.Validation</c>.</summary>
     private const string ElarionValidationExtensionsMetadataName =
         "Elarion.Validation.ElarionValidationServiceCollectionExtensions";
+
+    private const string ValidationRootAttributeMetadataName =
+        "Elarion.Abstractions.Validation.ValidationRootAttribute";
 
     private const string ValidationAttributeFqn =
         "global::System.ComponentModel.DataAnnotations.ValidationAttribute";
@@ -84,6 +94,26 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Warning,
         true);
 
+    // Same id and title as ValidationNotEnforcedDescriptor: one rule, worded for a root that has no handler.
+    private static readonly DiagnosticDescriptor RootValidationNotEnforcedDescriptor = new(
+        "ELVAL002",
+        "Validation attributes are not enforced without Elarion.Validation",
+        "Validation root '{0}' carries validation attributes, but the compilation does not reference "
+        + "Elarion.Validation, so no validation metadata is generated for it; reference Elarion.Validation and call "
+        + "AddElarionValidation()",
+        "Elarion.Abstractions.Validation",
+        DiagnosticSeverity.Warning,
+        true);
+
+    private static readonly DiagnosticDescriptor RootOutsideModulesDescriptor = new(
+        "ELVAL004",
+        "Validation root is not in any module",
+        "Validation root '{0}' carries validation attributes but lies outside the namespace of every module, so no "
+        + "module registers validation metadata for it; move it into the namespace of the module that validates it",
+        "Elarion.Abstractions.Validation",
+        DiagnosticSeverity.Error,
+        true);
+
     private static readonly DiagnosticDescriptor AsyncValidationBeforeTransactionDescriptor = new(
         "ELVAL003",
         "Asynchronous request validation runs before the transaction",
@@ -111,6 +141,7 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
 
     private static class TrackingNames {
         public const string Candidates = "ValidationCandidates";
+        public const string Roots = "ValidationRoots";
         public const string Resolvers = "ValidationResolvers";
         public const string Combined = "ValidationCombined";
     }
@@ -127,6 +158,23 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
             .Select(static (candidates, _) => HandlerCandidates.FlattenSortedDistinct(candidates))
             .WithTrackingName(TrackingNames.Candidates);
 
+        // Stage one, too: the [ValidationRoot] types, as sorted distinct metadata names.
+        var validationRoots = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ValidationRootAttributeMetadataName,
+                static (node, _) => node is TypeDeclarationSyntax,
+                static (ctx, _) => ctx.TargetSymbol is INamedTypeSymbol type
+                    ? ModuleScanner.BuildMetadataName(type)
+                    : null)
+            .Where(static name => name is not null)
+            .Collect()
+            .Select(static (names, _) => names
+                .Select(static name => name!)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(static name => name, StringComparer.Ordinal)
+                .ToEquatableArray())
+            .WithTrackingName(TrackingNames.Roots);
+
         var modules = ModuleProviders.CollectModules(context);
         var trigger = ModuleProviders.HasTrigger(context, TriggerAttributeMetadataName);
 
@@ -136,9 +184,11 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
         // (no extra provider needed — this stage is already compilation-bound). Output is value-equatable,
         // so emission stays cached when no model changed.
         var model = handlerCandidates
+            .Combine(validationRoots)
             .Combine(modules)
             .Combine(context.CompilationProvider)
-            .Select(static (source, ct) => BuildModel(source.Left.Left, source.Left.Right, source.Right, ct))
+            .Select(static (source, ct) => BuildModel(
+                source.Left.Left.Left, source.Left.Left.Right, source.Left.Right, source.Right, ct))
             .WithTrackingName(TrackingNames.Resolvers);
 
         var combined = model.Combine(trigger).WithTrackingName(TrackingNames.Combined);
@@ -158,10 +208,11 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
 
     private static ValidationModel BuildModel(
         EquatableArray<string> candidates,
+        EquatableArray<string> validationRoots,
         EquatableArray<ModuleScanner.Module> modules,
         Compilation compilation,
         CancellationToken ct) {
-        if (candidates.IsEmpty)
+        if (candidates.IsEmpty && validationRoots.IsEmpty)
             return ValidationModel.Empty;
 
         var hasElarionValidation =
@@ -216,14 +267,38 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
                         requestType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         string.Join("; ", asyncValidators)));
 
-                if (!moduleRoots.TryGetValue(module, out var roots)) {
-                    roots = new List<ITypeSymbol>();
-                    moduleRoots[module] = roots;
-                }
-
-                if (!roots.Contains(requestType, SymbolEqualityComparer.Default))
-                    roots.Add(requestType);
+                AddRoot(moduleRoots, module, requestType);
             }
+        }
+
+        // [ValidationRoot] types follow the handler requests, so a compilation without them emits exactly what it
+        // emitted before. A root with no validation attributes needs no metadata and is no error anywhere.
+        foreach (var metadataName in validationRoots) {
+            ct.ThrowIfCancellationRequested();
+            if (compilation.Assembly.GetTypeByMetadataName(metadataName) is not { } rootSymbol)
+                continue;
+
+            // typeof() cannot name an open generic type, so a generic type (or one nested in one) is no root.
+            if (IsOrIsNestedInGeneric(rootSymbol))
+                continue;
+
+            if (!ValidatableTypeWalker.IsValidatable(rootSymbol, walkContext))
+                continue;
+
+            var rootFqn = rootSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            var module = ModuleScanner.FindBest(rootSymbol.ContainingNamespace?.ToDisplayString() ?? "", modules);
+            if (module is null)
+                diagnostics.Add(DiagnosticInfo.Create(
+                    RootOutsideModulesDescriptor, LocationInfo.From(rootSymbol), rootFqn));
+
+            if (!hasElarionValidation)
+                diagnostics.Add(DiagnosticInfo.Create(
+                    RootValidationNotEnforcedDescriptor, LocationInfo.From(rootSymbol), rootFqn));
+
+            if (module is null || !hasElarionValidation)
+                continue;
+
+            AddRoot(moduleRoots, module, rootSymbol);
         }
 
         if (moduleRoots.Count == 0)
@@ -244,6 +319,27 @@ public sealed class ValidationResolverGenerator : IIncrementalGenerator {
         }
 
         return new ValidationModel(moduleModels.ToImmutable(), diagnostics.ToImmutable());
+    }
+
+    private static void AddRoot(
+        Dictionary<ModuleScanner.Module, List<ITypeSymbol>> moduleRoots,
+        ModuleScanner.Module module,
+        ITypeSymbol root) {
+        if (!moduleRoots.TryGetValue(module, out var roots)) {
+            roots = new List<ITypeSymbol>();
+            moduleRoots[module] = roots;
+        }
+
+        if (!roots.Contains(root, SymbolEqualityComparer.Default))
+            roots.Add(root);
+    }
+
+    private static bool IsOrIsNestedInGeneric(INamedTypeSymbol type) {
+        for (var current = type; current is not null; current = current.ContainingType)
+            if (current.IsGenericType)
+                return true;
+
+        return false;
     }
 
     private static void EmitModuleResolver(SourceProductionContext spc, ModuleResolverModel module) {

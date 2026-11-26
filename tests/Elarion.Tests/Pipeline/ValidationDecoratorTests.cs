@@ -94,5 +94,7 @@ public sealed class ValidationDecoratorTests {
             SeenRequest = request;
             return ValueTask.FromResult(errors);
         }
+
+        public bool HasMetadata(Type type) => true;
     }
 }

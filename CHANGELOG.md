@@ -8,6 +8,18 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **`[ValidationRoot]`: validate a type outside a handler request** (ADR-0108). A marked type gets the same generated,
+  constant-constructed validation metadata as a handler request, in the module whose namespace contains it, and is
+  validated through `IRequestValidator.ValidateAsync`. A marked type with validation attributes outside every module is
+  the build error `ELVAL004`; `ELVAL002` now also covers such a type in a compilation without `Elarion.Validation`. See
+  [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation#validating-outside-a-handler-request).
+
+### Changed
+- **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
+  type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
+  member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
+
 ## [0.4.6] - 2026-11-24
 
 ### Added

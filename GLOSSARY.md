@@ -198,6 +198,11 @@ The read-only projection of modules, flags and grants a frontend receives to ada
 hides and adapts; it never enforces.
 _Avoid_: permission (on the client), client-side authorization
 
+**Validation root**:
+A type the validator checks as a whole: a handler request, or a type marked `[ValidationRoot]` that is validated
+outside a handler request. Its module's generated metadata covers it and everything reachable from it.
+_Avoid_: validated type, validation target
+
 ### Events and live updates
 
 **Domain event**:

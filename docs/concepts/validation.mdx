@@ -203,6 +203,28 @@ A property typed as a C# 15 union is validated as its active case: the attribute
 use the property's path (`result.name`, not `result.value.name`), matching the JSON, where a union is written as its
 active case.
 
+### Validating outside a handler request
+
+A type that reaches the validator without a handler, such as a row read from a file, is marked
+`[ValidationRoot]` (`Elarion.Abstractions.Validation`). It joins the generated metadata of the module whose namespace
+contains it, exactly like a handler request, and is validated through the same seam with the same messages:
+
+```csharp
+[ValidationRoot]
+public sealed record ProductRow {
+    [StringLength(40, MinimumLength = 1)]
+    public required string Sku { get; init; }
+}
+
+if (!validator.HasMetadata(typeof(ProductRow)))
+    throw new InvalidOperationException("No validation metadata is registered for ProductRow.");
+var errors = await validator.ValidateAsync(typeof(ProductRow), row, cancellationToken);
+```
+
+`ValidateAsync` answers "valid" for a type it holds no metadata for, and metadata exists only while the module is
+enabled, so code that validates outside the pipeline asks `IRequestValidator.HasMetadata(type)` first and fails when
+the answer is no. A root outside every module is `ELVAL004`; without `Elarion.Validation` it is `ELVAL002`.
+
 ## Field-keyed errors
 
 A violation fails with `AppError.Validation` carrying `FieldErrors` — messages keyed by **wire-named
@@ -322,8 +344,9 @@ Nothing pretends a uniqueness check can run in a browser; the contract simply gu
 | Id | Severity | Meaning |
 | --- | --- | --- |
 | `ELVAL001` | Error | A handler's request carries validation attributes but the response type cannot represent failure (no `IResultFailureFactory<T>`, i.e. not `Result<T>`/`Result`) — the decorator could not short-circuit and would be silently skipped. Mirrors `ELAUTH001`. |
-| `ELVAL002` | Warning | A request carries validation attributes but the compilation does not reference `Elarion.Validation` — the constraints are documented in every schema but **unenforced** at runtime. Reference the package and call `AddElarionValidation()`, or remove the attributes; the gap must be a visible choice, never a silent one. |
+| `ELVAL002` | Warning | A request or a `[ValidationRoot]` type carries validation attributes but the compilation does not reference `Elarion.Validation` — the constraints are documented in every schema but **unenforced** at runtime. Reference the package and call `AddElarionValidation()`, or remove the attributes; the gap must be a visible choice, never a silent one. |
 | `ELVAL003` | Warning | (.NET 11) The request graph has an `AsyncValidationAttribute` or an `IAsyncValidatableObject`. It is enforced, but it runs in the validation decorator **before the transaction**, so a database or service lookup there is a time-of-check/time-of-use race. Move the check into the handler and return `AppError.Validation`/`AppError.Conflict`, or suppress the warning when the check reads no shared state. |
+| `ELVAL004` | Error | A `[ValidationRoot]` type carries validation attributes but lies outside the namespace of every module, so no module registers its metadata. Move it into the namespace of the module that validates it. |
 
 ## Coming from FluentValidation
 

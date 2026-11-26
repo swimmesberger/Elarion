@@ -176,6 +176,16 @@ public sealed class MicrosoftRequestValidatorTests {
     }
 
     [Fact]
+    public async Task HasMetadata_IsTrueForARegisteredType_AndFalseForAnUnknownType() {
+        await using var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+        var validator = scope.ServiceProvider.GetRequiredService<IRequestValidator>();
+
+        validator.HasMetadata(typeof(CreateClientRequest)).Should().BeTrue();
+        validator.HasMetadata(typeof(UnannotatedRequest)).Should().BeFalse();
+    }
+
+    [Fact]
     public void AddElarionValidation_IsIdempotent() {
         var services = new ServiceCollection();
         services.AddElarionValidation();

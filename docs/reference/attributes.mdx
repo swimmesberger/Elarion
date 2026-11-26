@@ -542,7 +542,7 @@ See [Audit trail](/docs/concepts/auditing).
 
 ## Validation
 
-There is **no Elarion validation attribute**. Request validation is declared with the standard
+There is **no Elarion validation constraint attribute**. Request validation is declared with the standard
 `System.ComponentModel.DataAnnotations` attributes on the handler's request DTO — `[Range]`,
 `[MinLength]`/`[MaxLength]`/`[Length]`/`[StringLength]`, `[RegularExpression]`, `[EmailAddress]`,
 `[Url]`, `[Base64String]` — with requiredness from nullability (ADR-0082; no
@@ -554,6 +554,18 @@ attribute (e.g. `[Slug] : RegularExpressionAttribute`). Enforcement requires the
 `Elarion.Validation` package (`AddElarionValidation()`); diagnostics `ELVAL001`/`ELVAL002`/`ELVAL003`.
 
 See [Validation](/docs/concepts/validation).
+
+### `[ValidationRoot]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** class, struct (records included)
+- **Triggers:** makes a type that is validated outside a handler request a validation root of the module whose
+  namespace contains it, so the validation generator emits the same constant-constructed metadata for it as for a
+  handler request and `IRequestValidator.HasMetadata` answers `true` for it while the module is enabled. A marked type
+  with validation attributes outside every module is `ELVAL004`; one in a compilation without `Elarion.Validation` is
+  `ELVAL002`. A generic type is not a root. See
+  [Validating outside a handler request](/docs/concepts/validation#validating-outside-a-handler-request).
+
+No parameters.
 
 ## Authorization
 

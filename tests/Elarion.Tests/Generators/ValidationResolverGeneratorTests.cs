@@ -477,6 +477,95 @@ public sealed class ValidationResolverGeneratorTests {
     }
 
     [Fact]
+    public void ValidationRootInModule_GetsTheModulesConstantConstructedMetadata() {
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+                              }
+
+                              namespace Sample.App.Imports {
+                                  [Elarion.Abstractions.Validation.ValidationRoot]
+                                  public sealed record ImportRow {
+                                      [StringLength(10, MinimumLength = 2)]
+                                      public required string Code { get; init; }
+                                  }
+                              }
+                              """;
+
+        var result = Run(source);
+        var generated = GetGenerated(result, "AppValidatableInfoResolver.g.cs");
+
+        generated.Should().Contain("if (type == typeof(global::Sample.App.Imports.ImportRow))");
+        generated.Should().Contain(
+            "new global::System.ComponentModel.DataAnnotations.StringLengthAttribute(10) { MinimumLength = 2 },");
+        GetGenerated(result, "Sample_App_AppModuleElarionModuleServices.Validators.g.cs")
+            .Should().Contain("AddElarionValidationResolver(services, new global::Sample.App.AppValidatableInfoResolver());");
+        result.Diagnostics.Should().BeEmpty();
+        AssertGeneratedOutputCompiles(source);
+    }
+
+    [Fact]
+    public void ValidationRootOutsideEveryModule_ReportsElval004() {
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+                              }
+
+                              namespace Sample.Shared {
+                                  [Elarion.Abstractions.Validation.ValidationRoot]
+                                  public sealed record ImportRow {
+                                      [StringLength(10)]
+                                      public required string Code { get; init; }
+                                  }
+
+                                  // Without validation attributes a root needs no metadata, wherever it lies.
+                                  [Elarion.Abstractions.Validation.ValidationRoot]
+                                  public sealed record PlainRow(string Code);
+                              }
+                              """;
+
+        var result = Run(source);
+
+        result.Diagnostics.Should().ContainSingle().Which.Should().Match<Diagnostic>(diagnostic =>
+            diagnostic.Id == "ELVAL004"
+            && diagnostic.Severity == DiagnosticSeverity.Error
+            && diagnostic.GetMessage(null).Contains("global::Sample.Shared.ImportRow"));
+        result.GeneratedTrees.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ValidationRootWithoutElarionValidationReference_ReportsElval002() {
+        const string source = Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+
+                                  [Elarion.Abstractions.Validation.ValidationRoot]
+                                  public sealed record ImportRow {
+                                      [StringLength(10)]
+                                      public required string Code { get; init; }
+                                  }
+                              }
+                              """;
+
+        var result = Run(source, true);
+
+        result.Diagnostics.Should().ContainSingle().Which.Should().Match<Diagnostic>(diagnostic =>
+            diagnostic.Id == "ELVAL002"
+            && diagnostic.Severity == DiagnosticSeverity.Warning
+            && diagnostic.GetMessage(null).Contains("global::Sample.App.ImportRow"));
+        result.GeneratedTrees.Should().BeEmpty();
+    }
+
+    [Fact]
     public void IrrelevantEdit_ReusesPipeline() {
         const string source = Preamble +
                               """
@@ -501,6 +590,7 @@ public sealed class ValidationResolverGeneratorTests {
             new ValidationResolverGenerator(),
             source,
             "ValidationCandidates",
+            "ValidationRoots",
             "ValidationResolvers",
             "ValidationCombined");
     }
