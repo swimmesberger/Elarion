@@ -50,3 +50,20 @@ public sealed partial class LenientRow {
 public sealed partial record AccountRow(string Iban, decimal Balance) {
     public string? Holder { get; init; }
 }
+
+/// <summary>An enum whose members read from extra spellings besides their labels and names.</summary>
+public enum EnergySource {
+    [System.ComponentModel.DataAnnotations.Display(Name = "Erdgas")]
+    [SpreadsheetChoice(Aliases = ["gas", "naturalgas"])]
+    NaturalGas,
+
+    [System.ComponentModel.DataAnnotations.Display(Name = "Wärme")]
+    [SpreadsheetChoice(Aliases = ["waerme"])]
+    Heating
+}
+
+/// <summary>A record with an enum column whose members carry aliases.</summary>
+[SpreadsheetRecord("Meters")]
+public sealed partial class MeterRow {
+    public EnergySource Source { get; init; }
+}

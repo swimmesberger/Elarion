@@ -375,6 +375,60 @@ public sealed class SpreadsheetRecordGeneratorTests {
         result.GeneratedTrees.Should().NotContain(tree => tree.FilePath.EndsWith("SpreadsheetRecord.g.cs"));
     }
 
+    [Theory]
+    [InlineData("[Elarion.Spreadsheets.SpreadsheetChoice(Aliases = new[] { \"gas\" })] NaturalGas, Gas", "gas", "Gas")]
+    [InlineData("[Elarion.Spreadsheets.SpreadsheetChoice(Aliases = new[] { \"gas\" })] NaturalGas, [System.ComponentModel.DataAnnotations.Display(Name = \"GAS\")] Other", "gas", "GAS")]
+    [InlineData("[System.ComponentModel.DataAnnotations.Display(Name = \"Heating\")] Warmth, Heating", "Heating", "Heating")]
+    public void EnumMembersWithAnEqualLabelNameOrAlias_FailTheBuildWithElsheet008NamingBoth(
+        string members, string first, string second) {
+        var result = Generate(
+            $$"""
+              namespace Sample {
+                  public enum Source { {{members}} }
+
+                  [Elarion.Spreadsheets.SpreadsheetRecord]
+                  public sealed partial class Row {
+                      public Source Source { get; set; }
+                  }
+              }
+              """);
+
+        var diagnostic = result.Diagnostics.Should().ContainSingle(d => d.Id == "ELSHEET008").Subject;
+        diagnostic.Severity.Should().Be(DiagnosticSeverity.Error);
+        diagnostic.GetMessage().Should().Contain($"'{first}'").And.Contain($"'{second}'");
+        diagnostic.GetMessage().Should().MatchRegex(@"member 'Sample\.Source\.\w+'.*member 'Sample\.Source\.\w+'");
+        result.GeneratedTrees.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AliasEqualToItsOwnLabelOrName_OrEmpty_IsIgnored() {
+        var result = Generate(
+            """
+            namespace Sample {
+                public enum Source {
+                    [System.ComponentModel.DataAnnotations.Display(Name = "Erdgas")]
+                    [Elarion.Spreadsheets.SpreadsheetChoice(Aliases = new[] { "ERDGAS", "naturalgas", " ", "gas" })]
+                    NaturalGas,
+                    Heating
+                }
+
+                [Elarion.Spreadsheets.SpreadsheetRecord]
+                public sealed partial class Row {
+                    public Source Source { get; set; }
+                }
+            }
+            """);
+
+        NoErrors(result);
+        var source = GetGenerated(result, "Sample_Row.SpreadsheetRowMapper.g.cs");
+        source.Should().Contain(
+            "if (string.Equals(text, \"gas\", global::System.StringComparison.OrdinalIgnoreCase)) return global::Sample.Source.NaturalGas;");
+        source.Should().NotContain("\"ERDGAS\"").And.NotContain("\" \"");
+        source.Should().Contain("new string[] { \"Erdgas\", \"Heating\" }", "the dropdown offers only the labels");
+        source.Should().Contain("global::Sample.Source.NaturalGas => \"Erdgas\",");
+        source.Split("\"gas\"").Length.Should().Be(2, "an alias only reads");
+    }
+
     [Fact]
     public void SpreadsheetRecord_EmitsTypedReadCodeAndAnObjectInitializer() {
         var result = Generate(ContactSource);

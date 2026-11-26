@@ -501,6 +501,7 @@ As with `[SqlRecord]`, there is no reflection fallback: if a record builds, it m
 | ELSHEET005 | Error | `TrueLabel`/`FalseLabel` is set on a property that is not a boolean, or only one of the two is set. | Set both labels, on a `bool` or `bool?` property only. |
 | ELSHEET006 | Error | `[SpreadsheetRecord]` is on a struct, or on a nested, generic or abstract type. | Use a top-level, non-generic, concrete class or record class. |
 | ELSHEET007 | Error | The record declares a member named `Columns` or `SpreadsheetMapper`, which collides with a generated member. | Rename the member; its column can keep its header through `[SpreadsheetColumn("…")]`. |
+| ELSHEET008 | Error | Two members of an enum that a record's column uses have a label (`[Display(Name)]`), name or `[SpreadsheetChoice]` alias that are equal ignoring case; the message names both. | Change the label or remove the alias, so that every spelling names one member. |
 
 ## ELSQL — SQL row mapping and interpolation
 

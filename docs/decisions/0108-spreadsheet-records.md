@@ -62,7 +62,9 @@ abstractions and Sylvan.Data.Excel, and bundles its generator. It does not depen
 1. **A spreadsheet record is a generated mapping in both directions.** `[SpreadsheetRecord]` on a `partial` class makes
    its properties the columns of a worksheet. `[SpreadsheetColumn]` names a header, its aliases (older headers that
    still read as it), an order, a number format, a width, and the labels of a boolean; `[SpreadsheetIgnore]` leaves a
-   property out; `[Display(Name)]` is the header when no column name is given and the label of an enum member. The
+   property out; `[Display(Name)]` is the header when no column name is given and the label of an enum member, and
+   `[SpreadsheetChoice(Aliases = …)]` on an enum member adds spellings that read as it (an older label, a word without
+   umlauts, a short form) but are never written. The
    generator emits the code that writes a record as a row and reads a row into a record, plus a constant per column. A
    property of an unsupported type, a duplicate header or alias, an invalid worksheet name, a struct, or a member that
    collides with a generated one is a build error (`ELSHEET` diagnostics): if it builds, it maps, as with `[SqlRecord]`.

@@ -88,6 +88,10 @@ can be read as plain rows of typed cells with the same formats and limits.
   reads each worksheet as its record type, then both read without the file being opened or parsed again.
 - Given an enum column holding labels, member names and a label in other case, when it is read, then each reads as its
   member.
+- Given an enum member `NaturalGas` with `[Display(Name = "Erdgas")]` and `[SpreadsheetChoice(Aliases = ["gas",
+  "naturalgas"])]`, and a member `Heating` labelled "Wärme" with the alias "waerme", when a file holding "gas",
+  "GAS ", "Erdgas" and "waerme" is read, then each reads as its member; when records are written, then the cells and the
+  dropdown list show only the labels "Erdgas" and "Wärme".
 
 ### Preview an import before anything is saved (P1)
 
@@ -164,6 +168,8 @@ can be read as plain rows of typed cells with the same formats and limits.
 - Given `[SpreadsheetRecord]` on a struct, when the project builds, then the build fails with `ELSHEET006`.
 - Given a spreadsheet record with a property named `Columns`, when the project builds, then the build fails with
   `ELSHEET007` naming the member that collides with a generated one.
+- Given an enum whose member carries the alias "gas" while another member is labelled or named "Gas", when the project
+  builds, then the build fails with `ELSHEET008` naming both members.
 - Given `[SpreadsheetColumn(TrueLabel = "Ja")]` on a boolean property without a `FalseLabel`, or both labels on a
   string property, when the project builds, then the build fails with `ELSHEET005` naming the property.
 - Given an application published with NativeAOT that writes and reads spreadsheet records, when it is published, then
@@ -327,6 +333,10 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
   they MUST appear in the result's errors and in its `AppError`.
 - FR-069: One workbook MUST be readable as several worksheets and record types after it has been opened once.
 - FR-070: A record member whose name collides with a generated member MUST fail the build with `ELSHEET007`.
+- FR-071: An enum value MUST also read from each alias that `[SpreadsheetChoice(Aliases = …)]` gives its member,
+  ignoring case and surrounding whitespace, and an alias MUST never be written or offered in a dropdown list.
+- FR-072: Two members of one enum whose labels, names or aliases are equal ignoring case MUST fail the build with
+  `ELSHEET008` naming both.
 
 ## Success criteria
 

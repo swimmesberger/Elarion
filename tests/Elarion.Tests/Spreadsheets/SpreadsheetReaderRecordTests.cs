@@ -242,6 +242,23 @@ public sealed class SpreadsheetReaderRecordTests {
     }
 
     [Fact]
+    public async Task EnumMembersWithAliases_ReadFromEachAlias_AndAreWrittenAndOfferedOnlyAsTheirLabels() {
+        var bytes = Build(TextRow(1, "Source") + TextRow(2, "gas") + TextRow(3, "GAS ") + TextRow(4, "Erdgas") +
+                          TextRow(5, "waerme"));
+
+        var sources = (await ReadAsync<MeterRow>(bytes)).Records.Select(row => row.Source);
+
+        sources.Should().Equal(EnergySource.NaturalGas, EnergySource.NaturalGas, EnergySource.NaturalGas, EnergySource.Heating);
+
+        using var workbook = await WrittenWorkbook.WriteAsync(
+            new[] { new MeterRow { Source = EnergySource.NaturalGas }, new MeterRow { Source = EnergySource.Heating } });
+
+        WrittenWorkbook.Text(workbook.Cell("A2")).Should().Be("Erdgas");
+        WrittenWorkbook.Text(workbook.Cell("A3")).Should().Be("Wärme");
+        workbook.DataValidation("A").Formula1!.Text.Should().Be("\"Erdgas,Wärme\"");
+    }
+
+    [Fact]
     public async Task FortyRowsOfWhichThreeHaveProblems_HoldEveryRowWithItsCellTexts_RecordsOrErrors() {
         var rows = TextRow(1, "Name", "Balance", "Visits", "Newsletter", "Kind", "Active");
         for (var r = 2; r <= 41; r++)

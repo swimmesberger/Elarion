@@ -17,6 +17,7 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
     private const string RecordAttributeName = "Elarion.Spreadsheets.SpreadsheetRecordAttribute";
     private const string ColumnAttributeName = "Elarion.Spreadsheets.SpreadsheetColumnAttribute";
     private const string IgnoreAttributeName = "Elarion.Spreadsheets.SpreadsheetIgnoreAttribute";
+    private const string ChoiceAttributeName = "Elarion.Spreadsheets.SpreadsheetChoiceAttribute";
     private const string DisplayAttributeName = "System.ComponentModel.DataAnnotations.DisplayAttribute";
     private const string ValidationAttributeName = "System.ComponentModel.DataAnnotations.ValidationAttribute";
     private const string ValidatableObjectName = "System.ComponentModel.DataAnnotations.IValidatableObject";
@@ -84,6 +85,15 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Error,
         true);
 
+    private static readonly DiagnosticDescriptor AmbiguousChoice = new(
+        "ELSHEET008",
+        "Two enum members share a label, name or alias",
+        "Property '{0}.{1}': the label, name or alias '{2}' of member '{3}.{4}' equals the label, name or alias '{5}' of "
+        + "member '{3}.{6}' ignoring case; a file could not tell the members apart",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
     // The members the generated ISpreadsheetRecord<T> half adds to the record.
     private static readonly string[] ReservedMemberNames = ["Columns", "SpreadsheetMapper"];
 
@@ -125,7 +135,8 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
         Enum
     }
 
-    private sealed record EnumMemberModel(string Name, string Label);
+    // Aliases only read (FR-071): trimmed, without empty ones or ones equal to the member's own label or name.
+    private sealed record EnumMemberModel(string Name, string Label, EquatableArray<string> Aliases);
 
     private sealed record ColumnModel(
         string PropertyName,
@@ -426,6 +437,8 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
 
         if (effective.TypeKind == TypeKind.Enum && effective is INamedTypeSymbol enumType) {
             var members = EnumMembers(enumType);
+            if (ReportAmbiguousChoices(property, typeFqn, enumType, members, diagnostics)) return null;
+
             return new ColumnModel(
                 property.Name, header, "Choice", WriteKind.Enum, isNullable, format, width,
                 aliases.ToEquatableArray(), enumType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
@@ -489,7 +502,10 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
         };
     }
 
-    /// <summary>An enum's members with distinct values, in declaration order, labelled by <c>[Display(Name)]</c>.</summary>
+    /// <summary>
+    /// An enum's members with distinct values, in declaration order, labelled by <c>[Display(Name)]</c>, with the aliases
+    /// of <c>[SpreadsheetChoice]</c>.
+    /// </summary>
     private static List<EnumMemberModel> EnumMembers(INamedTypeSymbol enumType) {
         var members = new List<EnumMemberModel>();
         var seen = new HashSet<object>();
@@ -498,14 +514,58 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
             if (!seen.Add(field.ConstantValue)) continue;
 
             string? label = null;
+            var aliases = new List<string>();
             foreach (var attribute in field.GetAttributes())
-                if (attribute.AttributeClass?.ToDisplayString() == DisplayAttributeName)
-                    label = DisplayName(attribute);
+                switch (attribute.AttributeClass?.ToDisplayString()) {
+                    case DisplayAttributeName:
+                        label = DisplayName(attribute);
+                        break;
+                    case ChoiceAttributeName:
+                        foreach (var argument in attribute.NamedArguments)
+                            if (argument is { Key: "Aliases", Value.IsNull: false })
+                                aliases.AddRange(argument.Value.Values
+                                    .Select(static value => (value.Value as string)?.Trim())
+                                    .Where(static value => !string.IsNullOrEmpty(value))
+                                    .Select(static value => value!));
 
-            members.Add(new EnumMemberModel(field.Name, label ?? field.Name));
+                        break;
+                }
+
+            label ??= field.Name;
+            var own = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { label.Trim(), field.Name };
+            members.Add(new EnumMemberModel(
+                field.Name, label, aliases.Where(own.Add).ToImmutableArray().ToEquatableArray()));
         }
 
         return members;
+    }
+
+    /// <summary>
+    /// Reports <c>ELSHEET008</c> for every label, name or alias of a member that equals one of an earlier member ignoring
+    /// case (FR-072); returns whether it reported any.
+    /// </summary>
+    private static bool ReportAmbiguousChoices(
+        IPropertySymbol property, string typeFqn, INamedTypeSymbol enumType, List<EnumMemberModel> members,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+        var enumName = enumType.ToDisplayString();
+        var seen = new Dictionary<string, (string Text, string Member)>(StringComparer.OrdinalIgnoreCase);
+        // One diagnostic per pair of members, however many of their spellings collide.
+        var reportedPairs = new HashSet<(string, string)>();
+        foreach (var member in members)
+        foreach (var text in new[] { member.Label.Trim(), member.Name }.Concat(member.Aliases)) {
+            if (seen.TryGetValue(text, out var first)) {
+                if (first.Member != member.Name && reportedPairs.Add((first.Member, member.Name)))
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        AmbiguousChoice, LocationInfo.From(property),
+                        typeFqn, property.Name, text, enumName, member.Name, first.Text, first.Member));
+
+                continue;
+            }
+
+            seen.Add(text, (text, member.Name));
+        }
+
+        return reportedPairs.Count > 0;
     }
 
     private static string? DisplayName(AttributeData attribute) {

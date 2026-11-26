@@ -16,7 +16,7 @@ below are the intended ones and may move during review; the FR numbers are fixed
 | Project | Target | Holds |
 | --- | --- | --- |
 | `src/Elarion.Spreadsheets` | `net10.0;net11.0`, `IsAotCompatible` | Attributes, public API, writer, reader, options, DI registration |
-| `src/Elarion.Spreadsheets.Generators` | `netstandard2.0` | `SpreadsheetRecordGenerator` and `ELSHEET001`–`ELSHEET007`; bundled into the package's `analyzers/dotnet/cs/` the way `Elarion.Sql` bundles its generator |
+| `src/Elarion.Spreadsheets.Generators` | `netstandard2.0` | `SpreadsheetRecordGenerator` and `ELSHEET001`–`ELSHEET008`; bundled into the package's `analyzers/dotnet/cs/` the way `Elarion.Sql` bundles its generator |
 | `src/Elarion.Abstractions` (changed) | | `ValidationRootAttribute` marker; `IRequestValidator.HasMetadata(Type)` (FR-048) |
 | `src/Elarion.Validation` (changed) | | Implements `HasMetadata` from the registered resolvers |
 | `src/Elarion.Generators` (changed) | `netstandard2.0` | `ValidationResolverGenerator` takes `[ValidationRoot]` types as roots; `ELVAL004`; `ELVAL002` extended (FR-061, FR-065) |
@@ -154,7 +154,9 @@ Incremental, `ForAttributeWithMetadataName("Elarion.Spreadsheets.SpreadsheetReco
   requiredness.
 - **Diagnostics**, in `AnalyzerReleases.Unshipped.md`: `ELSHEET001` unsupported property type, `ELSHEET002` not
   `partial`, `ELSHEET003` duplicate header or alias, `ELSHEET004` invalid worksheet name, `ELSHEET005` boolean labels
-  misused (FR-060), `ELSHEET006` a struct (FR-062), `ELSHEET007` a member named like a generated one (FR-070).
+  misused (FR-060), `ELSHEET006` a struct (FR-062), `ELSHEET007` a member named like a generated one (FR-070),
+  `ELSHEET008` two enum members with an equal label, name or alias (FR-072). `[SpreadsheetChoice(Aliases = …)]` on an
+  enum member feeds only the generated read switch (FR-071); the write switch and the dropdown list use the label.
 - **Emitted per record**: the self-mapping half (`ISpreadsheetRecord<T>`, `Columns`) and `{T}SpreadsheetRowMapper`
   with a static column table, typed write and read code per column, enum label switches in both directions (FR-009),
   and `HasValidation` when the type carries DataAnnotations or `IValidatableObject`. Reading constructs the record with
@@ -258,7 +260,7 @@ All in `tests/Elarion.Tests`, named after the acceptance scenarios.
   first sheet, rich text, Strict OOXML, formula cells, text typed into a template) under `Spreadsheets/Fixtures/`;
   hostile fixtures (a zip whose declared sizes lie, DTD with external entity, truncated, encrypted) built in code.
 - Every written file is validated with `OpenXmlValidator` and read back through the package's reader.
-- `Generators/SpreadsheetRecordGeneratorTests.cs` — emitted shape and `ELSHEET001`–`ELSHEET007`;
+- `Generators/SpreadsheetRecordGeneratorTests.cs` — emitted shape and `ELSHEET001`–`ELSHEET008`;
   `ValidationResolverGenerator` tests for `[ValidationRoot]`, `ELVAL004` and `ELVAL002`, with existing snapshots
   byte-identical.
 - AOT: the `EdgeTelemetry` sample (already `PublishAot`) gains a readings export and import; CI publishes it with
@@ -270,7 +272,7 @@ All in `tests/Elarion.Tests`, named after the acceptance scenarios.
 ## Documentation
 
 - `docs/capabilities/spreadsheets.mdx` (and `meta.json`); `docs/reference/packages.mdx`, `diagnostics.mdx`
-  (`ELSHEET001`–`ELSHEET007`, `ELVAL004`, `ELVAL002`), `configuration.mdx` (`SpreadsheetOptions`); the validation
+  (`ELSHEET001`–`ELSHEET008`, `ELVAL004`, `ELVAL002`), `configuration.mdx` (`SpreadsheetOptions`); the validation
   concept page (`[ValidationRoot]`, `HasMetadata`); `CHANGELOG.md`.
 
 ## Tasks

@@ -16,7 +16,9 @@ minor releases may include breaking changes.
   columns; writing no records gives a fill-in template. `SpreadsheetReader` (`AddElarionSpreadsheets`) reads `.xlsx`,
   `.xlsb` and `.xls` into a result with every row, every problem located at its cell under a stable `spreadsheet.*`
   code, the columns the file states, and `ToAppError`; each row is validated with the record's DataAnnotations. A
-  foreign layout reads as plain rows of typed cells. Mapping problems are build errors `ELSHEET001`–`ELSHEET007`. See
+  foreign layout reads as plain rows of typed cells. `[SpreadsheetChoice(Aliases = …)]` on an enum member adds spellings
+  that read as the member but are never written or offered. Mapping problems are build errors
+  `ELSHEET001`–`ELSHEET008`. See
   [Spreadsheets](https://elarion.wimmesberger.dev/docs/capabilities/spreadsheets).
 - **`[ValidationRoot]`: validate a type outside a handler request** (ADR-0108). A marked type gets the same generated,
   constant-constructed validation metadata as a handler request, in the module whose namespace contains it, and is

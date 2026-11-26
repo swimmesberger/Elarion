@@ -11,7 +11,7 @@ a record. There is no reflection, so an application that writes and reads spread
 
 | Piece | Role |
 | --- | --- |
-| `[SpreadsheetRecord]`, `[SpreadsheetColumn]`, `[SpreadsheetIgnore]` | Declare the worksheet: its name, the columns, their headers, aliases, order, formats, widths and boolean labels. |
+| `[SpreadsheetRecord]`, `[SpreadsheetColumn]`, `[SpreadsheetIgnore]`, `[SpreadsheetChoice]` | Declare the worksheet: its name, the columns, their headers, aliases, order, formats, widths, boolean labels and the extra spellings of enum members. |
 | `SpreadsheetWorkbook` | Writes records as an `.xlsx` workbook, forward-only to a stream, an `ElarionFile` or an `ElarionStreamedFile`. |
 | `SpreadsheetReader` | Reads `.xlsx`, `.xlsb` and `.xls` workbooks into records, or into plain rows of typed cells. |
 | `SpreadsheetReadResult<T>` | Every row with its cell texts, its errors and its record; the columns the file contains; the conversion to an `AppError`. |
@@ -108,12 +108,32 @@ in `[SpreadsheetRecord]`, else the type's name.
 | `DateTime`, `DateOnly`, `TimeOnly` | a date cell, as its date and time whatever its `Kind` | a date cell, or text by the lenient rules |
 | `DateTimeOffset` | ISO 8601 text with its offset | ISO 8601 text that states an offset, only |
 | `Guid` | text | text |
-| an enum | its member's `[Display(Name)]`, else its name | the label or the name, ignoring case |
+| an enum | its member's `[Display(Name)]`, else its name | the label, the name or an alias, ignoring case |
 
 Nullable forms of all of these are supported. Requiredness comes from nullability, as everywhere in Elarion: an empty
 cell reads as `null` for a nullable property and is an error for a non-nullable one. A get-only (computed) property is
 written and never read, which covers a derived export column. Any other property type fails the build (`ELSHEET001`);
 mark it `[SpreadsheetIgnore]` or map a text property and convert it in the handler.
+
+An enum member can also read from extra spellings, such as an older label, a word typed without umlauts or a short
+form. `[SpreadsheetChoice(Aliases = …)]` on the member lists them; they match like the label and the name, ignoring case
+and surrounding white space, but they are never written and never offered in the dropdown list:
+
+```csharp
+public enum EnergySource {
+    [Display(Name = "Erdgas")]
+    [SpreadsheetChoice(Aliases = ["gas", "naturalgas"])]
+    NaturalGas,
+
+    [Display(Name = "Wärme")]
+    [SpreadsheetChoice(Aliases = ["waerme"])]
+    Heating,
+}
+```
+
+A file holding `gas`, `GAS ` or `Erdgas` reads as `NaturalGas`, and `waerme` as `Heating`; written cells and the
+dropdown show only `Erdgas` and `Wärme`. When two members of one enum share a label, name or alias ignoring case, the
+build fails (`ELSHEET008`). An alias equal to its own member's label or name, or an empty one, is ignored.
 
 The generator also emits a nested `Columns` class with one `SpreadsheetColumn<T>` per column, for example
 `ContactRow.Columns.Email`. Handlers use these constants to ask about a column or to add an error to it, never a header
@@ -466,7 +486,8 @@ The defaults fit the 1–10 node tier Elarion targets. A read holds the whole up
 
 ## Build-time checks
 
-If a record builds, it maps. The generator reports `ELSHEET001`–`ELSHEET007` for an unsupported property type, a type
+If a record builds, it maps. The generator reports `ELSHEET001`–`ELSHEET008` for an unsupported property type, a type
 that is not `partial`, duplicate headers or aliases, an invalid worksheet name, misused boolean labels, a struct or
-nested or generic type, and a member that collides with the generated `Columns` or `SpreadsheetMapper`. See
+nested or generic type, a member that collides with the generated `Columns` or `SpreadsheetMapper`, and two enum
+members that share a label, name or alias. See
 [Diagnostics](/docs/reference/diagnostics#elsheet--spreadsheet-records).

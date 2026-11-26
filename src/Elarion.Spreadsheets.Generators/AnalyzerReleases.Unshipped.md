@@ -9,3 +9,4 @@
  ELSHEET005 | Elarion.Spreadsheets | Error    | TrueLabel/FalseLabel misused (not a boolean, or only one label)
  ELSHEET006 | Elarion.Spreadsheets | Error    | [SpreadsheetRecord] type shape is unsupported (struct, nested, generic, or abstract)
  ELSHEET007 | Elarion.Spreadsheets | Error    | [SpreadsheetRecord] type declares a member named like a generated one
+ ELSHEET008 | Elarion.Spreadsheets | Error    | Two members of one enum share a label, name or alias (ignoring case)

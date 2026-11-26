@@ -980,7 +980,7 @@ See [SQL mapping](/docs/capabilities/sql-mapping).
   class with one `SpreadsheetColumn<T>` per column. Every public instance property with a getter is a column, in
   declaration order; a get-only property is written and not read. The attribute class is marked `[ValidationRoot]`, so
   a record's DataAnnotations are validated on every row read. Unsupported shapes are build errors
-  (`ELSHEET001`–`ELSHEET007`).
+  (`ELSHEET001`–`ELSHEET008`).
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -1005,6 +1005,18 @@ See [SQL mapping](/docs/capabilities/sql-mapping).
 
 - **Package:** `Elarion.Spreadsheets` · **Applies to:** property
 - **Triggers:** leaves the property out of the worksheet: no column, neither written nor read.
+
+### `[SpreadsheetChoice]`
+
+- **Package:** `Elarion.Spreadsheets` · **Applies to:** enum member
+- **Triggers:** gives the member extra spellings that read as it in an enum column of a spreadsheet record, ignoring
+  case and surrounding white space. An alias is never written and never offered in the dropdown list, which show the
+  member's `[Display(Name)]`, else its name. Labels, names and aliases of two members of one enum must differ ignoring
+  case (`ELSHEET008`); an alias equal to its own member's label or name, or an empty one, is ignored.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `Aliases` | `string[]` | empty | The spellings that read as the member besides its label and its name. |
 
 See [Spreadsheets](/docs/capabilities/spreadsheets).
 

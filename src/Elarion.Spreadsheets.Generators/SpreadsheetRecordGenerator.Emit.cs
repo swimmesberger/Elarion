@@ -86,11 +86,14 @@ public sealed partial class SpreadsheetRecordGenerator {
 
             if (!IsReadable(model, column)) continue;
 
-            // Reading takes a member's label or its name, ignoring case and surrounding white space (FR-009).
+            // Reading takes a member's label, its name or one of its aliases, ignoring case and surrounding white space
+            // (FR-009, FR-071).
             builder.AppendLine();
             builder.AppendLine($"    private static {column.EnumTypeFqn}? Parse{column.PropertyName}(string text) {{");
             foreach (var (text, member) in column.EnumMembers.Select(static member => (member.Label, member.Name))
                          .Concat(column.EnumMembers.Select(static member => (member.Name, member.Name)))
+                         .Concat(column.EnumMembers.SelectMany(static member =>
+                             member.Aliases.Select(alias => (alias, member.Name))))
                          .GroupBy(static pair => pair.Item1, StringComparer.OrdinalIgnoreCase)
                          .Select(static group => group.First()))
                 builder.AppendLine(
