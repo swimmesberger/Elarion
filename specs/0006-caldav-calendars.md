@@ -93,6 +93,11 @@ Everything works on several nodes over one PostgreSQL and in an application publ
 - Given an app password, when it is sent to the application's browser surface (`/rpc`), then it does not authenticate.
 - Given a person who already holds the maximum number of app passwords, when they create another, then the creation is
   refused with a coded error.
+- Given an application that configures the scheme to require the Basic user name to be the account's e-mail, when a
+  calendar app sends the right app password with another user name, then the request is refused with `401`.
+- Given an application whose credentials live in its own service, when it replaces the credential check with a
+  delegate that asks that service, then calendar apps authenticate against it and Elarion's app-password store is not
+  used.
 
 ### Sync an external calendar into the application (P2)
 
@@ -205,33 +210,36 @@ App passwords
 - FR-030: Creating an app password beyond the configured maximum per user MUST fail with the code
   `app_password.limit_reached`.
 - FR-031: `Elarion.AppPasswords.AspNetCore` MUST provide an authentication scheme that accepts an app password with
-  scope `dav` over HTTP Basic and a feed token in a feed URL, MUST build the principal on every request through
-  `IAppPasswordPrincipalFactory`, and MUST refuse a revoked password and a user for whom the factory returns no
-  principal.
-- FR-032: The DAV route group MUST accept only the schemes the host names for it, so an app password MUST NOT
+  scope `dav` over HTTP Basic and a feed token in a feed URL, MUST build the principal on every request through the
+  `OnCreatePrincipal` event, and MUST refuse a revoked password and a user for whom that event returns no principal.
+- FR-032: The scheme's events MUST let an application replace the credential check (`OnVerifyCredential`), check the
+  Basic user name (`OnValidateUserName`, by default not checked), create the principal (`OnCreatePrincipal`) and
+  observe a success (`OnAuthenticated`), each as a delegate over a context that carries the request's services, and
+  MUST work under NativeAOT.
+- FR-033: The DAV route group MUST accept only the schemes the host names for it, so an app password MUST NOT
   authenticate any other endpoint and a browser session MUST NOT authenticate a DAV request.
-- FR-033: A missing or refused credential MUST answer `401` with a Basic challenge, and an authenticated request the
+- FR-034: A missing or refused credential MUST answer `401` with a Basic challenge, and an authenticated request the
   sources refuse MUST answer `403` or `404` without a challenge.
-- FR-034: The last use of an app password MUST be recorded at most once per configurable interval.
-- FR-035: The DAV routes MUST be exempt from Elarion's cross-origin protection, and MUST NOT carry the application's
+- FR-035: The last use of an app password MUST be recorded at most once per configurable interval.
+- FR-036: The DAV routes MUST be exempt from Elarion's cross-origin protection, and MUST NOT carry the application's
   browser credential.
 
 The client
 
-- FR-036: `CalDavClient` MUST discover an account from a base URL through `/.well-known/caldav`,
+- FR-037: `CalDavClient` MUST discover an account from a base URL through `/.well-known/caldav`,
   `current-user-principal` and `calendar-home-set`, and MUST list its calendars with their display names, colours,
   component kinds and whether they are writable.
-- FR-037: `SyncAsync(calendar, state)` MUST return the changed objects read by the `Elarion.Calendars` reader, the
+- FR-038: `SyncAsync(calendar, state)` MUST return the changed objects read by the `Elarion.Calendars` reader, the
   removed object names, and a new opaque state that serializes to a string.
-- FR-038: A sync step MUST use `sync-collection` when the server offers it, and MUST fall back to comparing ETags when
+- FR-039: A sync step MUST use `sync-collection` when the server offers it, and MUST fall back to comparing ETags when
   it does not or when the server refuses the token.
-- FR-039: Credentials MUST come from a delegate that returns an `Authorization` header value per request.
-- FR-040: A server's refusal of credentials, a calendar that no longer exists, and an object that is not valid
+- FR-040: Credentials MUST come from a delegate that returns an `Authorization` header value per request.
+- FR-041: A server's refusal of credentials, a calendar that no longer exists, and an object that is not valid
   iCalendar MUST be results with codes in the `caldav.*` form, not exceptions; only cancellation, misconfiguration and
   transport failures MUST throw.
-- FR-041: `PutAsync` and `DeleteAsync` MUST send `If-Match` (or `If-None-Match: *` to create) and MUST report a failed
+- FR-042: `PutAsync` and `DeleteAsync` MUST send `If-Match` (or `If-None-Match: *` to create) and MUST report a failed
   precondition as the code `caldav.conflict`.
-- FR-042: The client MUST bound response sizes, objects per step and XML nesting by options.
+- FR-043: The client MUST bound response sizes, objects per step and XML nesting by options.
 
 ## Success criteria
 

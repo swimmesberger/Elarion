@@ -21,9 +21,9 @@ slice 3. The evidence for every client rule below is the research note
 | `src/Elarion.WebDav.EntityFrameworkCore` (+ `.Generators`) | Store and journal; `[GenerateElarionDavStore]` on the application's `DbContext` (the pattern of `[GenerateElarionResourceGrants]`). |
 | `src/Elarion.WebDav.AspNetCore` | `MapElarionDav()`, `/.well-known/*`, method routing, scope seeding, cross-origin exemption. |
 | `src/Elarion.CalDav` | `IsAotCompatible`. Calendar sources, `ICalendarPublisher`, calendar properties and reports, feeds, `CalDavClient`. |
-| `src/Elarion.AppPasswords` | `IsAotCompatible`. `IAppPasswords`, hashing, `IAppPasswordStore` and `IAppPasswordPrincipalFactory` seams. |
+| `src/Elarion.AppPasswords` | `IsAotCompatible`. `IAppPasswords`, hashing, the `IAppPasswordStore` seam. |
 | `src/Elarion.AppPasswords.EntityFrameworkCore` (+ `.Generators`) | Store; `[GenerateElarionAppPasswords]`. |
-| `src/Elarion.AppPasswords.AspNetCore` | `AddElarionAppPasswordAuthentication()`: the Basic and feed-token scheme; an Identity principal factory as `AddElarionIdentityAppPasswordPrincipals<TUser>()`. |
+| `src/Elarion.AppPasswords.AspNetCore` | `AddElarionAppPasswordAuthentication(o => o.Events…)`: the Basic and feed-token scheme with its events; the Identity default for `OnCreatePrincipal` as `AddElarionIdentityAppPasswordPrincipals<TUser>()`. |
 | `tests/Elarion.Tests/WebDav`, `CalDav`, `AppPasswords` | One folder per package, as `Spreadsheets/`. |
 | `samples/` | The NativeAOT sample (SC-005) gains a published calendar and a feed. |
 
@@ -160,7 +160,7 @@ Three tables, snake_case, mapped onto the application's context by the bundled g
   root (not inside the group) redirecting `301` to the prefix for every method (FR-015). The group requires the
   schemes named in `WebDavHostOptions.AuthenticationSchemes` (default: the app-password scheme), calls `SeedScope` after
   authentication so `ICurrentUser` holds the DAV principal (the friction the consuming application reported), and
-  carries an endpoint marker that `UseElarionCrossOriginProtection` skips (FR-035). The feed path is anonymous at the
+  carries an endpoint marker that `UseElarionCrossOriginProtection` skips (FR-036). The feed path is anonymous at the
   ASP.NET level up to the scheme: the scheme reads the secret from the path itself.
 - Responses stream: `multistatus` is written forward into the response body; objects come from the store as
   `content` bytes per row, never the whole calendar at once (feeds stream object by object, deduplicating
@@ -174,20 +174,28 @@ Three tables, snake_case, mapped onto the application's context by the bundled g
   `last_used_at`. Revoke is a hard delete scoped to the user.
 - `IAppPasswords.VerifyAsync(secret, requiredScope)` → `AppPasswordMatch?` (id, user, scope); writes `last_used_at`
   only when older than the interval.
-- `IAppPasswordPrincipalFactory.CreateAsync(userId, ct) → ClaimsPrincipal?`: `null` refuses (deactivated, deleted).
-  The Identity default uses `UserManager<TUser>` and `IUserClaimsPrincipalFactory<TUser>`; applications on proxy
-  identity or OIDC implement it from their own user table. The scheme adds the claims `elarion:app_password_id` and
-  `elarion:app_password_scope`.
-- Scheme (`AppPasswordAuthenticationHandler`, hand-written over `AuthenticationHandler<T>`, no outside package):
-  Basic → split at the first colon, the user name ignored, the secret verified with scope `dav`; feed paths → secret
-  from the path, scope must be `calendar-feed:{source}.{key}` and the dispatcher checks it equals the requested
-  calendar. Challenge `401` with `Basic realm="{Realm}", charset="UTF-8"`; forbidden `403` without a challenge.
+- Scheme (`AppPasswordAuthenticationHandler`, hand-written over `AuthenticationHandler<AppPasswordAuthenticationOptions>`,
+  no outside package): Basic → split at the first colon; feed paths → secret from the path. Then the events, in order:
+  - `OnVerifyCredential(AppPasswordCredentialContext)` → `AppPasswordMatch?` (user id, scope, credential id). Default:
+    `IAppPasswords.VerifyAsync(secret, requiredScope)` (scope `dav` for Basic, `calendar-feed:{source}.{key}` for a
+    feed). A replacement returns its own match; `IAppPasswordStore` is then not resolved, so the EF package is optional.
+  - `OnValidateUserName(AppPasswordUserNameContext)` → `bool`. Default: `true` (not checked). Not run for feeds.
+  - `OnCreatePrincipal(AppPasswordPrincipalContext)` → `ClaimsPrincipal?`; `null` refuses (deactivated, deleted). No
+    default: startup fails with a message naming `AddElarionIdentityAppPasswordPrincipals<TUser>()` when neither is set.
+    The Identity default uses `UserManager<TUser>` and `IUserClaimsPrincipalFactory<TUser>`; applications on proxy
+    identity or OIDC set the delegate over their own user service.
+  - `OnAuthenticated(AppPasswordAuthenticatedContext)` → `Task`, for audit and metrics.
+  Every context derives from one base with `HttpContext`, `Services` (the request scope's provider), `UserName`
+  (Basic only), `Scheme` and `CancellationToken`; all events are `Func<TContext, ValueTask<…>>` properties on an
+  `AppPasswordAuthenticationEvents` object, so an application can also subclass it and register the type, as with
+  `JwtBearerEvents`. The scheme adds the claims `elarion:app_password_id` and `elarion:app_password_scope` to the
+  principal, and the dispatcher checks a feed's scope against the requested calendar. Challenge `401` with `Basic realm="{Realm}", charset="UTF-8"`; forbidden `403` without a challenge.
   Whether it compiles warning-free under `PublishAot` is checked in slice 1 (the research note could not verify it).
 
 ## The client
 
 - `CalDavClient` over an injected `HttpClient`; requests built with the same XML writer, responses read with the same
-  hardened reader and size limits (FR-042).
+  hardened reader and size limits (FR-043).
 - Discovery: `PROPFIND` `current-user-principal` on the base URL; on `404`/`405` or no answer, `/.well-known/caldav`
   following up to 5 redirects; then `calendar-home-set` from the principal (depth 0; never depth 1 on the principal,
   which iCloud answers with `400`), then depth 1 on the home.
@@ -240,17 +248,17 @@ against recorded responses of iCloud, Google, Nextcloud, Fastmail and Zimbra qui
 
 Each slice is one pull request, green on its own, in this order:
 
-1. `Elarion.AppPasswords` + EF store + ASP.NET scheme, with the Identity principal factory (FR-028–FR-035). Useful on
+1. `Elarion.AppPasswords` + EF store + ASP.NET scheme, with the Identity principal factory (FR-028–FR-036). Useful on
    its own; settles the AOT question of the authentication handler.
 2. `Elarion.WebDav` core: XML codec, dispatcher, properties, principals and home, `OPTIONS`/`PROPFIND`, the store seam
    and the EF store with journal and `sync-collection` (FR-014–FR-018, FR-020, FR-021, FR-023–FR-025), tested with a
    test-only collection kind.
 3. `Elarion.CalDav` server: sources, publisher, calendar properties, multiget, `calendar-query`, `free-busy-query`,
    `expand` (FR-004–FR-013, FR-019, FR-022). Needs `Elarion.Calendars`.
-4. `Elarion.WebDav.AspNetCore` host and well-known, then the client replays and the sample (FR-015, FR-016, FR-032,
-   FR-035; SC-001, SC-002, SC-005).
+4. `Elarion.WebDav.AspNetCore` host and well-known, then the client replays and the sample (FR-015, FR-016, FR-033,
+   FR-036; SC-001, SC-002, SC-005).
 5. Feeds (FR-026, FR-027).
-6. `CalDavClient` (FR-036–FR-042).
+6. `CalDavClient` (FR-037–FR-043).
 
 ## Risks
 

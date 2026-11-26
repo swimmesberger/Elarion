@@ -154,11 +154,39 @@ high-entropy machine-generated secret needs no slow hash and no lockout; a host 
 whatever the application uses for its browser (cookie, OIDC, proxy identity), so a browser session cannot drive DAV
 and an app password cannot reach `/rpc`. It answers a missing credential with `401` and `WWW-Authenticate: Basic …
 charset="UTF-8"` (iOS sends unauthenticated requests during discovery and fails on a `403`) and a forbidden one with
-`403` without a challenge. The principal is built on every request by an `IAppPasswordPrincipalFactory` the
-application provides (an ASP.NET Identity default ships), so a revoked password or a deactivated account stops syncing
-at once. The Basic user name is not checked: the secret identifies the credential, and matching it against an e-mail
-address would tie the package to a user directory that applications signed in through an identity provider do not
-have.
+`403` without a challenge.
+
+What happens between the header and the principal is the application's to configure, in the events style of
+ASP.NET's own schemes, with plain delegates set where the scheme is added:
+
+```csharp
+builder.Services.AddAuthentication().AddElarionAppPasswordAuthentication(o => {
+    o.Events.OnCreatePrincipal = async ctx => {                 // required, unless a default is registered
+        var users = ctx.Services.GetRequiredService<AccountService>();
+        return await users.CreatePrincipalAsync(ctx.Match.UserId, ctx.CancellationToken);  // null refuses
+    };
+    o.Events.OnValidateUserName = ctx => ...;                   // optional; default: the user name is not checked
+    o.Events.OnVerifyCredential = async ctx => ...;             // optional; default: Elarion's app-password store
+    o.Events.OnAuthenticated = ctx => ...;                      // optional; audit, metrics
+});
+```
+
+Each step is a delegate over a context that carries the request's `IServiceProvider`, the user name and secret the
+client sent, the match, and the cancellation token. Delegates over a context instead of minimal-API parameter binding
+keep the scheme free of reflection under NativeAOT; the context's services give the same reach. The defaults:
+
+- **Verify the credential**: Elarion's app-password store, by the hash of the secret and the scope the route needs.
+  An application that already has its own credentials (a platform's API tokens, a directory's app passwords) replaces
+  this step and keeps the rest; the store package is then not needed.
+- **Check the user name**: not checked, because the secret identifies the credential, and matching it against an
+  e-mail address would tie the package to a user directory that applications signed in through an identity provider
+  do not have. An application that wants the e-mail to match, as the consuming application did, says so here.
+- **Create the principal**: the application's; `AddElarionIdentityAppPasswordPrincipals<TUser>()` registers the ASP.NET
+  Identity default (`UserManager` and `IUserClaimsPrincipalFactory`). It runs on every request, so a revoked password
+  or a deactivated account stops syncing at once; returning `null` refuses.
+
+The DAV route group accepts whichever schemes the host names, so an application can also put an entirely different
+scheme in front of it.
 
 Elarion so far did not issue credentials ("Elarion does not issue credentials" on the authorization page);
 `Elarion.Devices` was the exception for devices. App passwords are the second, for people's devices. Management stays
