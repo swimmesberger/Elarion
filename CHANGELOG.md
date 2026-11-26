@@ -36,6 +36,11 @@ minor releases may include breaking changes.
   mapping resolved the request body's JSON metadata with a fallback to the reflection-based
   `JsonSerializerOptions.Default`, which made the publish report `IL2026` and `IL3050`. The fallback is gone; a missing
   type still fails at mapping time with the same message.
+- **`InsertManyAsync` no longer repeats earlier rows once Npgsql auto-prepares the INSERT.** With `Max Auto Prepare`
+  on, the batch reused one command and re-bound its parameters per row; after the statement was prepared, later rows
+  went out with an earlier row's values, so distinct rows were dropped (or, with `ON CONFLICT DO NOTHING`, silently
+  skipped and missing from the written count). Each row now runs its own command on the same prepared statement. See
+  [SQL mapping](https://elarion.wimmesberger.dev/docs/capabilities/sql-mapping#reads-and-writes).
 
 ## [0.4.6] - 2026-11-24
 
