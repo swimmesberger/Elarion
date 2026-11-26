@@ -3,7 +3,7 @@ type: Specification
 title: "Spec 0006: CalDAV calendars"
 description: "What Elarion's CalDAV support must do: publish an application's calendars read-only to iOS, macOS, Thunderbird and Android calendar apps and as ICS feeds, authenticate those apps with app passwords, and sync external CalDAV calendars into an application one step at a time, under NativeAOT."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T18:00:00Z }
-status: stable
+status: draft
 ---
 # Spec 0006: CalDAV calendars
 
@@ -48,7 +48,7 @@ Everything works on several nodes over one PostgreSQL and in an application publ
   user ("My shifts"), when a user without that permission connects, then their calendar home lists no shift calendar
   and the shift calendar's URL answers `404`.
 - Given the same source, when a user with the permission connects, then their home lists exactly their own shift
-  calendar, with the display name, colour and description the handler returned.
+  calendar, with the display name, color and description the handler returned.
 - Given a team calendar the source returns to the members of a team through a resource rule, when a member leaves the
   team, then on the next sync the calendar is gone from that person's home.
 - Given the source's module disabled by configuration, or the source's handler behind a closed feature gate, when a
@@ -102,7 +102,7 @@ Everything works on several nodes over one PostgreSQL and in an application publ
 ### Sync an external calendar into the application (P2)
 
 - Given an account on a CalDAV server and its credentials, when the application discovers the account from the
-  server's base URL, then it receives the account's calendars with their names, colours and component kinds.
+  server's base URL, then it receives the account's calendars with their names, colors and component kinds.
 - Given a calendar and no state, when the application runs a sync step, then it receives every object of the calendar,
   read into calendar items, and a state it stores.
 - Given the stored state, when the application runs the next step after one event changed and one was deleted on the
@@ -131,12 +131,14 @@ Packages and shape
   calendars MUST NOT use reflection, so that an application published with NativeAOT gets no trimming or AOT warning
   from them.
 - FR-003: Registration MUST be `AddElarionWebDav`, `AddElarionCalDav` and `AddElarionAppPasswords`, each taking an
-  optional `IConfiguration` and an optional options callback, with limits and defaults in one options bag per package.
+  optional `IConfiguration` and an optional options callback, with limits and defaults in one options bag per package;
+  limits MUST be named `Max…` as in the format packages, and `CalDavOptions` MUST embed a `CalendarReadOptions` for
+  calendar data instead of limits of its own.
 
 Publishing
 
-- FR-004: `ICalendarPublisher` MUST publish an object (an `Elarion.Calendars` event, task or component tree under one
-  UID), remove an object by UID, and replace the content of a calendar with a set of objects, addressed by calendar
+- FR-004: `ICalDavPublisher` MUST publish an object (an `Elarion.Calendars` `CalendarObject`: an event, a to-do or a
+  component tree under one UID), remove an object by UID, and replace the content of a calendar with a set of objects, addressed by calendar
   source and calendar key.
 - FR-005: Publishing MUST take part in the caller's unit of work, so the change is visible to clients exactly when the
   caller's transaction commits.
@@ -150,10 +152,11 @@ Publishing
 
 Calendar sources and access
 
-- FR-010: A module MUST declare a calendar source as a query request implementing `ICalendarSource<TSelf>` (which
+- FR-010: A module MUST declare a calendar source as a query request implementing `ICalDavSource<TSelf>` (which
   states the source's name) whose handler returns the calendars of that source the current user may see, each with a
-  key, a display name, and optionally a colour, a description, the component kinds and a time zone, and MUST register
-  it with `AddElarionCalendarSource<TQuery>()` in the module's `ConfigureServices`.
+  key, a display name, and optionally a color, a description, the component kinds (`Elarion.Calendars`'
+  `CalendarComponentKinds`) and a time zone (a `TimeZoneInfo`, as spec 0004 FR-003 asks), and MUST register
+  it with `AddElarionCalDavSource<TQuery>()` in the module's `ConfigureServices`.
 - FR-011: Every DAV request MUST invoke the calendar sources through the handler pipeline as the authenticated user,
   so `[Require*]`, resource rules and feature gates apply, and MUST serve only calendars a source returned.
 - FR-012: A calendar no source returns, a source whose module is disabled or whose feature gate is closed, and a
@@ -208,7 +211,8 @@ App passwords
 - FR-029: A secret MUST hold at least 256 bits from a cryptographically secure generator after a configurable prefix,
   and only a hash of it MUST be stored.
 - FR-030: Creating an app password beyond the configured maximum per user MUST fail with the code
-  `app_password.limit_reached`.
+  `app_password.limit_reached`, and revoking an unknown or foreign one with `app_password.not_found`; both codes MUST
+  be constants of `AppPasswordErrorCodes`.
 - FR-031: `Elarion.AppPasswords.AspNetCore` MUST provide an authentication scheme that accepts an app password with
   scope `dav` over HTTP Basic and a feed token in a feed URL, MUST build the principal on every request through the
   `OnCreatePrincipal` event, and MUST refuse a revoked password and a user for whom that event returns no principal.
@@ -227,16 +231,18 @@ App passwords
 The client
 
 - FR-037: `CalDavClient` MUST discover an account from a base URL through `/.well-known/caldav`,
-  `current-user-principal` and `calendar-home-set`, and MUST list its calendars with their display names, colours,
+  `current-user-principal` and `calendar-home-set`, and MUST list its calendars with their display names, colors,
   component kinds and whether they are writable.
 - FR-038: `SyncAsync(calendar, state)` MUST return the changed objects read by the `Elarion.Calendars` reader, the
   removed object names, and a new opaque state that serializes to a string.
 - FR-039: A sync step MUST use `sync-collection` when the server offers it, and MUST fall back to comparing ETags when
   it does not or when the server refuses the token.
 - FR-040: Credentials MUST come from a delegate that returns an `Authorization` header value per request.
-- FR-041: A server's refusal of credentials, a calendar that no longer exists, and an object that is not valid
-  iCalendar MUST be results with codes in the `caldav.*` form, not exceptions; only cancellation, misconfiguration and
-  transport failures MUST throw.
+- FR-041: A server's refusal of credentials, a calendar that no longer exists, an answer over a limit and an answer
+  that is not valid WebDAV MUST be results that carry an error with a `caldav.*` code (constants of
+  `CalDavErrorCodes`), a message and its data (the HTTP status, the URL, the limit); an object that is not valid
+  iCalendar MUST come back with the `calendar.*` errors of its read result. None of them MUST be an exception; only
+  cancellation, misconfiguration and transport failures MUST throw.
 - FR-042: `PutAsync` and `DeleteAsync` MUST send `If-Match` (or `If-None-Match: *` to create) and MUST report a failed
   precondition as the code `caldav.conflict`.
 - FR-043: The client MUST bound response sizes, objects per step and XML nesting by options.

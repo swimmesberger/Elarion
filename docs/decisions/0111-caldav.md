@@ -3,11 +3,11 @@ type: Architecture Decision Record
 title: "ADR-0111: CalDAV — published calendars served from a store, calendar sources as handlers, app passwords, and a sync-step client"
 description: "Elarion serves an application's calendars over CalDAV and as ICS feeds from a framework-owned store the application publishes to in its own transaction, decides who sees which calendar in an ordinary handler, authenticates calendar apps with app passwords over HTTP Basic, and syncs external CalDAV calendars one step at a time, on a WebDAV core that CardDAV can reuse."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T17:30:00Z }
-status: stable
+status: draft
 ---
 # ADR-0111: CalDAV — published calendars served from a store, calendar sources as handlers, app passwords, and a sync-step client
 
-- Status: Accepted (2026-11-26)
+- Status: Proposed
 - Date: 2026-11-26
 - Related: [ADR-0109](0109-icalendar-model-reader-and-writer.md) (the iCalendar model, reader, writer and recurrence
   engine this builds on; `Elarion.Calendars`), [ADR-0110](0110-vcard-contacts.md) (vCard; CardDAV later reuses the
@@ -80,12 +80,12 @@ EF-free store for the `Elarion.Sql` tier is a later sibling behind the same seam
 
 ### 2. The server serves a store the application publishes to
 
-The application does not answer CalDAV requests. It **publishes calendar objects** into a framework-owned store, in
-the handler transaction that changed its own data, through `ICalendarPublisher`: publish an object (an
-`Elarion.Calendars` event, task or component tree under one UID), remove one, or replace a whole calendar's content
-with a set (which removes what the set lacks). The publisher writes the object with the `Elarion.Calendars` writer;
-its strong ETag is a hash of the bytes. Publishing bytes equal to the stored ones changes nothing, so re-publishing
-after every save, or re-projecting a whole calendar at night, costs no client a refetch.
+The application does not answer CalDAV requests. It **publishes calendar objects** into a framework-owned store, in the
+handler transaction that changed its own data, through `ICalDavPublisher`: publish an object (an `Elarion.Calendars`
+calendar object: an event, a to-do or a component tree under one UID), remove one, or replace a whole calendar's content
+with a set (which removes what the set lacks). The publisher writes the object with the `Elarion.Calendars` writer; its
+strong ETag is a hash of the bytes. Publishing bytes equal to the stored ones changes nothing, so re-publishing after
+every save, or re-projecting a whole calendar at night, costs no client a refetch.
 
 Every change to a calendar increments its counter and appends a journal row (object name, change, counter) in the same
 transaction, taking the calendar's row lock with `UPDATE … RETURNING`. That counter is the RFC 6578 sync token (as a
@@ -111,9 +111,10 @@ application.
 
 ### 3. Who sees which calendar is a handler: calendar sources
 
-A module declares a **calendar source**: a query request implementing `ICalendarSource<TSelf>` (a static name) whose
-handler returns the calendars of that source the current user may see (key, display name, colour, description, the
-component kinds, the calendar's time zone), registered with `AddElarionCalendarSource<TQuery>()` in the module's
+A module declares a **calendar source**: a query request implementing `ICalDavSource<TSelf>` (a static name) whose
+handler returns the calendars of that source the current user may see (key, display name, color, description, the
+component kinds as `Elarion.Calendars`' `CalendarComponentKinds`, the calendar's time zone as a `TimeZoneInfo`),
+registered with `AddElarionCalDavSource<TQuery>()` in the module's
 `ConfigureServices`, which a disabled module never runs. A static interface member instead of an attribute keeps the
 registration free of reflection without a generator of its own; publishing into an unregistered source throws, so a
 forgotten registration shows at the first publish. The handler is an ordinary handler: `[RequirePermission]`, resource rules with `WhereAuthorized`, and
@@ -201,15 +202,18 @@ opaque value the application stores where it keeps the rest of the account. A st
 server offers it and falls back to a CTag check and an ETag comparison when it does not or when the token expired.
 `PUT` and `DELETE` take `If-Match`. Credentials come from a delegate that yields an `Authorization` header (an app
 password, or an OAuth bearer token the application refreshes), so Google works without Elarion owning OAuth. What
-the external server sent is input: a broken object is a coded error in the result, never an exception. The
+the external server sent is input: a broken object carries the `calendar.*` errors of its read result, and a refused
+credential, a missing calendar or a failed precondition is a result with an error (a `caldav.*` code from
+`CalDavErrorCodes`, a message and its data, such as the HTTP status), never an exception. The
 application schedules the sync with its own job. Microsoft 365 has no CalDAV; Graph is a separate decision.
 
 ### 7. Hostile input is bounded, and the scale tier holds
 
-Request bodies are read through the hardened XML reader (no DTD, no resolver, a size cap, a depth cap) and calendar
-data through `Elarion.Calendars` with per-request limits; responses are written forward, objects streamed from the
-store. All state is in the database, so every node answers every request alike. Clients poll; push (Apple's needs a
-certificate only Apple issues, WebDAV-Push is a draft only DAVx5 implements) is out of scope.
+Request bodies are read through the hardened XML reader (no DTD, no resolver, and `MaxBodyBytes`, `MaxXmlDepth` and
+`MaxXmlElements` options named like the format packages' limits) and calendar data through `Elarion.Calendars`, with the
+`CalendarReadOptions` that `CalDavOptions` embeds rather than limit names of its own; responses are written forward,
+objects streamed from the store. All state is in the database, so every node answers every request alike. Clients poll;
+push (Apple's needs a certificate only Apple issues, WebDAV-Push is a draft only DAVx5 implements) is out of scope.
 
 ## Consequences
 
@@ -227,6 +231,11 @@ certificate only Apple issues, WebDAV-Push is a draft only DAVx5 implements) is 
   journal, host and app passwords.
 - Changing the `Elarion.Calendars` writer's output changes every ETag once, and every client refetches once.
 - The glossary gains: calendar source, published calendar, app password, feed token.
+- Names follow one rule: a public type of the CalDAV packages whose name starts with `Calendar` means the
+  `Elarion.Calendars` concept (`CalendarObject`, `CalendarComponentKinds`, `CalendarReadOptions` live there); a type
+  that exists only for DAV carries the `CalDav` prefix instead (`ICalDavSource<TSelf>`, `ICalDavPublisher`,
+  `CalDavAddress`, `CalDavClient`). Error codes are constants of `CalDavErrorCodes` (`caldav.*`) and
+  `AppPasswordErrorCodes` (`app_password.*`), as the format packages keep theirs.
 
 ## Rejected alternatives
 

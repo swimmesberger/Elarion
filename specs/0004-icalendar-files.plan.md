@@ -3,7 +3,7 @@ type: Plan
 title: "Plan 0004: iCalendar files"
 description: "How Elarion.Calendars of spec 0004 is built: project, public surface, content lines, reader, typed model, time zones, recurrence engine, writer, tests and tasks."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T18:00:00Z }
-status: stable
+status: draft
 ---
 # Plan 0004: iCalendar files
 
@@ -16,17 +16,22 @@ behind it. Names below are the intended ones and may move during review; the FR 
 | Project | Target | Holds |
 | --- | --- | --- |
 | `src/Elarion.Calendars` | `net10.0;net11.0`, `IsAotCompatible` | Public model, reader, writer, recurrence engine, time zones, options, DI registration |
+| `src/Shared/ContentLines/` | compiled into `Elarion.Calendars` and `Elarion.Contacts` | The internal content-line reader and writer, the decoding ladder, the code-page cache |
 
 `Elarion.Calendars` references `Elarion.Abstractions` (`ElarionFile`, `ElarionStreamedFile`, `AppError`),
 `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Options` and
 `Microsoft.Extensions.Configuration.Binder` with the configuration-binding generator, as `Elarion.Spreadsheets` does.
-No generator project, no third-party package (FR-001). The Windows-1252 fallback comes from
-`CodePagesEncodingProvider.Instance.GetEncoding(1252)`, held by the package; `Encoding.RegisterProvider` is never
-called (FR-005).
+No generator project, no third-party package (FR-001). The fallback encoding (Windows-1252 by default) comes from
+the shared code-page cache over `CodePagesEncodingProvider.Instance`; `Encoding.RegisterProvider` is never called
+(FR-005).
 
-The content-line layer is internal and written so that it can move: no dependency on calendar types, its own limits
-type, line numbers on every line. When the vCard package ships second, the layer moves to a shared internal place
-(source-shared or a small package), decided then (ADR-0109, decision 2).
+The content-line layer is internal and source-shared with `Elarion.Contacts`: the folder `src/Shared/ContentLines/`,
+linked into both projects with `<Compile Include="..\Shared\ContentLines\**\*.cs" LinkBase="ContentLines" />`, the way
+the generator projects link shared files from `src/Elarion.Generators` (ADR-0109, decision 2). It is no project and no
+package, its types are `internal` in namespace `Elarion.ContentLines`, and it knows no property names. Plan 0005,
+"Shared with iCalendar", lists what it holds; this package passes the iCalendar rule set (unfold by removing one
+space or tab; no groups, bare parameters, `CHARSET` or quoted-printable). The first of the two packages to be
+implemented creates the folder; the second links it.
 
 ## Public surface
 
@@ -36,13 +41,14 @@ namespace Elarion.Calendars;
 // Registration and options (FR-001, FR-054, FR-055, FR-033, FR-034)
 public static IServiceCollection AddElarionCalendars(this IServiceCollection services,
     IConfiguration? configuration = null, Action<CalendarOptions>? configure = null);   // TryAddSingleton<CalendarReader>
-public sealed class CalendarOptions {            // section "Calendars"
+public sealed class CalendarOptions {            // section "Calendars" (SectionName)
     public CalendarReadOptions ReadDefaults { get; set; }
     public CalendarExpandOptions ExpandDefaults { get; set; }
 }
-public sealed record CalendarReadOptions {       // MaxBytes 16 MiB, MaxLineBytes 4 MiB, MaxComponents 50_000,
-    long MaxBytes; int MaxLineBytes; int MaxComponents; int MaxPropertiesPerComponent; int MaxDepth;
-    int LegacyCodePage;                          // 1252
+public sealed record CalendarReadOptions {       // MaxBytes 16 MiB, MaxComponents 50_000 (file limits: stop);
+    long MaxBytes; int MaxComponents;            // MaxLineBytes 4 MiB, MaxPropertiesPerComponent 1_000,
+    int MaxLineBytes; int MaxPropertiesPerComponent; int MaxDepth;   // MaxDepth 8 (per-item limits: cost the item)
+    string FallbackEncoding = "windows-1252";   // as ContactReadOptions; a name nothing resolves throws (misconfiguration)
 }
 public sealed record CalendarExpandOptions {     // MaxOccurrences 10_000, MaxIterations 100_000
     int MaxOccurrences; int MaxIterations; TimeZoneInfo? FloatingTimeZone;
@@ -61,22 +67,27 @@ public sealed class CalendarReadResult {
     public IReadOnlyList<CalendarError> FileErrors { get; }
     public IEnumerable<CalendarError> Errors { get; }             // file errors, then entries in line order
     public bool HasErrors { get; }
+    public string? ByteOrderMarkEncoding { get; } public bool UsedFallbackEncoding { get; }   // FR-005
     public CalendarOccurrences Expand(DateTimeOffset from, DateTimeOffset to, CalendarExpandOptions? options = null);
     public AppError ToAppError(string? fieldPath = null, Func<CalendarError, string>? format = null, int maxMessages = 100);
 }
-public sealed class CalendarEntry<T> where T : CalendarItem {
+public sealed class CalendarEntry<T> where T : CalendarItem {   // the entry shape ContactEntry has
+    public int Index { get; }                                     // 1-based, events and to-dos counted together
     public int LineNumber { get; }
-    public CalendarComponent Component { get; }
+    public CalendarComponent Component { get; }                   // lossless (FR-041)
     public T? Value { get; }
-    [MemberNotNullWhen(true, nameof(Value))] public bool IsValid { get; }   // FR-014: only time/identity invalidate
+    [MemberNotNullWhen(true, nameof(Value))] public bool HasValue { get; }   // FR-014: only time/identity and per-item limits clear it
     public IReadOnlyList<CalendarError> Errors { get; }
-    public void AddError(string code, string message, string? property = null);  // FR-023
+    public void AddError(string code, string message, string? property = null, int? lineNumber = null);  // FR-023
 }
-public sealed class CalendarError {               // FR-020, FR-022; shape of SpreadsheetError
-    string Code; string Message; int? LineNumber; string? Component; string? Uid; string? Property;
-    string? Value; string? TimeZoneId; long? Limit;
+public sealed class CalendarError {               // FR-020, FR-022
+    string Code; string Message;
+    // the location core both line formats share (ContactError has the same members)
+    int? ItemIndex; int? ItemLineNumber; int? LineNumber; string? Property; string? Value; string? ExpectedKind; long? Limit;
+    // iCalendar extras
+    string? Component; string? Uid; string? TimeZoneId;
 }
-public static class CalendarErrorCodes { /* the FR-021 codes as constants, plus Validation = "validation" */ }
+public static class CalendarErrorCodes { /* the FR-021 codes as constants; no Validation, as nothing runs DataAnnotations */ }
 
 // Component tree (FR-041, FR-042), mutable, public constructors
 public sealed class CalendarComponent { string Name; IList<CalendarProperty> Properties; IList<CalendarComponent> Components;
@@ -112,6 +123,11 @@ public sealed class CalendarAlarm { string? Uid; CalendarAlarmAction Action /* A
     TimeSpan? Trigger; CalendarAlarmRelation Related; DateTimeOffset? AbsoluteTrigger; int Repeat; TimeSpan? RepeatInterval;
     string? Description; string? Summary; DateTimeOffset? Acknowledged; ...;
     IReadOnlyList<DateTimeOffset> GetTriggerTimes(CalendarOccurrence occurrence); }        // FR-038
+public sealed class CalendarObject {             // the components of one UID (master and overrides), as CalDAV stores
+    string Uid; IReadOnlyList<CalendarComponent> Components;   // one resource; implicit from a CalendarEvent, a
+    static implicit operator CalendarObject(...);    // CalendarTodo or a component tree with one UID (else it throws)
+}
+[Flags] public enum CalendarComponentKinds { None = 0, Event = 1, Todo = 2, Journal = 4, FreeBusy = 8, Availability = 16 }
 public sealed record CalendarRecurrenceRule { /* Frequency, Interval, Count, Until, By* lists, WeekStart;
     static TryParse; ToString writes the canonical form */ }
 
@@ -132,39 +148,54 @@ public static class CalendarTimeZones {
     public static bool TryFromComponent(CalendarComponent vtimezone, out TimeZoneInfo zone, out CalendarError? error);
 }
 
-// Writing (FR-043–FR-053): one type, as SpreadsheetWorkbook
+// Writing (FR-043–FR-053): one type, the shape of SpreadsheetWorkbook and ContactWriter; the items, then the file
+// name, then the optional calendar header, then the options
 public sealed class CalendarWriter : IAsyncDisposable {
-    public const string ContentType = "text/calendar";
+    public const string ContentType = "text/calendar";   // served as "text/calendar; charset=utf-8"
     public static CalendarWriter Create(Stream destination, CalendarHeader? calendar = null, CalendarWriteOptions? options = null);
     public ValueTask AddAsync(CalendarItem item, CancellationToken ct = default);
     public ValueTask AddAsync(CalendarComponent component, CancellationToken ct = default);
-    public static ValueTask WriteAsync(Stream destination, CalendarHeader? calendar, IEnumerable<CalendarItem> | IAsyncEnumerable<CalendarItem> items, CalendarWriteOptions? options = null, CancellationToken ct = default);
+    public static ValueTask WriteAsync(Stream destination, IEnumerable<CalendarItem> | IAsyncEnumerable<CalendarItem> items, CalendarHeader? calendar = null, CalendarWriteOptions? options = null, CancellationToken ct = default);
     public static ValueTask WriteAsync(Stream destination, CalendarComponent root, CalendarWriteOptions? options = null, CancellationToken ct = default);
-    public static ValueTask<ElarionFile> ToFileAsync(CalendarHeader? calendar, IEnumerable<CalendarItem> items, string fileName, CalendarWriteOptions? options = null, CancellationToken ct = default);
-    public static ElarionStreamedFile ToStreamedFile(string fileName, CalendarHeader? calendar, IAsyncEnumerable<CalendarItem> items, CalendarWriteOptions? options = null);
-    public static ElarionStreamedFile ToStreamedFile(string fileName, Func<CalendarWriter, CancellationToken, ValueTask> write, CalendarWriteOptions? options = null);
+    public static ValueTask<ElarionFile> ToFileAsync(IEnumerable<CalendarItem> | IAsyncEnumerable<CalendarItem> items, string fileName, CalendarHeader? calendar = null, CalendarWriteOptions? options = null, CancellationToken ct = default);
+    public static ElarionStreamedFile ToStreamedFile(IAsyncEnumerable<CalendarItem> items, string fileName, CalendarHeader? calendar = null, CalendarWriteOptions? options = null);
+    public static ElarionStreamedFile ToStreamedFile(string fileName, Func<CalendarWriter, CancellationToken, ValueTask> write, CalendarHeader? calendar = null, CalendarWriteOptions? options = null);
 }
 public sealed record CalendarWriteOptions { string ProductId; DateTimeOffset? Timestamp; bool IncludeTimeZones = true; }
-public sealed class CalendarWriteException : Exception { string? Uid; int? ItemIndex; }
+public sealed class CalendarWriteException : Exception { int? ItemIndex; string? Uid; string? Property; }   // FR-048, FR-049
 ```
 
-`ElarionFile.ContentType` is `text/calendar; charset=utf-8`; the file name is the caller's.
+- `ElarionFile.ContentType` is `text/calendar; charset=utf-8`; the constant has no charset, as `ContactWriter`'s; the
+  file name is the caller's.
+- `CalendarReader` is registered as a singleton (`TryAddSingleton`), as `ContactReader` is: it holds no per-request
+  state and reads its defaults from `IOptions<CalendarOptions>`, bound from the section `Calendars`.
+- `HasValue` is not `IsValid`: in `Elarion.Spreadsheets` `IsValid` means a record and no errors; here an item with an
+  error in an optional property, or with an error the application added, keeps its typed value. Application codes
+  use their own prefix (`import.date_in_past`), never `calendar.`.
 
 ## Content lines and decoding
 
 - Read the stream into a pooled buffer with the byte limit checked while copying (as `SpreadsheetReader` does), so a
   too-large upload stops at the limit (FR-054).
-- Decode (FR-005): BOM sniff; otherwise validate the whole buffer as UTF-8 (`Utf8.IsValid`); on failure decode with the
-  legacy code page. Decoding happens per logical line after unfolding at byte level, so a fold inside a multi-byte
-  sequence is joined before it is decoded (FR-006). For UTF-16 input, unfold on decoded text instead.
-- Unfold: a line break is CRLF, LF or CR; a following space or tab continues the line (one whitespace char removed).
-  Line numbers are physical line numbers of a logical line's first physical line. Line limit is checked on the unfolded
-  length (FR-055).
+- Decode (FR-005) with the shared ladder: a byte-order mark, or `B\0E\0` / `\0B\0E` before the first line break,
+  decides the whole file (UTF-16 is transcoded to UTF-8 once); otherwise each logical line, after unfolding at byte
+  level, is checked with `Utf8.IsValid` and decoded as UTF-8, or else with `FallbackEncoding`, setting
+  `UsedFallbackEncoding`. So a fold inside a multi-byte sequence is joined before it is decoded (FR-006), and one
+  stray legacy byte costs only its line.
+- Unfold: a line break is CRLF, LF or CR; a following space or tab continues the line, and exactly that one character
+  is removed (the iCalendar rule; the vCard rule set removes all leading whitespace). Line numbers are physical line
+  numbers of a logical line's first physical line. The line limit is checked on the unfolded length: past it the
+  reader keeps consuming the continuation without storing it and reports `calendar.line_too_long` on the property,
+  which is left out of the tree (FR-055).
 - Parse a content line with a hand-written scanner: name (any of `A-Za-z0-9-_./`, compared case-insensitively),
   parameters separated by `;`, values separated by `,`, quoted with `"`, RFC 6868 carets decoded, whitespace around
   delimiters skipped, then `:` and the raw value. A line without `:` or with an empty name is malformed (FR-009).
 - `BEGIN`/`END` build the tree with a stack bounded by `MaxDepth`; an `END` that matches an outer component closes the
-  inner ones (reported once as `calendar.unexpected_end` on the item); end of file closes all (FR-011).
+  inner ones (reported once as `calendar.unexpected_end` on the item); end of file closes all (FR-011). Past
+  `MaxDepth` inside an item, or past `MaxPropertiesPerComponent` in one, the reader counts `BEGIN`/`END` without
+  building and skips to the item's end; the item keeps what was read within the limits and has no typed value
+  (`calendar.nesting_too_deep`, `calendar.too_many_properties`), and the read continues. `MaxComponents` and
+  `MaxBytes` are file limits and stop the read (FR-054, FR-055).
 - Before anything else, the first non-empty logical line must be `BEGIN:VCALENDAR`; otherwise `calendar.unreadable`
   (FR-010). Leading HTML, a PDF or binary content therefore fails at once. Several `VCALENDAR`s in one file (some
   exporters concatenate) are read as one; the header comes from the first.
@@ -176,7 +207,8 @@ public sealed class CalendarWriteException : Exception { string? Uid; int? ItemI
   order; `ToComponent` writes mapped properties in the fixed order (FR-046) and then the additional ones in their
   original order, then `VALARM`s, then additional components.
 - The time-placing properties of FR-014 are read first; a failure there produces the entry without a value. Other
-  properties failing to convert are recorded as `calendar.invalid_value` and skipped (FR-015).
+  properties failing to convert are recorded as `calendar.invalid_value` with the expected kind (`date-time`,
+  `integer`, `duration`, …) and skipped (FR-015).
 - Value repairs of FR-017 live in one date-time parser used for every date-time value, with tests per repair.
 - `X-WR-CALNAME`, `X-WR-CALDESC`, `X-WR-TIMEZONE`, `X-PUBLISHED-TTL` and `X-APPLE-CALENDAR-COLOR` feed the header when
   the RFC 7986 property is absent; on write, FR-047 pairs are emitted and the `X-` twins are not kept a second time.
@@ -230,12 +262,14 @@ public sealed class CalendarWriteException : Exception { string? Uid; int? ItemI
 ## Writer
 
 - `CalendarWriter` writes `BEGIN:VCALENDAR`, `VERSION`, `PRODID`, `CALSCALE:GREGORIAN`, `METHOD` when set, the header
-  pairs of FR-047, then items as they are added, then `END:VCALENDAR` on dispose. A content-line writer emits UTF-8 into
-  a pooled buffer, folding at 75 octets on rune boundaries with CRLF + space, and flushes to the stream asynchronously.
+  pairs of FR-047, then items as they are added, then `END:VCALENDAR` on dispose. The shared content-line writer of
+  `src/Shared/ContentLines/` emits UTF-8 into a pooled buffer, folding at 75 octets on rune boundaries with CRLF +
+  space, and flushes to the stream asynchronously.
 - Before writing an item, the writer collects the zones of its date-times; for each zone not yet written, it writes
   `CalendarTimeZones.ToComponent(zone)` unless `IncludeTimeZones` is false and the id is IANA (FR-052). Writing a
   `VTIMEZONE` between items is valid RFC 5545 and satisfies "defined before use".
-- `DTSTAMP` per FR-048; validation per FR-049 throws `CalendarWriteException`.
+- `DTSTAMP` per FR-048; validation per FR-049 throws `CalendarWriteException` with the item's index (counted from 1
+  over the items added), its `UID` and the property.
 - Determinism (FR-053): no clock, no culture (invariant formatting everywhere), fixed property order, `Dictionary`
   iteration never reaches the output.
 - `ToStreamedFile` uses `ElarionStreamedFile.FromWriter`; faults close what was written, as `SpreadsheetWorkbook` does.
@@ -244,8 +278,10 @@ public sealed class CalendarWriteException : Exception { string? Uid; int? ItemI
 
 All in `tests/Elarion.Tests`, named after the acceptance scenarios.
 
-- `Calendars/ContentLines` — unfolding (CRLF/LF/CR, space/tab, fold inside a multi-byte character), decoding ladder,
-  RFC 6868, escaping, malformed lines, limits, line numbers.
+- `ContentLines/` — the shared layer's tests, run with both rule sets: unfolding (CRLF/LF/CR, space/tab, one character
+  versus all indentation, fold inside a multi-byte character), the decoding ladder (per line, fallback flag), RFC 6868,
+  escaping, malformed lines, the line limit, line numbers.
+- `Calendars/ContentLines` — the iCalendar rule set on real shapes, and the per-item and file limits of FR-055.
 - `Calendars/Reading` — the typed mapping per property, the leniency of FR-014/FR-015, the repairs of FR-017,
   all-day rules, errors and `ToAppError`, application errors. A corpus under `Calendars/Fixtures/` with one synthetic
   file per producer shape in the research note (Google feed, Outlook export with Windows zones and HTAB folding,
@@ -282,7 +318,8 @@ All in `tests/Elarion.Tests`, named after the acceptance scenarios.
 
 1. **Time-zone spike** — `VTIMEZONE` → `TimeZoneInfo` against Outlook, Apple, Google and southern-hemisphere
    definitions, and `TimeZoneInfo` → `VTIMEZONE` round trip; decides the fallback in "Time zones".
-2. **Package and content lines** — FR-001, FR-005–FR-011, FR-054, FR-055.
+2. **Package and content lines** — FR-001, FR-005–FR-011, FR-054, FR-055, in `src/Shared/ContentLines/` (created
+   here, or taken over from `Elarion.Contacts` if it ships first).
 3. **Component tree and writer core** — FR-041–FR-046, FR-053, FR-056 for trees.
 4. **Typed model and reading** — FR-004, FR-012–FR-024, FR-039, FR-040, FR-042.
 5. **Time zones** — FR-003, FR-025–FR-029, FR-050–FR-052.
@@ -305,5 +342,5 @@ is the largest, so it can start in parallel with 3–5; 7 needs 3–5; 8 needs 6
   range); task 1 decides before the model depends on it.
 - **Results depend on the system's tzdata**, which differs between hosts and is absent in slim containers. Tests skip
   with a reason where a zone is missing; the capability page tells NativeAOT users to install tzdata.
-- **The content-line layer will move** when the vCard package ships; keeping it free of calendar types makes that a
-  file move, not a redesign.
+- **The shared content-line layer couples two packages' releases**: a change for one format ships in both. The rule
+  set keeps format differences out of the shared code, and its tests run with both rule sets.

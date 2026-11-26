@@ -1,22 +1,24 @@
 ---
 type: Specification
 title: "Spec 0005: vCard contacts"
-description: "What Elarion.VCards must do: read uploaded .vcf files of any version and from any common producer into contacts, keeping every contact and locating every problem, and write contacts as vCard 3.0 or 4.0, under NativeAOT."
+description: "What Elarion.Contacts must do: read uploaded .vcf files of any version and from any common producer into contacts, keeping every contact and locating every error, and write contacts as vCard 3.0 or 4.0, under NativeAOT."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T16:40:00Z }
-status: stable
+status: draft
 ---
 # Spec 0005: vCard contacts
 
-This spec describes the new opt-in package `Elarion.VCards`. Why it is shaped this way, and what was rejected, is in
-[ADR-0110](../docs/decisions/0110-vcard-contacts.md); what producers write is in the research note
-[vCard libraries and producers](../docs/research/2026-11-26-vcard-libraries-and-producers.md).
+This spec describes the new opt-in package `Elarion.Contacts`, which reads and writes vCard files. Why it is shaped
+this way, and what was rejected, is in [ADR-0110](../docs/decisions/0110-vcard-contacts.md); what producers write is in
+the research note [vCard libraries and producers](../docs/research/2026-11-26-vcard-libraries-and-producers.md). It
+shares its design and its content-line layer with `Elarion.Calendars` ([spec 0004](0004-icalendar-files.md)); a later
+CardDAV package is `Elarion.CardDav`, over this one.
 
 ## Intent
 
 A developer reads a `.vcf` file a person uploaded — exported from an Android phone, an iPhone, a Mac, Google Contacts,
-Outlook, Thunderbird or Nextcloud, in vCard 2.1, 3.0 or 4.0 — into `VCardContact` objects with one call, and maps
+Outlook, Thunderbird or Nextcloud, in vCard 2.1, 3.0 or 4.0 — into `Contact` objects with one call, and maps
 them to the application's own entities in plain code. The read keeps every contact, so the application can show a
-preview before anything is saved; it reports every problem with a code, its data and a location a person can find
+preview before anything is saved; it reports every error with a code, its data and a location a person can find
 (the contact, its name and the line), so the application words it in its own language; and it never throws because
 of what the file contains. The developer also hands out contacts as a `.vcf` file that phones and mail programs
 import. Hostile uploads are bounded, no address in a file is ever fetched, and the application still publishes with
@@ -44,9 +46,11 @@ NativeAOT.
 - Given a card whose properties are written in lower case (`version:2.1`, `tel;cell:…`) and whose `BEGIN` is
   `BEGIN:vCard`, when it is read, then it reads like an upper-case one.
 - Given a file with CRLF, LF and `\r\r\n` line ends, `#` comment lines and blank lines between cards, when it is read,
-  then the contacts read and the comments and blank lines produce no problem.
+  then the contacts read and the comments and blank lines produce no error.
 - Given a contact holding a property the model does not map (`X-SOCIALPROFILE`, `IMPP`, `X-ANDROID-CUSTOM`), when it
-  is read, then the contact lists it among its unmapped properties with its group, its parameters and its value.
+  is read, then the contact lists it among its additional properties with its group, its parameters and its value.
+- Given a card of twelve properties, when it is read, then its entry lists all twelve in file order, each with its
+  group, its parameters, its value as written and its line number, whether the contact maps it or not.
 
 ### Decode text in any encoding a producer used (P1)
 
@@ -61,32 +65,32 @@ NativeAOT.
 - Given a property with `CHARSET=Shift_JIS;ENCODING=QUOTED-PRINTABLE`, when it is read, then the value is decoded as
   Shift_JIS.
 - Given a property with `CHARSET=x-unknown`, when it is read, then the value is decoded by the ladder and the entry
-  carries a `vcard.unknown_charset` problem.
+  carries a `contact.unknown_charset` error.
 
-### Keep every contact and report every problem (P1)
+### Keep every contact and report every error (P1)
 
 - Given a file of 50 contacts in which contact 12, "Jane Doe", has the birthday `BDAY:31.02.1980` on line 340, when it
   is read, then the result holds 50 entries, contact 12 holds every other property and no birthday, and its entry
-  holds one problem with the code `vcard.invalid_value`, the property `BDAY`, line 340 and the expected kind "date".
+  holds one error with the code `contact.invalid_value`, the property `BDAY`, line 340 and the expected kind "date".
 - Given a contact whose photo is invalid Base64, when it is read, then the contact reads without a photo and its entry
-  holds a `vcard.invalid_value` problem naming `PHOTO`.
+  holds a `contact.invalid_value` error naming `PHOTO`.
 - Given a card holding only `BEGIN`, `VERSION` and `END`, when it is read, then its entry has no contact and holds a
-  `vcard.empty_contact` problem.
+  `contact.empty` error.
 - Given a card with an `N` and a phone number but no `FN`, as Android writes it, when it is read, then it has a
   contact whose display name comes from the name.
 - Given a file whose last card lacks `END:VCARD`, when it is read, then that contact reads and its entry holds a
-  `vcard.missing_end` problem.
+  `contact.unexpected_end` error.
 - Given a line inside a card without a colon, when the file is read, then the line is skipped and the entry holds a
-  `vcard.malformed_line` problem with its line number.
-- Given a result whose entry 7 the handler finds already stored, when the handler adds a `contact.duplicate` problem
-  to it, then the problem carries the contact's index, line and display name like the package's own, and appears in the
-  result's problems and in its `AppError`.
-- Given a result with problems, when the handler converts it to an `AppError` for its uploaded-file member `contacts`,
+  `contact.malformed_line` error with its line number.
+- Given a result whose entry 7 the handler finds already stored, when the handler adds an `import.duplicate` error
+  to it, then the error carries the contact's index, line and display name like the package's own, the entry still
+  has its contact, and the error appears in the result's errors and in its `AppError`.
+- Given a result with errors, when the handler converts it to an `AppError` for its uploaded-file member `contacts`,
   then the caller receives a validation error keyed `contacts` whose messages name the contact, its display name and
-  the line; given 300 problems, the error holds 100 messages and one that says 200 more exist; given a formatter, the
+  the line; given 300 errors, the error holds 100 messages and one that says 200 more exist; given a formatter, the
   messages use the application's wording.
 - Given an upload that holds no vCard (a PDF, an empty file, a spreadsheet), when it is read, then the result holds no
-  entries and one `vcard.unreadable` error.
+  entries and one `contact.unreadable` error.
 
 ### Read names, dates and kinds as producers write them (P2)
 
@@ -111,10 +115,10 @@ NativeAOT.
   the contact's photo holds the image bytes and the media type the bytes show.
 - Given a photo declared `TYPE=JPEG` whose bytes are PNG, when it is read, then the media type is `image/png`.
 - Given a photo of 3 MiB with the default limit, when it is read, then the contact has no photo and its entry holds a
-  `vcard.photo_too_large` problem with the limit.
+  `contact.photo_too_large` error with the limit.
 - Given `PHOTO:https://lh3.googleusercontent.com/…` and `PHOTO;VALUE=uri:file:///etc/passwd`, when each is read, then
   the first contact's photo holds the URI and no request is made, and the second contact has no photo and a
-  `vcard.invalid_value` problem.
+  `contact.invalid_value` error.
 
 ### Export contacts as a .vcf file (P1)
 
@@ -134,23 +138,23 @@ NativeAOT.
   first bytes reach the client before the last contact is produced, and the server's memory does not grow with the
   number of contacts.
 - Given the same contacts written twice, when the two files are compared, then they are byte-identical.
-- Given a contact read from a file with unmapped properties, when it is written, then the unmapped properties are
+- Given a contact read from a file with additional properties, when it is written, then the additional properties are
   written as they were read.
-- Given a contact holding an unmapped property named `BAD NAME`, when it is written, then the write fails with an
+- Given a contact holding an additional property named `BAD NAME`, when it is written, then the write fails with an
   exception naming the contact and the property.
 
 ### Hostile uploads are bounded (P2)
 
-- Given an upload larger than the read limit, when it is read, then the result holds one `vcard.too_large` error and
+- Given an upload larger than the read limit, when it is read, then the result holds one `contact.too_large` error and
   the reader held no more than the limit in memory.
 - Given a file of 20,000 contacts with the default limit, when it is read, then the result holds the first 10,000
-  entries and one `vcard.too_many_contacts` error.
+  entries and one `contact.too_many_contacts` error.
 - Given a contact with 5,000 properties, when the file is read, then its entry has no contact and holds a
-  `vcard.too_many_properties` problem, and the contacts after it read.
+  `contact.too_many_properties` error, and the contacts after it read.
 - Given a 5 MiB `NOTE` line, when the file is read, then the contact reads without the note and its entry holds a
-  `vcard.line_too_long` problem.
+  `contact.line_too_long` error.
 - Given an `AGENT` property holding a vCard that holds another, nested a thousand times, when the file is read, then
-  the read finishes in time linear in the file's size and the value stays an unmapped property.
+  the read finishes in time linear in the file's size and the value stays an additional property.
 - Given a file of 10 MiB made of one property folded into a million continuation lines, when it is read, then the read
   finishes in time linear in the file's size.
 
@@ -163,10 +167,10 @@ NativeAOT.
 
 The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 2119 and RFC 8174.
 
-- FR-001: The feature MUST ship as the opt-in package `Elarion.VCards`, which MUST NOT depend on a third-party
+- FR-001: The feature MUST ship as the opt-in package `Elarion.Contacts`, which MUST NOT depend on a third-party
   library, ASP.NET Core, EF Core or `Elarion.Blobs`.
-- FR-002: `AddElarionVCards(IConfiguration?, Action<VCardOptions>?)` MUST register the reader with one options bag
-  whose read defaults per-call read options of the same type replace.
+- FR-002: `AddElarionContacts(IConfiguration?, Action<ContactOptions>?)` MUST register the reader with one options bag,
+  bound from the configuration section `Contacts`, whose read defaults per-call read options of the same type replace.
 - FR-003: Reading MUST accept vCard 2.1, 3.0 and 4.0, and files that mix versions, and MUST report each entry's
   version.
 - FR-004: Reading MUST match `BEGIN`, `END`, property names and parameter names ignoring case.
@@ -186,24 +190,27 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
   end of their folded lines.
 - FR-012: Reading MUST decide the encoding of the whole file from a UTF-8 or UTF-16 byte-order mark, or from `BEGIN`
   encoded as UTF-16 without one.
-- FR-013: Otherwise, reading MUST decode each value with its `CHARSET` parameter when the runtime knows that charset,
-  else as UTF-8 when its bytes are valid UTF-8, else with the fallback encoding of the read options, Windows-1252 by
-  default.
-- FR-014: A `CHARSET` the runtime does not know MUST be a `vcard.unknown_charset` problem, and the value MUST be decoded
+- FR-013: Otherwise, reading MUST decode each logical line on its own: with its `CHARSET` parameter when the runtime
+  knows that charset, else as UTF-8 when its bytes are valid UTF-8, else with the fallback encoding the read options
+  name (`FallbackEncoding`), Windows-1252 by default. This is the decoding ladder `Elarion.Calendars` uses, which has
+  no `CHARSET` step.
+- FR-014: A `CHARSET` the runtime does not know MUST be a `contact.unknown_charset` error, and the value MUST be decoded
   as FR-013 says for a value without one.
-- FR-015: The result MUST say whether the fallback encoding decoded any value, and which encoding a byte-order mark
-  chose.
+- FR-015: The result MUST say whether the fallback encoding decoded any line (`UsedFallbackEncoding`), and which
+  encoding a byte-order mark chose.
 - FR-016: Reading MUST NOT change the process's registered encoding providers.
 - FR-017: Line breaks in read values MUST be `\n` on every platform.
 - FR-018: Reading MUST remove the Unicode directional formatting characters (U+200E, U+200F, U+202A to U+202E, U+2066
   to U+2069) from phone numbers.
 - FR-019: Each vCard in the file MUST become an entry with its 1-based index, the line number of its `BEGIN`, its
-  version, its contact when it has one, and its problems.
+  version, every property of the card in file order with its group, parameters, value as written and line number, its
+  contact as `Value` when it has one with `HasValue` saying so, and its errors. An error MUST NOT by itself remove the
+  contact.
 - FR-020: A contact MUST hold the formatted name, the name (family, given, additional, prefix, suffix, several values
   of one part joined with `, `), nicknames, the kind, organization and department (the first two `ORG` components),
   title, role, phone numbers, e-mail addresses, postal addresses (post office box, extended address, street,
   locality, region, postal code, country) and web addresses, the birthday, the anniversary, the note, the categories,
-  the photo, the UID, and every other property as an unmapped property with its group, parameters and value.
+  the photo, the UID, and every other property as an additional property with its group, parameters and value.
 - FR-021: Each phone number, e-mail address, postal address and web address MUST carry its types as flags (home, work,
   cell, voice, fax, pager, text, video, main), whether it is preferred, and its custom label.
 - FR-022: `TYPE` values, bare 2.1 parameters, and the Apple labels `_$!<Mobile>!$_`, `_$!<iPhone>!$_`,
@@ -221,44 +228,47 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
   the first e-mail address, else the first phone number.
 - FR-028: An inline photo (Base64 or a `data:` URI) MUST read as its bytes with the media type its bytes show (JPEG,
   PNG, GIF, WebP or BMP), whatever the declared type.
-- FR-029: A photo whose bytes show none of those formats MUST be dropped with a `vcard.invalid_value` problem.
+- FR-029: A photo whose bytes show none of those formats MUST be dropped with a `contact.invalid_value` error.
 - FR-030: A photo given as a URI MUST read as that URI when its scheme is `http` or `https`, and MUST otherwise be
-  dropped with a `vcard.invalid_value` problem.
+  dropped with a `contact.invalid_value` error.
 - FR-031: Reading MUST NOT request any URI a file contains.
-- FR-032: Only the first `PHOTO` of a contact MUST be read into its photo; later ones MUST stay unmapped properties.
+- FR-032: Only the first `PHOTO` of a contact MUST be read into its photo; later ones MUST stay additional properties.
 - FR-033: An `AGENT` value MUST NOT be parsed as a vCard.
-- FR-034: A property value that does not read as its kind MUST be dropped with a `vcard.invalid_value` problem that
+- FR-034: A property value that does not read as its kind MUST be dropped with a `contact.invalid_value` error that
   carries the property and the expected kind, and MUST NOT remove the contact.
-- FR-035: A line without a colon inside a card MUST be skipped with a `vcard.malformed_line` problem.
+- FR-035: A line without a colon inside a card MUST be skipped with a `contact.malformed_line` error.
 - FR-036: A card without a formatted name, name, organization, e-mail address or phone number MUST have no contact and
-  a `vcard.empty_contact` problem.
+  a `contact.empty` error.
 - FR-037: A card not closed by `END:VCARD` before the next `BEGIN:VCARD` or the end of the file MUST be read, with a
-  `vcard.missing_end` problem.
-- FR-038: Reading MUST return the entries and the problems together, and MUST throw only on cancellation and on
+  `contact.unexpected_end` error.
+- FR-038: Reading MUST return the entries and the errors together, and MUST throw only on cancellation and on
   misconfiguration, never because of what the file contains.
-- FR-039: A file without a `BEGIN:VCARD` line MUST be exactly one `vcard.unreadable` error and no entries.
-- FR-040: Every problem MUST carry a stable code, the data its wording needs, and an English default message.
-- FR-041: The codes MUST be `vcard.unreadable`, `vcard.too_large`, `vcard.too_many_contacts`,
-  `vcard.too_many_properties`, `vcard.line_too_long`, `vcard.photo_too_large`, `vcard.invalid_value`,
-  `vcard.unknown_charset`, `vcard.malformed_line`, `vcard.empty_contact` and `vcard.missing_end`.
-- FR-042: A problem about a contact MUST carry the entry's index, the line of its `BEGIN`, the contact's display name
-  when it has a contact, and, when it concerns a property, the property's name and line.
-- FR-043: Reading MUST report every problem of every entry it reads.
-- FR-044: The application MUST be able to add its own problems to an entry with its own code, located like the
-  package's own, and they MUST appear in the result's problems and in its `AppError`.
+- FR-039: A file without a `BEGIN:VCARD` line MUST be exactly one `contact.unreadable` error and no entries.
+- FR-040: Every error MUST carry a stable code, the data its wording needs, and an English default message.
+- FR-041: The codes MUST be `contact.unreadable`, `contact.too_large`, `contact.too_many_contacts`,
+  `contact.too_many_properties`, `contact.line_too_long`, `contact.photo_too_large`, `contact.invalid_value`,
+  `contact.unknown_charset`, `contact.malformed_line`, `contact.empty` and `contact.unexpected_end`.
+- FR-042: An error about a contact MUST carry the entry's index and the line of its `BEGIN`, the contact's display
+  name when it has a contact, and, when it concerns a property, the property's name, its line and its value as
+  written; an error about a value MUST carry the expected kind, an error about a limit the limit, and
+  `contact.unknown_charset` the charset. These are the location fields `Elarion.Calendars` errors carry too.
+- FR-043: Reading MUST report every error of every entry it reads.
+- FR-044: The application MUST be able to add its own errors to an entry with its own code, and optionally a property
+  and a line (`AddError(code, message, property?, lineNumber?)`), located like the package's own, and they MUST
+  appear in the result's errors and in its `AppError`.
 - FR-045: The result MUST convert to an `AppError.Validation` whose field errors are keyed by a field path the caller
   names, or the empty key when it names none, with at most 100 messages, each worded by the caller's formatter or else
   naming the contact, its display name and the line, and one closing message that counts the rest.
-- FR-046: Reading MUST refuse with one `vcard.too_large` error an input larger than the read limit, 32 MiB by default,
+- FR-046: Reading MUST refuse with one `contact.too_large` error an input larger than the read limit, 32 MiB by default,
   without holding more than the limit in memory.
-- FR-047: Reading MUST stop with one `vcard.too_many_contacts` error after the maximum number of entries of the read
+- FR-047: Reading MUST stop with one `contact.too_many_contacts` error after the maximum number of entries of the read
   options, 10,000 by default, keeping the entries before it.
 - FR-048: A card with more properties than the read limit, 1,000 by default, MUST have no contact and a
-  `vcard.too_many_properties` problem, and reading MUST continue with the next card.
+  `contact.too_many_properties` error, and reading MUST continue with the next card.
 - FR-049: An unfolded line longer than the read limit, 1 MiB by default, other than a photo, MUST be dropped with a
-  `vcard.line_too_long` problem.
+  `contact.line_too_long` error.
 - FR-050: A photo whose decoded size exceeds the read limit, 1 MiB by default, MUST be dropped with a
-  `vcard.photo_too_large` problem, without decoding more than the limit.
+  `contact.photo_too_large` error, without decoding more than the limit.
 - FR-051: Reading MUST take time and memory linear in the size of the input.
 - FR-052: Writing MUST produce vCard 3.0 by default and vCard 4.0 when the write options ask for it, and MUST NOT
   produce 2.1.
@@ -274,33 +284,38 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
 - FR-058: Writing MUST write an organization as `X-ABSHOWAS:COMPANY` in 3.0 and `KIND:org` in 4.0.
 - FR-059: Writing MUST write an `FN` for every contact, from the display name of FR-027 when the contact has no
   formatted name, and an `N` for every contact in 3.0.
-- FR-060: Writing MUST write unmapped properties as they were read.
-- FR-061: A contact the writer cannot represent — an unmapped property whose name or parameter is not a valid vCard
-  name, a photo with neither bytes nor URI — MUST fail the write with an exception that names the contact's index and
-  the property.
+- FR-060: Writing MUST write additional properties as they were read.
+- FR-061: A contact the writer cannot represent — an additional property whose name or parameter is not a valid vCard
+  name, a photo with neither bytes nor URI — MUST fail the write with a `ContactWriteException` that carries the
+  item's index (`ItemIndex`) and the property (`Property`).
 - FR-062: Writing MUST be forward-only to a stream and MUST NOT hold more than one contact in memory.
-- FR-063: Writing MUST be able to produce the file as an `ElarionFile` and as an `ElarionStreamedFile`, with the
-  `text/vcard` content type and a file name the caller gives.
+- FR-063: Writing MUST be able to produce the file as an `ElarionFile` and as an `ElarionStreamedFile`, served as
+  `text/vcard; charset=utf-8` with a file name the caller gives, through the shape `Elarion.Spreadsheets` and
+  `Elarion.Calendars` use: an instance writer created over a stream that contacts are added to, and static
+  `WriteAsync`, `ToFileAsync(contacts, fileName, …)`, `ToStreamedFile(contacts, fileName, …)` and
+  `ToStreamedFile(fileName, write, …)`.
 - FR-064: The same contacts MUST produce byte-identical files.
 - FR-065: Every contact written, read back, MUST be equal to the contact written, except that a contact without a
   formatted name reads back with the one FR-059 wrote, and a line break in a value reads back as `\n`.
 - FR-066: Reading and writing MUST NOT use reflection, so that an application published with NativeAOT gets no
   trimming or AOT warning from the package.
+- FR-067: A contact MUST convert to its property list and back, and the writer MUST also write an entry's property
+  list as it holds it, so a card read and written again keeps every property, mapped or not.
 
 ## Success criteria
 
 - SC-001: The real exports of the research note's producers — Android, Google Contacts, Apple, Outlook classic,
-  Thunderbird and Nextcloud, in every version they write — read with every contact and no problem the file does not
+  Thunderbird and Nextcloud, in every version they write — read with every contact and no error the file does not
   deserve.
 - SC-002: A file written by the package imports without an error into Apple Contacts, Google Contacts and Android's
   contacts app, and its first contact into Outlook classic.
 - SC-003: An application published with NativeAOT that reads and writes vCards gets zero trimming or AOT warnings from
   the package.
-- SC-004: One read of a file with several broken contacts reports every problem, each with a location a person can
+- SC-004: One read of a file with several broken contacts reports every error, each with a location a person can
   find.
 - SC-005: Reading a hostile file of the maximum size finishes within twice the time of reading a well-formed file of
   that size, and holds no more memory than a small multiple of the size limit.
-- SC-006: An application can word every problem of an import in its own language without parsing a message.
+- SC-006: An application can word every error of an import in its own language without parsing a message.
 - SC-007: An application that hand-wrote a vCard import with an encoding ladder and pictures can replace its parsing
   and decoding code with the package and keep its behavior.
 
@@ -308,18 +323,20 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
 
 - Writing vCard 2.1; jCard (RFC 7095) and xCard.
 - Group cards (`KIND:group`, `MEMBER`), and mapping `RELATED`, `IMPP`, `GEO`, `TZ`, `SOUND`, `LOGO`, `KEY`, `LABEL`,
-  `X-SOCIALPROFILE`, `X-ANDROID-CUSTOM` or phonetic names into the model; they stay unmapped properties.
+  `X-SOCIALPROFILE`, `X-ANDROID-CUSTOM` or phonetic names into the model; they stay additional properties.
 - Fetching photo URIs, and resizing or re-encoding photos.
 - Detecting duplicates within a file or against stored contacts, and merging contacts.
 - An archive of single-contact files for Outlook classic; the application writes one file per contact.
-- A generated record mapping (`[VCardRecord]`) and DataAnnotations validation of contacts.
+- A generated record mapping (`[ContactRecord]`) and DataAnnotations validation of contacts.
 - CardDAV.
 - Enumerating the contacts of a file one at a time without collecting them.
 
 ## Decisions
 
-- [ADR-0110](../docs/decisions/0110-vcard-contacts.md): the fixed contact model, the own reader and writer, the
-  per-value encoding ladder, the read result, photos, limits, the written versions.
+- [ADR-0110](../docs/decisions/0110-vcard-contacts.md): the fixed contact model over a lossless property list, the own
+  reader and writer, the per-line decoding ladder, the read result, photos, limits, the written versions.
+- [ADR-0109](../docs/decisions/0109-icalendar-model-reader-and-writer.md): the sibling format package whose entry,
+  error, limit and writer shapes, decoding ladder and content-line layer this package shares.
 - [ADR-0108](../docs/decisions/0108-spreadsheet-records.md): the reference file-format package whose result, codes,
   `ToAppError` and file tiers this package follows.
 - [ADR-0098](../docs/decisions/0098-streamed-files-for-http-only-endpoints.md) and

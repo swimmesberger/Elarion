@@ -321,14 +321,14 @@ carries, and reports a problem in the file as a coded, located error in the resu
 _Avoid_: Excel model, sheet DTO, export row, import row
 
 **Published calendar**:
-A calendar whose objects an application publishes into Elarion's store (`ICalendarPublisher`) in the transaction that
+A calendar whose objects an application publishes into Elarion's store (`ICalDavPublisher`) in the transaction that
 changed its own data, and which Elarion serves to calendar apps over CalDAV and as an ICS feed, with exact sync. It
 is a projection of the application's data, read-only to the apps; the application stays the source.
 _Avoid_: shared calendar (sharing is the calendar source's decision), calendar export, CalDAV collection (in
 application code)
 
 **Calendar source**:
-A query request implementing `ICalendarSource<TSelf>` whose handler returns the published calendars of that source
+A query request implementing `ICalDavSource<TSelf>` whose handler returns the published calendars of that source
 the current user may see. It decides access per calendar through the handler pipeline, so authorization, resource
 rules, feature gates and module enablement apply to calendar apps as to the application.
 _Avoid_: calendar provider, calendar backend, calendar collection
@@ -348,16 +348,34 @@ _Avoid_: secret link, calendar token, webcal password
 An event or to-do of an `.ics` calendar as `Elarion.Calendars` models it: a typed view over the item's component that
 keeps every property it does not model, so other programs' properties survive a round trip. Items with one `UID` form
 a series (a master and its overrides), which expansion turns into occurrences within a window. Reading keeps every item
-with its coded, located errors; only a broken time or time zone leaves an item without its typed view.
-_Avoid_: appointment, entry (for the typed item), calendar record, VEVENT (for the model type)
+with its coded, located errors; only a broken time or time zone, or a per-item limit, leaves an item without its typed
+view.
+_Avoid_: appointment, entry (for the typed item), calendar record, task (for a to-do), VEVENT (for the model type)
 
-**vCard contact**:
-A contact in the fixed model of `Elarion.VCards` (`VCardContact`), the same for reading and writing: names,
-organization, typed phone numbers, e-mail, postal and web addresses, dates that may lack a year, a photo, and the
-properties the model does not map. Reading an uploaded `.vcf` of any version keeps every contact and reports each
-problem as a coded problem located by contact and line, never as an exception. The application maps it to its own
-entity in code.
-_Avoid_: vCard record, contact DTO, card (for the model)
+**Component tree**:
+The lossless layer of `Elarion.Calendars`: every component, property and parameter of an `.ics` file in order, with
+values as written and line numbers, including unknown and `X-` ones (`CalendarComponent`). The typed calendar items
+are views over it; CalDAV filters and partial retrieval walk it, and code can build, prune or rewrite it.
+_Avoid_: raw calendar, iCalendar DOM, property bag
+
+**Calendar object**:
+The components of one `UID` in a calendar, a master and its overrides, written as one `VCALENDAR` with the time zones
+they use (`CalendarObject`). It is the unit an application publishes and a CalDAV server stores as one resource.
+_Avoid_: calendar entry, ics file (for one object), series (which is what expansion reads from it)
+
+**Occurrence**:
+One instance of a calendar item in time, produced by expanding a series within a window: its recurrence id, its start
+and end as the file states them and in UTC, how its end was found, and the item it comes from (`CalendarOccurrence`).
+_Avoid_: instance (in API names), event (for an occurrence), recurrence
+
+**Contact**:
+A contact in the fixed model of `Elarion.Contacts` (`Contact`), the same for reading and writing: names, organization,
+typed phone numbers, e-mail, postal and web addresses, dates that may lack a year, a photo, and the properties the
+model does not map. It is a view over the lossless list of the card's properties as read. Reading an uploaded `.vcf`
+of any version keeps every contact and reports each problem in the file as a coded, located error (by contact and
+line), never as an exception; an error does not take the contact away. The application maps it to its own entity in
+code.
+_Avoid_: vCard contact, vCard record, contact DTO, card (for the model)
 
 **Migration plan**:
 The one ordered sequence in which SQL scripts, C# code steps and EF migrations run, with one version

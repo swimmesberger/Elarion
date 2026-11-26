@@ -3,18 +3,19 @@ type: Architecture Decision Record
 title: "ADR-0109: iCalendar — a fixed model over a lossless component tree, with Elarion's own reader, writer and recurrence engine"
 description: "Elarion.Calendars reads .ics files leniently into a result that keeps every item, its component tree and coded errors, writes them deterministically, expands recurrences within a window under caps, and resolves time zones through TimeZoneInfo with the file's VTIMEZONE as fallback, without an outside library."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T17:00:00Z }
-status: stable
+status: draft
 ---
 # ADR-0109: iCalendar — a fixed model over a lossless component tree, with Elarion's own reader, writer and recurrence engine
 
-- Status: Accepted
+- Status: Proposed
 - Date: 2026-11-26
 - Related: [ADR-0017](0017-dependency-light-core.md) (heavy defaults live in opt-in siblings),
   [ADR-0025](0025-distributed-scheduler-coordination.md) (the 1–10 node tier the defaults are sized for),
   [ADR-0039](0039-binary-file-responses.md) (the small-file tier), [ADR-0098](0098-streamed-files-for-http-only-endpoints.md)
   (streamed files), [ADR-0104](0104-previewable-commands.md) (preview, then commit),
   [ADR-0105](0105-uploaded-files-are-handler-parameters.md) (uploaded files), [ADR-0108](0108-spreadsheet-records.md)
-  (the reference file-format package), the research note
+  (the reference file-format package), [ADR-0110](0110-vcard-contacts.md) (contacts, whose design and content-line
+  layer this shares), the research note
   [iCalendar in .NET](../research/2026-11-26-icalendar-libraries-and-producers.md), and
   [spec 0004](../../specs/0004-icalendar-files.md).
 
@@ -49,9 +50,9 @@ adding properties of its own (`X-APPLE-*`, `X-MICROSOFT-CDO-*`, `X-MOZ-*`) that 
 `Elarion.Calendars` is an opt-in package that depends on `Elarion.Abstractions` and `Microsoft.Extensions`
 abstractions only. It does not depend on ASP.NET Core, EF Core, `Elarion.Blobs` or an outside library: it reads from
 and writes to streams, and the file tiers carry them. It is `IsAotCompatible`; registration is
-`AddElarionCalendars(IConfiguration?, Action<CalendarOptions>?)`, bound through the configuration-binding generator,
-with limits and read defaults in one options bag and per-call options of the same type, as `Elarion.Spreadsheets`
-does.
+`AddElarionCalendars(IConfiguration?, Action<CalendarOptions>?)`, bound from the configuration section `Calendars`
+through the configuration-binding generator, with limits and read defaults in one options bag and per-call options of
+the same type, as `Elarion.Spreadsheets` and `Elarion.Contacts` do.
 
 1. **A fixed model over a lossless component tree, no generator.** The design language of file-format packages asks
    for generated typed records; a calendar is where it does not fit, because the RFC, not the application, fixes the
@@ -65,46 +66,57 @@ does.
    with changes, and a typed item converts to its component and back, so a caller can assemble, prune or rewrite a
    calendar and hand it to the writer.
    An application maps a typed item to its own type in a few lines of handler code; a generator would save little and
-   could not express a series, an override or a time zone better than the model.
+   could not express a series, an override or a time zone better than the model. Consequently there is no
+   `[ValidationRoot]`, no DataAnnotations run and no diagnostic prefix; the application validates its own type after
+   mapping.
 2. **Elarion owns the reader, the writer, the recurrence engine and the time-zone conversion.** iCalendar is text: a
    content-line grammar, some twenty value types, a recurrence rule and a time-zone component. The parts a library
    would contribute are exactly the parts the research found broken under trimming or still unsettled, and taking
    Ical.Net would bring NodaTime as a second dependency and its types toward the public API. Public types are .NET's
-   own: `DateOnly`, `DateTime`, `DateTimeOffset`, `TimeSpan`, `TimeZoneInfo`. The content-line layer (folding,
-   parameters, escaping, RFC 6868, the decoding ladder, limits, line numbers) is the same grammar vCard uses; it is
-   internal, lives in the first of the two packages that ships, and moves to a shared internal place when the second
-   ships.
+   own: `DateOnly`, `DateTime`, `DateTimeOffset`, `TimeSpan`, `TimeZoneInfo`. The content-line layer (line ends,
+   folding, parameters, escaping, RFC 6868, the decoding ladder, the code-page cache, limits, line numbers) is the same
+   grammar vCard uses. It is internal and source-shared: one folder, `src/Shared/ContentLines/`, compiled into this
+   package and `Elarion.Contacts`, with no property names in it; what differs is a rule set each package passes in.
+   For iCalendar, unfolding removes exactly one leading space or tab of a continuation line (vCard removes any
+   indentation), and there are no groups, bare parameters, `CHARSET` or quoted-printable.
 3. **The read result keeps every item.** Reading returns the calendar's own properties (name, product, method, the
-   default time zone of `X-WR-TIMEZONE`) and every event and to-do in file order, each with its component, the line it
-   starts on, its typed view when it has one, and its errors, so a preview can list every item, including those with
-   problems; an item whose typed view is set says so to the compiler. Items with the same `UID` form a series (one
+   default time zone of `X-WR-TIMEZONE`) and every event and to-do in file order, each with its index, its component,
+   the line it starts on, its typed view as `Value` when it has one, and its errors, so a preview can list every item,
+   including those with errors. `HasValue` says whether the typed view is set, and says so to the compiler; it is the
+   entry shape of `Elarion.Contacts`, and it is not `IsValid`, which in `Elarion.Spreadsheets` means a record and no
+   errors, because here an error need not take the value away (decision 5). Items with the same `UID` form a series (one
    master, overrides by `RECURRENCE-ID`); the result groups them for expansion but does not merge them, and a missing
    `UID` is not an error, because files from municipalities omit or regenerate them. Re-import matching is the
    application's, on `UID` where the producer keeps it stable and on start, end and summary where it does not.
 4. **A user's file is input, not infrastructure.** A file that is not a calendar, a limit exceeded, a value that does
-   not convert, a time zone that does not resolve: each is an error in the result, located by line, item (component
-   name and `UID`) and property, with a stable `calendar.*` code, the data its wording needs and an English default
-   message. Reading throws only on cancellation and misconfiguration. The application adds its own errors to an item,
-   and `ToAppError` converts the result to an `AppError.Validation` keyed by the field path the handler names, worded by
+   not convert, a time zone that does not resolve: each is an error in the result with a stable `calendar.*` code, an
+   English default message and the location both line formats share (the item's index and the line it starts on, the
+   line, the property and its value as written, the expected kind, the limit), and on top the component name, the
+   `UID` and the time-zone id. Reading throws only on cancellation and misconfiguration. The application adds its own
+   errors to an item (`AddError(code, message, property?, lineNumber?)`, with its own code prefix), and `ToAppError`
+   converts the result to an `AppError.Validation` keyed by the field path the handler names, worded by
    a formatter and capped at 100 messages plus one that counts the rest, as `Elarion.Spreadsheets` does. An import is a
    previewable command (ADR-0104) like any other; the package has no preview of its own.
-5. **Only what places an item in time makes it invalid.** An item has no typed view when its identity in time is
-   broken: `DTSTART`, `DTEND`, `DURATION`, `DUE`, `RRULE`, `RDATE`, `EXDATE`, `RECURRENCE-ID`, or a time zone one of them
-   names. Any other property whose value does not convert (a `PRIORITY` of `high`, a malformed `GEO`) is left out of the
-   typed view, kept in the tree, and reported as an error that does not invalidate the item. This is where the package
-   departs from spreadsheets, whose every cell belongs to the application's record: a calendar file carries many
-   properties the application never asked for, and an event should not disappear from a preview because a program
-   wrote one of them badly.
-6. **One lenient rule, the same for every application.** The reader decodes a byte-order mark (UTF-8, UTF-16), then
-   strict UTF-8, then a legacy encoding from the read options (Windows-1252 by default, held by the package, never
-   registered globally). It accepts CRLF, LF and CR line ends, folding with a space or a tab, lines of any length up to
-   the limit, property and parameter names in any case, spaces around `:`, `;` and `=`, quoted parameter values
-   anywhere, and `VTIMEZONE`s after their first use. It repairs the known value faults: a missing seconds field, a
-   value truncated after `T` (read as midnight), a duplicated time suffix (`…T000000ZT000000Z`), a `TZID` on a date
-   value (ignored), a date-only `DTSTAMP`, a date `EXDATE` against date-time starts (excludes the day's instance). An
-   all-day event is a date `DTSTART` with an exclusive `DTEND`; without `DTEND` or `DURATION` it lasts one day, and a
-   date-time event without either lasts no time; midnight-to-midnight date-times with
-   `X-MICROSOFT-CDO-ALLDAYEVENT:TRUE` read as all-day. Lines that are not content lines are skipped and reported. A
+5. **Only what places an item in time makes it invalid.** An item has no typed view when its identity in time is broken:
+   `DTSTART`, `DTEND`, `DURATION`, `DUE`, `RRULE`, `RDATE`, `EXDATE`, `RECURRENCE-ID`, or a time zone one of them names,
+   or when it exceeds a per-item limit (decision 10). Any other property whose value does not convert (a `PRIORITY` of
+   `high`, a malformed `GEO`) is left out of the typed view, kept in the tree, and reported as an error that does not
+   invalidate the item. This is where the package departs from spreadsheets, whose every cell belongs to the
+   application's record: a calendar file carries many properties the application never asked for, and an event should
+   not disappear from a preview because a program wrote one of them badly.
+6. **One lenient rule, the same for every application.** Text is decoded by the ladder both text formats use: a
+   byte-order mark (UTF-8, UTF-16), or a file that starts with `BEGIN` in UTF-16 without one, decides the whole file;
+   otherwise each logical line is decoded on its own, as strict UTF-8 when its bytes are valid UTF-8, else with the
+   fallback encoding the read options name (`FallbackEncoding`, Windows-1252 by default, held by the package, never
+   registered globally), and the result says when the fallback was used (`UsedFallbackEncoding`). iCalendar has no
+   `CHARSET` parameter, so the ladder's `CHARSET` step does not apply. The reader accepts CRLF, LF and CR line ends,
+   folding with a space or a tab, lines of any length up to the limit, property and parameter names in any case, spaces
+   around `:`, `;` and `=`, quoted parameter values anywhere, and `VTIMEZONE`s after their first use. It repairs the
+   known value faults: a missing seconds field, a value truncated after `T` (read as midnight), a duplicated time suffix
+   (`…T000000ZT000000Z`), a `TZID` on a date value (ignored), a date-only `DTSTAMP`, a date `EXDATE` against date-time
+   starts (excludes the day's instance). An all-day event is a date `DTSTART` with an exclusive `DTEND`; without `DTEND`
+   or `DURATION` it lasts one day, and a date-time event without either lasts no time; midnight-to-midnight date-times
+   with `X-MICROSOFT-CDO-ALLDAYEVENT:TRUE` read as all-day. Lines that are not content lines are skipped and reported. A
    repair is silent; what cannot be repaired is an error.
 7. **Time zones come from the system, then from the file.** A `TZID` is normalized (quotes and surrounding space
    removed, a vendor prefix such as `/mozilla.org/20070129_1/Europe/Berlin` reduced to its IANA id, a
@@ -144,13 +156,19 @@ does.
    name and refresh interval are written in both forms (`NAME` and `X-WR-CALNAME`, `REFRESH-INTERVAL` and
    `X-PUBLISHED-TTL`). The same input with the same timestamp produces the same bytes for one package version; a release
    that changes the bytes says so in the changelog, because every published ETag changes with them. A value the format
-   cannot hold (an event without `UID`, an end before its start, a `TimeZoneInfo` without an id) fails the write with an
-   exception naming the item. Output goes to a stream, an `ElarionFile` or an `ElarionStreamedFile` (`text/calendar`),
-   and a writer that adds items one at a time serves feeds too large to build in memory.
-10. **Reading is bounded.** Size in bytes (16 MiB by default), unfolded line length (4 MiB, for embedded HTML and
-    attachments), components (50,000), properties per component (1,000) and nesting depth (8), as read options; the
-    reader stops at the first limit with one error and keeps what it read before it. The defaults cover every
-    observed file by an order of magnitude and are sized for the 1–10 node tier.
+   cannot hold (an event without `UID`, an end before its start, a `TimeZoneInfo` without an id) fails the write with a
+   `CalendarWriteException` carrying the item's index, its `UID` and the property. The writer has the shape of
+   `SpreadsheetWorkbook` and `ContactWriter`: an instance created over a stream that items are added to one at a time,
+   for feeds too large to build in memory, and static `WriteAsync`, `ToFileAsync(items, fileName, …)`,
+   `ToStreamedFile(items, fileName, …)` and `ToStreamedFile(fileName, write, …)`. The content-type constant is
+   `text/calendar`, and files are served as `text/calendar; charset=utf-8`.
+10. **Reading is bounded.** Size in bytes (16 MiB by default), components (50,000), unfolded line length (4 MiB, for
+    embedded HTML and attachments), properties per component (1,000) and nesting depth (8), as read options. As for
+    contacts, a per-item limit costs at most that item and the read continues: a line over the limit costs its
+    property (and so the typed view, when the property places the item in time), too many properties or too deep a
+    nesting cost the item's typed view, and the reader skips to the item's end. A file limit (the bytes, the number of
+    components) stops the read with one error and keeps what it read before it. The defaults cover every observed file
+    by an order of magnitude and are sized for the 1–10 node tier.
 11. **The model is the one CalDAV builds on.** The tree is what CalDAV's filters and partial retrieval walk, the
     reader is what validates a stored calendar object, the writer is what returns one, expansion is what its
     time-range queries and `expand` use, and the `VTIMEZONE` conversions in both directions are public for its
@@ -164,7 +182,7 @@ item (create, update, skip, de-duplicate).
 
 ## Consequences
 
-- An application adds the package and reads an upload's stream into a result with every item, its problems and its
+- An application adds the package and reads an upload's stream into a result with every item, its errors and its
   occurrences in a window, from which it builds a preview and then commits; it publishes a feed by writing events to an
   `ElarionFile` or a streamed file. No reflection, no third-party types in the public API, nothing to configure.
 - Elarion owns a recurrence engine. It is the bulk of the work and the main risk; the tests take their oracle from
@@ -180,7 +198,8 @@ item (create, update, skip, de-duplicate).
   property the model treats as optional finds the error in the result, not a missing item.
 - An export states a timestamp: every event carries `DTSTAMP` or `LAST-MODIFIED`, or the write options name one. That
   is one line in a handler and what keeps feeds and CalDAV ETags stable.
-- `Elarion.Calendars` and the vCard package will share the content-line layer; the first to ship carries it.
+- `Elarion.Calendars` and `Elarion.Contacts` share the content-line layer as source: a fix to folding or decoding
+  lands in both packages in one change, and neither carries a public API for it.
 - The package's tests include a NativeAOT publish that reads, expands and writes calendars and must produce no
   trimming or AOT warning.
 
@@ -216,6 +235,14 @@ item (create, update, skip, de-duplicate).
   Rejected for one built from transitions.
 - **`DTSTAMP` from the clock when an item has none.** Most writers do it. Rejected: the bytes change on every write,
   so a feed or a CalDAV collection looks changed to every subscriber on every poll.
-- **Exceptions for broken files.** Rejected for the same reasons as in ADR-0108: the user needs every problem at once.
-- **A shared content-line package now.** Rejected for now with the user: no second consumer exists until the vCard
-  package ships; the layer moves then.
+- **Exceptions for broken files.** Rejected for the same reasons as in ADR-0108: the user needs every error at once.
+- **The content-line layer private to the first package that ships, moved when the second ships.** What this ADR first
+  said. Rejected: the two packages are designed together, two copies or a later move leave the second package to
+  discover the differences, and the folding and decoding rules would drift.
+- **A shared content-line package.** A small internal package instead of a source-shared folder. Rejected: it would
+  be a published package with no public API; linking a folder is how the repository already shares generator code.
+- **One encoding per file** (UTF-8 for the whole file when it all validates, else the fallback for all of it).
+  Rejected for the per-line ladder vCard needs too: one stray byte would push every UTF-8 line of the file through
+  Windows-1252, and two ladders would split the design language.
+- **Every limit stops the read.** What this ADR first said. Rejected for the rule both line formats follow: one
+  oversized description should cost its event, not every event after it; only a file limit stops.

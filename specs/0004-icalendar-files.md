@@ -1,20 +1,21 @@
 ---
 type: Specification
 title: "Spec 0004: iCalendar files"
-description: "What Elarion.Calendars must do: read .ics files leniently into every item with its problems, keep every property other programs wrote, expand recurrences within a window, resolve time zones, and write calendars and feeds deterministically, under NativeAOT."
+description: "What Elarion.Calendars must do: read .ics files leniently into every item with its errors, keep every property other programs wrote, expand recurrences within a window, resolve time zones, and write calendars and feeds deterministically, under NativeAOT."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T17:30:00Z }
-status: stable
+status: draft
 ---
 # Spec 0004: iCalendar files
 
 This spec describes the new opt-in package `Elarion.Calendars`. Why it is shaped this way, and what was rejected, is
 in [ADR-0109](../docs/decisions/0109-icalendar-model-reader-and-writer.md); what real files look like is in the
-[research note](../docs/research/2026-11-26-icalendar-libraries-and-producers.md).
+[research note](../docs/research/2026-11-26-icalendar-libraries-and-producers.md). It shares its design and its
+content-line layer with `Elarion.Contacts` ([spec 0005](0005-vcard-contacts.md)).
 
 ## Intent
 
 A developer reads a calendar file a user uploaded or a feed the application downloaded, and gets every event and to-do
-in it with its times resolved, its recurrences expanded within a window, and every problem coded and located, so the
+in it with its times resolved, its recurrences expanded within a window, and every error coded and located, so the
 application can show a preview and commit what the person confirms; files from Google, Outlook, Apple and municipal
 or school calendars read without the application repairing them first. The same developer publishes the application's
 dates as an `.ics` file or a feed that calendar programs subscribe to, byte-identical for the same data. Properties the
@@ -34,14 +35,15 @@ NativeAOT uses all of it without warnings.
   value, and the others with their typed values.
 - Given a file in which one event has `PRIORITY:high`, when it is read, then that event has its typed value without a
   priority, the property is still in its component, and the result reports a `calendar.invalid_value` error for it.
-- Given a read result, when the application adds its own error to an event (a date in the past), then the error appears
-  among the result's errors, located like the package's own, and in its `AppError`.
+- Given a read result, when the application adds its own error `import.date_in_past` to an event, then the event
+  keeps its typed value, and the error appears among the result's errors, located like the package's own, and in its
+  `AppError`.
 - Given a file without any `UID` on its events, when it is read, then every event is read, without an error.
 
-### Report problems in the application's language (P1)
+### Report errors in the application's language (P1)
 
 - Given a result with errors, when the handler converts it with `ToAppError("file")`, then it gets an
-  `AppError.Validation` whose field errors are keyed by `file` and hold one message per problem in English.
+  `AppError.Validation` whose field errors are keyed by `file` and hold one message per error in English.
 - Given a formatter that words errors by their code and data, when the handler passes it to `ToAppError`, then each
   message is the formatter's.
 - Given a file with 250 broken events, when the result is converted, then the `AppError` holds 100 messages and one
@@ -52,7 +54,9 @@ NativeAOT uses all of it without warnings.
 - Given a file with a UTF-8 byte-order mark and lines longer than 75 octets without folding, when it is read, then
   its events read as if it had neither.
 - Given a file in Windows-1252 with `Müll` in a summary, when it is read without options, then the summary reads
-  `Müll`.
+  `Müll` and the result says that the fallback encoding was used.
+- Given a UTF-8 file in which one line holds a Windows-1252 byte, when it is read, then every other line reads as
+  UTF-8 and that line reads with the fallback encoding.
 - Given a file with LF line ends and lines folded with a tab, when it is read, then it reads like the same file with
   CRLF and spaces.
 - Given an Outlook export with `DTSTART;TZID="W. Europe Standard Time":20261201T090000` and a matching `VTIMEZONE`,
@@ -145,25 +149,35 @@ NativeAOT uses all of it without warnings.
 
 - Given a file larger than the size limit, when it is read, then the result holds one `calendar.too_large` error
   without the file having been read beyond the limit.
-- Given a file with more components than the limit, or a line longer than the limit, or components nested deeper than
-  the limit, when it is read, then reading stops with one error naming the limit and the result keeps the items read
-  before it.
+- Given a file with more components than the limit, when it is read, then reading stops with one
+  `calendar.too_many_components` error naming the limit, and the result keeps the items read before it.
+- Given an event whose `DESCRIPTION` line is longer than the limit, when the file is read, then the event has its typed
+  value without the description, its entry holds a `calendar.line_too_long` error naming the limit, and the events
+  after it read.
+- Given an event with more properties than the limit, or with components nested deeper than the limit inside it, when
+  the file is read, then that event has no typed value and a `calendar.too_many_properties` or
+  `calendar.nesting_too_deep` error, and the events after it read.
 
 ## Requirements
 
 - FR-001: The feature MUST ship as the opt-in package `Elarion.Calendars`, which MUST NOT depend on ASP.NET Core,
   EF Core, `Elarion.Blobs` or a third-party library, and MUST be registered with
-  `AddElarionCalendars(IConfiguration?, Action<CalendarOptions>?)`.
+  `AddElarionCalendars(IConfiguration?, Action<CalendarOptions>?)`, bound from the configuration section `Calendars`.
 - FR-002: Reading, expanding and writing MUST NOT use reflection, so that an application published with NativeAOT
   gets no trimming or AOT warning from the package.
 - FR-003: The public API MUST use only .NET's own date and time types (`DateOnly`, `DateTime`, `DateTimeOffset`,
   `TimeSpan`, `TimeZoneInfo`) for times and time zones.
 - FR-004: Reading MUST accept a stream and return a result, and MUST throw only on cancellation and on
   misconfiguration.
-- FR-005: Reading MUST decode a byte-order mark (UTF-8, UTF-16 LE, UTF-16 BE), else strict UTF-8, else the legacy
-  encoding of the read options, Windows-1252 by default, without registering an encoding provider globally.
+- FR-005: Reading MUST decide the encoding of the whole file from a byte-order mark (UTF-8, UTF-16 LE, UTF-16 BE) or
+  from `BEGIN` encoded as UTF-16 without one, and otherwise MUST decode each logical line on its own, as strict UTF-8
+  when its bytes are valid UTF-8, else with the fallback encoding the read options name (`FallbackEncoding`),
+  Windows-1252 by default, without registering an encoding provider globally. The result MUST say whether the
+  fallback decoded any line (`UsedFallbackEncoding`) and which encoding a byte-order mark chose. This is the decoding
+  ladder of `Elarion.Contacts` without its `CHARSET` step.
 - FR-006: Reading MUST accept CRLF, LF and CR line ends, MUST unfold continuation lines that start with a space or a
-  tab, and MUST unfold before decoding so that a fold inside a multi-byte character does not damage it.
+  tab by removing that one character, and MUST unfold before decoding so that a fold inside a multi-byte character
+  does not damage it.
 - FR-007: Reading MUST accept lines of any length up to the line limit, property and parameter names in any case,
   spaces around `:`, `;` and `=`, and quoted parameter values in any parameter.
 - FR-008: Reading MUST decode parameter values per RFC 6868 and text values per RFC 5545 escaping, and MUST read an
@@ -175,11 +189,12 @@ NativeAOT uses all of it without warnings.
   `calendar.unexpected_end` error.
 - FR-012: The result MUST hold the calendar's own properties: product id, method, name (from `NAME` or
   `X-WR-CALNAME`), description, color, refresh interval, and the zone `X-WR-TIMEZONE` names when it resolves.
-- FR-013: The result MUST hold every `VEVENT` and `VTODO` of the calendar in file order, each with its component, the
-  line it starts on, its typed value when it has one, and its errors.
+- FR-013: The result MUST hold every `VEVENT` and `VTODO` of the calendar in file order, each with its 1-based index,
+  its component, the line it starts on, its typed value as `Value` when it has one with `HasValue` saying so, and its
+  errors.
 - FR-014: An item MUST have no typed value exactly when one of `DTSTART`, `DTEND`, `DURATION`, `DUE`, `RRULE`,
-  `RDATE`, `EXDATE`, `RECURRENCE-ID`, or a time zone one of them names, cannot be read, or when a `VEVENT` has no
-  `DTSTART` (`calendar.required`).
+  `RDATE`, `EXDATE`, `RECURRENCE-ID`, or a time zone one of them names, cannot be read, when a `VEVENT` has no
+  `DTSTART` (`calendar.required`), or when the item exceeds the properties or nesting limit of FR-055.
 - FR-015: Any other property of an item whose value cannot be read MUST be left out of the typed value, kept in the
   component, and reported as `calendar.invalid_value` without invalidating the item.
 - FR-016: An item without `UID` MUST be read without an error, and two items with the same `UID` and the same
@@ -198,10 +213,13 @@ NativeAOT uses all of it without warnings.
   `calendar.malformed_line`, `calendar.unexpected_end`, `calendar.required`, `calendar.invalid_value`,
   `calendar.unknown_time_zone`, `calendar.duplicate_uid`, `calendar.too_many_occurrences` and
   `calendar.recurrence_limit`.
-- FR-022: An error about an item MUST carry the line number, the component name, the `UID` when there is one, and the
-  property name and its value as written when it concerns a property.
-- FR-023: The application MUST be able to add its own errors to an item, and they MUST appear in the result's errors
-  and in its `AppError` like the package's own.
+- FR-022: An error about an item MUST carry the item's index and the line it starts on, the component name and the
+  `UID` when there is one, and, when it concerns a property, the property's name, its line and its value as written;
+  an error about a value MUST carry the expected kind, an error about a limit the limit, and
+  `calendar.unknown_time_zone` the time-zone id. These are the location fields `Elarion.Contacts` errors carry too.
+- FR-023: The application MUST be able to add its own errors to an item with its own code, and optionally a property
+  and a line (`AddError(code, message, property?, lineNumber?)`), and they MUST appear in the result's errors and in
+  its `AppError` like the package's own; an added error MUST NOT remove the typed value.
 - FR-024: The result MUST convert to an `AppError.Validation` whose field errors are keyed by a field path the caller
   names, worded by a formatter the caller may pass, with at most 100 messages by default plus one message that counts
   the rest.
@@ -242,7 +260,10 @@ NativeAOT uses all of it without warnings.
 - FR-042: Components and properties MUST be constructible and copyable in code, and a typed item MUST convert to its
   component and back without loss.
 - FR-043: Writing MUST accept a typed calendar and a component tree, and MUST write to a stream, an `ElarionFile` and an
-  `ElarionStreamedFile` with the content type `text/calendar`, and item by item for content not held in memory.
+  `ElarionStreamedFile` served as `text/calendar; charset=utf-8`, and item by item for content not held in memory,
+  through the shape `Elarion.Spreadsheets` and `Elarion.Contacts` use: an instance writer created over a stream that
+  items are added to, and static `WriteAsync`, `ToFileAsync(items, fileName, …)`, `ToStreamedFile(items, fileName, …)`
+  and `ToStreamedFile(fileName, write, …)`.
 - FR-044: Writing MUST produce UTF-8 without a byte-order mark, CRLF line ends, and lines of at most 75 octets folded
   with CRLF and a space without splitting a character.
 - FR-045: Writing MUST escape text values, encode parameter values per RFC 6868, and quote parameter values that
@@ -252,9 +273,10 @@ NativeAOT uses all of it without warnings.
 - FR-047: Writing MUST write `VERSION:2.0` and a product id, by default one naming the package, and the calendar's name
   and refresh interval both as `NAME` and `X-WR-CALNAME`, and as `REFRESH-INTERVAL` and `X-PUBLISHED-TTL`.
 - FR-048: Writing MUST write `DTSTAMP` from the item, else from its `LAST-MODIFIED`, else from the write options, and
-  MUST fail with an exception naming the item when none is given.
-- FR-049: Writing MUST fail with an exception naming the item for an event or to-do without `UID`, an end before its
-  start, and a zoned time whose zone has no id.
+  MUST fail with a `CalendarWriteException` when none is given.
+- FR-049: Writing MUST fail with a `CalendarWriteException` for an event or to-do without `UID`, an end before its
+  start, and a zoned time whose zone has no id; the exception MUST carry the item's index (`ItemIndex`), its `UID`
+  when it has one, and the property (`Property`).
 - FR-050: Writing MUST write a zoned time with the zone's IANA id where the system can name one, and otherwise with
   its id.
 - FR-051: Writing MUST write one `VTIMEZONE` per zone used, before the first item that uses it, whose observances
@@ -265,9 +287,12 @@ NativeAOT uses all of it without warnings.
 - FR-053: The same input with the same timestamp MUST produce byte-identical output with the same package version.
 - FR-054: Reading MUST stop with one `calendar.too_large` error at the byte limit of the read options, 16 MiB by
   default, without reading further.
-- FR-055: Reading MUST stop with one error at the unfolded line length (4 MiB), the number of components (50,000), the
-  properties of one component (1,000) and the nesting depth (8) of the read options, and MUST keep the items read
-  before the limit.
+- FR-055: Reading MUST stop with one `calendar.too_many_components` error at the number of components of the read
+  options (50,000), keeping the items read before it. The per-item limits MUST cost at most that item and reading MUST
+  continue: an unfolded line longer than the line limit (4 MiB) MUST be dropped with `calendar.line_too_long`, and an
+  item with more properties than the limit (1,000) or components nested deeper than the limit (8) MUST have no typed
+  value and a `calendar.too_many_properties` or `calendar.nesting_too_deep` error, its component holding what was read
+  within the limits.
 - FR-056: A calendar written by the package MUST read back into items equal to the ones written.
 
 ## Success criteria
@@ -282,7 +307,7 @@ NativeAOT uses all of it without warnings.
   warnings from the package.
 - SC-005: No file of at most the default size makes a read or an expansion run longer than a few seconds or allocate
   more than a small multiple of the limits.
-- SC-006: An application can word every problem of an import in its own language without parsing a message.
+- SC-006: An application can word every error of an import in its own language without parsing a message.
 - SC-007: An application that hand-wrote a calendar import with encoding detection and a preview can replace its
   parsing code with the package and keep its behavior.
 
@@ -305,6 +330,8 @@ NativeAOT uses all of it without warnings.
   lossless tree, the own reader, writer and recurrence engine, the lenient rule, time zones, writing.
 - [ADR-0108](../docs/decisions/0108-spreadsheet-records.md): the design language of file-format packages this package
   follows, and the result, error and `ToAppError` shapes it reuses.
+- [ADR-0110](../docs/decisions/0110-vcard-contacts.md): the sibling format package whose entry, error, limit and writer
+  shapes, decoding ladder and content-line layer this package shares.
 - [ADR-0098](../docs/decisions/0098-streamed-files-for-http-only-endpoints.md) and
   [ADR-0105](../docs/decisions/0105-uploaded-files-are-handler-parameters.md): the streamed-file and uploaded-file tiers
   an export and an import use.

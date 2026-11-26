@@ -184,8 +184,14 @@ design language, so an application learns it once. `Elarion.Spreadsheets` (ADR-0
   mapping, an `I<Area>Record<TSelf>` with a static mapper, and constants per field, as `[SqlRecord]` does. An
   unsupported member is a build error with the package's own diagnostic prefix, never a reflection fallback. This is
   for formats whose fields the application chooses (worksheet columns). Where a standard fixes the fields (calendars,
-  contacts), the package has a fixed public model instead, as a view over a public, lossless tree of the file's
-  components that keeps what the model does not cover (ADR-0109); no generator.
+  contacts), the package has a fixed public model instead, as a view over a public, lossless tree or list of the
+  file's components and properties that keeps what the model does not cover (ADR-0109, ADR-0110); no generator, no
+  `[ValidationRoot]`, no DataAnnotations run.
+- **Entries.** Each item read is an entry with its index, its line or row, its value and its errors. For a fixed model
+  an error need not invalidate the item: only what makes the item meaningless (a broken time, nothing usable left, a
+  per-item limit) leaves it without a value. "Has a value" is `HasValue`, with the value in `Value`; `IsValid` keeps
+  the meaning it has for generated records, a record and no errors. The application adds errors with
+  `AddError(code, message, …)` under its own code prefix.
 - **Files travel through the existing tiers.** Streams in and out; `ElarionFile` for small files,
   `ElarionStreamedFile` for large exports, `UploadedFile` read through `IUploadedFiles` for uploads. A format package
   adds no upload or download endpoints of its own.
@@ -193,8 +199,20 @@ design language, so an application learns it once. `Elarion.Spreadsheets` (ADR-0
   misconfiguration. It keeps every item for a preview, says what the file states, and reports each problem as a
   located error with a stable `<area>.<snake_case>` code, its data and an English default message, so the
   application words it. The application can add its own errors; `ToAppError` converts with a formatter and a cap.
-- **Hostile input is bounded.** Size, item and nesting limits as options, DTDs and external entities refused, the
-  outside library's exceptions caught and mapped.
+- **Hostile input is bounded.** Size, item and nesting limits as `Max…` options, DTDs and external entities refused,
+  the outside library's exceptions caught and mapped. A per-item limit (a line's length, the properties of one item)
+  costs at most that item and the read continues; a file limit (the bytes, the number of items) stops the read with one
+  error and keeps what was read before it.
+- **Text formats share one decoding ladder and one content-line layer.** A byte-order mark, or a BOM-less UTF-16
+  sniff, decides the whole file; otherwise each logical line is decoded by its `CHARSET` where the grammar has one,
+  then as strict UTF-8, then with the `FallbackEncoding` option (Windows-1252 by default), and the result's
+  `UsedFallbackEncoding` says when it was used. Code pages are held by the package, never registered process-wide. The
+  content-line formats (iCalendar, vCard) compile one internal, source-shared folder, `src/Shared/ContentLines/`, for
+  the reader, the writer, the ladder and the code-page cache; what differs between them is a rule set, not a copy.
+- **Writers have one shape.** An instance created over a stream that items are added to, plus static `WriteAsync`,
+  `ToFileAsync(items, fileName, …)`, `ToStreamedFile(items, fileName, …)` and `ToStreamedFile(fileName, write, …)`; a
+  write exception names the item; the `ContentType` constant carries no charset, and text files are served with
+  `charset=utf-8`.
 - **Validation fails closed.** Generated records use DataAnnotations through `IRequestValidator`; the record attribute carries
   `[ValidationRoot]`, and reading a validated record without metadata throws.
 - **Writing is deterministic and reading lenient by one documented rule**, the same for every application.

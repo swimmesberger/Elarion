@@ -20,7 +20,7 @@ slice 3. The evidence for every client rule below is the research note
 | `src/Elarion.WebDav` | `IsAotCompatible`. XML codec, dispatcher, properties, `sync-collection`, store seam, collection-source seam. |
 | `src/Elarion.WebDav.EntityFrameworkCore` (+ `.Generators`) | Store and journal; `[GenerateElarionDavStore]` on the application's `DbContext` (the pattern of `[GenerateElarionResourceGrants]`). |
 | `src/Elarion.WebDav.AspNetCore` | `MapElarionDav()`, `/.well-known/*`, method routing, scope seeding, cross-origin exemption. |
-| `src/Elarion.CalDav` | `IsAotCompatible`. Calendar sources, `ICalendarPublisher`, calendar properties and reports, feeds, `CalDavClient`. |
+| `src/Elarion.CalDav` | `IsAotCompatible`. Calendar sources, `ICalDavPublisher`, calendar properties and reports, feeds, `CalDavClient`. |
 | `src/Elarion.AppPasswords` | `IsAotCompatible`. `IAppPasswords`, hashing, the `IAppPasswordStore` seam. |
 | `src/Elarion.AppPasswords.EntityFrameworkCore` (+ `.Generators`) | Store; `[GenerateElarionAppPasswords]`. |
 | `src/Elarion.AppPasswords.AspNetCore` | `AddElarionAppPasswordAuthentication(o => o.Events…)`: the Basic and feed-token scheme with its events; the Identity default for `OnCreatePrincipal` as `AddElarionIdentityAppPasswordPrincipals<TUser>()`. |
@@ -33,35 +33,37 @@ All runtime projects build for `net10.0` and `net11.0`. No outside package beyon
 
 ```csharp
 // --- Elarion.CalDav: declaring a source (in a module) ---
-public sealed record MyShiftCalendars : ICalendarSource<MyShiftCalendars> {
+public sealed record MyShiftCalendars : ICalDavSource<MyShiftCalendars> {
     public static string SourceName => "shifts";
 }
 
 [Handler]
 [RequirePermission("shifts", Verbs.Read)]
 public sealed class ListMyShiftCalendars(ICurrentUser user)
-    : IHandler<MyShiftCalendars, Result<CalendarSourceListing>> {
-    public ValueTask<Result<CalendarSourceListing>> HandleAsync(MyShiftCalendars query, CancellationToken ct) =>
-        ValueTask.FromResult(Result.Success(new CalendarSourceListing([
+    : IHandler<MyShiftCalendars, Result<CalDavSourceListing>> {
+    public ValueTask<Result<CalDavSourceListing>> HandleAsync(MyShiftCalendars query, CancellationToken ct) =>
+        ValueTask.FromResult(Result.Success(new CalDavSourceListing([
             new PublishedCalendarInfo(Key: $"u-{user.Id}", DisplayName: "My shifts") {
-                Color = "#2E7D32", Components = CalendarComponentKinds.Event, TimeZone = "Europe/Vienna",
+                Color = "#2E7D32", Components = CalendarComponentKinds.Event,     // Elarion.Calendars type
+                TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Vienna"),  // a TimeZoneInfo (spec 0004 FR-003)
             },
         ])));
 }
 
 // module ConfigureServices
-services.AddElarionCalendarSource<MyShiftCalendars>();
+services.AddElarionCalDavSource<MyShiftCalendars>();
 
 // --- publishing, inside a command handler ---
-public sealed class CreateShift(AppDbContext db, ICalendarPublisher calendars) {
+public sealed class CreateShift(AppDbContext db, ICalDavPublisher calendars) {
     public async ValueTask<Result<Guid>> HandleAsync(Command command, CancellationToken ct) {
         // ... write the shift
-        await calendars.PublishAsync(new CalendarAddress("shifts", $"u-{shift.UserId}"), ToEvent(shift), ct);
+        await calendars.PublishAsync(new CalDavAddress("shifts", $"u-{shift.UserId}"), ToEvent(shift), ct);
         return Result.Success(shift.Id);
     }
 }
 // also: RemoveAsync(address, uid, ct); ReplaceAsync(address, IAsyncEnumerable<CalendarObject>, ct)
-// CalendarObject: implicit from Elarion.Calendars' CalendarEvent / CalendarTodo / a component tree with one UID.
+// CalendarObject is Elarion.Calendars' type (plan 0004): the items of one UID, master and overrides, implicit from a
+// CalendarEvent, a CalendarTodo or a component tree with one UID.
 
 // --- host ---
 builder.Services.AddElarionWebDav(builder.Configuration);
@@ -71,25 +73,52 @@ builder.Services.AddAuthentication().AddElarionAppPasswordAuthentication();
 app.MapElarionDav();                      // /dav, /.well-known/caldav, feeds; requires the app-password scheme
 
 // --- app passwords, inside the application's own-account handlers ---
-AppPasswordIssued issued = await appPasswords.CreateAsync(user.Id, "iPhone", AppPasswordScope.Dav, ct);
-AppPasswordIssued feed   = await appPasswords.CreateAsync(user.Id, "Outlook", AppPasswordScope.CalendarFeed(address), ct);
-Uri feedUrl = davLinks.FeedUrl(feed);     // https://host/dav/feeds/<secret>.ics
+Result<AppPasswordIssued> issued = await appPasswords.CreateAsync(user.Id, "iPhone", AppPasswordScope.Dav, ct);
+Result<AppPasswordIssued> feed   = await appPasswords.CreateAsync(user.Id, "Outlook", AppPasswordScope.CalendarFeed(address), ct);
+// a failure is an AppError with a code of AppPasswordErrorCodes: LimitReached = "app_password.limit_reached",
+// NotFound = "app_password.not_found" (RevokeAsync)
+Uri feedUrl = davLinks.FeedUrl(feed.Value);   // https://host/dav/feeds/<secret>.ics
 
 // --- client ---
 var client = new CalDavClient(httpClient, new CalDavClientOptions {
     Authorization = ct => ValueTask.FromResult(new AuthenticationHeaderValue("Bearer", token)),
 });
-CalDavAccountResult account = await client.DiscoverAsync(new Uri("https://caldav.example.com"), ct);
-CalDavSyncResult step = await client.SyncAsync(account.Value.Calendars[0], previousState, ct);
-// step.Changed: IReadOnlyList<CalDavObject(Name, ETag, CalendarReadResult)>; step.Removed; step.State (string-serializable)
-CalDavWriteResult put = await client.PutAsync(calendar, name, calendarObject, ifMatch: etag, ct);
+CalDavResult<CalDavAccount> account = await client.DiscoverAsync(new Uri("https://caldav.example.com"), ct);
+CalDavResult<CalDavSyncStep> step = await client.SyncAsync(account.Value.Calendars[0], previousState, ct);
+// step.Value.Changed: IReadOnlyList<CalDavObject(Name, ETag, CalendarReadResult)>; .Removed; .State (string-serializable)
+CalDavResult<CalDavWriteOutcome> put = await client.PutAsync(calendar, name, calendarObject, ifMatch: etag, ct);
+
+// every client result has the entry shape of the format packages, with one error instead of a list
+public sealed class CalDavResult<T> {
+    public T? Value { get; }
+    [MemberNotNullWhen(true, nameof(Value))] [MemberNotNullWhen(false, nameof(Error))] public bool HasValue { get; }
+    public CalDavError? Error { get; }
+}
+public sealed class CalDavError { string Code; string Message; int? StatusCode; Uri? Url; long? Limit; }
+public static class CalDavErrorCodes {
+    Unauthorized = "caldav.unauthorized", NotFound = "caldav.not_found", Conflict = "caldav.conflict",
+    ServerError = "caldav.server_error", InvalidResponse = "caldav.invalid_response", TooLarge = "caldav.too_large";
+}
 ```
 
-Options bags: `WebDavOptions` (prefix, XML limits: 1 MiB body, depth 32, 10,000 elements; journal retention 90 days
-and 10,000 rows per calendar; max multiget hrefs 1,000), `CalDavOptions` (calendar-data limits passed to
-`CalendarReadOptions`, expansion caps per report, feed enabled), `AppPasswordOptions` (prefix `elap_`, max per user 10,
-last-use interval 15 minutes), `CalDavClientOptions` (response limit 32 MiB, multiget batch 100, objects per step
-5,000, timeouts).
+Options bags, limits named `Max…` as in the format packages:
+
+- `WebDavOptions` (section `WebDav`): `Prefix` (`/dav`), `MaxBodyBytes` (1 MiB), `MaxXmlDepth` (32), `MaxXmlElements`
+  (10,000), `MaxMultigetHrefs` (1,000), `JournalRetention` (90 days), `MaxJournalRowsPerCalendar` (10,000).
+- `CalDavOptions` (section `CalDav`): `CalendarRead`, a `CalendarReadOptions` of `Elarion.Calendars` used for every
+  calendar object a request or a response carries (its own defaults, not a copy of its limit names), `CalendarExpand`,
+  a `CalendarExpandOptions` for the reports' expansion caps, and `FeedsEnabled`.
+- `AppPasswordOptions` (section `AppPasswords`): `SecretPrefix` (`elap_`), `MaxPerUser` (10), `LastUseInterval`
+  (15 minutes).
+- `CalDavClientOptions`: `MaxResponseBytes` (32 MiB), `MaxXmlDepth` (32), `MaxObjectsPerStep` (5,000),
+  `MultigetBatchSize` (100), `CalendarRead` (a `CalendarReadOptions`), timeouts.
+
+Naming rule for the public types of `Elarion.CalDav` (ADR-0111): a name that starts with `Calendar` means the
+`Elarion.Calendars` concept and lives there (`CalendarObject`, `CalendarComponentKinds`, `CalendarReadOptions`,
+`CalendarWriter`); a type that exists only for DAV carries the `CalDav` prefix (`ICalDavSource<TSelf>`,
+`AddElarionCalDavSource<TQuery>()`, `CalDavSourceListing`, `ICalDavPublisher`, `CalDavAddress`, `CalDavClient`,
+`CalDavFilterEvaluator`). `PublishedCalendarInfo` keeps the glossary term *published calendar*. Internal types are
+free of the rule.
 
 ## The store
 
@@ -135,12 +164,12 @@ Three tables, snake_case, mapped onto the application's context by the bundled g
   `…/{name}.ics`, `feeds/{secret}.ics`. `{user}` must equal `ICurrentUser.Id` (else 404, FR-012). Protocol modules
   (CalDAV now, CardDAV later) register the path segments and properties they own through
   `IDavProtocol` implementations; the host does not know them.
-- Calendar sources are resolved once per request: every registered `ICalendarSource<T>` handler is invoked through
+- Calendar sources are resolved once per request: every registered `ICalDavSource<T>` handler is invoked through
   `HandlerInvoker` in the request's dispatch scope (FR-011); `NotFound`, `Forbidden` and `Unauthorized` from a source
   mean "no calendars from this source", any other error answers `500` through the framework's error answer. The
   result is a request-scoped map `address → PublishedCalendarInfo`.
-- XML: `XmlReader` with `DtdProcessing.Prohibit`, `XmlResolver = null`, `MaxCharactersInDocument` from the body limit,
-  a depth counter; parsed into small request records (`PropFindRequest`, `SyncCollectionRequest`,
+- XML: `XmlReader` with `DtdProcessing.Prohibit`, `XmlResolver = null`, `MaxCharactersInDocument` from `MaxBodyBytes`,
+  a depth counter against `MaxXmlDepth` and an element counter against `MaxXmlElements`; parsed into small request records (`PropFindRequest`, `SyncCollectionRequest`,
   `CalendarQueryRequest`, `MultigetRequest`, `FreeBusyRequest`). Unknown elements are ignored where the RFCs allow it.
   Responses are written with `XmlWriter` (async, UTF-8, no BOM), with namespace prefixes `D`, `C`, `CS`, `ICAL`
   fixed so diffs in tests stay readable. `calendar-data` is written as text content of the object's bytes.
@@ -213,11 +242,13 @@ Three tables, snake_case, mapped onto the application's context by the bundled g
   token support, `getctag` then a depth-1 `PROPFIND` of ETags and a diff. Changed names fetched by
   `calendar-multiget` in batches; servers known to return deleted objects in multiget (Zimbra) are handled by treating a
   `404` propstat as a removal.
-- Results: `CalDavSyncResult` with `Status` (`Ok`, or a code: `caldav.unauthorized`, `caldav.not_found`,
-  `caldav.server_error` with the status, `caldav.invalid_response`), the objects with their `CalendarReadResult`
-  (errors coded `calendar.*` by the reader), and the state; the state is unchanged unless `Status` is `Ok`.
-- Writes: `PUT` with `If-Match` or `If-None-Match: *`, `DELETE` with `If-Match`; `412` → `caldav.conflict`; the new
-  ETag when the server returns one, else `null` (RFC 4791 §5.3.4), in which case the next sync step fetches it.
+- Results: `CalDavResult<CalDavSyncStep>`; on success the step holds the objects with their `CalendarReadResult`
+  (errors coded `calendar.*` by the reader) and the new state; otherwise `Error` holds a `CalDavError` with its code
+  (`caldav.unauthorized`, `caldav.not_found`, `caldav.server_error` with the status, `caldav.invalid_response`,
+  `caldav.too_large` with the limit), its English message and its data, and the caller keeps its previous state.
+- Writes: `PUT` with `If-Match` or `If-None-Match: *`, `DELETE` with `If-Match`; `412` → `caldav.conflict`; on success
+  `CalDavWriteOutcome` holds the new ETag when the server returns one, else `null` (RFC 4791 §5.3.4), in which case
+  the next sync step fetches it.
 
 ## Tests
 
