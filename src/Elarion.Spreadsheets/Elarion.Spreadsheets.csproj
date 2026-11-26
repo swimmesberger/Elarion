@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Spreadsheet records for Elarion (ADR-0108): [SpreadsheetRecord] generates the mapping between a partial class and the rows of a worksheet, and SpreadsheetWorkbook writes records as an .xlsx workbook, forward-only to a stream, with a styled frozen header, number and date formats and measured column widths. No reflection, so an application keeps publishing with NativeAOT.</Description>
+    <PackageTags>elarion;spreadsheet;xlsx;excel;export;import;source-generator;dotnet</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Elarion.Abstractions/Elarion.Abstractions.csproj"/>
+  </ItemGroup>
+
+  <!-- Bundle the record generator's analyzer into this package, as Elarion.Sql bundles its generator. NuGet analyzer
+       assets are not transitive, so shipping the generator inside the package that declares [SpreadsheetRecord] makes
+       the reference self-sufficient. ReferenceOutputAssembly=false keeps the generator off the runtime surface;
+       PrivateAssets=all keeps it from becoming a downstream package dependency. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.Spreadsheets.Generators\Elarion.Spreadsheets.Generators.csproj"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"/>
+  </ItemGroup>
+
+  <Target Name="_BundleSpreadsheetGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Elarion.Spreadsheets.Generators\Elarion.Spreadsheets.Generators.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_SpreadsheetGeneratorAnalyzer"/>
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_SpreadsheetGeneratorAnalyzer)"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs/"
+            Visible="false"/>
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+  </ItemGroup>
+
+</Project>
