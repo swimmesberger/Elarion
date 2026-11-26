@@ -331,6 +331,34 @@ public sealed class SqlMapperIntegrationTests(PostgreSqlSqlMapperFixture fixture
     }
 
     [Fact]
+    public async Task InsertMany_WithAutoPrepare_BindsEachRowsValues() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+
+        // Npgsql auto-prepares a statement once it has run Min Usages times; every later batch then
+        // executes the prepared statement, which must still carry each row's own values.
+        var builder = new NpgsqlConnectionStringBuilder(fixture.ConnectionString) {
+            MaxAutoPrepare = 16, AutoPrepareMinUsages = 2
+        };
+        await using var connection = new NpgsqlConnection(builder.ConnectionString);
+        var db = connection.AsSqlSession();
+        await connection.OpenAsync(Ct);
+        await db.ExecuteAsync($"TRUNCATE TABLE sql_positional_row", Ct);
+
+        var expected = new List<SqlPositionalRow>();
+        for (var batchIndex = 0; batchIndex < 3; batchIndex++) {
+            var batch = Enumerable.Range(0, 3)
+                .Select(i => new SqlPositionalRow(Guid.CreateVersion7(), $"row-{batchIndex}-{i}", batchIndex * 10 + i))
+                .ToArray();
+            var written = await db.InsertManyAsync(batch, " ON CONFLICT DO NOTHING", cancellationToken: Ct);
+            written.Should().Be(batch.Length, $"batch {batchIndex} holds only distinct rows");
+            expected.AddRange(batch);
+        }
+
+        var stored = await db.QueryAsync<SqlPositionalRow>($"{SqlPositionalRow.Select} ORDER BY count", Ct);
+        stored.Should().Equal(expected);
+    }
+
+    [Fact]
     public void GeneratedRegistration_ResolvesMappers() {
         var services = new ServiceCollection();
         services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SqlTestJsonContext.Default));

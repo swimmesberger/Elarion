@@ -8,6 +8,13 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+- **`InsertManyAsync` no longer repeats earlier rows once Npgsql auto-prepares the INSERT.** With `Max Auto Prepare`
+  on, the batch reused one command and re-bound its parameters per row; after the statement was prepared, later rows
+  went out with an earlier row's values, so distinct rows were dropped (or, with `ON CONFLICT DO NOTHING`, silently
+  skipped and missing from the written count). Each row now runs its own command on the same prepared statement. See
+  [SQL mapping](https://elarion.wimmesberger.dev/docs/capabilities/sql-mapping#reads-and-writes).
+
 ## [0.4.6] - 2026-11-24
 
 ### Added

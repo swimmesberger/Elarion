@@ -6,9 +6,9 @@ namespace Elarion.Sql;
 /// <summary>
 /// Internal write plumbing (ADR-0058): full-row inserts from the generated <c>InsertCommandText</c> + typed
 /// <c>BindParameters</c>, behind the single public surface (<see cref="SqlSessionExtensions"/>), which passes
-/// the session's ambient transaction through. <c>InsertManyAsync</c> is a batched convenience (one prepared
-/// statement reused per row inside one transaction), not bulk COPY — for high-throughput bulk load use the
-/// binary-COPY path (<c>Elarion.BulkOperations.PostgreSql</c>, ADR-0051). Not public: the per-call
+/// the session's ambient transaction through. <c>InsertManyAsync</c> is a batched convenience (one command
+/// per row inside one transaction, all running the provider's auto-prepared statement), not bulk COPY — for
+/// high-throughput bulk load use the binary-COPY path (<c>Elarion.BulkOperations.PostgreSql</c>, ADR-0051). Not public: the per-call
 /// <see cref="DbTransaction"/> parameter is exactly the forget-to-thread-it footgun the session surface
 /// exists to remove.
 /// </summary>
@@ -37,8 +37,8 @@ internal static class SqlWriteExtensions {
     }
 
     /// <summary>
-    /// Inserts every row via the generated full-row INSERT, reusing one prepared command inside one
-    /// transaction (its own if none is passed). <paramref name="sqlSuffix"/> is appended verbatim to
+    /// Inserts every row via the generated full-row INSERT, one command per row inside one transaction
+    /// (its own if none is passed). <paramref name="sqlSuffix"/> is appended verbatim to
     /// the INSERT (e.g. <c>" ON CONFLICT DO NOTHING"</c>). Returns the total affected row count.
     /// </summary>
     public static async Task<int> InsertManyAsync<T>(
@@ -56,21 +56,25 @@ internal static class SqlWriteExtensions {
         var tx = transaction
                  ?? await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         try {
-            var command = connection.CreateCommand();
-            await using (command.ConfigureAwait(false)) {
-                command.Transaction = tx;
-                command.CommandText = commandText;
-                var written = 0;
-                foreach (var row in rows) {
-                    command.Parameters.Clear();
+            var written = 0;
+            foreach (var row in rows) {
+                // A fresh command per row, never one command with its parameters cleared and re-bound:
+                // once Npgsql auto-prepares the statement, a reused command keeps sending the parameter
+                // objects it bound first, so every later row would repeat an earlier row's values. The
+                // provider's statement cache is keyed by SQL text per connection, so each fresh command
+                // still runs the prepared statement.
+                var command = connection.CreateCommand();
+                await using (command.ConfigureAwait(false)) {
+                    command.Transaction = tx;
+                    command.CommandText = commandText;
                     mapper.BindParameters(command, row);
                     written += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 }
-
-                if (ownsTransaction) await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
-
-                return written;
             }
+
+            if (ownsTransaction) await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+            return written;
         }
         catch {
             if (ownsTransaction) await tx.RollbackAsync(cancellationToken).ConfigureAwait(false);
