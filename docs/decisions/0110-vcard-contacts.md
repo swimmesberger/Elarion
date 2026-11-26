@@ -3,11 +3,11 @@ type: Architecture Decision Record
 title: "ADR-0110: vCard contacts — a fixed contact model over a lossless property list, Elarion's own reader and writer"
 description: "Elarion.Contacts reads uploaded .vcf files of any version into a fixed contact model, a view over every property as read, with every contact kept and every error coded and located by line, and writes contacts as vCard 3.0 or 4.0, with its own bounded reader and writer on the content-line layer it shares with Elarion.Calendars, instead of a library and a generated record mapping."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T16:10:00Z }
-status: draft
+status: stable
 ---
 # ADR-0110: vCard contacts — a fixed contact model over a lossless property list, Elarion's own reader and writer
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-26
 - Related: [ADR-0017](0017-dependency-light-core.md) (heavy defaults live in opt-in siblings),
   [ADR-0025](0025-distributed-scheduler-coordination.md) (the 1–10 node tier the defaults are sized for),

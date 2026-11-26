@@ -3,11 +3,11 @@ type: Architecture Decision Record
 title: "ADR-0109: iCalendar — a fixed model over a lossless component tree, with Elarion's own reader, writer and recurrence engine"
 description: "Elarion.Calendars reads .ics files leniently into a result that keeps every item, its component tree and coded errors, writes them deterministically, expands recurrences within a window under caps, and resolves time zones through TimeZoneInfo with the file's VTIMEZONE as fallback, without an outside library."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T17:00:00Z }
-status: draft
+status: stable
 ---
 # ADR-0109: iCalendar — a fixed model over a lossless component tree, with Elarion's own reader, writer and recurrence engine
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-26
 - Related: [ADR-0017](0017-dependency-light-core.md) (heavy defaults live in opt-in siblings),
   [ADR-0025](0025-distributed-scheduler-coordination.md) (the 1–10 node tier the defaults are sized for),

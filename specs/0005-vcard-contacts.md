@@ -3,7 +3,7 @@ type: Specification
 title: "Spec 0005: vCard contacts"
 description: "What Elarion.Contacts must do: read uploaded .vcf files of any version and from any common producer into contacts, keeping every contact and locating every error, and write contacts as vCard 3.0 or 4.0, under NativeAOT."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T16:40:00Z }
-status: draft
+status: stable
 ---
 # Spec 0005: vCard contacts
 
