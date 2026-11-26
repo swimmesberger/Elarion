@@ -3,7 +3,7 @@ type: Plan
 title: "Plan 0004: iCalendar files"
 description: "How Elarion.Calendars of spec 0004 is built: project, public surface, content lines, reader, typed model, time zones, recurrence engine, writer, tests and tasks."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T18:00:00Z }
-status: draft
+status: stable
 ---
 # Plan 0004: iCalendar files
 

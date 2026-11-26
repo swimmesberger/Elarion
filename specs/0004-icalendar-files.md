@@ -3,7 +3,7 @@ type: Specification
 title: "Spec 0004: iCalendar files"
 description: "What Elarion.Calendars must do: read .ics files leniently into every item with its problems, keep every property other programs wrote, expand recurrences within a window, resolve time zones, and write calendars and feeds deterministically, under NativeAOT."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T17:30:00Z }
-status: draft
+status: stable
 ---
 # Spec 0004: iCalendar files
 
