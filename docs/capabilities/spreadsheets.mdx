@@ -1,0 +1,472 @@
+---
+title: Spreadsheets
+description: Export records as .xlsx files and fill-in templates, and import uploaded workbooks back into records with every row, every located problem and the columns the file states, generated at compile time and NativeAOT-safe.
+icon: Sheet
+---
+
+Applications export lists to Excel and import master data from it. `Elarion.Spreadsheets` puts one type between the
+file and the handler: a **spreadsheet record**, a `partial` class marked `[SpreadsheetRecord]`. Its properties are the
+columns of a worksheet, and a bundled source generator emits the code that writes a record as a row and reads a row into
+a record. There is no reflection, so an application that writes and reads spreadsheets still publishes with NativeAOT.
+
+| Piece | Role |
+| --- | --- |
+| `[SpreadsheetRecord]`, `[SpreadsheetColumn]`, `[SpreadsheetIgnore]` | Declare the worksheet: its name, the columns, their headers, aliases, order, formats, widths and boolean labels. |
+| `SpreadsheetWorkbook` | Writes records as an `.xlsx` workbook, forward-only to a stream, an `ElarionFile` or an `ElarionStreamedFile`. |
+| `SpreadsheetReader` | Reads `.xlsx`, `.xlsb` and `.xls` workbooks into records, or into plain rows of typed cells. |
+| `SpreadsheetReadResult<T>` | Every row with its cell texts, its errors and its record; the columns the file contains; the conversion to an `AppError`. |
+| `SpreadsheetOptions` | The read limits and the extra date formats and yes/no words, bound from configuration. |
+
+Why it is shaped this way, and what was rejected, is in
+[ADR-0108](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0108-spreadsheet-records.md).
+
+## Getting started
+
+<Steps>
+<Step>
+
+### Reference the package
+
+```bash
+dotnet add package Elarion.Spreadsheets
+```
+
+The package bundles its generator, so the reference is all a project needs. It depends on `Elarion.Abstractions`, the
+`Microsoft.Extensions` abstractions and, behind an internal interface, [Sylvan.Data.Excel](https://github.com/MarkPflug/Sylvan.Data.Excel)
+for reading. No type of that library appears in the public API.
+
+</Step>
+<Step>
+
+### Declare a record
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+using Elarion.Spreadsheets;
+
+namespace Shop.Crm;   // inside the module that validates it
+
+[SpreadsheetRecord("Contacts")]
+public sealed partial class ContactRow {
+    public required string Name { get; init; }
+
+    [SpreadsheetColumn("E-mail", Aliases = ["Mail"])]
+    [EmailAddress(ErrorMessage = "Keine gültige E-Mail-Adresse.")]
+    public string? Email { get; init; }
+
+    [Display(Name = "Customer since")]
+    public DateOnly? CustomerSince { get; init; }
+
+    [SpreadsheetColumn(Format = "#,##0.00")]
+    public decimal? Balance { get; init; }
+
+    [SpreadsheetColumn("Newsletter", TrueLabel = "Ja", FalseLabel = "Nein")]
+    public bool Newsletter { get; init; }
+
+    public ContactKind Kind { get; init; }
+
+    [SpreadsheetIgnore]
+    public Guid InternalId { get; init; }
+}
+
+public enum ContactKind {
+    [Display(Name = "Customer")] Customer,
+    [Display(Name = "Supplier")] Supplier,
+}
+```
+
+</Step>
+<Step>
+
+### Register the reader
+
+Writing needs no registration. Reading does, because the reader validates each row through the scoped request
+validator:
+
+```csharp
+builder.Services.AddElarionValidation();   // when a record carries validation attributes
+builder.Services.AddElarionSpreadsheets(builder.Configuration.GetSection(SpreadsheetOptions.SectionName));
+```
+
+`AddElarionSpreadsheets` registers `SpreadsheetReader` as a scoped service and binds `SpreadsheetOptions` with the
+configuration-binding source generator, so it stays trimming- and NativeAOT-safe.
+
+</Step>
+</Steps>
+
+## Records and columns
+
+Every public instance property with a getter is a column, in declaration order. A property's header is the name given
+in `[SpreadsheetColumn]`, else its `[Display(Name)]`, else the property's name. The worksheet's name is the one given
+in `[SpreadsheetRecord]`, else the type's name.
+
+| Property type | Written as | Read from |
+| --- | --- | --- |
+| `string` | a text cell, never a formula, whatever it starts with | any cell, as its text |
+| integral types, `float`, `double`, `decimal` | a number cell | a number cell, or text by the [lenient rules](#values-typed-by-hand) |
+| `bool` | a boolean cell, or its labels as text | a boolean cell, a number, a yes/no word, its labels |
+| `DateTime`, `DateOnly`, `TimeOnly` | a date cell, as its date and time whatever its `Kind` | a date cell, or text by the lenient rules |
+| `DateTimeOffset` | ISO 8601 text with its offset | ISO 8601 text that states an offset, only |
+| `Guid` | text | text |
+| an enum | its member's `[Display(Name)]`, else its name | the label or the name, ignoring case |
+
+Nullable forms of all of these are supported. Requiredness comes from nullability, as everywhere in Elarion: an empty
+cell reads as `null` for a nullable property and is an error for a non-nullable one. A get-only (computed) property is
+written and never read, which covers a derived export column. Any other property type fails the build (`ELSHEET001`);
+mark it `[SpreadsheetIgnore]` or map a text property and convert it in the handler.
+
+The generator also emits a nested `Columns` class with one `SpreadsheetColumn<T>` per column, for example
+`ContactRow.Columns.Email`. Handlers use these constants to ask about a column or to add an error to it, never a header
+string.
+
+`[SpreadsheetColumn]` sets:
+
+| Parameter | Meaning |
+| --- | --- |
+| `header` (constructor) | The header text. |
+| `Order` | The column's position; columns without one keep their declaration order. |
+| `Format` | The number format of a number or date column, such as `#,##0.00` or `yyyy-mm-dd hh:mm`. |
+| `Width` | The width in characters; without it, the column is as wide as its header and the values of the first 200 records, at most 80. |
+| `Aliases` | Older headers that still read as this column. When a file carries both, the column's own header wins and the alias column is ignored. |
+| `TrueLabel`, `FalseLabel` | Both together, on a boolean only: the texts written for it, offered as a dropdown and read besides the usual yes/no words. |
+
+## Export
+
+### A small file for any transport
+
+`SpreadsheetWorkbook.ToFileAsync` writes the workbook into memory and returns an
+[`ElarionFile`](/docs/capabilities/transports/http-endpoints#files-downloads-and-uploads) with the `.xlsx` content
+type. HTTP serves it as a download, and the JSON surfaces carry it as their base64 envelope:
+
+```csharp
+[Handler("contacts.export")]
+[HttpEndpoint("contacts/export")]
+public sealed class ExportContacts(CrmDbContext db) : IHandler<ExportContacts.Query, Result<ElarionFile>> {
+    public sealed record Query : IQuery;
+
+    public async ValueTask<Result<ElarionFile>> HandleAsync(Query query, CancellationToken ct) {
+        var contacts = await db.Contacts.AsNoTracking()
+            .Select(c => new ContactRow { Name = c.Name, Email = c.Email, Kind = c.Kind })
+            .ToListAsync(ct);
+
+        return await SpreadsheetWorkbook.ToFileAsync(contacts, "contacts.xlsx", cancellationToken: ct);
+    }
+}
+```
+
+### A large file, streamed
+
+An `ElarionFile` is held in memory. For an export that can be large, an HTTP-only handler returns a
+[streamed file](/docs/capabilities/transports/http-endpoints#streamed-files-http-only-endpoints): the workbook is
+written to the response body while the records come. The writer holds only the first 200 records, which it measures
+for the column widths, so the server's memory does not grow with the number of rows.
+
+```csharp
+[HttpEndpoint("devices/{deviceId}/readings.xlsx")]
+public sealed class ExportReadings(ISqlSession db) : IHandler<ExportReadings.Query, Result<ElarionStreamedFile>> {
+    public sealed record Query(string DeviceId) : IQuery;
+
+    public ValueTask<Result<ElarionStreamedFile>> HandleAsync(Query query, CancellationToken ct) {
+        IAsyncEnumerable<ReadingRow> rows = db.QueryUnbufferedAsync<ReadingRow>(
+            $"{ReadingRow.Select} WHERE device_id = {query.DeviceId} ORDER BY recorded_at", ct);
+
+        // ToSheetRows maps each ReadingRow to a [SpreadsheetRecord] ReadingSheetRow as it comes (an async iterator).
+        return ValueTask.FromResult(Result<ElarionStreamedFile>.Success(
+            SpreadsheetWorkbook.ToStreamedFile(ToSheetRows(rows), $"{query.DeviceId}.xlsx")));
+    }
+}
+```
+
+The records are enumerated when the response is written, after the handler's pipeline and transaction, inside the
+request's scope. They must not depend on anything that ends with the handler. The
+[EdgeTelemetry sample](https://github.com/swimmesberger/Elarion/tree/main/samples/EdgeTelemetry) has the complete
+handler, published with NativeAOT.
+
+### Several worksheets, or any stream
+
+`SpreadsheetWorkbook.Create(stream)` starts a workbook on any writable stream (it need not be seekable). Each
+`AddWorksheetAsync` adds one worksheet, in the order written. The workbook is finished when it is disposed:
+
+```csharp
+await using (var workbook = SpreadsheetWorkbook.Create(stream)) {
+    await workbook.AddWorksheetAsync(contacts, cancellationToken: ct);
+    await workbook.AddWorksheetAsync(bankAccounts, new SpreadsheetWorksheetOptions { Name = "Accounts" }, ct);
+}
+```
+
+`ToStreamedFile("customers.xlsx", async (workbook, ct) => …)` does the same into a response body.
+`SpreadsheetWorkbook.WriteAsync(stream, records)` is the one-worksheet shortcut.
+
+### What a written file looks like
+
+- The header row is bold on a light fill with a thin bottom border, and stays in place while scrolling.
+- Numbers are number cells, dates are date cells, and booleans without labels are boolean cells. A date column without
+  a `Format` uses the built-in format that the spreadsheet application shows in its user's own notation:
+  `24.11.2026` in Austria, `11/24/2026` in the US.
+- Text is always a text cell. A value that starts with `=` shows as text and is never evaluated. Control characters
+  that XML cannot carry are escaped and read back unchanged.
+- The same records give byte-identical files with the same package version on the same runtime and platform.
+- A value a spreadsheet cannot hold fails the write with a `SpreadsheetWriteException` that names the worksheet, the
+  row and the column. Such values are text longer than 32,767 characters, a row beyond 1,048,576, a date before
+  1900-01-01, `NaN` and infinities. Two worksheets whose names are equal ignoring case fail the same way.
+
+`SpreadsheetWriteOptions` holds `DropdownRows` (2,000), `WidthSampleRows` (200) and `MaxColumnWidth` (80).
+
+## Templates and dropdown lists
+
+Writing no records produces a **template**: the header row, the column formats and widths, and the dropdown lists. An
+enum column offers its labels, and a boolean column with `TrueLabel`/`FalseLabel` offers both labels, on every written
+row and on at least the first 2,000 data rows, so rows a person adds keep their pickers. A list longer than the 255
+characters a list formula holds moves to a hidden worksheet, so a sixty-member enum still offers every label.
+
+Text columns carry the text number format on the same rows. When a person types `01010` or a 16-digit reference into
+one, the spreadsheet application keeps it as text instead of turning it into a number.
+
+```csharp
+return await SpreadsheetWorkbook.ToFileAsync(Array.Empty<ContactRow>(), "contacts-template.xlsx", cancellationToken: ct);
+```
+
+## Import
+
+### Read an upload
+
+A handler takes the uploaded file and injects `SpreadsheetReader`. A small upload arrives as an `ElarionFile`. A large
+one arrives as an [`UploadedFile`](/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler), which the handler
+opens through `IUploadedFiles`.
+
+```csharp
+[Handler("contacts.import")]
+[HttpEndpoint("contacts/import")]
+public sealed class ImportContacts(SpreadsheetReader reader, CrmDbContext db)
+    : IHandler<ImportContacts.Command, Result<ImportContacts.Response>> {
+    public sealed record Command : ICommand {
+        public required ElarionFile Workbook { get; init; }
+    }
+
+    public sealed record Response(int Imported);
+
+    public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
+        using var content = new MemoryStream(command.Workbook.Bytes.ToArray(), writable: false);
+        var result = await reader.ReadAsync<ContactRow>(content, cancellationToken: ct);
+        if (result.HasErrors) return result.ToAppError("workbook");
+
+        foreach (var contact in result.Records) db.Contacts.Add(new Contact { Name = contact.Name, Email = contact.Email });
+        await db.SaveChangesAsync(ct);
+        return new Response(result.Rows.Count);
+    }
+}
+```
+
+The reader recognizes the format from the content, not the file name, and reads the first visible worksheet with its
+first non-empty row as the headers. `SpreadsheetWorksheetSelection` names another worksheet (ignoring case) or the
+header row, as the row number the spreadsheet shows. Columns match by header, ignoring case, surrounding whitespace and
+order. Columns no property maps are ignored. Empty rows produce nothing, and every other row keeps the row number the
+spreadsheet shows. A formula cell reads as its last calculated value and is never evaluated. Dates follow the date
+system (1900 or 1904) the workbook declares.
+
+One upload can hold several worksheets of different record types. `OpenAsync` reads the file once:
+
+```csharp
+using var document = await reader.OpenAsync(content, cancellationToken: ct);
+var contacts = await document.ReadAsync<ContactRow>(new() { Name = "Contacts" }, ct);
+var accounts = await document.ReadAsync<BankAccountRow>(new() { Name = "Bank accounts" }, ct);
+```
+
+### A preview: every row, then decide
+
+A read never throws because of what a file contains: it throws only on cancellation and on misconfiguration. Everything
+else is in the result, so a handler can show a preview before it saves anything.
+
+| Member | Meaning |
+| --- | --- |
+| `Rows` | Every data row read, each a `SpreadsheetRow<T>`. |
+| `row.RowNumber`, `row.Worksheet` | Where the row is, as the spreadsheet shows it. |
+| `row.CellText(column)` | The text of the row's cell in that column, for a preview of a row that failed. |
+| `row.IsValid`, `row.Record` | Whether the row has no error, and then its record. `IsValid` tells the compiler that `Record` is set. |
+| `row.Errors`, `row.AddError(column, code, message)` | The row's problems; the handler adds its own. |
+| `FileErrors` | Problems with the file or its columns. Such a result holds no rows. |
+| `Errors`, `HasErrors` | All of them, the handler's included. |
+| `Records` | The records of the valid rows. |
+| `Contains(column)` | Whether the file has that column. |
+| `ToAppError(fieldPath, format, maxMessages)` | The errors as one `AppError.Validation`. |
+
+Every error of every row is reported, so a file with 500 broken rows returns 500 errors. The row limit bounds the
+result.
+
+Rules that need the database belong in the handler. It adds them to the row, and they are located and converted exactly
+like the package's own:
+
+```csharp
+foreach (var row in result.Rows.Where(static row => row.IsValid)) {
+    if (!knownKeys.Contains(row.Record.Key))
+        row.AddError(ContactUpdateRow.Columns.Key, "contacts.unknown_key", "No contact has this key.");
+}
+
+if (result.HasErrors) return result.ToAppError("workbook");
+```
+
+`ToAppError("workbook")` returns a validation error keyed by the uploaded-file member, which the HTTP transport renders
+as a `400` problem with `errors.workbook`. Each message names the row, the column and the cell, such as
+`Row 13, E-mail (C13): Keine gültige E-Mail-Adresse.`. At most 100 messages are listed, plus one that counts the rest,
+so a broken large file does not become a multi-megabyte response.
+
+### Validation
+
+A record's DataAnnotations run on every row read, through the registered `IRequestValidator`, with the messages a
+handler request would get. A violation is an error with the code `validation` and the validator's message, located at
+its cell. `[SpreadsheetRecord]` makes the record a
+[validation root](/docs/concepts/validation#validating-outside-a-handler-request), so the record must lie in the
+namespace of a module (`ELVAL004` otherwise). Its metadata is registered while that module is enabled.
+
+An import is never silently unchecked. Reading a record that carries validation attributes throws an
+`InvalidOperationException` that names the cause when no validator holds its metadata, either because
+`AddElarionValidation()` is missing or because the record's module is disabled.
+
+### Update only what the file states
+
+A column the file lacks is an error only when its property is not nullable. Otherwise its value reads as `null`, and
+`Contains` tells the handler that the file did not state it. An empty cell in a column the file has is a stated empty
+value. So one record serves both creating rows and updating them from a trimmed sheet:
+
+```csharp
+var result = await reader.ReadAsync<ContactUpdateRow>(content, cancellationToken: ct);
+var statesPhone = result.Contains(ContactUpdateRow.Columns.Phone);
+
+foreach (var row in result.Records) {
+    var contact = contacts[row.Key];
+    contact.Name = row.Name;
+    if (statesPhone) contact.Phone = row.Phone;   // an empty cell clears it; a missing column leaves it alone
+}
+```
+
+## Error codes and wording
+
+Every error is a `SpreadsheetError` with a stable `Code`, an English default `Message`, and the data needed to word it:
+`Worksheet`, `RowNumber`, `Header`, `CellReference`, `ExpectedKind`, `AllowedValues` and `Limit`. The codes are
+constants on `SpreadsheetErrorCodes`:
+
+| Code | When | Data |
+| --- | --- | --- |
+| `spreadsheet.unreadable` | The file is no workbook, or it is truncated, damaged or password-protected. | — |
+| `spreadsheet.too_large` | The workbook unpacks to more than `MaxUnpackedBytes`. | `Limit` |
+| `spreadsheet.too_many_rows` | The worksheet has more data rows than `MaxRows`. The rows before are kept. | `Limit` |
+| `spreadsheet.too_many_columns` | A plain-rows read meets more columns than `MaxColumns`. | `Limit` |
+| `spreadsheet.no_visible_worksheet` | Every worksheet is hidden. | — |
+| `spreadsheet.worksheet_not_found` | The named worksheet does not exist. | `Worksheet` |
+| `spreadsheet.column_missing` | The file lacks the column of a non-nullable property. | `Header` |
+| `spreadsheet.column_duplicated` | The file carries a mapped header twice. | `Header` |
+| `spreadsheet.required` | A non-nullable property's cell is empty. | the cell |
+| `spreadsheet.invalid_value` | A value does not convert. | the cell, `ExpectedKind`, and `AllowedValues` for a choice |
+| `validation` | A DataAnnotations rule failed. The message is the validator's. | the cell |
+
+A file-level error (the first seven) is the only error of its result, which then holds no rows. To word errors in the
+application's language, pass a formatter that switches on the code and never parses a message:
+
+```csharp
+return result.ToAppError("workbook", error => error.Code switch {
+    SpreadsheetErrorCodes.ColumnMissing => $"Die Spalte „{error.Header}“ fehlt.",
+    SpreadsheetErrorCodes.Required => $"Zeile {error.RowNumber}: „{error.Header}“ ist leer ({error.CellReference}).",
+    SpreadsheetErrorCodes.InvalidValue when error.AllowedValues is { } allowed =>
+        $"Zeile {error.RowNumber}: erlaubt sind {string.Join(", ", allowed)} ({error.CellReference}).",
+    SpreadsheetErrorCodes.TooManyRows => $"Höchstens {error.Limit} Zeilen.",
+    _ => error.ToString(),   // validation messages are already the application's own
+});
+```
+
+An application's own codes follow the same `area.snake_case` form, such as `contacts.unknown_key`.
+
+## Values typed by hand
+
+Cells that hold their own type read as that type. Text in a typed column is read by one rule that does not depend on
+the server's culture:
+
+- **Decimal and floating-point columns.** Spaces are ignored. When both `,` and `.` occur, the rightmost is the decimal
+  mark. A separator that occurs more than once alone groups thousands in threes. A single `,` or `.` is the decimal
+  mark. So `1.234,56`, `1,234.56`, `1234,56`, `1234.56` and `1 234,56` all read as 1234.56, `1.234.567` reads as
+  1234567, and `1.23.4` is an error.
+- **Integral columns.** Digits and an optional sign only. A number cell with a fraction or out of range is an error.
+- **Date and date-and-time columns.** ISO 8601, `d.M.yyyy` and `d.M.yy` (a two-digit year is in the 2000s), each with
+  an optional `H:mm` or `H:mm:ss` time. `DateFormats` in the read options adds formats.
+- **Boolean columns.** Boolean cells, a number (`true` when not zero), `true`/`yes`/`x`/`1` and `false`/`no`/`0`
+  ignoring case, the column's labels, and the `TrueWords`/`FalseWords` of the read options, such as `ja`, `j`, `nein`.
+- **`DateTimeOffset` columns.** Only ISO 8601 text that states an offset. A date cell or a text without an offset is
+  `spreadsheet.invalid_value`, so an import never depends on the server's time zone.
+- **Number cells.** They read as the at most 15 significant digits a spreadsheet shows. A stored 1234.56 reads into a
+  `decimal` as exactly 1234.56, and into a text column without an exponent, so a postal code stored as the number 1010
+  reads as `1010`.
+
+## Plain rows
+
+A worksheet in a foreign layout, such as a bank's statement export with account details above its header, reads
+without a record. The result holds every non-empty row with its row number and its cells, and the application finds the
+header row itself:
+
+```csharp
+var result = await reader.ReadRowsAsync(content, cancellationToken: ct);
+var header = result.Rows.First(row => row[0].Text == "Booking date");
+foreach (var row in result.Rows.Where(row => row.RowNumber > header.RowNumber)) {
+    if (row[0].TryGetDate(out var booked) && row[3].TryGetNumber(out var amount)) { /* … */ }
+}
+```
+
+Each `SpreadsheetCell` has a `Kind` (`Blank`, `Text`, `Number`, `Boolean`, `Date` or `Error`), its `Text`, and
+`TryGetNumber`, `TryGetDouble`, `TryGetBoolean` and `TryGetDate`. Plain rows use the same format detection, worksheet
+choice, cell rules and limits as records, and they also stop at `MaxColumns`.
+
+## Limits and options
+
+A read buffers the upload, then refuses a zip-based workbook whose declared unpacked size exceeds the limit before it
+unpacks anything. It never processes a document type definition or resolves an external entity.
+
+| `SpreadsheetReadOptions` | Default | Meaning |
+| --- | --- | --- |
+| `MaxUnpackedBytes` | 256 MiB | The largest unpacked workbook (`spreadsheet.too_large`). |
+| `MaxRows` | 100,000 | The most data rows read; empty rows do not count (`spreadsheet.too_many_rows`). |
+| `MaxColumns` | 256 | The most columns of a plain-rows read (`spreadsheet.too_many_columns`). |
+| `DateFormats` | none | Extra .NET date formats for text in date columns, such as `M/d/yyyy HH:mm`. |
+| `TrueWords`, `FalseWords` | none | Extra yes and no words for boolean columns. |
+
+The application's defaults are `SpreadsheetOptions.ReadDefaults`, bound from the `Spreadsheets` section. A read can
+pass its own `SpreadsheetReadOptions` instead:
+
+```json
+{
+  "Spreadsheets": {
+    "ReadDefaults": { "MaxRows": 20000, "TrueWords": [ "ja", "j" ], "FalseWords": [ "nein" ] }
+  }
+}
+```
+
+The defaults fit the 1–10 node tier Elarion targets. A read holds the whole upload and its rows in memory, so keep
+`MaxRows` and the upload limit at what a person actually imports.
+
+## Formats
+
+| Format | Write | Read |
+| --- | --- | --- |
+| `.xlsx` (Office Open XML) | yes | yes, Strict Open XML included |
+| `.xlsb` (Excel binary workbook) | — | yes |
+| `.xls` (Excel 97–2003) | — | yes |
+
+`.xlsx` is the format to hand out. `.xlsb` and `.xls` are read so that whatever a person saves can be uploaded.
+
+## Out of scope
+
+- Styling beyond the fixed header style, formulas, merged cells, images, charts, comments, hyperlinks, and data
+  validation other than the dropdown lists of choice columns.
+- Writing `.xls` or `.xlsb`, and reading or writing CSV.
+- Password-protected workbooks, beyond reporting `spreadsheet.unreadable`.
+- Custom value converters. A computed get-only property covers an export, and a text property converted in the handler
+  covers an import.
+- Numbered column groups ("Phone 1", "Phone 2") mapped to one collection property.
+- Deciding what an import does with a row (create, update, skip), references between worksheets, and committing all or
+  nothing. Those are the application's.
+- Enumerating an import's rows one at a time without collecting them, and a spreadsheet error contract in the schema
+  and the generated TypeScript client.
+
+## Build-time checks
+
+If a record builds, it maps. The generator reports `ELSHEET001`–`ELSHEET007` for an unsupported property type, a type
+that is not `partial`, duplicate headers or aliases, an invalid worksheet name, misused boolean labels, a struct or
+nested or generic type, and a member that collides with the generated `Columns` or `SpreadsheetMapper`. See
+[Diagnostics](/docs/reference/diagnostics#elsheet--spreadsheet-records).

@@ -7,7 +7,7 @@ status: stable
 ---
 # ADR-0108: Spreadsheet records — a generated mapping in both directions, Elarion's own .xlsx writer, a library behind the reader
 
-- Status: Accepted (not implemented)
+- Status: Accepted (implemented 2026-11-26)
 - Date: 2026-11-24
 - Related: [ADR-0017](0017-dependency-light-core.md) (heavy defaults live in opt-in siblings),
   [ADR-0025](0025-distributed-scheduler-coordination.md) (the 1–10 node tier the defaults are sized for),

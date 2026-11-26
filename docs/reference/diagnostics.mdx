@@ -487,6 +487,21 @@ Generated client-event topic registration for `IClientEvent` contracts. See
 | ELCEV002 | Error | Two `IClientEvent` contracts resolve to the same topic name; the colliding topics are withheld. | Rename one contract, or disambiguate with an explicit `[ClientEvent("…")]` name. |
 | ELCEV003 | Warning | The compilation declares `IClientEvent` contracts but does not reference `Elarion.ClientEvents`, so no topics are registered. | Reference `Elarion.ClientEvents` (and map the endpoint from `Elarion.ClientEvents.AspNetCore`), or remove the contracts. |
 
+## ELSHEET — Spreadsheet records
+
+Mapping generation for `[SpreadsheetRecord]` types (ADR-0108). See [Spreadsheets](/docs/capabilities/spreadsheets).
+As with `[SqlRecord]`, there is no reflection fallback: if a record builds, it maps.
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELSHEET001 | Error | A property's type is not a supported column type (`string`, `bool`, a number, `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`, `Guid`, an enum, or their nullable forms). | Change the type, mark the property `[SpreadsheetIgnore]`, or map a text property and convert it in the handler. |
+| ELSHEET002 | Error | A `[SpreadsheetRecord]` type is not `partial`, so the generated members (`ISpreadsheetRecord<T>.SpreadsheetMapper`, `Columns`) cannot be added. | Add the `partial` modifier. |
+| ELSHEET003 | Error | Two columns' headers or aliases are equal ignoring case, so a file could not tell them apart. | Give one column another header or alias. |
+| ELSHEET004 | Error | The worksheet name in `[SpreadsheetRecord]` is empty, longer than 31 characters, contains one of `[ ] : * ? / \`, or starts or ends with an apostrophe. | Choose a name a spreadsheet application accepts. |
+| ELSHEET005 | Error | `TrueLabel`/`FalseLabel` is set on a property that is not a boolean, or only one of the two is set. | Set both labels, on a `bool` or `bool?` property only. |
+| ELSHEET006 | Error | `[SpreadsheetRecord]` is on a struct, or on a nested, generic or abstract type. | Use a top-level, non-generic, concrete class or record class. |
+| ELSHEET007 | Error | The record declares a member named `Columns` or `SpreadsheetMapper`, which collides with a generated member. | Rename the member; its column can keep its header through `[SpreadsheetColumn("…")]`. |
+
 ## ELSQL — SQL row mapping and interpolation
 
 Mapper generation for `[SqlRecord]` types (ADR-0058) and checks on interpolated SQL statements

@@ -970,6 +970,44 @@ See [Entity Framework](/docs/capabilities/entity-framework) and [Pagination](/do
 
 See [SQL mapping](/docs/capabilities/sql-mapping).
 
+## Spreadsheet records
+
+### `[SpreadsheetRecord]`
+
+- **Package:** `Elarion.Spreadsheets` · **Applies to:** `partial` class (record classes included)
+- **Triggers:** makes the class a spreadsheet record (ADR-0108). The bundled generator implements
+  `ISpreadsheetRecord<T>` (the mapper `SpreadsheetWorkbook` and `SpreadsheetReader` use) and emits a nested `Columns`
+  class with one `SpreadsheetColumn<T>` per column. Every public instance property with a getter is a column, in
+  declaration order; a get-only property is written and not read. The attribute class is marked `[ValidationRoot]`, so
+  a record's DataAnnotations are validated on every row read. Unsupported shapes are build errors
+  (`ELSHEET001`–`ELSHEET007`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `worksheetName` | `string?` (ctor) | `null` | The worksheet's name, or `null` for the type's name. |
+
+### `[SpreadsheetColumn]`
+
+- **Package:** `Elarion.Spreadsheets` · **Applies to:** property
+- **Triggers:** sets how a property of a spreadsheet record is written and read. Without a header, the column's header
+  is the property's `[Display(Name)]`, else its name.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `header` | `string?` (ctor) | `null` | The header text. |
+| `Order` | `int` | `-1` (declaration order) | The column's position. |
+| `Format` | `string?` | `null` | The number format of a number or date column; a date column without one shows in the viewer's notation. |
+| `Width` | `double` | `0` (measured) | The width in characters; measured from the header and the first 200 values when not set, at most 80. |
+| `Aliases` | `string[]?` | `null` | Older headers that still read as this column; the column's own header wins when a file has both. |
+| `TrueLabel`, `FalseLabel` | `string?` | `null` | On a boolean, both together: the texts written, offered as a dropdown and read (`ELSHEET005` otherwise). |
+
+### `[SpreadsheetIgnore]`
+
+- **Package:** `Elarion.Spreadsheets` · **Applies to:** property
+- **Triggers:** leaves the property out of the worksheet: no column, neither written nor read.
+
+See [Spreadsheets](/docs/capabilities/spreadsheets).
+
 ## Cross-module communication
 
 ### `[ModuleContract]`
