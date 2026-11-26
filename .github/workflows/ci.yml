@@ -66,6 +66,34 @@ jobs:
           name: dotnet-test-results
           path: tests/**/TestResults/*.trx
 
+  aot:
+    name: NativeAOT sample
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6.1.0
+        with:
+          dotnet-version: 11.0.x
+          dotnet-quality: ga
+
+      - name: Publish EdgeTelemetry with NativeAOT
+        # The sample uses the AOT-tier packages (SQL, migrations, spreadsheet records, validation, generated HTTP
+        # endpoints), so a trimming or AOT warning in any of them shows here. Warnings are errors in this repository;
+        # the grep still fails the job if a project ever lets IL2xxx/IL3xxx through as plain warnings.
+        run: |
+          dotnet publish samples/EdgeTelemetry/EdgeTelemetry.Api --configuration Release --runtime linux-x64 \
+            --output artifacts/edge-telemetry 2>&1 | tee publish.log
+          if grep -E "IL[23][0-9]{3}" publish.log; then
+            echo "::error::The NativeAOT publish reported trimming or AOT warnings."
+            exit 1
+          fi
+
   npm:
     name: npm (${{ matrix.package }})
     runs-on: ubuntu-latest

@@ -25,4 +25,21 @@ public interface IRequestValidator {
     /// </returns>
     ValueTask<RequestValidationErrors?> ValidateAsync(Type requestType, object request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Whether this validator holds validation metadata for <paramref name="type"/>: a handler request or a
+    /// <see cref="ValidationRootAttribute"/> type of an enabled module that carries validation attributes.
+    /// </summary>
+    /// <param name="type">The type to ask about.</param>
+    /// <returns>
+    /// <see langword="true"/> when <see cref="ValidateAsync"/> checks <paramref name="type"/>; <see langword="false"/>
+    /// when it would answer "valid" without checking anything — the type has no validation attributes, or its
+    /// module is disabled, or no metadata for it was registered.
+    /// </returns>
+    /// <remarks>
+    /// A caller that validates a type outside a handler request asks this first, so a missing registration fails
+    /// loudly instead of passing every value. There is deliberately no default implementation: answering
+    /// <see langword="true"/> without knowing would fail open.
+    /// </remarks>
+    bool HasMetadata(Type type);
 }

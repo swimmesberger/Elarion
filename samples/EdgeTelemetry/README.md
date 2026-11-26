@@ -49,6 +49,7 @@ claim that a specialized workload is a *recipe over the one PostgreSQL*, never a
 | | |
 | --- | --- |
 | Publish output | **21 MB** self-contained native executable, **zero** trim/AOT warnings (17 MB without the OpenTelemetry pipeline) |
+| Publish output with spreadsheets (.NET 11, osx-arm64, 2026-11) | **26 MB** with the spreadsheet records, their reader and validation added, still **zero** trim/AOT warnings; CI publishes it on Linux and fails on any IL2xxx/IL3xxx warning |
 | Cold start, fresh database | **≈630 ms** to the first `200 /healthz` — dominated by the one-time `CREATE EXTENSION timescaledb` + `create_hypertable`; the runner, lock, and history bookkeeping are noise |
 | Warm restarts (schema current) | **≈115–160 ms** to first response, migration validation and handler registration included — the handler pipeline costs nothing measurable |
 
@@ -88,6 +89,12 @@ curl "localhost:5217/devices/edge-1/latest?metric=temperature"
 curl "localhost:5217/devices/edge-1/history?metric=temperature&limit=50"          # buffered JSON array
 curl -N "localhost:5217/devices/edge-1/history/stream?metric=temperature&limit=50" # finite SSE export
 curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time_bucket rollup
+
+# Spreadsheets: download the history as .xlsx, then upload a workbook (base64 in the JSON body)
+curl -o edge-1.xlsx "localhost:5217/devices/edge-1/readings.xlsx?metric=temperature"
+curl -X POST localhost:5217/readings/import -H 'Content-Type: application/json' \
+  -d "{\"workbook\":{\"contentType\":\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\",\"data\":\"$(base64 < edge-1.xlsx | tr -d '\n')\"}}"
+# → {"written":0} for the file just downloaded; a broken row answers 400 with one located problem per cell
 ```
 
 ## What to look at
@@ -113,6 +120,14 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   handlers (ADR-0059: merged tracing + user-context enrichment — the `Elarion.Handlers` span +
   `handler.execution.duration` metric per call, near-zero cost when nothing listens); add `[Idempotent]`
   or `[RequirePermission]` later and only then does a gate decorator join the chain.
+- **`Modules/Telemetry/ReadingSheetRow.cs`** and the two spreadsheet handlers — readings as
+  [spreadsheet records](https://elarion.wimmesberger.dev/docs/capabilities/spreadsheets) (ADR-0108).
+  `[SpreadsheetRecord]` generates the mapping both ways, so the native binary writes and reads workbooks
+  without reflection. `ExportReadingsSpreadsheet` returns `SpreadsheetWorkbook.ToStreamedFile` over the
+  unbuffered query: the workbook streams to the response while rows come off the reader.
+  `ImportReadingsSpreadsheet` reads an uploaded `.xlsx`, `.xlsb` or `.xls` through `SpreadsheetReader`,
+  which checks the record's DataAnnotations on every row (`AddElarionValidation()`), and answers
+  `result.ToAppError("workbook")` (one 400 entry per located problem) or inserts the readings.
 - **`Modules/Telemetry/TelemetryContracts.cs`** — the whole data contract. `ReadingRow` is a
   `[SqlRecord]`: the generated `ReadingRowSqlMapper` carries ordinal-cached typed reads, typed
   `BindParameters`, and the `TableName`/`Columns` constants the handlers compose SQL from.
@@ -131,8 +146,9 @@ curl "localhost:5217/devices/edge-1/stats?metric=temperature&hours=24"    # time
   while the generated stream handler owns validation and SQL.
 - **`EdgeTelemetry.Tests`** — the whole slice end-to-end against real TimescaleDB (Testcontainers,
   Docker-gated skip): startup migrates (extension + hypertable included), ingest flows through the
-  handler pipeline into the generated mapper, a retransmit writes zero rows, and the rollup reads
-  back through the projection mapper.
+  handler pipeline into the generated mapper, a retransmit writes zero rows, the rollup reads
+  back through the projection mapper, and a spreadsheet export reads back while an import with a broken
+  row is refused with the cell named.
 - **`EdgeTelemetry.AppHost`** — the one-click dev loop: Aspire provisions the TimescaleDB container
   (the same Postgres resource with a different image — the ADR-0056 posture in one line) and injects
   the connection string plus the OTLP endpoint. **Observability is composition too**: when

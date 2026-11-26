@@ -108,3 +108,4 @@
 * [ADR-0105](0105-uploaded-files-are-handler-parameters.md) - An uploaded file is a handler parameter
 * [ADR-0106](0106-upload-policies-choose-the-staging-limits.md) - An upload names a policy that chooses its staging limits (proposed)
 * [ADR-0107](0107-a-shared-entity-names-the-module-that-writes-it.md) - A shared entity may name the one module that writes it (proposed)
+* [ADR-0108](0108-spreadsheet-records.md) - Spreadsheet records — a generated mapping in both directions, Elarion's own .xlsx writer, a library behind the reader

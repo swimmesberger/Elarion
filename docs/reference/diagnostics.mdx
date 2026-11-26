@@ -281,13 +281,14 @@ Declaration, ownership and wiring of feature flags (ADR-0079). See [Feature flag
 ## ELVAL — Request validation
 
 Validation-decorator attachment for handlers whose request DTO carries DataAnnotations validation
-attributes. See [Validation](/docs/concepts/validation).
+attributes, and validation metadata for `[ValidationRoot]` types. See [Validation](/docs/concepts/validation).
 
 | Id | Severity | Meaning | Fix |
 | --- | --- | --- | --- |
 | ELVAL001 | Error | A handler's request type carries validation attributes but its response type does not implement `IResultFailureFactory<T>`, so the validation check cannot short-circuit and would be silently skipped (mirrors `ELAUTH001`). | Return `Result<T>` or `Result` from the handler so the validation decorator can short-circuit to `AppError.Validation`. |
-| ELVAL002 | Warning | A handler's request type carries validation attributes but the compilation does not reference `Elarion.Validation`; the constraints are exported to every schema surface but **not enforced** at runtime. | Reference `Elarion.Validation` and call `AddElarionValidation()` in the host, or remove the validation attributes — the gap must be a visible choice. |
+| ELVAL002 | Warning | A handler's request type, or a `[ValidationRoot]` type, carries validation attributes but the compilation does not reference `Elarion.Validation`; the constraints are exported to every schema surface but **not enforced** at runtime, and no metadata exists for the root. | Reference `Elarion.Validation` and call `AddElarionValidation()` in the host, or remove the validation attributes — the gap must be a visible choice. |
 | ELVAL003 | Warning | (.NET 11) A handler's request graph has an `AsyncValidationAttribute` or an `IAsyncValidatableObject`; it is enforced, but in the validation decorator, before the handler's transaction — a lookup there is a time-of-check/time-of-use race. | Move database or service checks into the handler and return `AppError.Validation`/`AppError.Conflict`; suppress `ELVAL003` only when the check reads no shared state. |
+| ELVAL004 | Error | A `[ValidationRoot]` type carries validation attributes but lies outside the namespace of every module, so no module registers validation metadata for it and it could never be validated. | Move the type into the namespace of the module that validates it. |
 
 ## ELREQ — Self-typed request markers
 
@@ -485,6 +486,22 @@ Generated client-event topic registration for `IClientEvent` contracts. See
 | ELCEV001 | Warning | An `IClientEvent` contract's namespace is not under any `[AppModule]`, so no topic is registered for it. | Move the contract under an `[AppModule]` namespace, or register the topic manually via `AddElarionClientEvents`. |
 | ELCEV002 | Error | Two `IClientEvent` contracts resolve to the same topic name; the colliding topics are withheld. | Rename one contract, or disambiguate with an explicit `[ClientEvent("…")]` name. |
 | ELCEV003 | Warning | The compilation declares `IClientEvent` contracts but does not reference `Elarion.ClientEvents`, so no topics are registered. | Reference `Elarion.ClientEvents` (and map the endpoint from `Elarion.ClientEvents.AspNetCore`), or remove the contracts. |
+
+## ELSHEET — Spreadsheet records
+
+Mapping generation for `[SpreadsheetRecord]` types (ADR-0108). See [Spreadsheets](/docs/capabilities/spreadsheets).
+As with `[SqlRecord]`, there is no reflection fallback: if a record builds, it maps.
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELSHEET001 | Error | A property's type is not a supported column type (`string`, `bool`, a number, `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`, `Guid`, an enum, or their nullable forms). | Change the type, mark the property `[SpreadsheetIgnore]`, or map a text property and convert it in the handler. |
+| ELSHEET002 | Error | A `[SpreadsheetRecord]` type is not `partial`, so the generated members (`ISpreadsheetRecord<T>.SpreadsheetMapper`, `Columns`) cannot be added. | Add the `partial` modifier. |
+| ELSHEET003 | Error | Two columns' headers or aliases are equal ignoring case, so a file could not tell them apart. | Give one column another header or alias. |
+| ELSHEET004 | Error | The worksheet name in `[SpreadsheetRecord]` is empty, longer than 31 characters, contains one of `[ ] : * ? / \`, or starts or ends with an apostrophe. | Choose a name a spreadsheet application accepts. |
+| ELSHEET005 | Error | `TrueLabel`/`FalseLabel` is set on a property that is not a boolean, or only one of the two is set. | Set both labels, on a `bool` or `bool?` property only. |
+| ELSHEET006 | Error | `[SpreadsheetRecord]` is on a struct, or on a nested, generic or abstract type. | Use a top-level, non-generic, concrete class or record class. |
+| ELSHEET007 | Error | The record declares a member named `Columns` or `SpreadsheetMapper`, which collides with a generated member. | Rename the member; its column can keep its header through `[SpreadsheetColumn("…")]`. |
+| ELSHEET008 | Error | Two members of an enum that a record's column uses have a label (`[Display(Name)]`), name or `[SpreadsheetChoice]` alias that are equal ignoring case; the message names both. | Change the label or remove the alias, so that every spelling names one member. |
 
 ## ELSQL — SQL row mapping and interpolation
 

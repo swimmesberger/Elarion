@@ -71,6 +71,18 @@ public sealed class MicrosoftRequestValidator(
         return new RequestValidationErrors { FieldErrors = fieldErrors };
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Answers from the registered <see cref="IValidatableInfoResolver"/>s, the same lookup
+    /// <see cref="ValidateAsync"/> starts with, on both the Microsoft.Extensions.Validation 10 walker and the net11
+    /// Elarion walker. Each module's generated resolver is registered only while the module is enabled, so a type of
+    /// a disabled module answers <see langword="false"/>.
+    /// </remarks>
+    public bool HasMetadata(Type type) {
+        ArgumentNullException.ThrowIfNull(type);
+        return validationOptions.Value.TryGetValidatableTypeInfo(type, out _);
+    }
+
     /// <summary>
     /// Translates a CLR property path (e.g. <c>"Address.Street"</c>, <c>"Items[0].Name"</c>) into its wire-named
     /// form by converting each segment's property-name part through <paramref name="namingPolicy"/>, preserving

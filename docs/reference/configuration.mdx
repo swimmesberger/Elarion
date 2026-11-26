@@ -137,6 +137,23 @@ Properties read by the `Elarion.Typst` build targets: `ElarionTypstBundle`, `Ela
 settings are `TypstOptions`, set through `AddElarionTypst(options => …)` (options, not config). Both tables, with
 defaults, are in [PDF documents](/docs/capabilities/pdf-documents#build-integration).
 
+## Spreadsheets
+
+`AddElarionSpreadsheets(configuration)` binds `SpreadsheetOptions` (package `Elarion.Spreadsheets`), conventionally from
+the `Spreadsheets` section (`SpreadsheetOptions.SectionName`), with the configuration-binding source generator. Its one
+member, `ReadDefaults`, holds the `SpreadsheetReadOptions` a read uses when it passes none.
+
+| Key | Default |
+| --- | --- |
+| `Spreadsheets:ReadDefaults:MaxUnpackedBytes` | `268435456` (256 MiB) |
+| `Spreadsheets:ReadDefaults:MaxRows` | `100000` |
+| `Spreadsheets:ReadDefaults:MaxColumns` | `256` |
+| `Spreadsheets:ReadDefaults:DateFormats` | — (ISO 8601, `d.M.yyyy` and `d.M.yy` are always read) |
+| `Spreadsheets:ReadDefaults:TrueWords` / `FalseWords` | — (`true`/`yes`/`x`/`1` and `false`/`no`/`0` are always read) |
+
+Write options (`SpreadsheetWriteOptions`) are passed per call, not configured. See
+[Spreadsheets](/docs/capabilities/spreadsheets#limits-and-options).
+
 ## Proxy identity
 
 `AddElarionProxyIdentity(configuration, environment)` binds the `ProxyIdentity` section (package

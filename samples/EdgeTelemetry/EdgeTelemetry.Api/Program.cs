@@ -5,8 +5,10 @@ using Elarion.Abstractions;
 using Elarion.AspNetCore;
 using Elarion.Diagnostics;
 using Elarion.Migrations;
+using Elarion.Spreadsheets;
 using Elarion.Sql;
 using Elarion.Sql.PostgreSql;
+using Elarion.Validation;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -71,6 +73,12 @@ builder.Services.AddElarionSqlMappers();
 // decorator — the AOT-tier counterpart to AddElarionUnitOfWork<TDbContext>(). The session opens from the
 // ISqlDatabase registered above.
 builder.Services.AddElarionSqlUnitOfWork();
+
+// Readings as spreadsheets (ADR-0108): the scoped SpreadsheetReader the import handler injects, with its read limits bound
+// from the "Spreadsheets" section (source-generated binding), and the request validator that checks every imported row
+// against ReadingSheetRow's DataAnnotations — a record with validation attributes refuses to read without it.
+builder.Services.AddElarionValidation();
+builder.Services.AddElarionSpreadsheets(builder.Configuration.GetSection(SpreadsheetOptions.SectionName));
 
 // Schema before traffic: the hosted service applies pending embedded migrations and fails startup on
 // error — an edge node serving against a half-migrated schema is worse than one that does not start. This

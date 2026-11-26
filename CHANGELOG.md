@@ -8,7 +8,34 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+- **`Elarion.Spreadsheets`: spreadsheet records** (ADR-0108). A `partial` class marked `[SpreadsheetRecord]` maps to
+  the rows of a worksheet through a bundled generator, with no reflection, so the application still publishes with
+  NativeAOT. `SpreadsheetWorkbook` writes records as an `.xlsx` workbook, forward-only to a stream, an `ElarionFile` or
+  a streamed file, with a styled frozen header, number and date formats, measured widths and dropdown lists for choice
+  columns; writing no records gives a fill-in template. `SpreadsheetReader` (`AddElarionSpreadsheets`) reads `.xlsx`,
+  `.xlsb` and `.xls` into a result with every row, every problem located at its cell under a stable `spreadsheet.*`
+  code, the columns the file states, and `ToAppError`; each row is validated with the record's DataAnnotations. A
+  foreign layout reads as plain rows of typed cells. `[SpreadsheetChoice(Aliases = …)]` on an enum member adds spellings
+  that read as the member but are never written or offered. Mapping problems are build errors
+  `ELSHEET001`–`ELSHEET008`. See
+  [Spreadsheets](https://elarion.wimmesberger.dev/docs/capabilities/spreadsheets).
+- **`[ValidationRoot]`: validate a type outside a handler request** (ADR-0108). A marked type gets the same generated,
+  constant-constructed validation metadata as a handler request, in the module whose namespace contains it, and is
+  validated through `IRequestValidator.ValidateAsync`. A marked type with validation attributes outside every module is
+  the build error `ELVAL004`; `ELVAL002` now also covers such a type in a compilation without `Elarion.Validation`. See
+  [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation#validating-outside-a-handler-request).
+
+### Changed
+- **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
+  type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
+  member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
+
 ### Fixed
+- **A NativeAOT application with a body-bound `[HttpEndpoint]` published with trimming warnings.** The generated
+  mapping resolved the request body's JSON metadata with a fallback to the reflection-based
+  `JsonSerializerOptions.Default`, which made the publish report `IL2026` and `IL3050`. The fallback is gone; a missing
+  type still fails at mapping time with the same message.
 - **`InsertManyAsync` no longer repeats earlier rows once Npgsql auto-prepares the INSERT.** With `Max Auto Prepare`
   on, the batch reused one command and re-bound its parameters per row; after the statement was prepared, later rows
   went out with an earlier row's values, so distinct rows were dropped (or, with `ON CONFLICT DO NOTHING`, silently

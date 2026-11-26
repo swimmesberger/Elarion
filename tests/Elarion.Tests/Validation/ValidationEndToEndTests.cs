@@ -2,6 +2,7 @@ using System.Reflection;
 using AwesomeAssertions;
 using Elarion.Abstractions;
 using Elarion.Abstractions.Results;
+using Elarion.Abstractions.Validation;
 using Elarion.Generators;
 using Elarion.Validation;
 using Microsoft.CodeAnalysis;
@@ -34,6 +35,7 @@ public sealed class ValidationEndToEndTests {
         using Elarion.Abstractions.Modules;
         using Elarion.Abstractions.Authorization;
         using Elarion.Abstractions.Results;
+        using Elarion.Abstractions.Validation;
 
         [assembly: GenerateModuleHandlers]
 
@@ -56,6 +58,13 @@ public sealed class ValidationEndToEndTests {
 
             public sealed record ExportClientsRequest {
                 [Range(1, 100)] public int Page { get; init; }
+            }
+
+            // Validated outside a handler request: no handler takes it, the marker makes it a root of the module.
+            [ValidationRoot]
+            public sealed record ClientImportRow {
+                [StringLength(10, MinimumLength = 2)]
+                public required string Code { get; init; }
             }
 
             [AllowAnonymous]
@@ -118,6 +127,60 @@ public sealed class ValidationEndToEndTests {
         ((bool)result.GetType().GetProperty("IsSuccess")!.GetValue(result)!).Should().BeFalse();
         var error = result.GetType().GetProperty("Error")!.GetValue(result)!;
         error.GetType().GetProperty("Kind")!.GetValue(error).Should().Be(ErrorKind.Validation);
+    }
+
+    [Fact]
+    public async Task ValidationRoot_GetsModuleMetadata_AndValidatesThroughTheSeam() {
+        var assembly = CompileAndLoad();
+        var services = new ServiceCollection();
+        services.AddElarionValidation();
+        ConfigureGeneratedModuleServices(assembly, services);
+        await using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var validator = scope.ServiceProvider.GetRequiredService<IRequestValidator>();
+        var rowType = assembly.GetType("Sample.App.ClientImportRow")!;
+
+        var invalid = await validator.ValidateAsync(rowType, CreateRow(rowType, "x"), Ct);
+        var valid = await validator.ValidateAsync(rowType, CreateRow(rowType, "AT-01"), Ct);
+
+        invalid.Should().NotBeNull();
+        invalid!.FieldErrors.Keys.Should().BeEquivalentTo("code");
+        valid.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task HasMetadata_IsTrueForARequestAndARoot_AndFalseForAnUnknownType() {
+        var assembly = CompileAndLoad();
+        var services = new ServiceCollection();
+        services.AddElarionValidation();
+        ConfigureGeneratedModuleServices(assembly, services);
+        await using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var validator = scope.ServiceProvider.GetRequiredService<IRequestValidator>();
+
+        validator.HasMetadata(assembly.GetType("Sample.App.CreateClientCommand")!).Should().BeTrue();
+        validator.HasMetadata(assembly.GetType("Sample.App.ClientImportRow")!).Should().BeTrue();
+        validator.HasMetadata(typeof(string)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task HasMetadata_IsFalseForATypeOfADisabledModule() {
+        var assembly = CompileAndLoad();
+        var services = new ServiceCollection();
+        services.AddElarionValidation();
+        // A disabled module's ConfigureDefaultServices never runs, so its resolver is never registered.
+        await using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var validator = scope.ServiceProvider.GetRequiredService<IRequestValidator>();
+
+        validator.HasMetadata(assembly.GetType("Sample.App.CreateClientCommand")!).Should().BeFalse();
+        validator.HasMetadata(assembly.GetType("Sample.App.ClientImportRow")!).Should().BeFalse();
+    }
+
+    private static object CreateRow(Type rowType, string code) {
+        var row = Activator.CreateInstance(rowType)!;
+        rowType.GetProperty("Code")!.SetValue(row, code);
+        return row;
     }
 
     /// <summary>Calls the generated module skeleton exactly like a host bootstrapper would:

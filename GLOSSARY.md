@@ -198,6 +198,11 @@ The read-only projection of modules, flags and grants a frontend receives to ada
 hides and adapts; it never enforces.
 _Avoid_: permission (on the client), client-side authorization
 
+**Validation root**:
+A type the validator checks as a whole: a handler request, or a type marked `[ValidationRoot]` that is validated
+outside a handler request. Its module's generated metadata covers it and everything reachable from it.
+_Avoid_: validated type, validation target
+
 ### Events and live updates
 
 **Domain event**:
@@ -307,6 +312,13 @@ the handler pipeline has run, never buffered. A deferred streamed file decides a
 byte, which file it is or that it is refused. Only HTTP carries it; JSON surfaces use an ElarionFile or a
 pending blob.
 _Avoid_: file stream, push stream, download result
+
+**Spreadsheet record**:
+A `partial` type marked `[SpreadsheetRecord]` whose generated mapping writes it as a worksheet row of an `.xlsx` file
+(or, with no records, a fill-in template) and reads it back from an uploaded workbook, matching columns by header or
+alias. A property the mapping cannot handle is a build error. Reading keeps every row, says which columns the file
+carries, and reports a problem in the file as a coded, located error in the result, never as an exception.
+_Avoid_: Excel model, sheet DTO, export row, import row
 
 **Migration plan**:
 The one ordered sequence in which SQL scripts, C# code steps and EF migrations run, with one version

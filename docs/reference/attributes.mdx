@@ -542,7 +542,7 @@ See [Audit trail](/docs/concepts/auditing).
 
 ## Validation
 
-There is **no Elarion validation attribute**. Request validation is declared with the standard
+There is **no Elarion validation constraint attribute**. Request validation is declared with the standard
 `System.ComponentModel.DataAnnotations` attributes on the handler's request DTO — `[Range]`,
 `[MinLength]`/`[MaxLength]`/`[Length]`/`[StringLength]`, `[RegularExpression]`, `[EmailAddress]`,
 `[Url]`, `[Base64String]` — with requiredness from nullability (ADR-0082; no
@@ -554,6 +554,19 @@ attribute (e.g. `[Slug] : RegularExpressionAttribute`). Enforcement requires the
 `Elarion.Validation` package (`AddElarionValidation()`); diagnostics `ELVAL001`/`ELVAL002`/`ELVAL003`.
 
 See [Validation](/docs/concepts/validation).
+
+### `[ValidationRoot]`
+
+- **Package:** `Elarion.Abstractions` · **Applies to:** class, struct (records included)
+- **Triggers:** makes a type that is validated outside a handler request a validation root of the module whose
+  namespace contains it, so the validation generator emits the same constant-constructed metadata for it as for a
+  handler request and `IRequestValidator.HasMetadata` answers `true` for it while the module is enabled. A marked type
+  with validation attributes outside every module is `ELVAL004`; one in a compilation without `Elarion.Validation` is
+  `ELVAL002`. A generic type is not a root. On an attribute class, it makes every type that carries that attribute a
+  root, as `[SpreadsheetRecord]` does for spreadsheet records. See
+  [Validating outside a handler request](/docs/concepts/validation#validating-outside-a-handler-request).
+
+No parameters.
 
 ## Authorization
 
@@ -956,6 +969,56 @@ See [Entity Framework](/docs/capabilities/entity-framework) and [Pagination](/do
 | `Provider` | `SqlProvider` (init) | `Portable` | The provider to emit provider-specific code for (`Portable` or `Npgsql`). |
 
 See [SQL mapping](/docs/capabilities/sql-mapping).
+
+## Spreadsheet records
+
+### `[SpreadsheetRecord]`
+
+- **Package:** `Elarion.Spreadsheets` · **Applies to:** `partial` class (record classes included)
+- **Triggers:** makes the class a spreadsheet record (ADR-0108). The bundled generator implements
+  `ISpreadsheetRecord<T>` (the mapper `SpreadsheetWorkbook` and `SpreadsheetReader` use) and emits a nested `Columns`
+  class with one `SpreadsheetColumn<T>` per column. Every public instance property with a getter is a column, in
+  declaration order; a get-only property is written and not read. The attribute class is marked `[ValidationRoot]`, so
+  a record's DataAnnotations are validated on every row read. Unsupported shapes are build errors
+  (`ELSHEET001`–`ELSHEET008`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `worksheetName` | `string?` (ctor) | `null` | The worksheet's name, or `null` for the type's name. |
+
+### `[SpreadsheetColumn]`
+
+- **Package:** `Elarion.Spreadsheets` · **Applies to:** property
+- **Triggers:** sets how a property of a spreadsheet record is written and read. Without a header, the column's header
+  is the property's `[Display(Name)]`, else its name.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `header` | `string?` (ctor) | `null` | The header text. |
+| `Order` | `int` | `-1` (declaration order) | The column's position. |
+| `Format` | `string?` | `null` | The number format of a number or date column; a date column without one shows in the viewer's notation. |
+| `Width` | `double` | `0` (measured) | The width in characters; measured from the header and the first 200 values when not set, at most 80. |
+| `Aliases` | `string[]?` | `null` | Older headers that still read as this column; the column's own header wins when a file has both. |
+| `TrueLabel`, `FalseLabel` | `string?` | `null` | On a boolean, both together: the texts written, offered as a dropdown and read (`ELSHEET005` otherwise). |
+
+### `[SpreadsheetIgnore]`
+
+- **Package:** `Elarion.Spreadsheets` · **Applies to:** property
+- **Triggers:** leaves the property out of the worksheet: no column, neither written nor read.
+
+### `[SpreadsheetChoice]`
+
+- **Package:** `Elarion.Spreadsheets` · **Applies to:** enum member
+- **Triggers:** gives the member extra spellings that read as it in an enum column of a spreadsheet record, ignoring
+  case and surrounding white space. An alias is never written and never offered in the dropdown list, which show the
+  member's `[Display(Name)]`, else its name. Labels, names and aliases of two members of one enum must differ ignoring
+  case (`ELSHEET008`); an alias equal to its own member's label or name, or an empty one, is ignored.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `Aliases` | `string[]` | empty | The spellings that read as the member besides its label and its name. |
+
+See [Spreadsheets](/docs/capabilities/spreadsheets).
 
 ## Cross-module communication
 

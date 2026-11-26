@@ -31,6 +31,7 @@
     "blob-storage",
     "blob-uploads",
     "pdf-documents",
+    "spreadsheets",
     "telemetry"
   ]
 }

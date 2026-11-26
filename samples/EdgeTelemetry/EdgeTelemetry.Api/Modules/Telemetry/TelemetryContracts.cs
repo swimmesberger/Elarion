@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using EdgeTelemetry.Api.Modules.Telemetry.Handlers;
 using Elarion.Sql;
 
 namespace EdgeTelemetry.Api.Modules.Telemetry;
@@ -77,4 +78,5 @@ public sealed record IngestResult(int Written);
 [JsonSerializable(typeof(List<ReadingRow>))]
 [JsonSerializable(typeof(List<MetricBucket>))]
 [JsonSerializable(typeof(IngestResult))]
+[JsonSerializable(typeof(ImportReadingsSpreadsheet.Command), TypeInfoPropertyName = "ImportReadingsSpreadsheetCommand")]
 public sealed partial class TelemetryJsonContext : JsonSerializerContext;

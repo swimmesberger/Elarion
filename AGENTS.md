@@ -259,7 +259,7 @@ command. Existing specs move into its layout in one change.
   `.github/instructions/framework.instructions.md` first. It holds the package layout and the framework
   invariants: modules, handlers and transports; serialization and AOT; authorization, feature gates and
   validation; events and cross-module communication; actors, connections and live updates; persistence, blobs
-  and SQL; the TypeScript client and frontend contributions.
+  and SQL; file formats, import and export; the TypeScript client and frontend contributions.
 - Writing or changing a `.cs` file: `.github/instructions/csharp.instructions.md`; mechanical formatting is in
   `.editorconfig`.
 - Writing or changing a generator, an analyzer or a generator test:
