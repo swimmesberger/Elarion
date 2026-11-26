@@ -206,8 +206,9 @@ Three tables, snake_case, mapped onto the application's context by the bundled g
 
 ## App passwords
 
-- Secret: prefix + 32 bytes `RandomNumberGenerator`, base64url without padding. Stored: `SHA-256` base64 in a unique
-  index; also `id` (uuid v7), `user_id` (string, as `ICurrentUser.Id`), `name`, `scope`, `created_at`,
+- Secret: prefix + 32 bytes `RandomNumberGenerator`, base64url without padding. Stored: SHA-256 over the UTF-8 bytes of
+  the whole secret as the client sends it, prefix included, as standard Base64 with padding, in a unique index; this
+  exact encoding is a compatibility contract (see "Adopting existing app passwords"); also `id` (uuid v7), `user_id` (string, as `ICurrentUser.Id`), `name`, `scope`, `created_at`,
   `last_used_at`. Revoke is a hard delete scoped to the user.
 - `IAppPasswords.VerifyAsync(secret, requiredScope)` → `AppPasswordMatch?` (id, user, scope); writes `last_used_at`
   only when older than the interval.
@@ -228,6 +229,29 @@ Three tables, snake_case, mapped onto the application's context by the bundled g
   `JwtBearerEvents`. The scheme adds the claims `elarion:app_password_id` and `elarion:app_password_scope` to the
   principal, and the dispatcher checks a feed's scope against the requested calendar. Challenge `401` with `Basic realm="{Realm}", charset="UTF-8"`; forbidden `403` without a challenge.
   Whether it compiles warning-free under `PublishAot` is checked in slice 1 (the research note could not verify it).
+
+## Adopting existing app passwords
+
+An application that already issues its own Basic credentials for DAV clients (as the consuming application whose
+CardDAV surface informed ADR-0111 does) moves to Elarion's scheme without asking anyone to create a new password and
+re-enter it on every device. It has two paths, and the capability page documents both:
+
+1. **Keep its own store.** It registers no `Elarion.AppPasswords.EntityFrameworkCore` and sets `OnVerifyCredential` to
+   its existing check, `OnValidateUserName` to its user-name rule (for example "the e-mail of the owning account,
+   compared case-insensitively"), and `OnCreatePrincipal` to its principal construction, including any account checks
+   of its own (active, within its validity period). Only the handler class changes; its table, management handlers and
+   UI stay. This is the step that needs no data migration.
+2. **Move the rows into Elarion's store.** Possible without the secrets when the old store kept SHA-256 over the UTF-8
+   secret as standard Base64, which is the encoding above: a migration step of the application copies each row into
+   the app-password table with `scope = 'dav'`, its user id as a string, name, creation and last-use times, and the
+   hash unchanged; then it drops its own table and handlers and uses `IAppPasswords` for management. The hash covers
+   the whole secret as typed, so secrets with an older prefix keep verifying, and `AppPasswordOptions.SecretPrefix`
+   (set to the application's prefix) affects only new ones. An old store with another hash encoding stays on path 1,
+   or its users re-create their passwords.
+
+The cap per user, the last-use interval and the hard-delete revocation default to what such stores already do (10,
+15 minutes, delete), so neither path changes behaviour a user notices. What Elarion cannot carry over is a user-name
+rule: path 2 still needs `OnValidateUserName` when the application wants one.
 
 ## The client
 
@@ -268,6 +292,9 @@ against recorded responses of iCloud, Google, Nextcloud, Fastmail and Zimbra qui
   after its last sync (FR-006, FR-007, FR-020).
 - **Concurrency**: two publishers of one calendar in parallel transactions; tokens strictly increase and no change is
   lost; a rolled-back publish leaves no journal row.
+- **Adoption**: a secret hashed by an independent SHA-256/UTF-8/Base64 implementation and inserted as a row verifies
+  through the default `OnVerifyCredential`, with and without a legacy prefix; a replaced `OnVerifyCredential` never
+  resolves `IAppPasswordStore`.
 - **Hostile input**: DTD, entity expansion, a 100 MB body, depth 10,000, a `calendar-query` whose expansion exceeds the
   cap.
 - **AOT**: the NativeAOT sample publishes in CI (`ci: publish the EdgeTelemetry sample with NativeAOT` exists), with
@@ -278,7 +305,7 @@ against recorded responses of iCloud, Google, Nextcloud, Fastmail and Zimbra qui
 ## Documentation
 
 - `docs/capabilities/calendars/caldav.mdx` (publishing, sources, feeds, the host, client), `docs/capabilities/app-
-  passwords.mdx`, both in their `meta.json`; `docs/reference/packages.mdx` rows for the seven packages; diagnostics
+  passwords.mdx` (with a section on adopting existing app passwords, both paths above), both in their `meta.json`; `docs/reference/packages.mdx` rows for the seven packages; diagnostics
   and configuration reference tables; `CHANGELOG.md`; the glossary terms (calendar source, published calendar, app
   password, feed token) land with this design. The authorization page's sentence that Elarion does not issue
   credentials gets the two exceptions.
