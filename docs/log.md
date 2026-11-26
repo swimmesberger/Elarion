@@ -2,6 +2,7 @@
 
 ## 2026-11-26
 
+* **Update**: [ADR-0110](decisions/0110-vcard-contacts.md) accepted and [spec 0005](../specs/0005-vcard-contacts.md) approved; implementation follows its [plan](../specs/0005-vcard-contacts.plan.md).
 * **Update**: [ADR-0111](decisions/0111-caldav.md) accepted and [spec 0006](../specs/0006-caldav-calendars.md) approved, after the pluggable app-password checks and the Elarion.Calendars type names were worked in.
 * **Creation**: [ADR-0111](decisions/0111-caldav.md) (proposed), CalDAV and ICS feeds served from a published-calendar store, calendar sources as handlers, app passwords and a sync-step client, with [spec 0006](../specs/0006-caldav-calendars.md) and its plan; the [glossary](../GLOSSARY.md) gains published calendar, calendar source, app password and feed token.
 * **Creation**: the research note [CalDAV clients and .NET libraries](research/2026-11-26-caldav-servers-clients-and-dotnet.md), input for ADR-0111.

@@ -3,11 +3,11 @@ type: Architecture Decision Record
 title: "ADR-0110: vCard contacts — a fixed contact model, Elarion's own reader and writer"
 description: "Elarion.VCards reads uploaded .vcf files of any version into a fixed contact model with every contact kept and every problem coded and located by line, and writes contacts as vCard 3.0 or 4.0, with its own bounded parser and writer instead of a library and no generated record mapping."
 generated: { by: claude-code/claude-opus-5-5, at: 2026-11-26T16:10:00Z }
-status: draft
+status: stable
 ---
 # ADR-0110: vCard contacts — a fixed contact model, Elarion's own reader and writer
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-26
 - Related: [ADR-0017](0017-dependency-light-core.md) (heavy defaults live in opt-in siblings),
   [ADR-0025](0025-distributed-scheduler-coordination.md) (the 1–10 node tier the defaults are sized for),
