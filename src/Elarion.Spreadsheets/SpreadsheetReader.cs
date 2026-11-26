@@ -110,6 +110,23 @@ public sealed class SpreadsheetReader {
         }
     }
 
+    /// <summary>
+    /// Opens <paramref name="workbook"/>, reads one worksheet without a record as rows of typed cells, and releases the
+    /// workbook (FR-058): for a foreign layout, such as a bank's statement export, whose header row the application finds.
+    /// </summary>
+    /// <param name="workbook">The uploaded file; read to its end, and left open.</param>
+    /// <param name="options">The read options; <see langword="null"/> uses <see cref="SpreadsheetOptions.ReadDefaults"/>.</param>
+    /// <param name="selection">The worksheet; <see langword="null"/> takes the first visible one.</param>
+    /// <param name="cancellationToken">Cancels buffering the stream.</param>
+    public async ValueTask<SpreadsheetRowsResult> ReadRowsAsync(
+        Stream workbook,
+        SpreadsheetReadOptions? options = null,
+        SpreadsheetWorksheetSelection? selection = null,
+        CancellationToken cancellationToken = default) {
+        using var document = await OpenAsync(workbook, options, cancellationToken).ConfigureAwait(false);
+        return document.ReadRows(selection);
+    }
+
     /// <summary>Copies at most <paramref name="limit"/> bytes; <see langword="false"/> when the source holds more.</summary>
     private static async ValueTask<bool> CopyBoundedAsync(
         Stream source, MemoryStream destination, long limit, CancellationToken cancellationToken) {

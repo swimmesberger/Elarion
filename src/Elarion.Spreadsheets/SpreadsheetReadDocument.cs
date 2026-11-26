@@ -60,6 +60,18 @@ public sealed class SpreadsheetReadDocument : IDisposable {
             source, worksheet, selection, _options, _reader.Validator, _reader.NamingPolicy, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Reads the selected worksheet without a record (FR-058): its non-empty rows as typed cells with their row numbers,
+    /// under the same worksheet choice, cell rules and row limit as a record read, plus the column limit (FR-059).
+    /// </summary>
+    /// <param name="selection">The worksheet; <see langword="null"/> takes the first visible one. Its header row is ignored.</param>
+    public SpreadsheetRowsResult ReadRows(SpreadsheetWorksheetSelection? selection = null) {
+        if (!TryOpenWorksheet(selection, out var source, out var worksheet, out var error))
+            return new SpreadsheetRowsResult(error.Worksheet ?? (worksheet.Length > 0 ? worksheet : null), [], [error]);
+
+        return PlainRowReader.Read(source, worksheet, _options);
+    }
+
     /// <inheritdoc />
     public void Dispose() {
         if (_disposed) return;
