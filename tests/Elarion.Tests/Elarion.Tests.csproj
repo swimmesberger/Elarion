@@ -22,6 +22,8 @@
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing"/>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp"/>
     <PackageReference Include="OpenFeature.Hosting"/>
+    <!-- Test-only: validates written workbooks against the Open XML schema and inspects their cells (ADR-0108). -->
+    <PackageReference Include="DocumentFormat.OpenXml"/>
   </ItemGroup>
   <ItemGroup>
     <!-- Migration-runner test scripts: the runner discovers embedded .sql resources, scoped per scenario

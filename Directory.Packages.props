@@ -27,6 +27,8 @@
     <PackageVersion Include="Dapper" Version="2.1.89"/>
     <PackageVersion Include="Dapper.AOT" Version="1.1.0"/>
     <PackageVersion Include="Azure.Storage.Blobs" Version="12.30.1"/>
+    <!-- Test-only: the Open XML SDK validates and inspects the workbooks Elarion.Spreadsheets writes. -->
+    <PackageVersion Include="DocumentFormat.OpenXml" Version="3.5.1"/>
     <!-- The EF Core stack stays on 10.x for both target frameworks: EF Core 11 needs the matching Npgsql provider
          (Npgsql.EntityFrameworkCore.PostgreSQL 11 is still a release candidate), and EF Core 10 runs on .NET 11.
          Move these (and Identity.EntityFrameworkCore, which depends on EF Core Relational of its own major) into the
