@@ -23,6 +23,13 @@
     <ProjectReference Include="..\..\..\src\Elarion.Migrations\Elarion.Migrations.csproj"/>
   </ItemGroup>
 
+  <!-- Readings as spreadsheets (ADR-0108): [SpreadsheetRecord] mappers export and import .xlsx without reflection, and
+       Elarion.Validation checks each imported row against the record's DataAnnotations through the generated metadata. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Elarion.Spreadsheets\Elarion.Spreadsheets.csproj"/>
+    <ProjectReference Include="..\..\..\src\Elarion.Validation\Elarion.Validation.csproj"/>
+  </ItemGroup>
+
   <!-- Observability for the Aspire dashboard (OTLP). The whole pipeline only activates when an OTLP
        endpoint is configured, so the bare edge binary stays lean. -->
   <ItemGroup>
@@ -33,12 +40,15 @@
 
   <!-- The generators as analyzers (building from source; from NuGet they ship inside their packages):
        Elarion.Generators emits the module bootstrapper + handler registrations, Elarion.Sql.Generators
-       the row mappers. -->
+       the row mappers, Elarion.Spreadsheets.Generators the spreadsheet record mappers. -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Elarion.Generators\Elarion.Generators.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false"/>
     <ProjectReference Include="..\..\..\src\Elarion.Sql.Generators\Elarion.Sql.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"/>
+    <ProjectReference Include="..\..\..\src\Elarion.Spreadsheets.Generators\Elarion.Spreadsheets.Generators.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false"/>
   </ItemGroup>

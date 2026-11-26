@@ -5,8 +5,12 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using AwesomeAssertions;
 using EdgeTelemetry.Api.Modules.Telemetry;
+using EdgeTelemetry.Api.Modules.Telemetry.Handlers;
+using Elarion.Abstractions;
+using Elarion.Spreadsheets;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -166,5 +170,64 @@ public sealed class TelemetryApiTests : IAsyncLifetime {
         handlerSpans.Should().Contain("stream ExportReadingHistory");
         handlerSpans.Should().Contain("handle GetMetricStats");
         spans.Should().Contain(s => s.Source == "Npgsql", "the SQL command spans nest under the handler spans");
+
+        await SpreadsheetExportThenImport_RoundTripsReadingsAndRejectsABrokenRow(client);
+    }
+
+    // Part of the one test above: the canonical JSON accessor is installed once per process, so the class runs one host.
+    private async Task SpreadsheetExportThenImport_RoundTripsReadingsAndRejectsABrokenRow(HttpClient client) {
+
+        var recordedAt = new DateTime(2026, 7, 15, 8, 0, 0, DateTimeKind.Utc);
+        foreach (var (value, minutes) in new[] { (1013.25, 0), (1009.5, 10) }) {
+            ReadingInput[] reading = [
+                new() { DeviceId = "sheet-1", Metric = "pressure", Value = value, RecordedAt = recordedAt.AddMinutes(minutes) }
+            ];
+            (await client.PostAsJsonAsync("/readings", reading, TelemetryJsonContext.Default.ReadingInputArray, Ct))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        // The export streams a workbook; reading it back through the registered reader gives the stored readings.
+        using var export = await client.GetAsync("/devices/sheet-1/readings.xlsx?metric=pressure", Ct);
+        export.StatusCode.Should().Be(HttpStatusCode.OK);
+        export.Content.Headers.ContentType!.MediaType.Should().Be(SpreadsheetWorkbook.ContentType);
+        var workbook = await export.Content.ReadAsByteArrayAsync(Ct);
+
+        using (var scope = _factory!.Services.CreateScope()) {
+            var reader = scope.ServiceProvider.GetRequiredService<SpreadsheetReader>();
+            var read = await reader.ReadAsync<ReadingSheetRow>(new MemoryStream(workbook), cancellationToken: Ct);
+            read.HasErrors.Should().BeFalse();
+            read.Records.Select(record => (record.RecordedAt, record.Value))
+                .Should().Equal((recordedAt, 1013.25), (recordedAt.AddMinutes(10), 1009.5));
+        }
+
+        // Importing a workbook stores its readings.
+        var import = await ImportAsync(client, [
+            new ReadingSheetRow { DeviceId = "sheet-2", Metric = "pressure", RecordedAt = recordedAt, Value = 1001 }
+        ]);
+        import.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await import.Content.ReadFromJsonAsync(TelemetryJsonContext.Default.IngestResult, Ct))!.Written.Should().Be(1);
+        var imported = await client.GetFromJsonAsync(
+            "/devices/sheet-2/latest?metric=pressure", TelemetryJsonContext.Default.ReadingRow, Ct);
+        imported!.RecordedAt.Should().Be(new DateTimeOffset(recordedAt));
+        imported.Value.Should().Be(1001);
+
+        // A row that breaks the record's validation attributes rejects the file with a located problem.
+        var broken = await ImportAsync(client, [
+            new ReadingSheetRow { DeviceId = "sheet-3", Metric = "pressure", RecordedAt = recordedAt, Value = 1 },
+            new ReadingSheetRow { DeviceId = new string('x', 65), Metric = "pressure", RecordedAt = recordedAt, Value = 2 }
+        ]);
+        broken.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await broken.Content.ReadAsStringAsync(Ct)).Should().Contain("A3");
+    }
+
+    private static async Task<HttpResponseMessage> ImportAsync(HttpClient client, ReadingSheetRow[] rows) {
+        using var content = new MemoryStream();
+        await SpreadsheetWorkbook.WriteAsync(content, rows, cancellationToken: Ct);
+        var command = new ImportReadingsSpreadsheet.Command {
+            Workbook = new ElarionFile(content.ToArray(), SpreadsheetWorkbook.ContentType) { FileName = "readings.xlsx" }
+        };
+
+        return await client.PostAsJsonAsync(
+            "/readings/import", command, TelemetryJsonContext.Default.ImportReadingsSpreadsheetCommand, Ct);
     }
 }
