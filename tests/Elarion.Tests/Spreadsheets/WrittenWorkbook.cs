@@ -83,6 +83,19 @@ internal sealed class WrittenWorkbook : IDisposable {
         return [.. Worksheet(worksheet).GetFirstChild<Columns>()!.Elements<Column>()];
     }
 
+    public IReadOnlyList<DataValidation> DataValidations(int worksheet = 0) {
+        return [.. Worksheet(worksheet).GetFirstChild<DataValidations>()?.Elements<DataValidation>() ?? []];
+    }
+
+    public DataValidation DataValidation(string column, int worksheet = 0) {
+        return DataValidations(worksheet).Single(validation => validation.SequenceOfReferences!.InnerText!.StartsWith(
+            column + "2:", StringComparison.Ordinal));
+    }
+
+    public Sheet Sheet(int index) {
+        return WorkbookPart.Workbook!.Sheets!.Elements<Sheet>().ElementAt(index);
+    }
+
     /// <summary>The raw XML of a part, for assertions on what the schema does not model (escapes, absent formulas).</summary>
     public string PartXml(string entryName) {
         using var archive = new ZipArchive(new MemoryStream(Bytes), ZipArchiveMode.Read);

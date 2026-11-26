@@ -41,6 +41,7 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
     private readonly Stream _destination;
     private readonly SpreadsheetWriteOptions _options;
     private readonly SpreadsheetStyles _styles = new();
+    private readonly SpreadsheetDropdowns _dropdowns = new();
     private readonly List<string> _worksheets = [];
     private readonly HashSet<string> _worksheetNames = new(StringComparer.OrdinalIgnoreCase);
 
@@ -65,6 +66,7 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
 
         options ??= SpreadsheetWriteOptions.Default;
         ArgumentOutOfRangeException.ThrowIfNegative(options.WidthSampleRows, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfNegative(options.DropdownRows, nameof(options));
         if (!(options.MaxColumnWidth >= 1))
             throw new ArgumentOutOfRangeException(nameof(options), options.MaxColumnWidth, "MaxColumnWidth must be one or more.");
 
@@ -254,6 +256,10 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
                 }
 
                 xml.Append("</sheetData>"u8);
+                // Every written row and the first DropdownRows data rows offer the lists, so a template (no records)
+                // still has them where a person fills it in (FR-021, FR-022).
+                var dropdownEnd = Math.Min(SpreadsheetCells.MaxRows, Math.Max(rowNumber, _options.DropdownRows + 1));
+                _dropdowns.AppendDataValidations(xml, columns, dropdownEnd, _worksheetNames);
                 xml.Append("</worksheet>"u8);
                 await xml.FlushAsync(stream, cancellationToken).ConfigureAwait(false);
             }
@@ -319,6 +325,12 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
 
     private async ValueTask WritePackagePartsAsync(ZipArchive archive, CancellationToken cancellationToken) {
         using var xml = new Utf8XmlBuffer(16 * 1024);
+        var listsWorksheet = _dropdowns.ListsWorksheetName;
+        var sheetCount = _worksheets.Count + (listsWorksheet is null ? 0 : 1);
+        if (listsWorksheet is not null) {
+            _dropdowns.AppendListsWorksheet(xml);
+            await WriteEntryAsync(archive, $"xl/worksheets/sheet{sheetCount}.xml", xml, cancellationToken).ConfigureAwait(false);
+        }
 
         xml.Append("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""u8);
         xml.Append("""<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>"""u8);
@@ -332,12 +344,23 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
             xml.Append("\"/>"u8);
         }
 
+        if (listsWorksheet is not null) {
+            // Hidden, so the lists behind the dropdowns are not mistaken for data, and a reader skips the sheet.
+            xml.Append("<sheet name=\""u8);
+            xml.AppendAttribute(listsWorksheet);
+            xml.Append("\" sheetId=\""u8);
+            xml.AppendFormatted(sheetCount);
+            xml.Append("\" state=\"hidden\" r:id=\"rId"u8);
+            xml.AppendFormatted(sheetCount);
+            xml.Append("\"/>"u8);
+        }
+
         xml.Append("</sheets></workbook>"u8);
         await WriteEntryAsync(archive, "xl/workbook.xml", xml, cancellationToken).ConfigureAwait(false);
 
         xml.Append("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""u8);
         xml.Append("""<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"""u8);
-        for (var i = 0; i < _worksheets.Count; i++) {
+        for (var i = 0; i < sheetCount; i++) {
             xml.Append("<Relationship Id=\"rId"u8);
             xml.AppendFormatted(i + 1);
             xml.Append("\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet"u8);
@@ -346,7 +369,7 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         }
 
         xml.Append("<Relationship Id=\"rId"u8);
-        xml.AppendFormatted(_worksheets.Count + 1);
+        xml.AppendFormatted(sheetCount + 1);
         xml.Append("\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>"u8);
         xml.Append("</Relationships>"u8);
         await WriteEntryAsync(archive, "xl/_rels/workbook.xml.rels", xml, cancellationToken).ConfigureAwait(false);
@@ -359,7 +382,7 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         xml.Append("""<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""u8);
         xml.Append("""<Default Extension="xml" ContentType="application/xml"/>"""u8);
         xml.Append("""<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>"""u8);
-        for (var i = 0; i < _worksheets.Count; i++) {
+        for (var i = 0; i < sheetCount; i++) {
             xml.Append("<Override PartName=\"/xl/worksheets/sheet"u8);
             xml.AppendFormatted(i + 1);
             xml.Append(".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"u8);
