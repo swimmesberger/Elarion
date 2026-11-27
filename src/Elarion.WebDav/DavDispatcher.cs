@@ -220,6 +220,11 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
         else if (!body.Is(DavNames.D.PropFind)) {
             return DavResponse.Text(400, "The PROPFIND body must be a DAV:propfind element.");
         }
+        // RFC 4918 §14.20: exactly one of propname, allprop and prop (an empty body is allprop); unknown siblings are ignored.
+        else if ((body.Child(DavNames.D.PropName) is null ? 0 : 1) + (body.Child(DavNames.D.AllProp) is null ? 0 : 1)
+                 + (body.Child(DavNames.D.Prop) is null ? 0 : 1) != 1) {
+            return DavResponse.Text(400, "A DAV:propfind holds exactly one of propname, allprop and prop.");
+        }
         else if (body.Child(DavNames.D.PropName) is not null) {
             selection = DavPropertySelection.PropName;
         }
@@ -334,7 +339,12 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
     private static async ValueTask<DavResponse> SyncCollectionAsync(DavContext context, DavResource resource, DavXmlElement body,
         CancellationToken cancellationToken) {
         var level = body.Child(DavNames.D.SyncLevel)?.Text.Trim();
-        if (level is not null && level != "1") return DavResponse.Error(403, DavNames.D.SyncTraversalSupported);
+        // RFC 6578 §6.3: "1" or "infinity" (DAVx5 spells it "infinite"); collections have no child collections, so infinity
+        // is refused as not supported, and anything else is a malformed request.
+        if (level is not null && level != "1")
+            return level.Equals("infinity", StringComparison.OrdinalIgnoreCase) || level.Equals("infinite", StringComparison.OrdinalIgnoreCase)
+                ? DavResponse.Error(403, DavNames.D.SyncTraversalSupported)
+                : DavResponse.Text(400, "DAV:sync-level must be 1 or infinity.");
         int? limit = null;
         if (body.Child(DavNames.D.Limit)?.Child(DavNames.D.NResults)?.Text.Trim() is { Length: > 0 } nresults) {
             if (!int.TryParse(nresults, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedLimit) || parsedLimit < 1)

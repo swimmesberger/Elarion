@@ -128,7 +128,7 @@ public sealed class DavXmlOutput : IAsyncDisposable {
     public DavXmlOutput(Stream destination) {
         ArgumentNullException.ThrowIfNull(destination);
         _destination = destination;
-        Writer = XmlWriter.Create(_buffer, DavXml.WriterSettings);
+        Writer = new DavSanitizingXmlWriter(XmlWriter.Create(_buffer, DavXml.WriterSettings));
         Writer.WriteStartDocument();
     }
 
