@@ -37,7 +37,7 @@ public sealed record MyShiftCalendars : ICalDavSource<MyShiftCalendars> {
     public static string SourceName => "shifts";
 }
 
-[Handler]
+// No [Handler]: the source is called in process, through the module's pipeline, and is no JSON-RPC operation.
 [RequirePermission("shifts", Verbs.Read)]
 public sealed class ListMyShiftCalendars(ICurrentUser user)
     : IHandler<MyShiftCalendars, Result<CalDavSourceListing>> {
