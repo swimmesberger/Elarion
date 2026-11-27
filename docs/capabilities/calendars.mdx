@@ -1,0 +1,153 @@
+---
+title: Calendars
+description: Read uploaded .ics files into events and to-dos with every problem located, keep what other programs wrote, expand recurrences within a window, resolve time zones, and publish calendars and feeds byte for byte the same, NativeAOT-safe.
+icon: CalendarDays
+---
+
+Applications import calendars people upload (waste collection, school holidays, an export from Outlook or Google) and
+publish their own dates as files and feeds that calendar programs subscribe to. `Elarion.Calendars` reads and writes
+iCalendar (RFC 5545) without a third-party library and without reflection, so an application keeps publishing with
+NativeAOT.
+
+| Piece | Role |
+| --- | --- |
+| `CalendarReader` | Reads an `.ics` stream leniently into a `CalendarReadResult`: every event and to-do with its typed value, its component and its located errors. |
+| `CalendarEvent`, `CalendarTodo`, `CalendarAlarm` | The typed model, a view over the component that keeps every property it does not model. |
+| `CalendarComponent`, `CalendarProperty`, `CalendarParameter` | The lossless component tree: everything the file states, in order, with line numbers; built and changed in code too. |
+| `CalendarDateTime` | A date, a floating time, a UTC time or a time in a zone, with the zone's `TimeZoneInfo` and the `TZID` as written. |
+| `CalendarRecurrence` | Expands items into occurrences within a window: rules, extra and excluded dates, overrides, bounded by caps. |
+| `CalendarTimeZones` | Resolves `TZID`s, converts `VTIMEZONE` to `TimeZoneInfo` and back. |
+| `CalendarWriter` | Writes calendars to a stream, an `ElarionFile` or an `ElarionStreamedFile`, deterministically. |
+
+Why it is shaped this way, and what was rejected, is in
+[ADR-0109](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0109-icalendar-model-reader-and-writer.md).
+
+## Getting started
+
+```bash
+dotnet add package Elarion.Calendars
+```
+
+```csharp
+builder.Services.AddElarionCalendars(builder.Configuration.GetSection(CalendarOptions.SectionName));
+```
+
+## Importing an uploaded calendar
+
+A handler reads the uploaded file's stream. Reading never throws because of what the file contains: it returns every
+item, so the handler can show a preview and commit what the person confirms.
+
+```csharp
+[Handler]
+public sealed class PreviewImport(CalendarReader reader) : IHandler<PreviewImport.Command, Result<ImportPreview>> {
+    public sealed record Command([property: UploadLimits(FileExtensions = [".ics"])] UploadedFile File);
+
+    public async ValueTask<Result<ImportPreview>> HandleAsync(Command command, CancellationToken ct) {
+        await using var stream = command.File.OpenReadStream();
+        var result = await reader.ReadAsync(stream, cancellationToken: ct);
+        if (result.FileErrors.Count > 0) return result.ToAppError("file");
+
+        foreach (var entry in result.Events.Where(e => e.HasValue && e.Value!.Start!.Value.Date < today))
+            entry.AddError("import.date_in_past", "The event lies in the past.", "DTSTART");
+
+        return new ImportPreview([.. result.Events.Select(e => new Row(e.Index, e.Value?.Summary, e.Value?.Start, e.Errors))]);
+    }
+}
+```
+
+- `HasValue` says whether an entry has a typed item. Only a time that cannot be read (`DTSTART`, `DTEND`, `DURATION`,
+  `DUE`, `RRULE`, `RDATE`, `EXDATE`, `RECURRENCE-ID` or its zone), a missing `DTSTART` on an event, or a per-item limit
+  clears it. Any other unreadable property is reported as `calendar.invalid_value`, left out of the value and kept in the
+  component.
+- `AddError(code, message, property?, lineNumber?)` adds the application's own errors, under its own prefix; they are
+  located like the package's and appear in `Errors` and in `ToAppError`.
+- `ToAppError(fieldPath, format?, maxMessages)` converts to a validation `AppError` with at most 100 messages by default
+  and one that counts the rest. Pass a formatter to word each error from its `Code` and data in the application's
+  language.
+
+### Files as producers write them
+
+The reader accepts a byte-order mark, UTF-16, lines that were never folded, LF and CR line ends, folds with a tab,
+quoted and vendor-prefixed `TZID`s (`/mozilla.org/…/Europe/Berlin`, `"W. Europe Standard Time"`), dates where
+date-times belong, truncated or doubled time suffixes, and Exchange's all-day flag. A line that is not valid UTF-8 is
+decoded with the fallback encoding (Windows-1252 by default, `FallbackEncoding` to change it); `UsedFallbackEncoding`
+says when that happened. The code pages are held by the package, never registered process-wide.
+
+## Time zones
+
+A `TZID` resolves through the system's zones first, as an IANA or a Windows id, and otherwise through the file's
+`VTIMEZONE` of that id. An id neither knows is `calendar.unknown_time_zone` on each item that uses it. A floating time
+stays floating; it converts to UTC only in a zone the caller passes (`CalendarExpandOptions.FloatingTimeZone`).
+`X-WR-TIMEZONE` is reported as `CalendarHeader.SuggestedTimeZone`.
+
+Resolution depends on the host's tzdata. Slim and NativeAOT container images often lack it: install `tzdata`.
+
+A `VTIMEZONE` converts to a `TimeZoneInfo` with one adjustment rule per year. `TimeZoneInfo` evaluates rules per
+calendar year, so two historical shapes are approximate: the New Year hour of a zone's first year that ends in daylight
+time, and a year with three different offsets.
+
+## Recurrences
+
+```csharp
+var week = result.Expand(monday, monday.AddDays(7), new CalendarExpandOptions { FloatingTimeZone = vienna });
+foreach (var occurrence in week.Occurrences)
+    Console.WriteLine($"{occurrence.StartUtc}–{occurrence.EndUtc}: {occurrence.Item.Summary}");
+```
+
+Expansion implements RFC 5545 recurrence for the Gregorian calendar: every `FREQ` and `BY` part, `BYSETPOS`, `WKST`,
+`COUNT`, `UNTIL`, `RDATE`, `EXDATE` and overrides matched by `UID` and `RECURRENCE-ID`. A local time in a
+daylight-saving gap moves forward by the gap; an ambiguous one takes its first offset. Hourly and shorter rules step in
+elapsed time. An override whose recurrence id is no instance is an extra occurrence, as the major clients treat it, and
+`RANGE=THISANDFUTURE` is read as an override of its one instance.
+
+Two caps bound an expansion: `MaxOccurrences` (10,000) stops with `calendar.too_many_occurrences` and the occurrences
+found; `MaxIterations` (100,000 candidates without an occurrence) stops a series with `calendar.recurrence_limit`. Each
+occurrence says where its end comes from (`EndKind`: stated, from a duration, a default day or no time).
+
+Alarms resolve their trigger times per occurrence with `CalendarAlarm.GetTriggerTimes(occurrence)`.
+
+## Publishing a calendar or a feed
+
+```csharp
+// A small export to any transport:
+return await CalendarWriter.ToFileAsync(events, "shifts.ics", new CalendarHeader { Name = "Shifts" }, cancellationToken: ct);
+
+// A feed an HTTP endpoint streams:
+return CalendarWriter.ToStreamedFile(db.Shifts.AsNoTracking().AsAsyncEnumerable().Select(ToEvent), "shifts.ics",
+    new CalendarHeader { Name = "Shifts", RefreshInterval = TimeSpan.FromHours(6) });
+```
+
+- Output is UTF-8 without a byte-order mark, CRLF, lines folded at 75 octets, served as `text/calendar; charset=utf-8`.
+- One `VTIMEZONE` per zone is written before the first item that uses it; `IncludeTimeZones = false` leaves out those of
+  zones with an IANA id. A zone is written with its IANA id where the system can name one.
+- The writer never reads a clock: `DTSTAMP` comes from the item, else its `LAST-MODIFIED`, else
+  `CalendarWriteOptions.Timestamp`. The same input writes the same bytes; a change in the written bytes between package
+  versions is noted in the changelog.
+- An item without `UID` or timestamp, one that ends before it starts, or a zone without an id fails with a
+  `CalendarWriteException` naming the item and the property.
+- Name and refresh interval are written as `NAME` and `X-WR-CALNAME`, `REFRESH-INTERVAL` and `X-PUBLISHED-TTL`.
+
+Properties and components the model does not cover (`X-APPLE-*`, `X-MICROSOFT-*`, unknown components) are kept on the
+typed item and written back unchanged. The component tree can be pruned or built in code and written with
+`CalendarWriter.WriteAsync(stream, root)`.
+
+## Limits and options
+
+| Option | Default | Exceeded |
+| --- | --- | --- |
+| `MaxBytes` | 16 MiB | One `calendar.too_large` error; nothing past the limit is read. |
+| `MaxComponents` | 50,000 | Reading stops with `calendar.too_many_components`; the items before it are kept. |
+| `MaxLineBytes` | 4 MiB | The line is dropped with `calendar.line_too_long`; the item keeps its value. |
+| `MaxPropertiesPerComponent` | 1,000 | The item has no value (`calendar.too_many_properties`); reading continues. |
+| `MaxDepth` | 8 | The item has no value (`calendar.nesting_too_deep`); reading continues. |
+
+The keys are listed in the [configuration reference](/docs/reference/configuration#calendars).
+
+## Error codes
+
+`calendar.unreadable`, `calendar.too_large`, `calendar.line_too_long`, `calendar.too_many_components`,
+`calendar.too_many_properties`, `calendar.nesting_too_deep`, `calendar.malformed_line`, `calendar.unexpected_end`,
+`calendar.required`, `calendar.invalid_value`, `calendar.unknown_time_zone`, `calendar.duplicate_uid`,
+`calendar.too_many_occurrences`, `calendar.recurrence_limit` — constants of `CalendarErrorCodes`. Each error carries the
+item's index and line, the component and `UID`, the property, its line and value, and the expected kind, the limit or
+the time-zone id where they apply.
