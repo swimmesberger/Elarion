@@ -212,6 +212,18 @@ can be read as plain rows of typed cells with the same formats and limits.
   labels.
 - Given a workbook already in memory, when it is read as plain rows, then the read is synchronous, and each number or
   date cell carries the number format the file gives it.
+- Given a run-time column whose values are text in some rows and numbers in others, when it is written, then each value
+  keeps its own type and the column has no format of its own (FR-081).
+- Given an export that needs a title above its header, when the application adds title rows, then they stand above the
+  header row, which stays in place while scrolling, and a read that names the header row reads the records (FR-082).
+- Given a worksheet of lookup values, when the application writes it hidden, then the workbook opens on its first
+  visible worksheet and a reader skips the hidden one (FR-083).
+- Given a run-time worksheet with a total row, when the application writes the total as a footer row, then the dropdown
+  lists stop above it (FR-084).
+- Given a one-line in-memory export, when the application passes worksheet options, then they apply as they do to an
+  added worksheet (FR-085).
+- Given a caller without an asynchronous context, when it writes a workbook into memory, then the write is synchronous
+  and blocks on no task (FR-086).
 
 ## Requirements
 
@@ -372,6 +384,17 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
 - FR-079: A workbook already in memory MUST be readable as plain rows synchronously, without copying memory backed by an
   array.
 - FR-080: A number or date cell read without a record MUST carry the number format the file gives it.
+- FR-081: A run-time worksheet MUST be able to declare a general column, whose values each take their own type and
+  default format and which carries no column format; text in it MUST NOT take the text format.
+- FR-082: A worksheet MUST accept, per call, title rows of per-value cells above its header row; the frozen pane and
+  the dropdown lists MUST follow the moved header row, and a write error MUST name the row the spreadsheet shows.
+- FR-083: A worksheet MUST be writable hidden; the workbook MUST open on its first visible worksheet, and a workbook
+  whose worksheets are all hidden MUST fail when it is completed.
+- FR-084: A run-time worksheet MUST accept the per-call worksheet options of a record worksheet (name, title rows,
+  footer rows, hidden); a column filter for it MUST fail before anything is written.
+- FR-085: The one-line in-memory export of records MUST accept the per-call worksheet options.
+- FR-086: A workbook of one worksheet, from records or a run-time definition, MUST be writable into memory
+  synchronously without blocking on a task.
 
 ## Success criteria
 

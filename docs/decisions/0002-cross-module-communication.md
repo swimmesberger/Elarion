@@ -244,3 +244,34 @@ the seam stays "own the convention and the analyzer," not "generate adapters."
   but broad breaking change, intentionally out of scope here.
 - **A generated gRPC/HTTP client backend** for `[ModuleContract]`, for when a module is extracted
   out of process. Not needed while everything is in-process.
+
+## Amendment (2026-11-27): `DependsOn` cycles are ordered as one unit and reported
+
+`ELMOD008` asks a module that injects another module's contract to name that module in `DependsOn`. Two modules that
+inject each other's contracts therefore name each other, and the generated bootstrapper's ordering silently appended
+the members of such a cycle, and every module depending on them, by name after the modules it could order. A typo in
+`DependsOn` had the same effect on the module that carried it.
+
+**Decision.**
+
+- **A mutual dependency is legitimate.** When each module needs the other, naming each other is the honest
+  declaration, and it satisfies `ELMOD008`. `DependsOn` keeps meaning "needs, and initializes after"; in a cycle the
+  second half cannot hold, so it is relaxed for the members of the cycle only.
+- **A cycle is placed as one unit.** The bootstrapper orders the strongly connected components of the dependency
+  graph: a cycle comes after everything any of its members depends on and before everything that depends on any of
+  them, and its members are ordered by the tie-break the sort already used (Core first, then by name). For an acyclic
+  graph the order is unchanged.
+- **The cycle is reported as `ELMOD009`, Info,** naming the modules and the order chosen. Info, not Warning: the
+  guidance says the cycle is allowed, and an application that treats warnings as errors should not have to suppress
+  a declaration the framework asked for. An application that wants no cycles raises the severity in `.editorconfig`.
+- **An unknown `DependsOn` name orders nothing and is reported as `ELMOD010`, Warning,** like `ELMOD004` for an
+  unknown `[ModuleEndpoints]` name.
+
+**Guidance.** Neither member of a cycle may rely on the other having initialized first; contracts resolve lazily, so
+injecting each other works. Break a cycle when one direction only reacts to the other (an event), or when both use one
+piece that can move into a third or a Core module.
+
+**Rejected.** *A Warning for every cycle*: it would make the dependency `ELMOD008` asks for a warning of its own.
+*Refusing cycles (an error), or letting `ELMOD008` accept a missing back edge*: either forces an application to hide
+a real dependency, and a disabled module would still break its consumer. *Keeping declaration order for the cycle*:
+it also moved the cycle's dependents ahead of modules they did not depend on, which no rule explained.

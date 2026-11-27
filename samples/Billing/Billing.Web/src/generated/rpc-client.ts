@@ -698,13 +698,15 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
   }
 }
 
-// A [ClientTag("timeout", ...)] value in milliseconds: "1500ms", "30s", "3m", or a bare number of seconds.
+// A [ClientTag("timeout", ...)] value in milliseconds: "1500ms", "30s", "3m", or a bare number of seconds, above
+// zero and at most 2147483647 ms (a longer timer fires at once). The build reports any other value (ELRPC013).
 function parseTimeoutTag(value: string | undefined): number | undefined {
-  const match = value === undefined ? null : /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m)?\s*$/i.exec(value)
+  const match = value === undefined ? null : /^[ \t]*([0-9]+(?:\.[0-9]+)?)[ \t]*(ms|s|m)?[ \t]*$/i.exec(value)
   if (!match) return undefined
   const amount = Number(match[1])
   const unit = (match[2] ?? 's').toLowerCase()
-  return unit === 'ms' ? amount : unit === 'm' ? amount * 60_000 : amount * 1000
+  const milliseconds = unit === 'ms' ? amount : unit === 'm' ? amount * 60_000 : amount * 1000
+  return milliseconds > 0 && milliseconds <= 2_147_483_647 ? milliseconds : undefined
 }
 
 // Aborts when either signal does: the caller's cancel and the timeout.

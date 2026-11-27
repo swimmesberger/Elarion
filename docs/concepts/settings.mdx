@@ -104,8 +104,14 @@ if (!write.IsSuccess && write.Error.Code == SettingErrorCodes.Pinned)
 ```
 
 `GetAsync` returns the **effective** value. `GetResolvedAsync` returns it together with its `SettingSource` and store
-`Version` (`SettingValue<T>`; `IsSet` is `false` while the default applies), so "unset" is distinguishable from
-"explicitly stored the default" without a nullable value type or a `DescribeAsync` call. `SetAsync` returns `Result<SettingWrite>` (the new version);
+`Version` (`SettingValue<T>`), so "unset" is distinguishable from "explicitly stored the default" without a nullable
+value type or a `DescribeAsync` call. Two shorthands read `Source`:
+
+- `IsSet` is `Source != SettingSource.Default`: `true` for a stored value, a pin, **and** a deployment value at the
+  `FallbackConfigurationKey`. It answers "does anything override the default?".
+- `IsStored` is `Source == SettingSource.Store`: `true` only while the effective value is the stored one. It answers
+  "has someone saved a value?", for example to show a "Reset" button. A pinned setting reports `false` even when a
+  stored value exists underneath the pin, because that value is ignored. `SetAsync` returns `Result<SettingWrite>` (the new version);
 `ResetAsync` removes the stored value so the setting reverts to its default. Failures are `AppError`s with a stable
 code ([ADR-0080](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md))
 and a `SettingWriteFailure(Key)` payload: `settings.pinned` (`SettingErrorCodes.Pinned`, a `BusinessRule` — the

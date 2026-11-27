@@ -77,6 +77,11 @@ return result.ToAppError("file", German);
 - Reading is lenient (see below). An application that refuses broken files instead refuses when
   `CalendarErrorCodes.IsStructural(error.Code)` holds for an error: the file is not a calendar or past a file limit, a
   line is malformed, too long or holds a control character, a component ends unexpectedly or exceeds a per-item limit.
+  An application that imports leniently instead skips the entries that have errors and keeps the rest: where an error
+  is reported says what it affects (`FileErrors` the file, an entry's `Errors` only that item, which has no value when a
+  per-item limit stopped it). `CalendarErrorCodes.IsLimit(error.Code)` tells a configured limit (`too_large`,
+  `line_too_long`, `too_many_*`, `nesting_too_deep`, `recurrence_limit`) apart from a broken file, to word it as "too
+  large" rather than "broken".
   `Strict = true` in the read options also reports what the lenient reader accepts silently: a rule with both `COUNT`
   and `UNTIL` (`calendar.invalid_value`, the item has no value) and a value with a control character other than tab
   (`calendar.control_character`, the line is skipped).
@@ -86,7 +91,7 @@ return result.ToAppError("file", German);
 
 ### Files as producers write them
 
-The reader accepts a byte-order mark, UTF-16, lines that were never folded, LF and CR line ends, folds with a tab,
+The reader accepts a byte-order mark, also at the start of a later line of files concatenated from several exports, UTF-16, lines that were never folded, LF and CR line ends, folds with a tab,
 quoted and vendor-prefixed `TZID`s (`/mozilla.org/…/Europe/Berlin`, `"W. Europe Standard Time"`), dates where
 date-times belong, truncated or doubled time suffixes, and Exchange's all-day flag. A line that is not valid UTF-8 is
 decoded with the fallback encoding (Windows-1252 by default, `FallbackEncoding` to change it); `UsedFallbackEncoding`
@@ -120,13 +125,17 @@ foreach (var occurrence in week.Occurrences)
 Expansion implements RFC 5545 recurrence for the Gregorian calendar: every `FREQ` and `BY` part, `BYSETPOS`, `WKST`,
 `COUNT`, `UNTIL`, `RDATE`, `EXDATE` and overrides matched by `UID` and `RECURRENCE-ID`. A local time in a
 daylight-saving gap moves forward by the gap; an ambiguous one takes its first offset. Hourly and shorter rules step in
-elapsed time. A repeated value of a `BY` list counts once, and a list longer than the part has values does not parse.
+elapsed time. A repeated value of a `BY` list counts once, as RFC 5545 allows repeats: `BYMONTH=1,1,1` is January,
+however many items the list has. Parsing is linear in the rule's length, which the line limit bounds
+(`calendar.line_too_long`).
 
 - **Overrides** match their instance exactly, as RFC 5545 says: an override whose recurrence id is no instance (the
   right day at another time, say) is an extra occurrence, as the major clients treat it. A date `RECURRENCE-ID` against
   date-time instances matches the day's instance. `RANGE=THISANDFUTURE` is read as an override of its one instance.
 - **Updates sent again**: of several overrides of one instance, only the latest counts (the highest `SEQUENCE`, then
   the latest `DTSTAMP`, then the later one), as calendar clients do. `ResolveOverrideVersions = false` keeps them all.
+  `CalendarRecurrence.LatestVersions(result.Items)` returns the items without the versions that lose, by the same
+  rule, for an application that stores or shows items rather than occurrences.
 - **Cancelled items**: by default an item with `STATUS:CANCELLED` is an occurrence like any other, because the
   expansion reports what the file states. `SkipCancelled = true` leaves them out: a cancelled override removes its
   instance, a cancelled master its series. An application that shows a calendar turns it on.
@@ -197,6 +206,6 @@ The keys are listed in the [configuration reference](/docs/reference/configurati
 `calendar.required`, `calendar.invalid_value`, `calendar.unknown_time_zone`, `calendar.duplicate_uid`,
 `calendar.too_many_occurrences`, `calendar.recurrence_limit`, `calendar.too_many_lines`, `calendar.too_many_items`,
 `calendar.control_character` — constants of `CalendarErrorCodes`, whose `IsStructural(code)` says which are about the
-file's form. Each error carries the
+file's form and `IsLimit(code)` which report a configured limit. Each error carries the
 item's index and line, the component and `UID`, the property, its line and value, and the expected kind, the limit or
 the time-zone id where they apply.

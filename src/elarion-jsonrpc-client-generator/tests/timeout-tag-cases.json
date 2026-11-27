@@ -1,0 +1,42 @@
+{
+  "description": "[ClientTag(\"timeout\", value)] cases shared by the generated client's parseTimeoutTag (generate.test.ts) and the ELRPC013 analyzer (ClientTagAnalyzerTests.cs). A valid value is read as milliseconds; the client ignores an invalid one and the build refuses it.",
+  "valid": [
+    { "value": "150ms", "milliseconds": 150 },
+    { "value": "1.5ms", "milliseconds": 1.5 },
+    { "value": "30s", "milliseconds": 30000 },
+    { "value": "1.5s", "milliseconds": 1500 },
+    { "value": "3m", "milliseconds": 180000 },
+    { "value": "45", "milliseconds": 45000 },
+    { "value": "180S", "milliseconds": 180000 },
+    { "value": "250MS", "milliseconds": 250 },
+    { "value": " 30 s ", "milliseconds": 30000 },
+    { "value": "\t2m", "milliseconds": 120000 },
+    { "value": "007s", "milliseconds": 7000 },
+    { "value": "2147483647ms", "milliseconds": 2147483647 },
+    { "value": "35791m", "milliseconds": 2147460000 }
+  ],
+  "invalid": [
+    "",
+    " ",
+    "abc",
+    "s",
+    "30 sec",
+    "30sec",
+    "1h",
+    "-5s",
+    "+5s",
+    "0",
+    "0ms",
+    "0.0s",
+    "1e3ms",
+    ".5s",
+    "5.s",
+    "5,5s",
+    "30s ms",
+    "30s\n",
+    "2147483648ms",
+    "35792m",
+    "\u0663\u0660s",
+    "30\u017f"
+  ]
+}

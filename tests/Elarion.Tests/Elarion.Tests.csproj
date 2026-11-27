@@ -40,6 +40,9 @@
     <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest"/>
     <!-- Workbooks saved by other applications, which the spreadsheet reader tests read from the output directory. -->
     <None Include="Spreadsheets/Fixtures/**" CopyToOutputDirectory="PreserveNewest"/>
+    <!-- The timeout-tag cases the generated TypeScript client is tested with; ClientTagAnalyzerTests reads the same. -->
+    <None Include="../../src/elarion-jsonrpc-client-generator/tests/timeout-tag-cases.json"
+          Link="Analyzers/Fixtures/timeout-tag-cases.json" CopyToOutputDirectory="PreserveNewest"/>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Elarion.Abstractions/Elarion.Abstractions.csproj"/>

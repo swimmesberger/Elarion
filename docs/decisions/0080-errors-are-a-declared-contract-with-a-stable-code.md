@@ -163,3 +163,30 @@ multiply; the client answers only whether a retry can help. **Retryability decla
 kinds already decide it for every code but two framework ones, and a declaration per code would be one more thing to
 keep right.
 
+
+## Amendment (2026-11-27): the SSR status takes the application's errors and Start's stream result
+
+The TanStack Start adapter's `ssrStatusFor(error)` and `withResponseStatus(response, status)` were too narrow for a
+server entry to use. An application's API wrapper throws its own error types (a forbidden or a maintenance error)
+that the built-in mapping cannot know, and Start's handler callback returns either a `Response` or the stream result
+`{ response, serverSsrCleanup, dispose }`. A wrapper that unwrapped the response and returned a bare `Response` lost
+`dispose`, which cancels the stream and cleans up the render when the request is aborted. The wrapper also had no way
+to add the headers that go with the status, such as `Retry-After`. So an application kept its own copy of both
+helpers.
+
+1. **`ssrStatusFor(error, { classify })`.** The application's `classify(error) => status | undefined` is consulted
+   first, for the error and each `cause`, outermost first. The first status it returns wins; undefined leaves the
+   error to the built-in mapping. The application maps only its own types and keeps the framework's 401, 403, 404
+   and 503.
+2. **`withResponseStatus(result, status, headers?)`** takes a `Response` or the stream result and returns the shape it
+   was given. For the stream result, only `response` is replaced, so `serverSsrCleanup` and `dispose` stay attached.
+   The body stream is handed over, not copied, so `dispose` still cancels what the client reads. The given headers
+   are set over the rendered ones; a 503 still gets `Cache-Control: no-store` unless a header says otherwise. The
+   parameter type is structural (`Response | { response: Response }`), so the adapter imports no router-core
+   internals, and a test type-checks it against router-core's `HandlerCallbackResult`.
+
+Rejected: **an `instanceof` list of error classes as the option** — it cannot express a test by `name` or by a
+field, and a function covers it in one line. **Consulting `classify` only for the outermost error** — the
+application's error usually arrives wrapped by `mapError` or by the router, which is why the built-in mapping already
+walks `cause`. **Returning a fresh `{ response, serverSsrCleanup: 'none' }`** (router-core's `replaceSsrResponse`) —
+that disposes the render, which is right for a new body but wrong for the same body with another status.

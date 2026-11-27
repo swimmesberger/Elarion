@@ -52,6 +52,7 @@ public sealed class ClientExportsSchemaTests {
         private static readonly SortMap<Invoice> SortKeys = SortMap<Invoice>
             .CreateBuilder("createdAt", i => i.CreatedAt, SortDirection.Descending)
             .Add("number", i => i.Number)
+            .MaxLevels(2)
             .Build();
     }
 
@@ -158,8 +159,11 @@ public sealed class ClientExportsSchemaTests {
                                 {"key":"number","direction":"ascending"}]
                                """))
             .Should().BeTrue();
+        // How many keys one sort may combine, so a client's description lists them all.
+        methods["invoices.list"]!["maxSortLevels"]!.GetValue<int>().Should().Be(2);
         // Two sort maps: the export cannot tell which one the sort parameter uses (the generator warns, ELRPC012).
         methods["invoices.byAccount"]!.AsObject().ContainsKey("sortKeys").Should().BeFalse();
+        methods["invoices.byAccount"]!.AsObject().ContainsKey("maxSortLevels").Should().BeFalse();
     }
 
     [Fact]
@@ -212,7 +216,8 @@ public sealed class ClientExportsSchemaTests {
         });
 
         empty.Should().Be(without);
-        without.Should().NotContain("\"constants\"").And.NotContain("\"presets\"").And.NotContain("\"sortKeys\"");
+        without.Should().NotContain("\"constants\"").And.NotContain("\"presets\"").And.NotContain("\"sortKeys\"")
+            .And.NotContain("\"maxSortLevels\"");
     }
 
     public sealed class BrokenPreset {
