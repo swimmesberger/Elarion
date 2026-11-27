@@ -278,3 +278,8 @@ must not stand alone between a caller and the rows.
   always-true relation, refused for a directory of another key type like `ForUser`.
 - Rejected: an `IsAuthenticated`-free mode of the generated filter for test doubles. Failing closed for an
   unauthenticated caller is the point; the resource-authorization page now says a stub must set it.
+- **A registered filter may be internal.** The host bootstrapper names each registered filter of a referenced module
+  assembly, so a non-public filter (or entity) failed to compile there. The module's manifest generator now emits a
+  public `{Filter}ElarionRegistration.Register(IServiceCollection)` for such a filter and records it in the manifest
+  entry (an appended fifth field, so older manifests still decode); the bootstrapper calls it. A public filter keeps
+  the direct registration, so its generated code is unchanged.

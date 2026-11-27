@@ -36,7 +36,9 @@ Declare a filter for an entity on a dedicated partial class (the entity stays cl
 public sealed partial class ContactAccess;
 ```
 
-The generator completes the class as an `IQueryAuthorizer<Contact>` and auto-registers it. Inject it into the
+The generator completes the class as an `IQueryAuthorizer<Contact>` and auto-registers it. The class (and the entity)
+may be `internal`: a filter in a module assembly that the host cannot name is registered through a public
+`ContactAccessElarionRegistration` class the module's own generator emits next to it. Inject it into the
 handler and compose it into the query **before** paging:
 
 ```csharp

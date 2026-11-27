@@ -321,6 +321,56 @@ public sealed class ElarionManifestGeneratorTests {
     }
 
     [Fact]
+    public void Manifest_ANonPublicRegisteredResourceFilter_GetsAPublicRegistrar_ThatCompiles() {
+        const string source =
+            """
+            using System;
+            using System.Linq.Expressions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Identity;
+
+            namespace Sample.Manifest
+            {
+                internal sealed class Contact { public Guid Id { get; set; } public Guid OwnerId { get; set; } }
+
+                [ResourceFilter<Contact>(OwnerProperty = "OwnerId")]
+                internal sealed class ContactAccess : IQueryAuthorizer<Contact> {
+                    public static ContactAccess Specification { get; } = new();
+                    public Expression<Func<Contact, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
+                }
+
+                public sealed class Order { public Guid Id { get; set; } }
+
+                [ResourceFilter<Order>(OwnerProperty = "Id")]
+                public sealed class OrderAccess : IQueryAuthorizer<Order> {
+                    public static OrderAccess Specification { get; } = new();
+                    public Expression<Func<Order, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
+                }
+            }
+            """;
+
+        var generated = RunGenerator(source, out var diagnostics);
+
+        diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).Should().BeEmpty();
+        generated.Should().Contain("public static class ContactAccessElarionRegistration")
+            .And.Contain("global::Sample.Manifest.ContactAccessElarionRegistration")
+            .And.Contain("TryAddSingleton<global::Elarion.Abstractions.Authorization.IQueryAuthorizer<global::Sample.Manifest.Contact>>(services, global::Sample.Manifest.ContactAccess.Specification);")
+            .And.NotContain("OrderAccessElarionRegistration", "a public filter is registered by name, as before");
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        CSharpCompilation.Create(
+                "ManifestProducerWithRegistrar",
+                [
+                    CSharpSyntaxTree.ParseText(source, parseOptions, cancellationToken: TestContext.Current.CancellationToken),
+                    CSharpSyntaxTree.ParseText(generated, parseOptions, cancellationToken: TestContext.Current.CancellationToken)
+                ],
+                CreateMetadataReferences(),
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+            .GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Manifest_ModuleEndpointsWithoutHooks_WarnsElmod005AndPublishesNothing() {
         const string source =
             """

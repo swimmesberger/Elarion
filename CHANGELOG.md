@@ -196,6 +196,11 @@ minor releases may include breaking changes.
   went out with an earlier row's values, so distinct rows were dropped (or, with `ON CONFLICT DO NOTHING`, silently
   skipped and missing from the written count). Each row now runs its own command on the same prepared statement. See
   [SQL mapping](https://elarion.wimmesberger.dev/docs/capabilities/sql-mapping#reads-and-writes).
+- **A registered `[ResourceFilter]` in a module assembly had to be public.** The host bootstrapper named the filter
+  class and its entity, so an `internal` one failed to compile in the host. The module's manifest generator now emits a
+  public `{Filter}ElarionRegistration` for a non-public filter, and the bootstrapper registers the filter through it;
+  public filters are registered as before. See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization).
 
 ## [0.4.6] - 2026-11-24
 

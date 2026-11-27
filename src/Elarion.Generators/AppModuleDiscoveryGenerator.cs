@@ -460,7 +460,10 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         var resourceFiltersByModule =
             new Dictionary<string, List<ElarionManifest.ResourceFilter>>(StringComparer.Ordinal);
         var unmatchedResourceFilters = new List<ElarionManifest.ResourceFilter>();
+        // A filter of this compilation is accessible here whatever its accessibility, so it is registered directly;
+        // only a referenced assembly's non-public filter goes through the registrar that assembly emitted.
         var resourceFilterEntries = currentResourceFilters.AsImmutableArray
+            .Select(static filter => filter with { RegistrarFqn = null })
             .Concat(manifest.ResourceFilters)
             .Distinct()
             .ToList();
@@ -1109,6 +1112,12 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         sb.AppendLine("        this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("    {");
         foreach (var filter in filters) {
+            if (filter.RegistrarFqn is { } registrar) {
+                // A non-public filter of a referenced assembly: its assembly's public registrar does the same TryAdd.
+                sb.AppendLine($"        {registrar}.Register(services);");
+                continue;
+            }
+
             var serviceType = $"{ElarionGeneratorConventions.QueryAuthorizerTypeFqn}<{filter.EntityFqn}>";
             // TryAdd: an IQueryAuthorizer<T> the application registered itself (a composed rule, from a module's
             // ConfigureServices or the host) is the whole rule and must not be replaced by one of its building blocks.
