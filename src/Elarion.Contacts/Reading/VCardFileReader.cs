@@ -5,8 +5,8 @@ using Elarion.ContentLines;
 namespace Elarion.Contacts.Reading;
 
 /// <summary>
-/// The card state machine over the shared content-line layer (FR-003–FR-019, FR-033–FR-039, FR-047–FR-049): one pass,
-/// no recursion, every line counted against its card.
+/// The card state machine over the shared content-line layer (FR-003–FR-019, FR-033–FR-039, FR-047–FR-049, FR-073,
+/// FR-074): one pass, no recursion, every line counted against its card and the file.
 /// </summary>
 internal static class VCardFileReader {
     private const string DefaultVersion = "3.0";
@@ -23,6 +23,7 @@ internal static class VCardFileReader {
 
         var entries = new List<ContactEntry>();
         var fileErrors = new List<ContactError>();
+        var state = new ReadState(options);
         var sawBegin = false;
         Card? card = null;
 
@@ -36,32 +37,11 @@ internal static class VCardFileReader {
                     continue;
                 }
 
-                if (reader.IsTooLong) {
-                    if (card is null || !card.CountLine(lineNumber, options)) continue;
-                    card.AgentPending = false;
-                    var name = ContentLineParser.PeekName(line, allowGroups: true) ?? "";
-                    card.Errors.Add(name == "PHOTO"
-                        ? new ContactError(
-                            ContactErrorCodes.PhotoTooLarge,
-                            $"The photo is larger than {options.MaxPhotoBytes.ToString(CultureInfo.InvariantCulture)} bytes.",
-                            lineNumber: lineNumber, property: name, limit: options.MaxPhotoBytes)
-                        : new ContactError(
-                            ContactErrorCodes.LineTooLong,
-                            $"The line is longer than {reader.Limit.ToString(CultureInfo.InvariantCulture)} bytes.",
-                            lineNumber: lineNumber, property: name.Length == 0 ? null : name, limit: reader.Limit));
-                    continue;
-                }
+                var isTooLong = reader.IsTooLong;
+                ParsedContentLine parsed = default;
+                var isParsed = !isTooLong && ContentLineParser.TryParse(line, rules, decoder, out parsed);
 
-                if (!ContentLineParser.TryParse(line, rules, decoder, out var parsed)) {
-                    if (card is null || !card.CountLine(lineNumber, options)) continue;
-                    card.AgentPending = false;
-                    card.Errors.Add(new ContactError(
-                        ContactErrorCodes.MalformedLine, "The line has no property name or no colon; it was skipped.",
-                        lineNumber: lineNumber, value: decoder.Decode(line)));
-                    continue;
-                }
-
-                if (parsed.Name == "BEGIN" && IsVCard(parsed.Value)) {
+                if (isParsed && parsed.Name == "BEGIN" && IsVCard(parsed.Value)) {
                     sawBegin = true;
                     if (card is not null) {
                         if (card.AgentPending) {
@@ -70,7 +50,7 @@ internal static class VCardFileReader {
                         }
 
                         card.Errors.Add(UnexpectedEnd());
-                        entries.Add(card.Close(options));
+                        entries.Add(card.Close(options, state));
                         card = null;
                     }
 
@@ -88,16 +68,50 @@ internal static class VCardFileReader {
                 }
 
                 if (card is null) continue;
-                if (parsed.Name == "END" && IsVCard(parsed.Value)) {
-                    entries.Add(card.Close(options));
+                if (isParsed && parsed.Name == "END" && IsVCard(parsed.Value)) {
+                    entries.Add(card.Close(options, state));
                     card = null;
                     continue;
                 }
 
                 if (!card.CountLine(lineNumber, options)) continue;
-                var property = ToProperty(parsed, lineNumber, decoder, card.Errors);
+                if (!state.CountLine()) {
+                    // FR-073: the file-wide bound; the card being read is incomplete and is not kept.
+                    fileErrors.Add(state.TooManyProperties(lineNumber));
+                    card = null;
+                    break;
+                }
+
+                if (isTooLong) {
+                    card.AgentPending = false;
+                    var name = ContentLineParser.PeekName(line, allowGroups: true) ?? "";
+                    card.Errors.Add(name == "PHOTO"
+                        ? new ContactError(
+                            ContactErrorCodes.PhotoTooLarge,
+                            $"The photo is larger than {options.MaxPhotoBytes.ToString(CultureInfo.InvariantCulture)} bytes.",
+                            lineNumber: lineNumber, property: name, limit: options.MaxPhotoBytes)
+                        : new ContactError(
+                            ContactErrorCodes.LineTooLong,
+                            $"The line is longer than {reader.Limit.ToString(CultureInfo.InvariantCulture)} bytes.",
+                            lineNumber: lineNumber, property: name.Length == 0 ? null : name, limit: reader.Limit));
+                    continue;
+                }
+
+                if (!isParsed) {
+                    card.AgentPending = false;
+                    card.Errors.Add(new ContactError(
+                        ContactErrorCodes.MalformedLine, "The line has no property name or no colon; it was skipped.",
+                        lineNumber: lineNumber, value: decoder.Decode(line)));
+                    continue;
+                }
+
+                var property = ToProperty(parsed, lineNumber, decoder, state, card.IsVersion21, card.Errors);
                 card.Properties.Add(property);
-                if (property.Name == "VERSION") card.Version ??= ContentText.Unescape(property.Value).Trim();
+                if (property.Name == "VERSION" && card.Version is null) {
+                    card.Version = ContentText.Unescape(property.Value).Trim();
+                    if (card.IsVersion21) card.ConvertEarlierTo21Escaping();
+                }
+
                 card.AgentPending = property.Name == "AGENT" && property.Value.Trim().Length == 0;
             }
         }
@@ -105,24 +119,38 @@ internal static class VCardFileReader {
         if (card is not null) {
             card.FinishAgent(lineLimit);
             card.Errors.Add(UnexpectedEnd());
-            entries.Add(card.Close(options));
+            entries.Add(card.Close(options, state));
         }
 
-        if (!sawBegin && fileErrors.Count == 0)
-            fileErrors.Add(new ContactError(ContactErrorCodes.Unreadable, "The file holds no vCard."));
+        if (!sawBegin && fileErrors.Count == 0) {
+            // FR-075: say what the bytes are when they are not text, so "a PDF" and "a text without a vCard" word apart.
+            var mediaType = fileEncoding.Transcoded ? null : FileSniffer.BinaryMediaType(input.Span);
+            fileErrors.Add(mediaType is null
+                ? new ContactError(ContactErrorCodes.Unreadable, "The file holds no vCard.")
+                : new ContactError(ContactErrorCodes.Unreadable, $"The file is not text ({mediaType}); it holds no vCard.", mediaType: mediaType));
+        }
 
-        return new ContactReadResult(entries, fileErrors, fileEncoding.ByteOrderMarkEncoding, decoder.UsedFallbackEncoding);
+        if (state.OmittedErrors > 0) {
+            fileErrors.Add(new ContactError(
+                ContactErrorCodes.TooManyErrors,
+                $"The file has {state.OmittedErrors.ToString(CultureInfo.InvariantCulture)} more problems than the {options.MaxErrors.ToString(CultureInfo.InvariantCulture)} listed; they are not listed.",
+                limit: options.MaxErrors));
+        }
+
+        return new ContactReadResult(entries, fileErrors, fileEncoding.ByteOrderMarkEncoding, decoder.UsedFallbackEncoding, state.OmittedErrors);
     }
 
     private static ContactError UnexpectedEnd() =>
         new(ContactErrorCodes.UnexpectedEnd, "The vCard is not closed by END:VCARD.");
 
-    private static ContactProperty ToProperty(ParsedContentLine parsed, int lineNumber, ContentTextDecoder decoder, List<ContactError> errors) {
-        var parameters = new ContactParameter[parsed.Parameters.Count];
+    private static ContactProperty ToProperty(
+        ParsedContentLine parsed, int lineNumber, ContentTextDecoder decoder, ReadState state, bool version21, List<ContactError> errors) {
+        // Names and short values repeat on every card: one instance of each per read, and no array for no parameters.
+        var parameters = parsed.Parameters.Count == 0 ? [] : new ContactParameter[parsed.Parameters.Count];
         string? encoding = null, charset = null;
         for (var i = 0; i < parameters.Length; i++) {
             var parameter = parsed.Parameters[i];
-            parameters[i] = new ContactParameter(parameter.Name, [.. parameter.Values]);
+            parameters[i] = state.Parameter(parameter.Name, parameter.Values);
             if (parameter.Values.Count == 0) continue;
             if (parameter.Name == "ENCODING") encoding ??= parameter.Values[0];
             else if (parameter.Name == "CHARSET") charset ??= parameter.Values[0];
@@ -132,14 +160,16 @@ internal static class VCardFileReader {
         bool unknownCharset;
         if (encoding is not null && encoding.Equals("QUOTED-PRINTABLE", StringComparison.OrdinalIgnoreCase)) {
             var bytes = DecodeQuotedPrintable(parsed.Value);
-            value = EscapeLineBreaks(decoder.Decode(bytes, charset, out unknownCharset));
+            var text = decoder.Decode(bytes, charset, out unknownCharset);
+            value = version21 ? EscapeVersion21(text) : EscapeLineBreaks(text);
         }
         else if (encoding is not null && (encoding.Equals("B", StringComparison.OrdinalIgnoreCase) || encoding.Equals("BASE64", StringComparison.OrdinalIgnoreCase))) {
             value = Encoding.Latin1.GetString(parsed.Value);
             unknownCharset = false;
         }
         else {
-            value = decoder.Decode(parsed.Value, charset, out unknownCharset);
+            var text = decoder.Decode(parsed.Value, charset, out unknownCharset);
+            value = version21 ? EscapeVersion21(text) : text;
         }
 
         if (unknownCharset) {
@@ -148,7 +178,47 @@ internal static class VCardFileReader {
                 lineNumber: lineNumber, property: parsed.Name, value: value, charset: charset));
         }
 
-        return new ContactProperty(parsed.Group, parsed.Name, parameters, value) { LineNumber = lineNumber };
+        return new ContactProperty(state.Name(parsed.Group), state.Name(parsed.Name)!, parameters, state.ShortValue(value)) { LineNumber = lineNumber };
+    }
+
+    /// <summary>
+    /// A vCard 2.1 value in the escaping of 3.0 and 4.0 (FR-072). 2.1 escapes only the semicolon, so every other
+    /// backslash is a character and is doubled, and a line break of a quoted-printable value becomes the <c>\n</c>
+    /// escape. The mapper and the writer then treat the value like any other: <c>N:C:\Daten</c> reads <c>C:\Daten</c>.
+    /// </summary>
+    /// <param name="text">The decoded 2.1 value.</param>
+    /// <param name="keepLineBreakEscapes">
+    /// Whether a <c>\n</c> already stands for a line break: for a value read before the card's <c>VERSION:2.1</c>, whose
+    /// quoted-printable line breaks were escaped by the 3.0 rule.
+    /// </param>
+    internal static string EscapeVersion21(string text, bool keepLineBreakEscapes = false) {
+        if (text.AsSpan().IndexOfAny('\\', '\r', '\n') < 0) return text;
+        var builder = new StringBuilder(text.Length + 8);
+        for (var i = 0; i < text.Length; i++) {
+            var c = text[i];
+            if (c == '\\') {
+                var next = i + 1 < text.Length ? text[i + 1] : '\0';
+                if (next == ';' || (keepLineBreakEscapes && next is 'n' or 'N')) {
+                    builder.Append(c).Append(next);
+                    i++;
+                }
+                else {
+                    builder.Append(@"\\");
+                }
+            }
+            else if (c == '\r') {
+                if (i + 1 < text.Length && text[i + 1] == '\n') i++;
+                builder.Append(@"\n");
+            }
+            else if (c == '\n') {
+                builder.Append(@"\n");
+            }
+            else {
+                builder.Append(c);
+            }
+        }
+
+        return builder.ToString();
     }
 
     // Quoted-printable (FR-010); soft breaks were joined by the line reader. An invalid escape keeps its characters.
@@ -221,18 +291,87 @@ internal static class VCardFileReader {
         return EqualsIgnoreCase(line[start..i].TrimEnd(" \t"u8), "PHOTO"u8);
     }
 
+    /// <summary>
+    /// The state of one read: the file-wide line and error budgets (FR-073, FR-074), and the names and short values
+    /// every card of a file repeats, held once, so a property costs its own object and not a copy of each string.
+    /// </summary>
+    private sealed class ReadState(ContactReadOptions options) {
+        // Enough for every name and common value of a real file; a hostile file of distinct names stops sharing there.
+        private const int MaxShared = 4096;
+        private const int MaxSharedValueLength = 32;
+
+        private readonly Dictionary<string, string> _strings = new(StringComparer.Ordinal);
+        private readonly Dictionary<(string Name, string Value), ContactParameter> _parameters = [];
+        private int _lines;
+        private int _errors;
+
+        /// <summary>The errors over <see cref="ContactReadOptions.MaxErrors"/>, counted and not kept.</summary>
+        public int OmittedErrors { get; private set; }
+
+        /// <summary>Counts a line of a card against <see cref="ContactReadOptions.MaxProperties"/>.</summary>
+        public bool CountLine() => ++_lines <= options.MaxProperties;
+
+        public ContactError TooManyProperties(int lineNumber) =>
+            new(ContactErrorCodes.TooManyPropertiesInFile,
+                $"The file holds more than {options.MaxProperties.ToString(CultureInfo.InvariantCulture)} properties; the contact being read and the rest were not read.",
+                lineNumber: lineNumber, limit: options.MaxProperties);
+
+        /// <summary>Keeps as many of <paramref name="errors"/> as <see cref="ContactReadOptions.MaxErrors"/> still allows and counts the rest.</summary>
+        public List<ContactError> Keep(List<ContactError> errors) {
+            var room = Math.Max(0, options.MaxErrors - _errors);
+            if (errors.Count <= room) {
+                _errors += errors.Count;
+                return errors;
+            }
+
+            _errors += room;
+            OmittedErrors += errors.Count - room;
+            return errors.GetRange(0, room);
+        }
+
+        public string? Name(string? name) => name is null ? null : Share(name);
+
+        public string ShortValue(string value) => value.Length <= MaxSharedValueLength ? Share(value) : value;
+
+        public ContactParameter Parameter(string name, List<string> values) {
+            if (values.Count == 0) return new ContactParameter(Share(name), []);
+            if (values.Count > 1 || values[0].Length > MaxSharedValueLength) {
+                var copy = new string[values.Count];
+                for (var i = 0; i < copy.Length; i++) copy[i] = ShortValue(values[i]);
+                return new ContactParameter(Share(name), copy);
+            }
+
+            if (_parameters.TryGetValue((name, values[0]), out var shared)) return shared;
+            var parameter = new ContactParameter(Share(name), [Share(values[0])]);
+            if (_parameters.Count < MaxShared) _parameters[(parameter.Name, parameter.Values[0])] = parameter;
+            return parameter;
+        }
+
+        private string Share(string value) {
+            if (value.Length == 0) return "";
+            if (_strings.TryGetValue(value, out var shared)) return shared;
+            if (_strings.Count < MaxShared) _strings[value] = value;
+            return value;
+        }
+    }
+
     /// <summary>The state of the card being read.</summary>
     private sealed class Card(int index, int lineNumber) {
+        // What a card over MaxPropertiesPerContact keeps of its properties: enough to name it in a preview.
+        private static readonly string[] DisplayProperties = ["FN", "N", "ORG", "EMAIL", "TEL", "UID"];
+
         private int _lines;
         private bool _tooMany;
         private StringBuilder? _agent;
         private bool _agentTooLong;
 
-        public List<ContactProperty> Properties { get; } = [];
+        public List<ContactProperty> Properties { get; private set; } = [];
 
         public List<ContactError> Errors { get; } = [];
 
         public string? Version { get; set; }
+
+        public bool IsVersion21 => Version == "2.1";
 
         // An AGENT with an empty value whose vCard follows on its own lines (vCard 2.1): kept as text, never parsed (FR-033).
         public bool AgentPending { get; set; }
@@ -250,6 +389,19 @@ internal static class VCardFileReader {
                 $"The vCard has more than {options.MaxPropertiesPerContact.ToString(CultureInfo.InvariantCulture)} lines; it was not read.",
                 lineNumber: line, limit: options.MaxPropertiesPerContact));
             return false;
+        }
+
+        /// <summary>
+        /// The properties read before a <c>VERSION:2.1</c> took the 3.0 escaping; they take 2.1's now. A line break of a
+        /// quoted-printable value among them already reads as <c>\n</c> and stays one.
+        /// </summary>
+        public void ConvertEarlierTo21Escaping() {
+            for (var i = 0; i < Properties.Count - 1; i++) {
+                var property = Properties[i];
+                if (IsBase64(property)) continue;
+                var value = EscapeVersion21(property.Value, keepLineBreakEscapes: true);
+                if (!ReferenceEquals(value, property.Value)) Properties[i] = property with { Value = value };
+            }
         }
 
         public void StartAgent() {
@@ -292,19 +444,37 @@ internal static class VCardFileReader {
             AgentDepth = 0;
         }
 
-        public ContactEntry Close(ContactReadOptions options) {
+        public ContactEntry Close(ContactReadOptions options, ReadState state) {
             FinishAgent(options.MaxLineBytes);
             var errors = Errors;
             Contact? contact = null;
             if (!_tooMany) contact = ContactMapper.Map(Properties, options.MaxPhotoBytes, errors);
+            else Properties = KeepForDisplay(Properties);
 
             // File order: errors with a line by that line, the card's own (empty, unexpected end) last.
             var located = errors
                 .Select((error, order) => (error, order))
                 .OrderBy(static pair => pair.error.LineNumber ?? int.MaxValue)
                 .ThenBy(static pair => pair.order)
-                .Select(pair => pair.error.At(index, lineNumber, contact?.DisplayName));
-            return new ContactEntry(index, lineNumber, Version ?? DefaultVersion, Properties, contact, located);
+                .Select(pair => pair.error.At(index, lineNumber, contact?.DisplayName))
+                .ToList();
+            return new ContactEntry(index, lineNumber, Version ?? DefaultVersion, Properties, contact, state.Keep(located));
         }
+
+        // A card over the limit has no contact; keeping all its lines would let a file of such cards hold every line it
+        // has (FR-048). The first formatted name, name, organization, e-mail address, phone number and UID stay, to name it.
+        private static List<ContactProperty> KeepForDisplay(List<ContactProperty> properties) {
+            var kept = new List<ContactProperty>(DisplayProperties.Length);
+            foreach (var name in DisplayProperties) {
+                var first = properties.Find(property => property.Name == name);
+                if (first is not null) kept.Add(first);
+            }
+
+            kept.Sort(static (a, b) => (a.LineNumber ?? 0).CompareTo(b.LineNumber ?? 0));
+            return kept;
+        }
+
+        private static bool IsBase64(ContactProperty property) =>
+            property.GetParameter("ENCODING").Any(static value => value.Equals("B", StringComparison.OrdinalIgnoreCase) || value.Equals("BASE64", StringComparison.OrdinalIgnoreCase));
     }
 }

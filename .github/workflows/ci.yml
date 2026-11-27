@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  # Every pull request, whatever it targets: in a stack only the bottom one targets main.
   pull_request:
-    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

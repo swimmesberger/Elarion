@@ -121,7 +121,7 @@ internal sealed partial class CalDavProtocol {
             using var stream = new MemoryStream(stored.Content.ToArray(), false);
             var read = await reader.ReadAsync(stream, settings.CalendarRead, cancellationToken).ConfigureAwait(false);
             var events = read.Events.Where(static e => e.HasValue).Select(static e => (CalendarItem)e.Value!).ToList();
-            foreach (var occurrence in CalendarRecurrence.Expand(events, start, end, caps).Occurrences) {
+            foreach (var occurrence in CalendarRecurrence.Expand(events, start, end, caps, cancellationToken).Occurrences) {
                 if (occurrence.Item is not CalendarEvent item || item.Transparency == CalendarTransparency.Transparent
                     || string.Equals(item.Status, "CANCELLED", StringComparison.OrdinalIgnoreCase) || occurrence.StartUtc is not { } s)
                     continue;

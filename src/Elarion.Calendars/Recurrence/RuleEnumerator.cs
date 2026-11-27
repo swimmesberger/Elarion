@@ -12,6 +12,12 @@ internal readonly record struct RecurrenceInstance(DateTime Local, DateTimeOffse
 /// frequencies of a zoned series step in elapsed time, so an hourly rule stays hourly across a daylight-saving change.
 /// The <c>DTSTART</c> is the first instance and counts towards <c>COUNT</c>.
 /// </summary>
+/// <remarks>
+/// The work is bounded three ways: periods without an instance (<c>maxIterations</c>), candidates built across all periods
+/// and within one (<c>maxCandidates</c>, checked as each is built, so one period of a year's every second stops early),
+/// and the cancellation token, checked per period. Without <c>COUNT</c>, enumeration starts a few periods before the
+/// window, for every frequency.
+/// </remarks>
 internal sealed class RuleEnumerator {
     private readonly CalendarRecurrenceRule _rule;
     private readonly DateTime _start;
@@ -21,6 +27,10 @@ internal sealed class RuleEnumerator {
     private readonly DateTime _stopLocal;
     private readonly DateTime? _skipBeforeLocal;
     private readonly int _maxIterations;
+    private readonly long _maxCandidates;
+    private readonly CancellationToken _cancellationToken;
+    private readonly IReadOnlyList<TimeOnly> _times;
+    private long _built;
 
     private readonly IReadOnlyList<int> _byMonthDay;
     private readonly IReadOnlyList<int> _byMonth;
@@ -34,7 +44,9 @@ internal sealed class RuleEnumerator {
         Func<RecurrenceInstance, bool> beyondUntil,
         DateTime stopLocal,
         DateTime? skipBeforeLocal,
-        int maxIterations) {
+        int maxIterations,
+        long maxCandidates = long.MaxValue,
+        CancellationToken cancellationToken = default) {
         _rule = rule;
         _start = start;
         _isDate = isDate;
@@ -43,6 +55,12 @@ internal sealed class RuleEnumerator {
         _stopLocal = stopLocal;
         _skipBeforeLocal = rule.Count is null ? skipBeforeLocal : null;
         _maxIterations = maxIterations;
+        _maxCandidates = maxCandidates;
+        _cancellationToken = cancellationToken;
+        // Sub-daily rules build their times per period and never read these.
+        _times = isDate || rule.Frequency is CalendarFrequency.Hourly or CalendarFrequency.Minutely or CalendarFrequency.Secondly
+            ? [TimeOnly.MinValue]
+            : Times(rule, start);
 
         // The defaults RFC 5545 takes from DTSTART when no BY part constrains a level.
         _byMonthDay = rule.ByMonthDay;
@@ -72,6 +90,9 @@ internal sealed class RuleEnumerator {
     /// <summary>Whether the enumeration stopped because no period produced an instance within the iteration cap.</summary>
     public bool HitIterationLimit { get; private set; }
 
+    /// <summary>Whether the enumeration stopped because it built more candidates than its cap.</summary>
+    public bool HitCandidateLimit { get; private set; }
+
     /// <summary>Whether the rule can never produce an instance after its start, such as February 30.</summary>
     public static bool IsImpossible(CalendarRecurrenceRule rule) {
         if (rule.ByMonthDay.Count == 0 || rule.ByMonth.Count == 0 || rule.ByYearDay.Count > 0 || rule.ByWeekNo.Count > 0) return false;
@@ -99,11 +120,13 @@ internal sealed class RuleEnumerator {
         var sinceLast = 0;
         var candidates = new List<RecurrenceInstance>();
         for (var k = FirstPeriod(); ; k++) {
+            _cancellationToken.ThrowIfCancellationRequested();
             candidates.Clear();
             bool past;
             if (elapsed) past = !ElapsedPeriod(k, startUtc!.Value, candidates);
             else past = !WallPeriod(k, candidates);
-            if (past) yield break;
+            // A period cut short by the candidate cap is not used: its BYSETPOS positions would be wrong.
+            if (past || HitCandidateLimit) yield break;
 
             var produced = false;
             foreach (var candidate in ApplySetPosition(candidates)) {
@@ -126,6 +149,15 @@ internal sealed class RuleEnumerator {
 
     private long FirstPeriod() {
         if (_skipBeforeLocal is not { } skip || skip <= _start) return 0;
+        switch (_rule.Frequency) {
+            case CalendarFrequency.Monthly:
+                var months = (long)(skip.Year - _start.Year) * 12 + skip.Month - _start.Month;
+                return Math.Max(0, months / _rule.Interval - 1);
+            case CalendarFrequency.Yearly:
+                // A year's week-numbered days can begin in the previous December: one period of margin.
+                return Math.Max(0, (skip.Year - _start.Year) / _rule.Interval - 1);
+        }
+
         long unitTicks = _rule.Frequency switch {
             CalendarFrequency.Secondly => TimeSpan.TicksPerSecond,
             CalendarFrequency.Minutely => TimeSpan.TicksPerMinute,
@@ -239,6 +271,7 @@ internal sealed class RuleEnumerator {
 
         foreach (var minute in minutes.Order()) {
             foreach (var second in seconds.Order()) {
+                if (!Built()) return;
                 var s = Math.Min(second, 59);
                 var wall = new DateTime(local.Year, local.Month, local.Day, local.Hour, minute, s);
                 DateTimeOffset? utc = null;
@@ -248,27 +281,32 @@ internal sealed class RuleEnumerator {
         }
     }
 
-    private void AddDays(IEnumerable<DateOnly> days, int periodYear, int? periodMonth, List<RecurrenceInstance> candidates) {
-        IReadOnlyList<TimeOnly> times;
-        if (_isDate) {
-            times = [TimeOnly.MinValue];
-        }
-        else {
-            var hours = _rule.ByHour.Count > 0 ? _rule.ByHour : [_start.Hour];
-            var minutes = _rule.ByMinute.Count > 0 ? _rule.ByMinute : [_start.Minute];
-            var seconds = _rule.BySecond.Count > 0 ? _rule.BySecond : [_start.Second];
-            var list = new List<TimeOnly>(hours.Count * minutes.Count * seconds.Count);
-            foreach (var h in hours)
-            foreach (var m in minutes)
-            foreach (var s in seconds)
-                list.Add(new TimeOnly(h, m, Math.Min(s, 59)));
-            list.Sort();
-            times = list;
-        }
+    // Counts one more candidate; false, and the cap marked, when it is past the cap.
+    private bool Built() {
+        if (++_built <= _maxCandidates) return true;
+        HitCandidateLimit = true;
+        return false;
+    }
 
+    // The times of day of a daily or longer rule, sorted; the same for every period, so built once.
+    private static List<TimeOnly> Times(CalendarRecurrenceRule rule, DateTime start) {
+        var hours = rule.ByHour.Count > 0 ? rule.ByHour : [start.Hour];
+        var minutes = rule.ByMinute.Count > 0 ? rule.ByMinute : [start.Minute];
+        var seconds = rule.BySecond.Count > 0 ? rule.BySecond : [start.Second];
+        var list = new List<TimeOnly>(hours.Count * minutes.Count * seconds.Count);
+        foreach (var h in hours)
+        foreach (var m in minutes)
+        foreach (var s in seconds)
+            list.Add(new TimeOnly(h, m, Math.Min(s, 59)));
+        list.Sort();
+        return list;
+    }
+
+    private void AddDays(IEnumerable<DateOnly> days, int periodYear, int? periodMonth, List<RecurrenceInstance> candidates) {
         foreach (var day in days) {
             if (!MatchesDay(day, periodYear, periodMonth, ignoreOffsets: false)) continue;
-            foreach (var time in times) {
+            foreach (var time in _times) {
+                if (!Built()) return;
                 var local = day.ToDateTime(time);
                 candidates.Add(new RecurrenceInstance(local, _zone is null ? null : ZoneMath.ToUtc(local, _zone)));
             }

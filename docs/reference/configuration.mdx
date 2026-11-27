@@ -152,8 +152,15 @@ passes none, bound by the configuration-binding source generator; `ExpandDefault
 | `Calendars:ReadDefaults:MaxPropertiesPerComponent` | `1000` |
 | `Calendars:ReadDefaults:MaxDepth` | `8` |
 | `Calendars:ReadDefaults:FallbackEncoding` | `windows-1252` |
+| `Calendars:ReadDefaults:MaxLines` | `1000000` |
+| `Calendars:ReadDefaults:MaxItems` | `50000` |
+| `Calendars:ReadDefaults:MaxTimeZoneIdLength` | `128` |
+| `Calendars:ReadDefaults:Strict` | `false` |
 | `Calendars:ExpandDefaults:MaxOccurrences` | `10000` |
 | `Calendars:ExpandDefaults:MaxIterations` | `100000` |
+| `Calendars:ExpandDefaults:MaxCandidates` | `1000000` |
+| `Calendars:ExpandDefaults:ResolveOverrideVersions` | `true` |
+| `Calendars:ExpandDefaults:SkipCancelled` | `false` |
 | `Calendars:ExpandDefaults:FloatingTimeZone` | — (floating times stay unconverted) |
 
 ## Spreadsheets
@@ -184,6 +191,8 @@ Write options (`SpreadsheetWriteOptions`) are passed per call, not configured. S
 | `Contacts:ReadDefaults:MaxBytes` | `33554432` (32 MiB) |
 | `Contacts:ReadDefaults:MaxContacts` | `10000` |
 | `Contacts:ReadDefaults:MaxPropertiesPerContact` | `1000` |
+| `Contacts:ReadDefaults:MaxProperties` | `1000000` (lines of all cards of a file) |
+| `Contacts:ReadDefaults:MaxErrors` | `10000` |
 | `Contacts:ReadDefaults:MaxLineBytes` | `1048576` (1 MiB) |
 | `Contacts:ReadDefaults:MaxPhotoBytes` | `1048576` (1 MiB) |
 | `Contacts:ReadDefaults:FallbackEncoding` | `windows-1252` (an unknown name throws when the reader is resolved) |
@@ -221,6 +230,9 @@ package.
 | `CalDav:CalendarRead:MaxBytes` (and the other `CalendarReadOptions` keys) | `16777216` |
 | `CalDav:CalendarExpand:MaxOccurrences` | `10000` |
 | `CalDav:CalendarExpand:MaxIterations` | `100000` |
+| `CalDav:CalendarExpand:MaxCandidates` | `1000000` |
+| `CalDav:CalendarExpand:ResolveOverrideVersions` | `true` |
+| `CalDav:CalendarExpand:SkipCancelled` | `false` |
 | `CalDav:FeedsEnabled` | `true` |
 | `CalDav:ProductId` | `-//Elarion//Elarion.Calendars//EN` |
 

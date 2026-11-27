@@ -151,12 +151,76 @@ minor releases may include breaking changes.
   the build error `ELVAL004`; `ELVAL002` now also covers such a type in a compilation without `Elarion.Validation`. See
   [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation#validating-outside-a-handler-request).
 
+- **`Elarion.Typst`: required packages and a package-not-found error** (ADR-0093). `TypstOptions.RequiredPackages`
+  (`@local/acme-documents:1.0.0`) makes the startup check refuse a deployment without the application's template
+  package, like a missing executable; `TypstToolchain.HasPackage` runs the same test at render time. A compilation
+  whose import names a package Typst cannot find throws `TypstPackageNotFoundException` (with `Package`, telemetry
+  outcome `package_not_found`) instead of `TypstCompilationException`, so a missing package is no longer reported as a
+  template defect. See [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#startup-check).
+- **`Elarion.Typst`: asset and compiler conveniences.** `TypstAsset.IsValidName` and `TypstAsset.TryCreate` expose the
+  asset-name rule, so a user-supplied name can be rejected with the application's own error; `TypstAsset.FromJson`
+  serializes a second model into an asset the template reads with `json(assets.at("letterhead.json"))`;
+  `TypstCompiler.Create(options, loggerFactory)` builds the compiler without a service collection, for tests that need
+  their own executable, package directory or working directory. See
+  [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#several-models).
+
 ### Changed
+- **`Elarion.Contacts`: bounded results, vCard 2.1 escaping, URI values and payloads that are not files** (ADR-0110,
+  amendment of 2026-11-27; spec 0005, FR-072–FR-089). Reading: `ContactReadOptions.MaxProperties` (1,000,000 lines in
+  the whole file; `contact.too_many_properties_in_file`) and `MaxErrors` (10,000; further errors are counted in
+  `ContactReadResult.OmittedErrorCount` and named by `contact.too_many_errors`) bound what a result holds; a card over
+  `MaxPropertiesPerContact` keeps only its `FN`, `N`, `ORG`, `EMAIL`, `TEL` and `UID`. A vCard 2.1 value is read with
+  2.1's escaping (only `\;`), and its property holds it in 3.0's: `N:C:\Daten` reads `C:\Daten` and its `Value` is
+  `C:\\Daten`. `TYPE=INTERNET` reads as the new `ContactTypes.Internet`. A partial date (`1985`, `--04`) is
+  `contact.partial_date`; a photo of another format is `contact.invalid_value` with the expected kind `photo-format`
+  and the new `ContactError.MediaType`, which `contact.unreadable` also carries for a file that is not text. The first
+  `PHOTO` that reads is the photo. `ContactPhone`, `ContactEmail`, `ContactAddress` and `ContactUrl` carry `LineNumber`
+  and `Group` (ignored by equality). New: `ContactProperty.GetText`/`GetTexts`, `ContactPhoto.TryRead`,
+  `ContactPhoto.TryFromData`, `ContactWriter.Write` and `ContactWriter.ToText` (synchronous), and
+  `ContactWriteOptions.FoldLines` for QR and NFC payloads. Writing: `URL`, and a 4.0 `tel:` number (`VALUE=uri`), are
+  written as URIs, not escaped as text; control characters other than the tab are left out of every value; an
+  organization is `X-ABShowAs:COMPANY`; no line is folded inside an escape (in `Elarion.Calendars` too, which shares
+  the folder). These change the bytes, and so the CardDAV ETag, of a stored card that holds an organization, a URL
+  with `;` or `,`, a control character, the internet type or a long escaped line, once, when it is next published.
+  See [Contacts](https://elarion.wimmesberger.dev/docs/capabilities/contacts).
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
   type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
   member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
+- **`Elarion.Calendars`: overrides, `EXRULE`, strict reads and more limits** (ADR-0109, amendment 2026-11-27). Of
+  several overrides of one instance, expansion now keeps only the latest (highest `SEQUENCE`, then latest `DTSTAMP`);
+  `CalendarExpandOptions.ResolveOverrideVersions = false` keeps them all. `SkipCancelled` (off by default) leaves out
+  `STATUS:CANCELLED` items, a cancelled override removing its instance. `EXRULE` is read into
+  `CalendarItem.ExceptionRules`, applied in expansion (never to `DTSTART`) and written back in the item's fixed property
+  order, where it used to be an unmapped property written at the end. Repeated `BY` values count once, and a `BY` list
+  longer than its part has values no longer parses. New read options `MaxLines` (1,000,000), `MaxItems` (50,000, events
+  and to-dos only) and `Strict` (refuses `COUNT` with `UNTIL`, skips values with control characters as
+  `calendar.control_character`); `CalendarErrorCodes.IsStructural(code)` names the errors about a file's form.
+  `CalendarRecurrence.Expand` and `CalendarReadResult.Expand` take a `CancellationToken`, and `ReadAsync` checks its token
+  per item while mapping. See [Calendars](https://elarion.wimmesberger.dev/docs/capabilities/calendars#recurrences).
 
 ### Fixed
+- **`Elarion.Contacts`: a 20 MB upload no longer holds 600–950 MB after a read.** Every property, parameter and error of
+  the file stayed in the result, at 60 to 150 bytes per line however short; names, parameters and short values are now
+  shared within a read and the result is bounded by `MaxProperties` and `MaxErrors`, so the same files hold 2–115 MB
+  and no read holds more than about 200 MB at the defaults.
+- **`Elarion.Contacts`: a file concatenated from several exports no longer loses cards.** A byte-order mark before a
+  later `BEGIN:VCARD` (UTF-8 or UTF-16) made the line unreadable and the card vanished without an error; a mark at the
+  start of a line is now nothing.
+- **`Elarion.Calendars` reads and expands hostile files in bounded time and memory.** Resolving a vendor-prefixed
+  `TZID` was quadratic in its length (64 KB of `/a` took 3.1 s); it is now linear, tries only an id's last four
+  segments, and a read refuses ids longer than `CalendarReadOptions.MaxTimeZoneIdLength` (128) as
+  `calendar.unknown_time_zone`. The process-wide time-zone cache was keyed by the id as written and cached misses, so
+  every distinct id of every upload stayed in memory (200 reads of a 100 KB id kept 39 MB); it now holds only zones the
+  system knows, and the writer's `VTIMEZONE` cache only system zones. Expansion built every candidate of a period
+  before filtering (a yearly rule with every second of a year allocated 2 GB) and walked monthly and yearly rules from
+  `DTSTART`; the new `CalendarExpandOptions.MaxCandidates` (1,000,000) stops a series as candidates are built, and rules
+  without `COUNT` skip ahead to the window for every frequency (582 ms and 2 GB became 23 ms and 64 MB).
+- **The documented container build of `Elarion.Typst` failed in `mcr.microsoft.com/dotnet/sdk` images.** Their GNU
+  tar unpacks the Typst `.tar.xz` only through the `xz` program, which the images do not install, so the build failed
+  after the download with `xz: Cannot exec`. The targets now check for an unpacker before downloading and stop with an
+  error that names the package to install (`apt-get install -y xz-utils`) or `ElarionTypstExecutable`, and the
+  documented Dockerfile installs `xz-utils`. See
+  [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#containers).
 - **A NativeAOT application with a body-bound `[HttpEndpoint]` published with trimming warnings.** The generated
   mapping resolved the request body's JSON metadata with a fallback to the reflection-based
   `JsonSerializerOptions.Default`, which made the publish report `IL2026` and `IL3050`. The fallback is gone; a missing

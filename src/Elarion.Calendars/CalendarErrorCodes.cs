@@ -49,6 +49,31 @@ public static class CalendarErrorCodes {
     /// <summary>An expansion produced more occurrences than <see cref="CalendarExpandOptions.MaxOccurrences"/>.</summary>
     public const string TooManyOccurrences = "calendar.too_many_occurrences";
 
-    /// <summary>A recurrence examined more than <see cref="CalendarExpandOptions.MaxIterations"/> candidates without an occurrence.</summary>
+    /// <summary>
+    /// A recurrence examined more than <see cref="CalendarExpandOptions.MaxIterations"/> periods without an occurrence, or
+    /// built more than <see cref="CalendarExpandOptions.MaxCandidates"/> candidates; its expansion stopped.
+    /// </summary>
     public const string RecurrenceLimit = "calendar.recurrence_limit";
+
+    /// <summary>The file has more lines than <see cref="CalendarReadOptions.MaxLines"/>; reading stopped.</summary>
+    public const string TooManyLines = "calendar.too_many_lines";
+
+    /// <summary>The file has more events and to-dos than <see cref="CalendarReadOptions.MaxItems"/>; reading stopped.</summary>
+    public const string TooManyItems = "calendar.too_many_items";
+
+    /// <summary>
+    /// A value holds a control character other than tab; reported only by a <see cref="CalendarReadOptions.Strict"/>
+    /// read, which skips the line.
+    /// </summary>
+    public const string ControlCharacter = "calendar.control_character";
+
+    /// <summary>
+    /// Whether <paramref name="code"/> is about the file's form rather than an item's values: the file is not a calendar
+    /// or past a file limit, a line is malformed, too long or holds a control character, a component ends unexpectedly
+    /// or exceeds a per-item limit. An application that refuses broken files refuses when one of these occurs; the
+    /// value errors (<see cref="Required"/>, <see cref="InvalidValue"/>, <see cref="UnknownTimeZone"/>,
+    /// <see cref="DuplicateUid"/>) and the expansion's are not structural.
+    /// </summary>
+    public static bool IsStructural(string code) => code is Unreadable or TooLarge or LineTooLong or TooManyComponents
+        or TooManyProperties or NestingTooDeep or MalformedLine or UnexpectedEnd or TooManyLines or TooManyItems or ControlCharacter;
 }

@@ -15,6 +15,8 @@ namespace Elarion.Typst;
 /// </code>
 /// </remarks>
 public sealed class TypstToolchain {
+    private readonly Func<string, bool> _fileExists;
+
     /// <summary>Resolves the toolchain from <paramref name="options"/>.</summary>
     public TypstToolchain(TypstOptions options)
         : this(options, Environment.GetEnvironmentVariable("PATH"), AppContext.BaseDirectory, File.Exists, Directory.Exists) { }
@@ -26,6 +28,7 @@ public sealed class TypstToolchain {
         Func<string, bool> fileExists,
         Func<string, bool> directoryExists) {
         ArgumentNullException.ThrowIfNull(options);
+        _fileExists = fileExists;
 
         ToolchainDirectory = Path.GetFullPath(options.ToolchainDirectory ?? Path.Combine(baseDirectory, "typst"));
 
@@ -79,6 +82,37 @@ public sealed class TypstToolchain {
     public IReadOnlyList<string> FontPaths { get; }
 
     internal string ConfiguredExecutable { get; }
+
+    /// <summary>
+    /// Whether <paramref name="package"/> is installed in <see cref="PackagePath"/>: whether its
+    /// <c>&lt;namespace&gt;/&lt;name&gt;/&lt;version&gt;/typst.toml</c> exists. A render-time probe for the
+    /// application's own package, so a missing deployment can be told apart from a broken template before compiling.
+    /// </summary>
+    /// <param name="package">A package specification such as <c>@local/acme-documents:1.0.0</c>.</param>
+    /// <returns>
+    /// <see langword="false"/> when the package is missing or no package directory is configured or bundled. A
+    /// <c>@preview</c> package Typst would download on first use counts as missing: a server vendors it.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="package"/> is not a package specification.</exception>
+    /// <example>
+    /// <code>
+    /// if (!toolchain.HasPackage("@local/acme-documents:1.0.0"))
+    ///     return AppError.BusinessRule("The document templates are not installed.", code: "document.templates-missing");
+    /// </code>
+    /// </example>
+    public bool HasPackage(string package) {
+        if (!TypstPackageSpec.TryParse(package, out var spec))
+            throw new ArgumentException(
+                $"'{package}' is not a Typst package specification of the form @namespace/name:major.minor.patch.", nameof(package));
+        return PackagePath is { } packagePath && _fileExists(spec.ManifestPath(packagePath));
+    }
+
+    /// <summary>Why <paramref name="package"/> is missing, for the startup check.</summary>
+    internal string MissingPackageMessage(string package) =>
+        PackagePath is { } packagePath
+            ? $"The required Typst package '{package}' is not installed: '{TypstPackageSpec.Parse(package).ManifestPath(packagePath)}' does not exist."
+            : $"The required Typst package '{package}' is not installed: no package directory is configured (TypstOptions.PackagePath) "
+              + $"and '{Path.Combine(ToolchainDirectory, "packages")}' does not exist. Bundle the package with ElarionTypstAssetsDirectory.";
 
     /// <summary>
     /// Runs <c>typst --version</c> and returns its output, such as <c>typst 0.15.1 (…)</c>.

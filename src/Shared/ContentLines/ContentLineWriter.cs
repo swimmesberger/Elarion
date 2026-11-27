@@ -5,8 +5,9 @@ namespace Elarion.ContentLines;
 
 /// <summary>
 /// Writes content lines as UTF-8 without a byte-order mark, with CRLF line ends, folded so no line is longer than 75
-/// octets, never inside a UTF-8 sequence, each continuation starting with one space (spec 0004 FR-044, spec 0005
-/// FR-053). Lines collect in a pooled buffer that <see cref="FlushAsync"/> writes to the stream.
+/// octets, never inside a UTF-8 sequence and never between a backslash and the character it escapes, each continuation
+/// starting with one space (spec 0004 FR-044, spec 0005 FR-053); or unfolded on request. Lines collect in a pooled
+/// buffer that <see cref="FlushAsync"/> or <see cref="Flush"/> writes to the stream.
 /// </summary>
 internal sealed class ContentLineWriter : IDisposable {
     /// <summary>The most octets of one physical line, without its CRLF.</summary>
@@ -17,9 +18,16 @@ internal sealed class ContentLineWriter : IDisposable {
     private readonly StringBuilder _line = new();
     private byte[] _buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
     private byte[] _scratch = ArrayPool<byte>.Shared.Rent(1024);
+    private readonly bool _fold;
     private int _length;
 
-    public ContentLineWriter(Stream destination) => _destination = destination;
+    /// <summary>Creates a writer over <paramref name="destination"/>.</summary>
+    /// <param name="destination">The stream written to.</param>
+    /// <param name="fold">Whether lines are folded at 75 octets; an unfolded line is written whole.</param>
+    public ContentLineWriter(Stream destination, bool fold = true) {
+        _destination = destination;
+        _fold = fold;
+    }
 
     /// <summary>The bytes waiting for <see cref="FlushAsync"/>.</summary>
     public int BufferedBytes => _length;
@@ -60,6 +68,13 @@ internal sealed class ContentLineWriter : IDisposable {
         _length = 0;
     }
 
+    /// <summary>Writes the buffered bytes to the stream synchronously.</summary>
+    public void Flush() {
+        if (_length == 0) return;
+        _destination.Write(_buffer, 0, _length);
+        _length = 0;
+    }
+
     public void Dispose() {
         var buffer = Interlocked.Exchange(ref _buffer, []);
         if (buffer.Length > 0) ArrayPool<byte>.Shared.Return(buffer);
@@ -85,7 +100,7 @@ internal sealed class ContentLineWriter : IDisposable {
         while (true) {
             var room = first ? MaxOctets : MaxOctets - 1;
             if (!first) _buffer[_length++] = (byte)' ';
-            if (bytes.Length <= room) {
+            if (bytes.Length <= room || !_fold) {
                 bytes.CopyTo(_buffer.AsSpan(_length));
                 _length += bytes.Length;
                 break;
@@ -99,6 +114,10 @@ internal sealed class ContentLineWriter : IDisposable {
                 cut = room;
                 while (cut > 0 && (bytes[cut] & 0xC0) == 0x80) cut--;
             }
+
+            // Not right after an odd run of backslashes: unfolding comes before unescaping, but a reader that unescapes
+            // each physical line would split the pair. One byte earlier the run is even, and the cut is before a backslash.
+            if (cut > 1 && EndsWithOddBackslashRun(bytes[..cut])) cut--;
             bytes[..cut].CopyTo(_buffer.AsSpan(_length));
             _length += cut;
             _buffer[_length++] = (byte)'\r';
@@ -109,6 +128,12 @@ internal sealed class ContentLineWriter : IDisposable {
 
         _buffer[_length++] = (byte)'\r';
         _buffer[_length++] = (byte)'\n';
+    }
+
+    private static bool EndsWithOddBackslashRun(ReadOnlySpan<byte> bytes) {
+        var run = 0;
+        for (var i = bytes.Length - 1; i >= 0 && bytes[i] == (byte)'\\'; i--) run++;
+        return run % 2 == 1;
     }
 
     private void Ensure(int extra) {

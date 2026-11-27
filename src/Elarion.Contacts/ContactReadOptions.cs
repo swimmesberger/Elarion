@@ -11,7 +11,11 @@ namespace Elarion.Contacts;
 /// <remarks>
 /// The defaults are sized for the 1–10 node tier (ADR-0025). A per-contact limit (<see cref="MaxPropertiesPerContact"/>,
 /// <see cref="MaxLineBytes"/>, <see cref="MaxPhotoBytes"/>) costs at most that contact or property and the read
-/// continues; a file limit (<see cref="MaxBytes"/>, <see cref="MaxContacts"/>) stops the read with one error. The
+/// continues; a file limit (<see cref="MaxBytes"/>, <see cref="MaxContacts"/>, <see cref="MaxProperties"/>) stops the
+/// read with one error; <see cref="MaxErrors"/> stops listing errors, not the read. The bytes bound the input, the
+/// properties and errors bound what the result holds: a result holds 60 to 150 bytes per property line and at most
+/// about five times the bytes of its values (ADR-0110, decision 9), so the defaults keep one result under about 200 MB
+/// whatever the file holds. The
 /// properties are settable because the configuration binder fills <see cref="ContactOptions.ReadDefaults"/> in place;
 /// do not change an instance a read may be using.
 /// </remarks>
@@ -24,6 +28,12 @@ public sealed record ContactReadOptions {
 
     /// <summary>The default of <see cref="MaxPropertiesPerContact"/>: 1,000.</summary>
     public const int DefaultMaxPropertiesPerContact = 1_000;
+
+    /// <summary>The default of <see cref="MaxProperties"/>: 1,000,000.</summary>
+    public const int DefaultMaxProperties = 1_000_000;
+
+    /// <summary>The default of <see cref="MaxErrors"/>: 10,000.</summary>
+    public const int DefaultMaxErrors = 10_000;
 
     /// <summary>The default of <see cref="MaxLineBytes"/>: 1 MiB.</summary>
     public const int DefaultMaxLineBytes = 1024 * 1024;
@@ -53,6 +63,20 @@ public sealed record ContactReadOptions {
     public int MaxPropertiesPerContact { get; set; } = DefaultMaxPropertiesPerContact;
 
     /// <summary>
+    /// The most lines of all vCards of the file together (FR-073): what bounds the memory of a result, since a line of
+    /// a few bytes costs a property of 60 to 150. Reading stops with
+    /// <see cref="ContactErrorCodes.TooManyPropertiesInFile"/> and keeps the entries before the card being read.
+    /// </summary>
+    public int MaxProperties { get; set; } = DefaultMaxProperties;
+
+    /// <summary>
+    /// The most errors a result lists (FR-074). The read goes on; further errors are counted in
+    /// <see cref="ContactReadResult.OmittedErrorCount"/> and named by one <see cref="ContactErrorCodes.TooManyErrors"/>
+    /// file error.
+    /// </summary>
+    public int MaxErrors { get; set; } = DefaultMaxErrors;
+
+    /// <summary>
     /// The most bytes of one unfolded line other than a photo (FR-049). A longer line is dropped with a
     /// <see cref="ContactErrorCodes.LineTooLong"/> error.
     /// </summary>
@@ -76,6 +100,8 @@ public sealed record ContactReadOptions {
         if (MaxContacts <= 0) throw new ArgumentOutOfRangeException(nameof(MaxContacts), MaxContacts, "The contact limit must be positive.");
         if (MaxPropertiesPerContact <= 0)
             throw new ArgumentOutOfRangeException(nameof(MaxPropertiesPerContact), MaxPropertiesPerContact, "The property limit must be positive.");
+        if (MaxProperties <= 0) throw new ArgumentOutOfRangeException(nameof(MaxProperties), MaxProperties, "The file's property limit must be positive.");
+        if (MaxErrors < 0) throw new ArgumentOutOfRangeException(nameof(MaxErrors), MaxErrors, "The error limit must not be negative.");
         if (MaxLineBytes <= 0) throw new ArgumentOutOfRangeException(nameof(MaxLineBytes), MaxLineBytes, "The line limit must be positive.");
         if (MaxPhotoBytes <= 0) throw new ArgumentOutOfRangeException(nameof(MaxPhotoBytes), MaxPhotoBytes, "The photo limit must be positive.");
         if (string.IsNullOrWhiteSpace(FallbackEncoding))

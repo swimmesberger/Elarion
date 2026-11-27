@@ -91,7 +91,7 @@ public sealed class ContactWriterTests {
         text.Should().Contain("item4.X-ABDATE:2010-06-12\r\nitem4.X-ABLabel:_$!<Anniversary>!$_\r\n");
         text.Should().Contain("item2.TEL;TYPE=WORK,FAX:+43 1 234\r\nitem2.X-ABLabel:Office fax\r\n");
         text.Should().Contain("TEL;TYPE=CELL,VOICE,pref:+43 660 1234567\r\n");
-        text.Should().Contain("X-ABSHOWAS:COMPANY\r\n");
+        text.Should().Contain("X-ABShowAs:COMPANY\r\n");
         text.Should().Contain("PHOTO;VALUE=uri:https://example.com/logo.png\r\n");
         text.Should().Contain("N:;;;;\r\n");
         text.Should().Contain("X-SOCIALPROFILE;TYPE=twitter;X-USER=\"a:b\",c:https://twitter.com/jane\r\n");
@@ -107,7 +107,7 @@ public sealed class ContactWriterTests {
         text.Should().Contain("TEL;TYPE=cell,voice;PREF=1:+43 660 1234567\r\n");
         text.Should().Contain("KIND:org\r\n");
         text.Should().Contain("PHOTO:https://example.com/logo.png\r\n");
-        text.Should().NotContain("X-ABSHOWAS");
+        text.Should().NotContain("X-ABShowAs");
     }
 
     [Fact]
@@ -353,5 +353,103 @@ public sealed class ContactWriterTests {
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    [Theory]
+    [InlineData(ContactFormatVersion.V3_0)]
+    [InlineData(ContactFormatVersion.V4_0)]
+    public async Task AWebAddress_IsWrittenAsAUriNotEscapedAsText(ContactFormatVersion version) {
+        var contact = new Contact { FormattedName = "A", Urls = [new ContactUrl("https://example.com/a;b,c?x=1")] };
+
+        var text = await WriteAsync([contact], version);
+
+        text.Should().Contain("URL:https://example.com/a;b,c?x=1\r\n");
+        (await ReadAsync(text)).Contacts.Single().Urls.Single().Value.Should().Be("https://example.com/a;b,c?x=1");
+    }
+
+    [Fact]
+    public async Task AWebAddressWithALineBreak_FailsTheWrite() {
+        var contact = new Contact { FormattedName = "A", Urls = [new ContactUrl("https://example.com/\r\nX-EVIL:1")] };
+
+        var write = async () => await WriteAsync([contact]);
+
+        (await write.Should().ThrowAsync<ContactWriteException>()).Which.Property.Should().Be("URL");
+    }
+
+    [Fact]
+    public async Task ATelUriInVersion40_IsWrittenAsAUriValue() {
+        var contact = new Contact { FormattedName = "A", Phones = [new ContactPhone("tel:+43-1-234;ext=5") { Types = ContactTypes.Work }] };
+
+        var v4 = await WriteAsync([contact], ContactFormatVersion.V4_0);
+        var v3 = await WriteAsync([contact], ContactFormatVersion.V3_0);
+
+        v4.Should().Contain("TEL;VALUE=uri;TYPE=work:tel:+43-1-234;ext=5\r\n");
+        v3.Should().Contain("TEL;TYPE=WORK:tel:+43-1-234\\;ext=5\r\n");
+        (await ReadAsync(v4)).Contacts.Single().Phones.Single().Number.Should().Be("tel:+43-1-234;ext=5");
+    }
+
+    [Fact]
+    public async Task ControlCharacters_AreLeftOutOfEveryValue() {
+        var contact = new Contact {
+            FormattedName = "A\u0000B",
+            Note = "a\u0000b\u0007c\td\u0085e\u007Ff\ng",
+            AdditionalProperties = [new ContactProperty(null, "X-RAW", [new ContactParameter("X-P", "p\u0001q")], "r\u001Bs")],
+        };
+
+        var text = await WriteAsync([contact]);
+
+        text.Should().Contain("FN:AB\r\n");
+        text.Should().Contain("NOTE:abc\tdef\\ng\r\n");
+        text.Should().Contain("X-RAW;X-P=pq:rs\r\n");
+        text.Where(static c => char.IsControl(c) && c is not ('\r' or '\n' or '\t')).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task FoldLinesOff_WritesEachPropertyOnOneLine() {
+        var note = new string('x', 200);
+        var contact = new Contact { FormattedName = "A", Note = note };
+
+        var text = Encoding.UTF8.GetString((await ContactWriter.ToFileAsync([contact], "a.vcf", new ContactWriteOptions { FoldLines = false }, TestCancellation)).Bytes.Span);
+
+        text.Should().Contain("NOTE:" + note + "\r\n");
+        (await ReadAsync(text)).Contacts.Single().Note.Should().Be(note);
+    }
+
+    [Fact]
+    public async Task AFoldNeverSplitsABackslashFromTheCharacterItEscapes() {
+        for (var prefix = 0; prefix < 4; prefix++) {
+            var note = new string('a', prefix) + string.Concat(Enumerable.Repeat(";\\", 60));
+            var bytes = Encoding.UTF8.GetBytes(await WriteAsync([new Contact { FormattedName = "A", Note = note }]));
+
+            foreach (var line in Split(bytes)) {
+                var run = 0;
+                for (var i = line.Length - 1; i >= 0 && line[i] == (byte)'\\'; i--) run++;
+                (run % 2).Should().Be(0, "a physical line must not end inside an escape");
+                line.Length.Should().BeLessThanOrEqualTo(75);
+            }
+
+            (await ReadAsync(bytes)).Contacts.Single().Note.Should().Be(note);
+        }
+    }
+
+    [Fact]
+    public async Task TheInternetType_IsReadAndWritten() {
+        var contact = new Contact { FormattedName = "A", Emails = [new ContactEmail("a@example.com") { Types = ContactTypes.Internet | ContactTypes.Work }] };
+
+        var text = await WriteAsync([contact]);
+
+        text.Should().Contain("EMAIL;TYPE=INTERNET,WORK:a@example.com\r\n");
+        (await ReadAsync(text)).Contacts.Single().Should().Be(contact);
+    }
+
+    [Fact]
+    public async Task ToTextAndWrite_WriteSynchronouslyWhatTheAsynchronousWriterWrites() {
+        var expected = await WriteAsync([Full, Organization]);
+        using var stream = new MemoryStream();
+
+        ContactWriter.Write(stream, [Full, Organization]);
+
+        Encoding.UTF8.GetString(stream.ToArray()).Should().Be(expected);
+        ContactWriter.ToText(Organization).Should().Be(await WriteAsync([Organization]));
     }
 }

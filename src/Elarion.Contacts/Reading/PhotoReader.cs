@@ -4,7 +4,7 @@ using Elarion.ContentLines;
 namespace Elarion.Contacts.Reading;
 
 /// <summary>
-/// Reads the first <c>PHOTO</c> of a card (FR-028–FR-032, FR-050): inline Base64 or a <c>data:</c> URI into bounded
+/// Reads a <c>PHOTO</c> of a card (FR-028–FR-032, FR-050, FR-076): inline Base64 or a <c>data:</c> URI into bounded
 /// bytes whose media type is sniffed, an <c>http</c> or <c>https</c> address into a URI. Nothing is ever requested.
 /// </summary>
 internal static class PhotoReader {
@@ -12,7 +12,7 @@ internal static class PhotoReader {
         var encoding = property.GetParameter("ENCODING");
         var value = property.Value.Trim();
         if (encoding.Any(static e => e.Equals("B", StringComparison.OrdinalIgnoreCase) || e.Equals("BASE64", StringComparison.OrdinalIgnoreCase)))
-            return FromBase64(property, value, maxBytes, errors);
+            return FromBase64(property, value, DeclaredType(property, null), maxBytes, errors);
 
         if (value.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) {
             var comma = value.IndexOf(',');
@@ -21,7 +21,8 @@ internal static class PhotoReader {
                 return null;
             }
 
-            return FromBase64(property, value[(comma + 1)..], maxBytes, errors);
+            var dataType = value.AsSpan(5, comma - 5 - ";base64".Length).ToString();
+            return FromBase64(property, value[(comma + 1)..], DeclaredType(property, dataType), maxBytes, errors);
         }
 
         var text = ContentText.Unescape(value).Trim();
@@ -35,7 +36,7 @@ internal static class PhotoReader {
         return null;
     }
 
-    private static ContactPhoto? FromBase64(ContactProperty property, string text, int maxBytes, List<ContactError> errors) {
+    private static ContactPhoto? FromBase64(ContactProperty property, string text, string? declaredType, int maxBytes, List<ContactError> errors) {
         // Count first, so a photo over the limit is refused without decoding it (FR-050).
         var length = 0;
         foreach (var c in text)
@@ -65,11 +66,29 @@ internal static class PhotoReader {
         }
 
         if (ContactPhoto.SniffMediaType(bytes.AsSpan(0, written)) is null) {
-            errors.Add(Invalid(property, "photo", "The photo is not a JPEG, PNG, GIF, WebP or BMP image."));
+            // FR-076: what the bytes are, or what the file said they are, so the application can name the format.
+            var mediaType = FileSniffer.MediaType(bytes.AsSpan(0, written)) ?? declaredType;
+            var shown = mediaType is null ? "" : $" ({mediaType})";
+            errors.Add(new ContactError(
+                ContactErrorCodes.InvalidValue, $"The photo{shown} is not a JPEG, PNG, GIF, WebP or BMP image.",
+                lineNumber: property.LineNumber, property: property.Name, value: property.Value, expectedKind: "photo-format",
+                mediaType: mediaType));
             return null;
         }
 
         return ContactPhoto.FromData(bytes.AsMemory(0, written));
+    }
+
+    // The type a file declared: a data URI's, 4.0's MEDIATYPE, or 2.1 and 3.0's TYPE (JPEG, image/jpeg).
+    private static string? DeclaredType(ContactProperty property, string? dataUriType) {
+        var declared = !string.IsNullOrWhiteSpace(dataUriType)
+            ? dataUriType
+            : property.GetParameter("MEDIATYPE").FirstOrDefault() ?? property.GetParameter("TYPE").FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(declared)) return null;
+        declared = declared.Trim().ToLowerInvariant();
+        var parameters = declared.IndexOf(';', StringComparison.Ordinal);
+        if (parameters >= 0) declared = declared[..parameters].Trim();
+        return declared.Contains('/', StringComparison.Ordinal) ? declared : "image/" + declared;
     }
 
     private static ContactError Invalid(ContactProperty property, string kind, string message) =>

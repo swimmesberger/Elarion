@@ -1,8 +1,9 @@
 namespace Elarion.Contacts;
 
 /// <summary>
-/// The structured name of a contact (<c>N</c>, FR-020). Several values of one part, such as two additional names, are
-/// joined with <c>", "</c>.
+/// The structured name of a contact (<c>N</c>, FR-020). Several values of one part, comma-separated in the file, are
+/// joined with <c>", "</c>: <c>N:Huber;Anna,Maria</c> reads the given name <c>Anna, Maria</c>, and is written back as
+/// one value with its comma escaped.
 /// </summary>
 /// <param name="Family">The family name.</param>
 /// <param name="Given">The given name.</param>
@@ -26,6 +27,25 @@ public sealed record ContactPhone(string Number) {
 
     /// <summary>The custom label, such as Apple's <c>X-ABLabel</c> of the number's group.</summary>
     public string? Label { get; init; }
+
+    /// <summary>
+    /// The line of the file the value was read from (FR-077); <see langword="null"/> for a value built in code. Equality
+    /// ignores it, and the writer does not write it.
+    /// </summary>
+    public int? LineNumber { get; init; }
+
+    /// <summary>
+    /// The group prefix it was read with, such as <c>item1</c>, to find the raw <c>X-ABLabel</c> among the entry's
+    /// properties (FR-077); <see langword="null"/> without one. Equality ignores it, and the writer assigns its own groups.
+    /// </summary>
+    public string? Group { get; init; }
+
+    /// <inheritdoc/>
+    public bool Equals(ContactPhone? other) =>
+        other is not null && Number == other.Number && Types == other.Types && Preferred == other.Preferred && Label == other.Label;
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => HashCode.Combine(Number, Types, Preferred, Label);
 }
 
 /// <summary>An e-mail address of a contact (<c>EMAIL</c>, FR-021).</summary>
@@ -39,6 +59,25 @@ public sealed record ContactEmail(string Address) {
 
     /// <summary>The custom label, such as Apple's <c>X-ABLabel</c> of the address's group.</summary>
     public string? Label { get; init; }
+
+    /// <summary>
+    /// The line of the file the value was read from (FR-077); <see langword="null"/> for a value built in code. Equality
+    /// ignores it, and the writer does not write it.
+    /// </summary>
+    public int? LineNumber { get; init; }
+
+    /// <summary>
+    /// The group prefix it was read with, such as <c>item1</c>, to find the raw <c>X-ABLabel</c> among the entry's
+    /// properties (FR-077); <see langword="null"/> without one. Equality ignores it, and the writer assigns its own groups.
+    /// </summary>
+    public string? Group { get; init; }
+
+    /// <inheritdoc/>
+    public bool Equals(ContactEmail? other) =>
+        other is not null && Address == other.Address && Types == other.Types && Preferred == other.Preferred && Label == other.Label;
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => HashCode.Combine(Address, Types, Preferred, Label);
 }
 
 /// <summary>A web address of a contact (<c>URL</c>, FR-021).</summary>
@@ -52,6 +91,25 @@ public sealed record ContactUrl(string Value) {
 
     /// <summary>The custom label, such as Apple's <c>X-ABLabel</c> of the address's group.</summary>
     public string? Label { get; init; }
+
+    /// <summary>
+    /// The line of the file the value was read from (FR-077); <see langword="null"/> for a value built in code. Equality
+    /// ignores it, and the writer does not write it.
+    /// </summary>
+    public int? LineNumber { get; init; }
+
+    /// <summary>
+    /// The group prefix it was read with, such as <c>item1</c>, to find the raw <c>X-ABLabel</c> among the entry's
+    /// properties (FR-077); <see langword="null"/> without one. Equality ignores it, and the writer assigns its own groups.
+    /// </summary>
+    public string? Group { get; init; }
+
+    /// <inheritdoc/>
+    public bool Equals(ContactUrl? other) =>
+        other is not null && Value == other.Value && Types == other.Types && Preferred == other.Preferred && Label == other.Label;
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => HashCode.Combine(Value, Types, Preferred, Label);
 }
 
 /// <summary>
@@ -88,4 +146,25 @@ public sealed record ContactAddress {
 
     /// <summary>The custom label, such as Apple's <c>X-ABLabel</c> of the address's group.</summary>
     public string? Label { get; init; }
+
+    /// <summary>
+    /// The line of the file the value was read from (FR-077); <see langword="null"/> for a value built in code. Equality
+    /// ignores it, and the writer does not write it.
+    /// </summary>
+    public int? LineNumber { get; init; }
+
+    /// <summary>
+    /// The group prefix it was read with, such as <c>item1</c>, to find the raw <c>X-ABLabel</c> among the entry's
+    /// properties (FR-077); <see langword="null"/> without one. Equality ignores it, and the writer assigns its own groups.
+    /// </summary>
+    public string? Group { get; init; }
+
+    /// <inheritdoc/>
+    public bool Equals(ContactAddress? other) =>
+        other is not null && PostOfficeBox == other.PostOfficeBox && Extended == other.Extended && Street == other.Street
+        && Locality == other.Locality && Region == other.Region && PostalCode == other.PostalCode && Country == other.Country
+        && Types == other.Types && Preferred == other.Preferred && Label == other.Label;
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => HashCode.Combine(HashCode.Combine(Street, Locality, PostalCode, Country), Types, Preferred, Label);
 }
