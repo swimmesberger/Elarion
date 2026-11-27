@@ -52,6 +52,25 @@ public sealed class SettingsFallbackConfigurationTests {
         (await manager.GetAsync(Host, cancellationToken: Ct)).Should().Be("mail.internal", "a reset falls back again");
     }
 
+    [Fact]
+    public async Task AFallbackValue_IsSet_ButNotStored() {
+        using var provider = Build(("Email:Smtp:Host", "mail.internal"));
+        var manager = SettingsTestHost.Scoped<ISettingsManager>(provider);
+
+        var configured = await manager.GetResolvedAsync(Host, cancellationToken: Ct);
+        configured.IsSet.Should().BeTrue("the value is not the default");
+        configured.IsStored.Should().BeFalse("nothing is stored");
+
+        await manager.SetAsync(Host, "smtp.example.com", cancellationToken: Ct);
+        var stored = await manager.GetResolvedAsync(Host, cancellationToken: Ct);
+        stored.IsSet.Should().BeTrue();
+        stored.IsStored.Should().BeTrue();
+
+        var defaulted = await manager.GetResolvedAsync(Port, cancellationToken: Ct);
+        defaulted.IsSet.Should().BeFalse();
+        defaulted.IsStored.Should().BeFalse();
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
