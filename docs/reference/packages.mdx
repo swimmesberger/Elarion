@@ -37,6 +37,9 @@ Protocols remain host-neutral where possible; ASP.NET packages own only their wi
 | `Elarion.AspNetCore.SchemaGeneration` | An ASP.NET build should export `rpc-schema.json` for client generation. |
 | `Elarion.AspNetCore.Identity` | An ASP.NET host needs Identity registration, EF stores, `ICurrentUser` claims mapping, and the default authorizer. |
 | `Elarion.AspNetCore.ProxyIdentity` | The app sits behind an authenticating reverse proxy (Cloudflare Access, Google IAP, oauth2-proxy, an OIDC gateway) and must validate the token it forwards in a header or cookie, refuse to start unauthenticated, and run locally with a stand-in identity. See [proxy identity](/docs/capabilities/proxy-identity). |
+| `Elarion.AppPasswords` | People connect calendar apps or subscribe to feeds with app passwords: `IAppPasswords` issues, lists, revokes and verifies them (only a hash is stored), over the `IAppPasswordStore` seam. NativeAOT-safe. See [app passwords](/docs/capabilities/app-passwords). |
+| `Elarion.AppPasswords.EntityFrameworkCore` | App passwords need a durable table on the application's `DbContext` (`[GenerateElarionAppPasswords]`). |
+| `Elarion.AppPasswords.AspNetCore` | Calendar apps authenticate with an app password over HTTP Basic, or a feed token in a feed URL: the `AddElarionAppPasswordAuthentication` scheme and its events, and `AddElarionIdentityAppPasswordPrincipals<TUser>()`. |
 
 See [transport capabilities](/docs/capabilities/transports) and
 [writing a custom transport](/docs/capabilities/transports/custom-transports).

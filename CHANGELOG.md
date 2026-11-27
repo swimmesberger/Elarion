@@ -28,6 +28,22 @@ minor releases may include breaking changes.
   limits bound hostile uploads. `ContactWriter` writes vCard 3.0 or 4.0 deterministically, forward-only to a stream, an
   `ElarionFile` or a streamed file. No reflection and no third-party library, so the application still publishes with
   NativeAOT. See [Contacts](https://elarion.wimmesberger.dev/docs/capabilities/contacts).
+- **App passwords: `Elarion.AppPasswords`, `Elarion.AppPasswords.EntityFrameworkCore`, `Elarion.AppPasswords.AspNetCore`**
+  (ADR-0111, spec 0006). Calendar apps and calendar subscriptions authenticate without a browser sign-in.
+  `IAppPasswords` creates a named app password for a user with a scope (`AppPasswordScope.Dav`, or
+  `AppPasswordScope.CalendarFeed(source, key)` for a feed token) and returns its secret once, lists without secrets,
+  revokes by deleting, and verifies with a last-use write at most once per `LastUseInterval`. A secret is a
+  configurable prefix (`elap_`) and 256 random bits; only its SHA-256 (standard Base64) is stored. A user past
+  `MaxPerUser` (10) gets `app_password.limit_reached`, a foreign or unknown id `app_password.not_found`
+  (`AppPasswordErrorCodes`). `[GenerateElarionAppPasswords]` maps the `elarion_app_passwords` table onto the
+  application's `DbContext` (`ELAPW001` without `[GenerateDbSets]`).
+  `AddAuthentication().AddElarionAppPasswordAuthentication()` adds a hand-written, NativeAOT-safe scheme for HTTP Basic
+  and for feed tokens in `{/dav}/feeds/{token}.ics`, with the events `OnVerifyCredential`, `OnValidateUserName`,
+  `OnCreatePrincipal` and `OnAuthenticated`, the claims `elarion:app_password_id` and `elarion:app_password_scope`, a
+  `401` Basic challenge and a `403` without one; `AddElarionIdentityAppPasswordPrincipals<TUser>()` creates the
+  principal through ASP.NET Core Identity. Applications with app passwords of their own keep their store behind the
+  events, or copy their rows when they hashed the same way. See
+  [App passwords](https://elarion.wimmesberger.dev/docs/capabilities/app-passwords).
 - **`Elarion.Spreadsheets`: spreadsheet records** (ADR-0108). A `partial` class marked `[SpreadsheetRecord]` maps to
   the rows of a worksheet through a bundled generator, with no reflection, so the application still publishes with
   NativeAOT. `SpreadsheetWorkbook` writes records as an `.xlsx` workbook, forward-only to a stream, an `ElarionFile` or

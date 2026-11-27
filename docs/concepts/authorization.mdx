@@ -12,7 +12,9 @@ the same attributes.
 ## Authentication vs authorization
 
 - **Authentication** — *who you are.* The host's ASP.NET middleware validates a cookie, JWT, or OIDC
-  token and produces a `ClaimsPrincipal`. This is the host's job; Elarion does not issue credentials.
+  token and produces a `ClaimsPrincipal`. This is the host's job; Elarion does not issue credentials, with two
+  exceptions for devices and apps that cannot sign in through a browser: [device keys](/docs/capabilities/devices)
+  and [app passwords](/docs/capabilities/app-passwords) for calendar apps and feeds.
 - **Authorization** — *what you may do.* Elarion's job, per handler.
 
 The request flow:

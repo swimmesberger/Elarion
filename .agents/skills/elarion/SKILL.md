@@ -307,6 +307,13 @@ pre-assigned at issue; redeem atomically mints the per-device key; codes stored 
 app-owned and must be rate-limited; sweep expired codes with a `[ScheduledJob]` calling
 `IPairingCodeStore.DeleteExpiredAsync`.
 
+Don't hand-roll Basic auth for calendar apps or feed links — `Elarion.AppPasswords` owns app passwords (ADR-0111):
+`AddElarionAppPasswordsEntityFrameworkCore<TDbContext>(section)` + `[GenerateElarionAppPasswords]` on the context, your own
+own-account handlers calling `IAppPasswords.CreateAsync(user.UserId, name, AppPasswordScope.Dav, ct)` (secret returned
+once), `ListAsync` and `RevokeAsync`, and `AddAuthentication().AddElarionAppPasswordAuthentication()` with
+`AddElarionIdentityAppPasswordPrincipals<TUser>()` or `o.Events.OnCreatePrincipal`. Name the scheme only on the DAV
+routes, never as the default. An app with its own credential table keeps it behind `o.Events.OnVerifyCredential`.
+
 Don't hand-roll Web Push either — `Elarion.WebPush` owns notifying users whose app is **closed** (ADR-0076):
 `AddElarionWebPushEntityFrameworkCore<TDbContext>(o => o.Subject = "mailto:…")` + `[GenerateElarionWebPush]`
 on the context, three `[Handler]`s delegating to `WebPushSubscriptionService` (subscribe, unsubscribe, public key — so your
