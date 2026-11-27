@@ -49,7 +49,7 @@ public interface ICalDavPublisher {
 }
 
 /// <summary>The default <see cref="ICalDavPublisher"/> over the scoped <see cref="IDavCollectionStore"/>.</summary>
-internal sealed class CalDavPublisher(IDavCollectionStore store, CalDavSourceRegistry sources, IOptions<CalDavOptions> options, CalendarReader reader)
+internal sealed class CalDavPublisher(IDavCollectionStore store, DavSourceRegistry<CalDavSourceListing> sources, IOptions<CalDavOptions> options, CalendarReader reader)
     : ICalDavPublisher {
     public async ValueTask<bool> PublishAsync(CalDavAddress address, CalendarObject calendarObject, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(calendarObject);

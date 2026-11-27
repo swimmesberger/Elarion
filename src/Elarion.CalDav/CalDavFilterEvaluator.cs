@@ -22,7 +22,7 @@ public static class CalDavFilterEvaluator {
     private static readonly DateTimeOffset Latest = new(2200, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     /// <summary>The collations <c>text-match</c> supports.</summary>
-    public static IReadOnlyList<string> Collations { get; } = ["i;ascii-casemap", "i;unicode-casemap", "i;octet"];
+    public static IReadOnlyList<string> Collations => DavTextMatch.Collations;
 
     /// <summary>Whether <paramref name="calendar"/> matches <paramref name="filter"/>, a <c>C:filter</c> element.</summary>
     /// <param name="calendar">The calendar object, read by <see cref="CalendarReader"/>.</param>
@@ -175,21 +175,10 @@ public static class CalDavFilterEvaluator {
         }
 
         private static bool TextMatches(string value, DavXmlElement textMatch) {
-            var needle = textMatch.Text;
-            var comparison = textMatch.Attribute("collation") switch {
-                "i;octet" => StringComparison.Ordinal,
-                "i;unicode-casemap" => StringComparison.OrdinalIgnoreCase,
-                _ => StringComparison.Ordinal,
-            };
-            bool found;
-            if (textMatch.Attribute("collation") is null or "i;ascii-casemap") found = AsciiFold(value).Contains(AsciiFold(needle), StringComparison.Ordinal);
-            else found = value.Contains(needle, comparison);
+            // RFC 4791 §9.7.5: i;ascii-casemap is CalDAV's default collation, and contains its only match type.
+            var found = DavTextMatch.Matches(value, textMatch.Text, textMatch.Attribute("collation") ?? DavTextMatch.AsciiCasemap, DavMatchType.Contains);
             var negate = string.Equals(textMatch.Attribute("negate-condition"), "yes", StringComparison.OrdinalIgnoreCase);
             return found != negate;
-
-            static string AsciiFold(string text) => string.Create(text.Length, text, static (span, source) => {
-                for (var i = 0; i < source.Length; i++) span[i] = source[i] is >= 'a' and <= 'z' ? (char)(source[i] - 32) : source[i];
-            });
         }
 
         private bool MatchTimeRange(CalendarComponent component, DavXmlElement timeRange) {

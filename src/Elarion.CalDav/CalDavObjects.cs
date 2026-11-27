@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Elarion.Calendars;
 using Elarion.WebDav;
 
@@ -15,37 +13,11 @@ internal static class CalDavObjects {
     private static readonly DateTimeOffset WindowStart = new(1900, 1, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset WindowEnd = new(2200, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
-    private const string Base32Alphabet = "abcdefghijklmnopqrstuvwxyz234567";
-
     /// <summary>
     /// The member name of <paramref name="uid"/>: the UID itself when it is 1 to 200 of <c>A–Z a–z 0–9 . _ @ -</c>, else the
     /// base32 of its SHA-256; <c>.ics</c> appended. Stable, so re-publishing a UID never moves its URL.
     /// </summary>
-    public static string NameOf(string uid) {
-        ArgumentException.ThrowIfNullOrEmpty(uid);
-        var plain = uid.Length <= 200;
-        foreach (var c in uid)
-            if (!char.IsAsciiLetterOrDigit(c) && c is not ('.' or '_' or '@' or '-')) {
-                plain = false;
-                break;
-            }
-
-        if (plain) return uid + ".ics";
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(uid));
-        var builder = new StringBuilder(56);
-        int buffer = 0, bits = 0;
-        foreach (var b in hash) {
-            buffer = (buffer << 8) | b;
-            bits += 8;
-            while (bits >= 5) {
-                builder.Append(Base32Alphabet[(buffer >> (bits - 5)) & 31]);
-                bits -= 5;
-            }
-        }
-
-        if (bits > 0) builder.Append(Base32Alphabet[(buffer << (5 - bits)) & 31]);
-        return builder.Append(".ics").ToString();
-    }
+    public static string NameOf(string uid) => DavObjectNames.NameOf(uid, ".ics");
 
     /// <summary>The media type of an object, with the RFC 4791 <c>component</c> parameter of its first component.</summary>
     public static string ContentTypeOf(CalendarObject calendarObject) {

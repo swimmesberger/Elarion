@@ -66,7 +66,7 @@ public sealed record PublishedCalendarInfo(string Key, string DisplayName) {
 /// <summary>The address of a published calendar: the source that declares it and its key within the source.</summary>
 public sealed record CalDavAddress {
     /// <summary>The longest source name or key: 64 characters.</summary>
-    public const int MaxSegmentLength = 64;
+    public const int MaxSegmentLength = Elarion.WebDav.DavSources.MaxSegmentLength;
 
     /// <summary>Creates an address.</summary>
     /// <exception cref="ArgumentException">A name is not 1 to 64 ASCII letters, digits, <c>-</c> or <c>_</c>.</exception>
@@ -90,60 +90,10 @@ public sealed record CalDavAddress {
     public override string ToString() => Source + "." + Key;
 
     /// <summary>Whether <paramref name="value"/> is 1 to 64 ASCII letters, digits, <c>-</c> or <c>_</c>.</summary>
-    public static bool IsValidSegment(string? value) {
-        if (string.IsNullOrEmpty(value) || value.Length > MaxSegmentLength) return false;
-        foreach (var c in value)
-            if (!char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_'))
-                return false;
-        return true;
-    }
+    public static bool IsValidSegment(string? value) => Elarion.WebDav.DavSources.IsValidSegment(value);
 }
 
-/// <summary>A registered calendar source: its name, its query, the handler service it needs, and how to invoke it as the current user.</summary>
-internal sealed class CalDavSourceRegistration(
-    string name,
-    Type queryType,
-    Type handlerServiceType,
-    Func<IServiceProvider, CancellationToken, ValueTask<Result<CalDavSourceListing>>> invoke) {
-    public string Name { get; } = name;
-
-    public Type QueryType { get; } = queryType;
-
-    public Type HandlerServiceType { get; } = handlerServiceType;
-
-    public Func<IServiceProvider, CancellationToken, ValueTask<Result<CalDavSourceListing>>> Invoke { get; } = invoke;
-}
-
-/// <summary>The registered sources, by name.</summary>
-internal sealed class CalDavSourceRegistry {
-    private readonly Dictionary<string, CalDavSourceRegistration> _sources = new(StringComparer.Ordinal);
-
-    public CalDavSourceRegistry(IEnumerable<CalDavSourceRegistration> registrations) {
-        foreach (var registration in registrations)
-            if (!_sources.TryAdd(registration.Name, registration))
-                throw new InvalidOperationException($"Two calendar sources are named '{registration.Name}'; source names must be unique.");
-    }
-
-    public IReadOnlyCollection<CalDavSourceRegistration> Sources => _sources.Values;
-
-    public bool Contains(string name) => _sources.ContainsKey(name);
-}
-
-/// <summary>
-/// Fails the host's start when a registered source has no handler, instead of the first DAV request answering 500
-/// (spec 0006 FR-013): the handler is resolved only per request, so nothing else would notice it is missing.
-/// </summary>
-internal sealed class CalDavSourceHandlerValidator(IEnumerable<CalDavSourceRegistration> sources, Microsoft.Extensions.DependencyInjection.IServiceProviderIsService services)
-    : Microsoft.Extensions.Options.IValidateOptions<CalDavOptions> {
-    public Microsoft.Extensions.Options.ValidateOptionsResult Validate(string? name, CalDavOptions options) {
-        var missing = sources.Where(source => !services.IsService(source.HandlerServiceType))
-            .Select(static source =>
-                $"The calendar source '{source.Name}' ({source.QueryType.Name}) has no handler: no IHandler<{source.QueryType.Name}, "
-                + "Result<CalDavSourceListing>> is registered. Add the handler class to the module that calls AddElarionCalDavSource, "
-                + "or register it.")
-            .ToList();
-        return missing.Count == 0
-            ? Microsoft.Extensions.Options.ValidateOptionsResult.Success
-            : Microsoft.Extensions.Options.ValidateOptionsResult.Fail(missing);
-    }
+/// <summary>What the shared source machinery calls a calendar source in its messages.</summary>
+internal static class CalDavSourceKind {
+    public static Elarion.WebDav.DavSourceKind Value { get; } = new("calendar source", "AddElarionCalDavSource");
 }

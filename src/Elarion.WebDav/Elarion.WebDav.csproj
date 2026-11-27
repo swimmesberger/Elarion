@@ -22,6 +22,7 @@
     <InternalsVisibleTo Include="Elarion.Tests"/>
     <!-- The protocol packages share the XML name tables and the hardened reader settings, not a public surface. -->
     <InternalsVisibleTo Include="Elarion.CalDav"/>
+    <InternalsVisibleTo Include="Elarion.CardDav"/>
     <InternalsVisibleTo Include="Elarion.WebDav.AspNetCore"/>
     <InternalsVisibleTo Include="Elarion.WebDav.EntityFrameworkCore"/>
   </ItemGroup>

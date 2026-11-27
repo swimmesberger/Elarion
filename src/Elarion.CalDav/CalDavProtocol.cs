@@ -30,7 +30,7 @@ public sealed class CalDavCollection : DavCollection {
 /// registered sources return for the current user, their properties, and the reports <c>calendar-multiget</c>,
 /// <c>calendar-query</c> and <c>free-busy-query</c>. Every calendar is read-only.
 /// </summary>
-internal sealed partial class CalDavProtocol(CalDavSourceRegistry sources, IOptions<CalDavOptions> options, CalendarReader reader, TimeProvider timeProvider)
+internal sealed partial class CalDavProtocol(DavSourceRegistry<CalDavSourceListing> sources, IOptions<CalDavOptions> options, CalendarReader reader, TimeProvider timeProvider)
     : IDavProtocol {
     /// <summary>The collection kind of calendars in the store.</summary>
     public const string Kind = "calendar";
@@ -98,22 +98,12 @@ internal sealed partial class CalDavProtocol(CalDavSourceRegistry sources, IOpti
     public async ValueTask<IReadOnlyList<DavCollection>> GetCollectionsAsync(DavContext context, CancellationToken cancellationToken) {
         var collections = new List<DavCollection>();
         foreach (var source in sources.Sources) {
-            var result = await source.Invoke(context.Services, cancellationToken).ConfigureAwait(false);
-            if (!result.IsSuccess) {
-                // A source the user may not use, behind a closed feature gate, or of a disabled module shows no calendars
-                // (FR-011, FR-012); anything else is the application's failure.
-                if (result.Error.Kind is ErrorKind.NotFound or ErrorKind.Forbidden or ErrorKind.Unauthorized) continue;
-                throw new InvalidOperationException($"The calendar source '{source.Name}' failed: {result.Error.Code}: {result.Error.Message}");
-            }
-
+            // A source the user may not use, behind a closed feature gate, or of a disabled module shows no calendars.
+            var listing = await DavSources.InvokeAsync(source, CalDavSourceKind.Value, context.Services, cancellationToken).ConfigureAwait(false);
             var keys = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var info in result.Value?.Calendars ?? []) {
+            foreach (var info in listing?.Calendars ?? []) {
                 if (info is null) continue;
-                if (!CalDavAddress.IsValidSegment(info.Key))
-                    throw new InvalidOperationException(
-                        $"The calendar source '{source.Name}' returned the key '{info.Key}'; a key must be 1 to 64 ASCII letters, digits, '-' or '_'.");
-                if (!keys.Add(info.Key))
-                    throw new InvalidOperationException($"The calendar source '{source.Name}' returned the key '{info.Key}' twice.");
+                DavSources.CheckKey(source.Name, info.Key, keys, CalDavSourceKind.Value);
                 collections.Add(new CalDavCollection(new CalDavAddress(source.Name, info.Key), info));
             }
         }
