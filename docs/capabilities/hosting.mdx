@@ -204,6 +204,10 @@ refused with `403` before the socket is accepted, while a device or server clien
 before. An HTTP/2 handshake is a `CONNECT`, which is never a safe method. Every other `GET` (including server-sent
 events) is unaffected.
 
+An endpoint that authenticates every request with a credential a browser never attaches by itself can opt out with
+`.DisableElarionCrossOriginProtection(pathPrefix)` (`CrossOriginProtectionExemptMetadata`); with a path prefix the
+exemption also holds when the middleware runs before routing. `MapElarionDav()` does this for the DAV routes.
+
 A refusal is HTTP `403` with a ProblemDetails body whose `code` is `cross_origin.refused`
 (`CrossOriginProtectionErrorCodes.Refused`); a registered `IProblemDetailsService` writes it, so host customization
 applies. `AllowedOrigins` entries are validated at startup (`scheme://host[:port]`, no path).

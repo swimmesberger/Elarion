@@ -217,6 +217,50 @@ public sealed class CrossOriginProtectionTests {
         }
     }
 
+    [Theory]
+    [InlineData(true)] // routing runs after the protection: the exempt endpoints' path prefixes decide
+    [InlineData(false)] // WebApplication routes first: the selected endpoint's metadata decides
+    public async Task AnEndpointWithExemptMetadata_PassesCrossSite_WhileOthersAreRefused(bool routingAfter) {
+        var ct = TestContext.Current.CancellationToken;
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+
+        await using var app = builder.Build();
+        app.UseElarionCrossOriginProtection();
+        if (routingAfter) app.UseRouting();
+        app.MapPost("/hooks/{**rest}", (RequestDelegate)(context => {
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            return Task.CompletedTask;
+        })).DisableElarionCrossOriginProtection("/hooks");
+        app.MapPost("/rpc", (RequestDelegate)(context => {
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            return Task.CompletedTask;
+        }));
+        await app.StartAsync(ct);
+
+        try {
+            var baseAddress = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(baseAddress) };
+
+            var exempt = await client.SendAsync(CrossSitePost("/hooks/a"), ct);
+            var protectedRoute = await client.SendAsync(CrossSitePost("/rpc"), ct);
+
+            exempt.StatusCode.Should().Be(HttpStatusCode.OK);
+            protectedRoute.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+        finally {
+            await app.StopAsync(ct);
+        }
+
+        static HttpRequestMessage CrossSitePost(string path) {
+            var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
+            request.Headers.TryAddWithoutValidation("Origin", Attacker);
+            request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "cross-site");
+            return request;
+        }
+    }
+
     [Fact]
     public async Task OverHttp_InFrontOfAWebSocketEndpoint_RefusesCrossSiteHandshake_AndAcceptsOthers() {
         var ct = TestContext.Current.CancellationToken;

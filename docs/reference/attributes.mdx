@@ -902,6 +902,18 @@ See [Actors — multiple instances and single-homing](/docs/concepts/actors/stat
 
 See [App passwords](/docs/capabilities/app-passwords).
 
+### `[GenerateElarionDavStore]`
+
+- **Package:** `Elarion.WebDav.EntityFrameworkCore` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits the `ElarionDavCollections`, `ElarionDavObjects` and `ElarionDavChanges` sets and applies the store's model configuration through the EF generator's model-config seam — the tables behind the EF `IDavCollectionStore` (ADR-0111). The hand-written equivalent is `modelBuilder.UseElarionDavStore()`. Requires `[GenerateDbSets]` (else `ELDAV001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column names use snake_case (`elarion_dav_collections`, …) or PascalCase. |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [CalDAV](/docs/capabilities/caldav#the-published-collection-store).
+
 ### `[GenerateElarionDeviceIdentity]`
 
 - **Package:** `Elarion.Devices.EntityFrameworkCore` · **Applies to:** class

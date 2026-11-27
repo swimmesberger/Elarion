@@ -28,6 +28,53 @@ minor releases may include breaking changes.
   limits bound hostile uploads. `ContactWriter` writes vCard 3.0 or 4.0 deterministically, forward-only to a stream, an
   `ElarionFile` or a streamed file. No reflection and no third-party library, so the application still publishes with
   NativeAOT. See [Contacts](https://elarion.wimmesberger.dev/docs/capabilities/contacts).
+- **WebDAV core and store: `Elarion.WebDav`, `Elarion.WebDav.EntityFrameworkCore`** (ADR-0111, spec 0006). The
+  foundation of CalDAV: `DavDispatcher` answers `OPTIONS`, `PROPFIND` (depth 0 and 1; `infinity` is `403
+  propfind-finite-depth`), `REPORT sync-collection` (RFC 6578, with `507` truncation and `403 valid-sync-token` for an
+  expired or foreign token) and `GET` over the current user's principal, homes, published collections and their
+  objects, read-only (`403 need-privileges` for every write method), from request records without ASP.NET Core. Bodies
+  are read with DTDs refused and `MaxBodyBytes`, `MaxXmlDepth`, `MaxXmlElements` (`WebDavOptions`).
+  `[GenerateElarionDavStore]` maps the `elarion_dav_collections`, `elarion_dav_objects` and `elarion_dav_changes` tables
+  onto the application's `DbContext` (`ELDAV001` without `[GenerateDbSets]`); the EF store joins the context's
+  transaction, writes nothing for unchanged bytes, serialises writers per collection under its row lock and prunes its
+  journal while the collection changes (`JournalRetention`, `MaxJournalRowsPerCollection`). See
+  [CalDAV](https://elarion.wimmesberger.dev/docs/capabilities/caldav).
+- **CalDAV server: `Elarion.CalDav`** (ADR-0111, spec 0006). A module declares a calendar source, a query request
+  implementing `ICalDavSource<TSelf>` registered with `AddElarionCalDavSource<TQuery>()`, whose ordinary handler returns
+  the calendars (`PublishedCalendarInfo`: key, name, color, description, component kinds, time zone) the current user
+  may see; every DAV request runs the sources through the handler pipeline as that user, and a source without a
+  registered handler stops the host from starting. `ICalDavPublisher` publishes,
+  removes and replaces `Elarion.Calendars` objects in the handler's transaction (no change for equal bytes; `METHOD`, a
+  missing `DTSTAMP` or an unregistered source throw). Calendars answer the properties iOS, macOS, Thunderbird, DAVx5 and
+  Evolution read, read-only, and the reports `calendar-multiget`, `calendar-query` (every RFC 4791 filter, the §9.9
+  time-range table over recurrences, floating times in the calendar's zone), `free-busy-query`, `expand`,
+  `limit-recurrence-set` and partial `calendar-data`. `CalDavOptions` embeds `CalendarReadOptions` and
+  `CalendarExpandOptions`. See [CalDAV](https://elarion.wimmesberger.dev/docs/capabilities/caldav).
+- **CalDAV client** (ADR-0111, spec 0006). `CalDavClient` over an application's `HttpClient` discovers an account from a
+  URL (`current-user-principal`, `/.well-known/caldav`, `calendar-home-set`), lists its calendars (name, color,
+  component kinds, writable, `sync-collection`), and syncs a calendar one step at a time: `SyncAsync(calendar, state)`
+  returns the changed objects read by `CalendarReader`, the removed names and a new state string, using
+  `sync-collection` and falling back to an ETag comparison. `PutAsync` and `DeleteAsync` send `If-Match` (or
+  `If-None-Match: *`). Credentials come from an `Authorization` delegate (Basic app passwords, OAuth bearer tokens).
+  Refusals, missing calendars, oversized or invalid answers are `CalDavResult` errors with `CalDavErrorCodes`
+  (`caldav.*`), never exceptions; limits are `CalDavClientOptions` (`MaxResponseBytes`, `MaxXmlDepth`,
+  `MaxObjectsPerStep`, …). The state serializes through a source-generated JSON context, so NativeAOT stays clean.
+- **CalDAV feeds** (ADR-0111, spec 0006). Every published calendar is also one `.ics` document at
+  `{prefix}/feeds/{token}.ics` for Outlook and Google Calendar, where the token is an app password created with
+  `AppPasswordScope.CalendarFeed(address)`; `CalDavLinks.FeedUrl` builds the URL. The feed answers `404` when the token
+  is unknown, revoked or of another scope, or its user no longer sees the calendar through its source; it holds each
+  `VTIMEZONE` once, streams from the store, and answers `304` to a current `If-None-Match`. `CalDav:FeedsEnabled`
+  turns it off.
+- **CalDAV host: `Elarion.WebDav.AspNetCore`** (ADR-0111, spec 0006). `app.MapElarionDav()` maps the DAV route group
+  under `WebDav:Prefix` with the WebDAV methods, requiring only the schemes of `WebDavHostOptions.AuthenticationSchemes`
+  (the app-password scheme by default, so a browser session never drives DAV and an app password reaches no other
+  endpoint), seeds the dispatch scope with the DAV principal after authentication, and redirects
+  `/.well-known/caldav` with `301` to the prefix. iOS, macOS, Thunderbird, DAVx5 and Evolution add an account from the
+  host name, an e-mail and an app password.
+- **`Elarion.AspNetCore`: endpoints can opt out of cross-origin protection.**
+  `.DisableElarionCrossOriginProtection(pathPrefix)` adds `CrossOriginProtectionExemptMetadata`, which
+  `UseElarionCrossOriginProtection` honours for the selected endpoint and, through the metadata's path prefix, before
+  routing; the DAV routes use it.
 - **App passwords: `Elarion.AppPasswords`, `Elarion.AppPasswords.EntityFrameworkCore`, `Elarion.AppPasswords.AspNetCore`**
   (ADR-0111, spec 0006). Calendar apps and calendar subscriptions authenticate without a browser sign-in.
   `IAppPasswords` creates a named app password for a user with a scope (`AppPasswordScope.Dav`, or

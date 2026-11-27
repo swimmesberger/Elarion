@@ -37,7 +37,7 @@ public sealed record MyShiftCalendars : ICalDavSource<MyShiftCalendars> {
     public static string SourceName => "shifts";
 }
 
-[Handler]
+// No [Handler]: the source is called in process, through the module's pipeline, and is no JSON-RPC operation.
 [RequirePermission("shifts", Verbs.Read)]
 public sealed class ListMyShiftCalendars(ICurrentUser user)
     : IHandler<MyShiftCalendars, Result<CalDavSourceListing>> {
@@ -256,6 +256,104 @@ As built in slice 1, where it settles or departs from the above:
   PostgreSQL advisory lock on the user. The generated set is `ElarionAppPasswords`, so an adopting application can keep
   its own `AppPasswords` set during migration. No store is registered by `AddElarionAppPasswords`;
   `AddElarionInMemoryAppPasswordStore()` exists for tests.
+
+As built in slice 2 (`Elarion.WebDav`, `Elarion.WebDav.EntityFrameworkCore`), where it settles or departs from the above:
+
+- **Collection id**: not a version 7 UUID but a name-based one (version 8, SHA-256 over kind, source and key), exposed as
+  `DavCollectionAddress.Id`. Every node computes it without a read, and a calendar a source lists but nothing was
+  published to yet still has a stable sync token at counter 0; a token beyond the counter (a store that was reset) is
+  refused like an expired one.
+- **Journal retention needs a time**: `elarion_dav_changes` has a `changed_at` column; a change prunes the rows beyond the
+  row cap or older than the retention and raises `low_water` to the highest pruned counter, in one statement.
+- **Locking**: a publish compares the stored ETag without a lock first (no write for equal bytes, FR-006), then inserts
+  the collection row if missing, takes the row lock with `SELECT … FOR UPDATE`, re-checks, writes and gives each change
+  its own counter value; the counter and the low-water mark are written by the pruning statement.
+- **Naming**: the row cap is `MaxJournalRowsPerCollection`, since the store is shared with CardDAV later. The tables have
+  foreign keys from objects and changes to collections. The EF store requires PostgreSQL and says so when it is not.
+- **The in-memory store ships**: `AddElarionInMemoryDavStore()` keeps the same counters, journal and pruning without a
+  transaction, for tests and single-node development, as slice 1 shipped `AddElarionInMemoryAppPasswordStore()`; the
+  dispatcher tests and the store contract run on it and on PostgreSQL.
+- **Dispatcher details**: a missing `Depth` on `PROPFIND` is read as `1` (sabre/dav's default) rather than RFC 4918's
+  `infinity`; a body with more elements than `MaxXmlElements` answers `413`, a deeper one `400`; an initial
+  `sync-collection` (empty token) answers every member regardless of `limit`; `getctag` is the sync token. The name
+  tables and the XML helpers are internal and shared with `Elarion.CalDav`, `Elarion.WebDav.AspNetCore` and the EF store
+  through `InternalsVisibleTo`; the seams (`IDavProtocol`, `DavCollection`, `DavProperty`, `IDavCollectionStore`,
+  `DavDispatcher`, `DavRequest`, `DavResponse`, `DavXmlElement`) are public.
+
+As built in slice 3 (`Elarion.CalDav` server):
+
+- **Sources are invoked in the request's scope**, resolving `IHandler<TQuery, Result<CalDavSourceListing>>` from it (the
+  decorated chain), not through `HandlerInvoker` in a child scope: the host seeds the request scope with the DAV
+  principal, and `Elarion.CalDav` needs no reference to the `Elarion` core. `ICalDavSource<TSelf>` derives from
+  `IQuery<TSelf, CalDavSourceListing>` and needs a parameterless constructor.
+- **Publisher results**: `PublishAsync` and `RemoveAsync` return whether the calendar changed; `ReplaceAsync` returns the
+  store's `DavReplaceOutcome` (added, changed, removed), with an `IEnumerable` overload beside the `IAsyncEnumerable` one.
+- **The stored span** is computed from the written bytes read back with `CalendarReader`: an object with an item without
+  a start (a to-do with only `DUE`) is a candidate of every query; an endless series is expanded only to its first
+  occurrence; floating times and dates are widened by 14 hours.
+- **text-match** defaults to `i;ascii-casemap`, as RFC 4791 §9.7.5 says, not `i;unicode-casemap`; both and `i;octet`
+  are supported, an unknown collation is an invalid filter (`403` with `valid-filter`).
+- **calendar-query with `Depth: 0`** answers no members; a missing `Depth` is read as `1`, as clients send it. The
+  candidate range comes from the `time-range` of a single `VEVENT`, `VTODO` or `VJOURNAL` filter below `VCALENDAR`.
+- **free-busy** writes a `DTSTAMP` of the current time (the answer is computed, not stored) and `BUSY-TENTATIVE` for
+  tentative events.
+- **Options**: `CalDavOptions` also has `ProductId` (the `PRODID` of published objects).
+
+As built in slice 4 (`Elarion.WebDav.AspNetCore`):
+
+- **Cross-origin exemption**: `UseElarionCrossOriginProtection` had no endpoint-skip mechanism, only path prefixes set
+  where it is installed. `Elarion.AspNetCore` gains `CrossOriginProtectionExemptMetadata` and
+  `.DisableElarionCrossOriginProtection(pathPrefix)`: the middleware honours the selected endpoint's metadata when routing
+  ran first, and otherwise exempts the path prefixes it reads once from the endpoint data source, so it still works
+  placed before routing as documented.
+- **No reference to the app-password package**: the default scheme name is the constant
+  `WebDavHostOptions.AppPasswordScheme` (`ElarionAppPassword`), checked equal to the scheme's by a test, so the host
+  depends on `Elarion.WebDav` and `Elarion.AspNetCore` only, as ADR-0111 states. The feed-token reader of the scheme is
+  not changed by the host; an application with another prefix sets it.
+- **Routing**: one catch-all `MapMethods` with a plain `RequestDelegate` (no request-delegate generator), and
+  `MapElarionDav` returns the `RouteGroupBuilder`. The well-known redirect's `Location` is relative to the request, so it
+  keeps the scheme the client used, and it carries `Cache-Control: no-cache`.
+- **Replays**: the iOS, macOS, Thunderbird, DAVx5 and Evolution sequences run against a Kestrel host in
+  `CalDavClientReplayTests`; the Apple CalDAVTester job and the NativeAOT sample are not part of this slice.
+
+As built in slice 5 (feeds):
+
+- **`Elarion.CalDav` references `Elarion.AppPasswords`** (abstractions-only, AOT-compatible) for the scope type and its
+  claim: `AppPasswordScope.CalendarFeed(CalDavAddress)` is a C# 14 static extension, and the feed reads the
+  `elarion:app_password_scope` claim through `ICurrentUser.GetClaimValues`. ADR-0111's table lists only `Elarion.WebDav`
+  and `Elarion.Calendars`; an application that only syncs external calendars now also gets `Elarion.AppPasswords`.
+- **Links**: `davLinks.FeedUrl(feed)` is `CalDavLinks.FeedUrl(origin, feed)` (and `FeedPath(feed)`), since the public
+  origin is not known outside a request.
+- **The feed's ETag** is a hash of the collection's sync token and what the source says about the calendar, not the
+  bare counter, so a renamed calendar also refreshes; the feed carries `Cache-Control: private, no-cache`. A method other
+  than `GET` or `HEAD` answers `405`.
+
+As built in slice 6 (`CalDavClient`):
+
+- **One more code**: `caldav.forbidden` (`CalDavErrorCodes.Forbidden`) for a `403`, such as a write to a read-only
+  calendar, which `caldav.unauthorized` would misname.
+- **Shape**: `CalDavError` is a sealed record; `CalDavResult<T>` has static `Success` and `Failure`; `DeleteAsync`
+  returns a `CalDavWriteOutcome` without an ETag; `CalDavSyncStep.HasMore` says when another step should run;
+  `CalDavClientOptions` also has `MaxXmlElements`, `MaxRedirects`, `RequestTimeout` (a `TimeoutException`, a transport
+  failure) and a `TimeProvider` for the `DTSTAMP` of written objects that carry none.
+- **Redirects** are followed by the client with method, body and credentials kept, up to `MaxRedirects`, so the
+  `HttpClient` should not follow them itself.
+- **Bounding a step**: the client sends no `DAV:limit` (Nextcloud cuts without `507`, iCloud ignores it). It fetches at
+  most `MaxObjectsPerStep` changed objects and, when it deferred some, keeps the previous token or CTag, so the next step
+  lists the same changes and fetches only those whose ETag it does not hold yet; a `507` from the server is continued
+  from its token. The initial step and the fallback are both a `sync-collection` with an empty token when the calendar
+  offers it, compared with the stored ETags; servers without it get `getctag`, then a depth-1 `PROPFIND` of ETags.
+- **Fixtures**: iCloud, Google, Nextcloud, Fastmail, Zimbra and a server without `sync-collection` are handwritten
+  answers in `CalDavClientServerQuirkTests`, reproducing the research note's findings; the round trip runs against the
+  host of this repository.
+
+As built after review:
+
+- **A source without a handler fails the start**: `AddElarionCalDavSource<TQuery>()` records the handler service it
+  needs, and an options validator run on start (`ValidateOnStart` on `CalDavOptions`) refuses a source whose
+  `IHandler<TQuery, Result<CalDavSourceListing>>` is not registered, naming the source. Before, the first DAV request
+  answered `500`. A test also proves that a source handler without `[Handler]` is registered in its module behind the
+  authorization decorator, so its `[RequirePermission]` applies (FR-011).
 
 ## Adopting existing app passwords
 

@@ -1,0 +1,322 @@
+---
+title: CalDAV
+description: Publish an application's calendars read-only to iOS, macOS, Thunderbird, DAVx5 and Evolution and as ICS feeds, decide who sees which calendar in a handler, and sync external CalDAV calendars step by step, NativeAOT-safe and exact on several nodes over one PostgreSQL.
+icon: CalendarSync
+---
+
+People see the application's shifts, bookings and deadlines in the calendar app they already use. A module publishes
+calendar objects in the handler that changes its data; the framework keeps them in a store with a change journal and
+answers the calendar apps' WebDAV requests from it, so sync is exact on every node and after every restart.
+
+| Package | Role |
+| --- | --- |
+| `Elarion.WebDav` | The WebDAV core without a wire: the hardened XML reader, the `DavDispatcher`, `sync-collection`, the store seam `IDavCollectionStore`. NativeAOT-safe. |
+| `Elarion.WebDav.EntityFrameworkCore` | The store and its journal on the application's `DbContext`: `[GenerateElarionDavStore]`. PostgreSQL. |
+| `Elarion.CalDav` | Calendar sources, `ICalDavPublisher`, the calendar properties and reports. NativeAOT-safe. |
+| `Elarion.WebDav.AspNetCore` | The host: `MapElarionDav()`, `/.well-known/caldav`, the app-password scheme on the DAV routes only. |
+| `Elarion.AppPasswords` (+ `.EntityFrameworkCore`, `.AspNetCore`) | The credential calendar apps send: see [App passwords](/docs/capabilities/app-passwords). |
+
+Why it is shaped this way, and what was rejected, is in
+[ADR-0111](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0111-caldav.md).
+
+## Getting started
+
+```bash
+dotnet add package Elarion.CalDav
+dotnet add package Elarion.WebDav.EntityFrameworkCore
+```
+
+```bash
+dotnet add package Elarion.WebDav.AspNetCore
+dotnet add package Elarion.AppPasswords.EntityFrameworkCore
+dotnet add package Elarion.AppPasswords.AspNetCore
+```
+
+```csharp
+builder.Services.AddElarionWebDavEntityFrameworkCore<AppDbContext>(builder.Configuration.GetSection("WebDav"));
+builder.Services.AddElarionCalDav(builder.Configuration.GetSection("CalDav"));
+builder.Services.AddElarionAppPasswordsEntityFrameworkCore<AppDbContext>(builder.Configuration.GetSection("AppPasswords"));
+builder.Services.AddAuthentication()
+    .AddElarionAppPasswordAuthentication();          // plus AddElarionIdentityAppPasswordPrincipals<TUser>() or OnCreatePrincipal
+
+var app = builder.Build();
+app.UseElarionCrossOriginProtection();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapElarionDav();                                  // /dav, /.well-known/caldav, feeds
+```
+
+A person creates an app password in the application (the application's own-account handler calls `IAppPasswords`),
+then adds a CalDAV account on iOS, macOS, Thunderbird, DAVx5 or Evolution with the host name, their e-mail and that
+password. The calendars of their home appear, read-only.
+
+## The host
+
+`MapElarionDav()` maps one route group under `WebDav:Prefix` for every registered DAV protocol and returns it, so the
+application can add conventions such as a rate limiter:
+
+- **Methods.** `OPTIONS`, `GET`, `HEAD`, `PROPFIND`, `REPORT`, and the write methods, which the dispatcher answers `403`.
+- **Authentication.** The group requires an authenticated user of the schemes in
+  `WebDavHostOptions.AuthenticationSchemes`, by default only the app-password scheme (`ElarionAppPassword`): the
+  application's browser credential (a cookie, a proxy token) never authenticates a DAV request, and an app password no
+  other endpoint. A request without a credential answers `401` with `WWW-Authenticate: Basic realm="DAV",
+  charset="UTF-8"` (iOS sends anonymous requests during discovery and gives up on a `403`); a forbidden one `403`
+  without a challenge.
+- **The dispatch scope** is seeded with the DAV principal after authentication, so `ICurrentUser` in the calendar
+  sources is the calendar app's user, whatever ran before.
+- **Cross-origin protection.** The group carries `CrossOriginProtectionExemptMetadata` with its prefix, so
+  `UseElarionCrossOriginProtection` leaves it alone, before routing as well as after: its only credential is one a
+  browser never attaches by itself.
+- **Well-known.** `/.well-known/caldav` at the application root answers every method with `301` to the prefix
+  (`WebDavHostOptions.MapWellKnown`).
+
+Serve CalDAV over HTTPS: Apple clients may send no credentials over plain HTTP. When the prefix is not `/dav`, set the
+scheme's `FeedTokenReader` to `AppPasswordFeedPaths.CreateReader(prefix)`.
+
+## Calendar sources: who sees which calendar
+
+A module declares a **calendar source**: a query request implementing `ICalDavSource<TSelf>`, whose static
+`SourceName` names it, and an ordinary handler that returns the calendars of the source the current user may see.
+
+```csharp
+public sealed record MyShiftCalendars : ICalDavSource<MyShiftCalendars> {
+    public static string SourceName => "shifts";
+}
+
+[RequirePermission("shifts", Verbs.Read)]
+public sealed class ListMyShiftCalendars(ICurrentUser user) : IHandler<MyShiftCalendars, Result<CalDavSourceListing>> {
+    public ValueTask<Result<CalDavSourceListing>> HandleAsync(MyShiftCalendars query, CancellationToken ct) =>
+        ValueTask.FromResult(Result<CalDavSourceListing>.Success(new CalDavSourceListing([
+            new PublishedCalendarInfo(Key: $"u-{user.UserId}", DisplayName: "My shifts") {
+                Color = "#2E7D32",
+                Components = CalendarComponentKinds.Event,
+                TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Vienna"),
+            },
+        ])));
+}
+
+// in the module's ConfigureServices, so a disabled module registers no source
+services.AddElarionCalDavSource<MyShiftCalendars>();
+```
+
+Every DAV request invokes every registered source's handler through the handler pipeline as the authenticated user, so
+`[RequirePermission]`, resource rules with `WhereAuthorized` and `[FeatureGate]` decide what a calendar app shows
+exactly as they decide what the application shows. A source that answers not-found (a closed feature gate), forbidden or
+unauthorized shows no calendars; any other failure answers `500`. A calendar no source returns, and a principal or home
+of another user, answer `404`, never `403`. Leave `[Handler]` off a source's handler unless you also want it on JSON-RPC:
+it is invoked in process.
+
+A source name and a key are 1 to 64 ASCII letters, digits, `-` and `_`; a calendar's URL segment is `{source}.{key}`.
+Two sources with one name fail when the second is registered; an invalid or repeated key fails when it is returned,
+naming the source. A source whose handler is not registered (the class is outside the module, or the module that holds
+it is not enabled) stops the host from starting, with a message naming the source.
+
+Access is decided per calendar, not per object. A calendar whose content differs between viewers is published as one
+calendar per viewer (`u-{user}` above); losing access to a calendar needs no log, because the calendar leaves the home.
+
+## Publishing calendar objects
+
+The handler that changes the application's data publishes the calendar objects it changes, in its own transaction:
+
+```csharp
+public sealed class CreateShift(AppDbContext db, ICalDavPublisher calendars) : IHandler<CreateShift.Command, Result<Guid>> {
+    public async ValueTask<Result<Guid>> HandleAsync(Command command, CancellationToken ct) {
+        // ... write the shift
+        await calendars.PublishAsync(new CalDavAddress("shifts", $"u-{shift.UserId}"), ToEvent(shift), ct);
+        return shift.Id;
+    }
+}
+```
+
+| Call | Does |
+| --- | --- |
+| `PublishAsync(address, calendarObject)` | Adds or replaces the object of its UID; `false` when the written bytes equal the stored ones. |
+| `RemoveAsync(address, uid)` | Removes it; clients syncing receive it as removed. |
+| `ReplaceAsync(address, objects)` | Makes the set the calendar's whole content: the repair for a drifted calendar, or a nightly re-projection. Only what differs is recorded. |
+
+A `CalendarObject` (from `Elarion.Calendars`) is an event, a to-do, or a series' master and its overrides under one UID;
+it converts implicitly from a `CalendarEvent` or `CalendarTodo`. The publisher writes it with `CalendarWriter` and one
+`VTIMEZONE` per `TZID`, under the name `{uid}.ics` (a hash for a UID with other characters), and its strong ETag is a hash
+of the bytes. No clock value is passed to the writer, so every item needs a `Timestamp` (`DTSTAMP`) or `LastModified`:
+publishing an item with neither throws `CalendarWriteException`, because a clock value would change the bytes, and every
+client would refetch, on every re-publish. Publishing an object with a `METHOD` property, or into a source that is not
+registered, throws too.
+
+The store records the time span each object's occurrences cover (open for an endless series), so a `calendar-query`
+selects its candidates without reading the calendar.
+
+A handler that forgets to publish leaves the calendar stale. Publishing from a domain-event consumer, which shares the
+command's transaction, keeps every handler that changes a shift covered; `ReplaceAsync` repairs what drifted.
+
+## Calendars as calendar apps see them
+
+Every calendar answers the properties the surveyed clients read: `resourcetype` with `calendar`, `displayname`,
+`calendar-description`, Apple's `calendar-color`, `supported-calendar-component-set`, `calendar-timezone` (a `VTIMEZONE`
+DAVx5 uses as the Android calendar's zone), `supported-report-set`, `sync-token` and `getctag`, `owner`, and a
+`current-user-privilege-set` of `read` and `read-current-user-privilege-set` only, which Thunderbird, DAVx5 and
+Evolution read as read-only. The principal answers `calendar-home-set` and `calendar-user-address-set` (`mailto:` the
+user's e-mail, which DAVx5 asks for otherwise).
+
+| Report | Answer |
+| --- | --- |
+| `calendar-multiget` | The named objects in the order of their `href`s; one that does not exist as `404`. At most `MaxMultigetHrefs`. |
+| `calendar-query` | The objects matching the filter: `comp-filter`, `prop-filter`, `param-filter`, `text-match` (`i;ascii-casemap` by default, `i;unicode-casemap`, `i;octet`, `negate-condition`), `is-not-defined`, and `time-range` by the table of RFC 4791 §9.9 for events, to-dos, journals, free-busy and alarms, over every occurrence of a series. Floating times and dates are placed in the calendar's time zone. |
+| `free-busy-query` | One `VFREEBUSY` of the opaque, not cancelled events in the range, merged, tentative ones as `BUSY-TENTATIVE`. |
+
+`calendar-data` may ask for `expand` (every instance in UTC, without rules), `limit-recurrence-set`, or a partial
+`comp`/`prop` selection; `CalDAV-Timezones: F` (RFC 7809) leaves standard `VTIMEZONE`s out. `CalendarExpandOptions` in
+`CalDavOptions.CalendarExpand` caps every expansion. `CalDavFilterEvaluator.Matches` evaluates a filter on its own.
+
+## Feeds for Outlook and Google Calendar
+
+Outlook and Google Calendar cannot add a CalDAV account; they subscribe to a URL, which cannot carry a password. Every
+published calendar is also served as one `.ics` document at `{prefix}/feeds/{token}.ics`, where the token is an
+[app password](/docs/capabilities/app-passwords) bound to that calendar:
+
+```csharp
+var address = new CalDavAddress("shifts", $"u-{user.UserId}");
+var feed = await appPasswords.CreateAsync(user.UserId, "Outlook", AppPasswordScope.CalendarFeed(address), ct);
+if (!feed.IsSuccess) return feed.Error;
+Uri url = links.FeedUrl(new Uri("https://app.example.com"), feed.Value);   // CalDavLinks; show it once
+```
+
+- The URL is the credential: revoking the app password ends the feed, and each feed is revoked on its own.
+- On every request the feed runs the calendar's source as the token's user: a feed of a calendar the user no longer
+  sees, an unknown or revoked token, and a CalDAV (`dav`) app password in the URL all answer `404`, without a challenge.
+- The document holds the calendar's name, description and color, each `VTIMEZONE` once, and the same objects as the
+  calendar. It streams from the store; its `ETag` follows the calendar's sync token, so `If-None-Match` answers `304`
+  until something changed.
+- `CalDav:FeedsEnabled` turns feeds off. A feed token is never accepted as a Basic password, nor the reverse.
+
+Outlook.com refreshes subscriptions about every three hours, Google Calendar less often; calendar apps on CalDAV see a
+change within their polling interval.
+
+## Syncing an external calendar: the client
+
+`CalDavClient` brings calendars from iCloud, Nextcloud, Fastmail, Google or any CalDAV server into the application, one
+step at a time. The application stores each step's state where it keeps the rest of the account, and schedules the steps
+with its own job.
+
+```csharp
+var http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false });   // the client follows redirects itself
+var client = new CalDavClient(http, new CalDavClientOptions {
+    Authorization = ct => ValueTask.FromResult<AuthenticationHeaderValue?>(
+        new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{user}:{appPassword}")))),
+});
+
+CalDavResult<CalDavAccount> account = await client.DiscoverAsync(new Uri("https://caldav.example.com"), ct);
+if (!account.HasValue) return account.Error;                      // caldav.unauthorized, caldav.not_found, …
+
+CalDavResult<CalDavSyncStep> step = await client.SyncAsync(account.Value.Calendars[0], stored.State, ct);
+if (!step.HasValue) return step.Error;                            // keep the previous state
+foreach (var changed in step.Value.Changed) { /* changed.Name, changed.ETag, changed.Data (a CalendarReadResult) */ }
+foreach (var name in step.Value.Removed) { /* … */ }
+stored.State = step.Value.State;                                  // a string; step.Value.HasMore: run another step
+```
+
+- **Discovery** asks the URL for `current-user-principal`, then `/.well-known/caldav`, then `calendar-home-set` on the
+  principal at depth 0 (iCloud refuses depth 1 there), then lists the home's calendars with their names, colors,
+  component kinds, whether they are writable, and whether they offer `sync-collection`.
+- **A sync step** uses `sync-collection` when the calendar offers it, and compares the ETags of a full listing when it
+  does not (after a `getctag` check) or when the server refuses the token (`403`, `409`, `412`). Changed objects are
+  fetched with `calendar-multiget` in batches of `MultigetBatchSize`; an object a multiget answers `404` for (Zimbra) is
+  a removal. At most `MaxObjectsPerStep` objects are fetched per step; the rest follow in the next. A name can appear in
+  `Removed` again in a later step; removing is idempotent.
+- **Credentials** come from the `Authorization` delegate per request: an app password as Basic, or an OAuth bearer
+  token the application refreshes (Google's CalDAV endpoint accepts only that).
+- **Writes**: `PutAsync(calendar, name, calendarObject, ifMatch)` sends `If-Match`, or `If-None-Match: *` to create;
+  `DeleteAsync` sends `If-Match`. A failed precondition is `caldav.conflict`. The new ETag is returned when the server
+  sends a strong one, else `null` and the next step fetches it.
+- **What the server sends is input.** A refused credential (`caldav.unauthorized`), a refused request
+  (`caldav.forbidden`), a missing calendar (`caldav.not_found`), another error status (`caldav.server_error`), an answer
+  that is not WebDAV (`caldav.invalid_response`) or over a limit (`caldav.too_large`, with the limit) is a result with a
+  `CalDavError` (code, message, status, URL), never an exception; an object that is not valid iCalendar comes back with
+  the `calendar.*` errors of its read result. Only cancellation, misconfiguration (an option out of range, a state from
+  elsewhere) and transport failures throw.
+
+| `CalDavClientOptions` | Default | Meaning |
+| --- | --- | --- |
+| `Authorization` | none | The `Authorization` header of each request. |
+| `MaxResponseBytes` | 32 MiB | The largest answer read. |
+| `MaxXmlDepth` | `32` | The deepest nesting of an answer. |
+| `MaxXmlElements` | `500000` | The most elements of an answer. |
+| `MaxObjectsPerStep` | `5000` | The most objects one step fetches. |
+| `MultigetBatchSize` | `100` | The objects per `calendar-multiget`. |
+| `MaxRedirects` | `5` | The redirects one request follows, with its method, body and credentials. |
+| `RequestTimeout` | the `HttpClient`'s | How long one request may take (`TimeoutException`). |
+| `CalendarRead` | `CalendarReadOptions` defaults | How calendar data is read. |
+
+## The published-collection store
+
+Calendar apps poll. They ask "what changed since my token?" (RFC 6578 `sync-collection`), and the answer must name every
+changed and every removed object, on every node, after every restart. The store keeps, per published collection, the
+objects as written, a counter, and a journal of changes:
+
+| Table | Holds |
+| --- | --- |
+| `elarion_dav_collections` | One row per published collection: kind, source, key, the counter `sync_seq` and the journal's `low_water` mark. |
+| `elarion_dav_objects` | The objects: name, `uid`, strong `etag`, `content`, `content_type`, the time span they cover (`range_start`, `range_end`). |
+| `elarion_dav_changes` | One row per change: the counter it was given, the object name, added/changed/removed, and when. |
+
+Map the tables onto the application's context and register the store:
+
+```csharp
+[GenerateDbSets]
+[GenerateElarionDavStore]                       // or modelBuilder.UseElarionDavStore() in OnModelCreating
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options);
+
+builder.Services.AddElarionWebDavEntityFrameworkCore<AppDbContext>(builder.Configuration.GetSection("WebDav"));
+```
+
+Then create the tables with a migration. The store is scoped over the request's context: a publish joins the context's
+transaction, so a published object becomes visible exactly when the handler commits and disappears with a rollback.
+Without a transaction, a write runs in a transaction of its own.
+
+- **No change, no write.** Publishing bytes equal to the stored ones compares the entity tag and writes nothing, so a
+  handler may re-publish after every save, and a nightly re-projection costs no client a refetch.
+- **Every change counts.** Any other change takes the collection's row lock, increments the counter and appends one
+  journal row per changed object, so tokens strictly increase across nodes.
+- **The journal prunes itself.** Each change also removes the collection's journal rows beyond `MaxJournalRowsPerCollection`
+  or older than `JournalRetention` and raises the low-water mark. A client holding an older token gets `403` with
+  `valid-sync-token` and resyncs in full. No job has to run.
+- **The sync token** is `urn:elarion:sync:{collection id}:{counter}`: a URI (Evolution reads anything else as a CTag),
+  bound to its collection, and valid on every node. A collection's id is derived from its kind, source and key, so a
+  calendar nothing was published to yet has a stable token at `0`. The same value serves as `getctag`.
+
+`AddElarionInMemoryDavStore()` keeps the same counters and journal in memory, for tests and single-node development.
+
+## The WebDAV dispatcher
+
+`DavDispatcher.HandleAsync(DavRequest, IServiceProvider, CancellationToken)` answers a request without a wire, so it runs
+in tests without a server. It serves the current user's principal `{prefix}/principals/{user}/`, a home per protocol
+such as `{prefix}/calendars/{user}/`, each published collection `{prefix}/calendars/{user}/{source}.{key}/` and its
+objects; another user's principal or home answers `404`.
+
+| Request | Answer |
+| --- | --- |
+| `OPTIONS` | `200`, `DAV: 1, 3` and the protocols' classes (`calendar-access`), an `Allow` header without a write method. |
+| `PROPFIND` depth `0` or `1` | The live properties of RFC 4918, RFC 3744, RFC 5397 and RFC 6578 and the protocol's, an unknown one in a `404` propstat; `Prefer: return=minimal` leaves those out. A missing `Depth` is read as `1`. |
+| `PROPFIND` depth `infinity` | `403` with `propfind-finite-depth`. |
+| `REPORT sync-collection` | Level `1`: the changed objects and the removed ones (as `404`) since the token, with a new token; a `limit` lower than the changes answers the first ones and a `507` on the collection, and the client continues from the token; an expired or foreign token `403` with `valid-sync-token`. |
+| `GET`, `HEAD` on an object | Its bytes, `Content-Type` and `ETag`; `If-None-Match` answers `304`. |
+| `PUT`, `DELETE`, `PROPPATCH`, `MKCALENDAR`, `MOVE`, `COPY`, … | `403` with `need-privileges`, nothing changes. Every collection grants `read` and `read-current-user-privilege-set` only. |
+
+Request bodies are read with DTDs and external entities refused and with `MaxBodyBytes`, `MaxXmlDepth` and
+`MaxXmlElements`: a larger body answers `413` without reading the rest, a deeper or malformed one `400`.
+
+## Configuration
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `CalDav:CalendarRead:…` | the `CalendarReadOptions` defaults | How published objects and server answers are read (`MaxBytes`, `MaxComponents`, …). |
+| `CalDav:CalendarExpand:MaxOccurrences` | `10000` | The most occurrences one expansion yields. |
+| `CalDav:CalendarExpand:MaxIterations` | `100000` | The most candidates a rule examines. |
+| `CalDav:FeedsEnabled` | `true` | Whether calendars are also served as ICS feeds. |
+| `CalDav:ProductId` | `-//Elarion//Elarion.Calendars//EN` | The `PRODID` of published objects; changing it changes every ETag once. |
+| `WebDav:Prefix` | `/dav` | The path the DAV routes are served under. |
+| `WebDav:MaxBodyBytes` | `1048576` | The largest request body. |
+| `WebDav:MaxXmlDepth` | `32` | The deepest element nesting of a request body. |
+| `WebDav:MaxXmlElements` | `10000` | The most elements in a request body. |
+| `WebDav:MaxMultigetHrefs` | `1000` | The most objects one multiget names. |
+| `WebDav:JournalRetention` | `90.00:00:00` | How long the journal keeps a change. |
+| `WebDav:MaxJournalRowsPerCollection` | `10000` | The most changes one collection's journal keeps. |

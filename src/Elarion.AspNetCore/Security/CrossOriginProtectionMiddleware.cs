@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -26,10 +27,14 @@ internal sealed class CrossOriginProtectionMiddleware(
 
     private static readonly byte[] RefusalBody = CreateRefusalBody();
 
+    // The path prefixes of endpoints carrying CrossOriginProtectionExemptMetadata, read once from the endpoint data source
+    // on the first unsafe request: the middleware usually runs before routing, so it cannot see the endpoint itself.
+    private PathString[]? _endpointExemptPrefixes;
+
     public Task InvokeAsync(HttpContext context) {
         var request = context.Request;
         if ((IsSafeMethod(request.Method) && !IsWebSocketUpgrade(request)) || IsExempt(request.Path) ||
-            IsAllowed(request))
+            IsExemptEndpoint(context) || IsAllowed(request))
             return next(context);
 
         logger.LogInformation(
@@ -111,6 +116,26 @@ internal sealed class CrossOriginProtectionMiddleware(
         }
 
         return false;
+    }
+
+    private bool IsExemptEndpoint(HttpContext context) {
+        if (context.GetEndpoint() is { } endpoint) return endpoint.Metadata.GetMetadata<CrossOriginProtectionExemptMetadata>() is not null;
+        var prefixes = _endpointExemptPrefixes ??= ReadEndpointExemptPrefixes(context.RequestServices);
+        foreach (var prefix in prefixes) {
+            if (context.Request.Path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
+
+    private static PathString[] ReadEndpointExemptPrefixes(IServiceProvider services) {
+        if (services.GetService<EndpointDataSource>() is not { } dataSource) return [];
+        return [
+            .. dataSource.Endpoints
+                .Select(static endpoint => endpoint.Metadata.GetMetadata<CrossOriginProtectionExemptMetadata>()?.PathPrefix ?? default)
+                .Where(static prefix => prefix.HasValue)
+                .Distinct(),
+        ];
     }
 
     private bool IsAllowed(HttpRequest request) {

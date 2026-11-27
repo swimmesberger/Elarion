@@ -314,6 +314,16 @@ once), `ListAsync` and `RevokeAsync`, and `AddAuthentication().AddElarionAppPass
 `AddElarionIdentityAppPasswordPrincipals<TUser>()` or `o.Events.OnCreatePrincipal`. Name the scheme only on the DAV
 routes, never as the default. An app with its own credential table keeps it behind `o.Events.OnVerifyCredential`.
 
+Don't hand-roll a CalDAV server, a change log or an ICS feed endpoint — `Elarion.CalDav` publishes calendars
+(ADR-0111): `AddElarionWebDavEntityFrameworkCore<TDbContext>(section)` + `[GenerateElarionDavStore]`,
+`AddElarionCalDav(section)`, `app.MapElarionDav()`. Who sees which calendar is a query handler of an
+`ICalDavSource<TSelf>` request (static `SourceName`; `[RequirePermission]`/resource rules apply), registered with
+`AddElarionCalDavSource<TQuery>()` in the module's `ConfigureServices`; the handler that changes the data calls
+`ICalDavPublisher.PublishAsync(new CalDavAddress(source, key), calendarEvent, ct)` in its transaction (items need
+`Timestamp`/`LastModified`). Feeds: an app password with `AppPasswordScope.CalendarFeed(address)`, URL from
+`CalDavLinks.FeedUrl`. Syncing an external calendar: `CalDavClient.DiscoverAsync`/`SyncAsync(calendar, state)`; store the
+returned state string and schedule the steps yourself.
+
 Don't hand-roll Web Push either — `Elarion.WebPush` owns notifying users whose app is **closed** (ADR-0076):
 `AddElarionWebPushEntityFrameworkCore<TDbContext>(o => o.Subject = "mailto:…")` + `[GenerateElarionWebPush]`
 on the context, three `[Handler]`s delegating to `WebPushSubscriptionService` (subscribe, unsubscribe, public key — so your
