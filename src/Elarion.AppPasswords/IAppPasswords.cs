@@ -26,7 +26,7 @@ public interface IAppPasswords {
     /// <param name="name">A name the user recognises, 1 to <see cref="AppPasswordOptions.MaxNameLength"/> characters.</param>
     /// <param name="scope">What the password may be used for.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
-    /// <exception cref="ArgumentException"><paramref name="userId"/> or <paramref name="name"/> is empty, or the name is too long.</exception>
+    /// <exception cref="ArgumentException"><paramref name="userId"/> or <paramref name="name"/> is empty, or one of them is too long (<see cref="AppPasswordOptions.MaxUserIdLength"/>, <see cref="AppPasswordOptions.MaxNameLength"/>).</exception>
     ValueTask<Result<AppPasswordIssued>> CreateAsync(string userId, string name, AppPasswordScope scope,
         CancellationToken cancellationToken = default);
 
