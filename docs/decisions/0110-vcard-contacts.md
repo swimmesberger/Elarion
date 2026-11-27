@@ -301,3 +301,50 @@ FR-072–FR-089, holds the requirements.
    archive, an image), so "a PDF" and "a text without a vCard" can be worded apart. *Rejected:* a `ContactDate` with
    optional month and day, which every application would have to handle to read a birthday. Several values of one
    `N` component stay joined with `", "`; the published page says so.
+
+## Amendment (2026-11-27, second): parameters bounded, structural errors named, the writer's last inconsistencies
+
+The application that adopted the first amendment found that the parameters of a line were still unbounded, that its
+own adapter, following this package's XML-doc example, refused complete reads, and three small writer gaps.
+[Spec 0005](../../specs/0005-vcard-contacts.md), FR-090–FR-094, holds the requirements.
+
+1. **A line has at most `MaxParametersPerProperty` parameter values (100), and each counts against `MaxProperties`.**
+   The tokenizer built a list entry per parameter however empty, and each became a `ContactParameter`; the file
+   budget counted lines only. Measured as in the first amendment (net11.0, arm64, `GC.GetTotalMemory(true)` around one
+   read whose result is kept):
+
+   | Input | before | after |
+   | --- | --- | --- |
+   | one 20 MB line of `;a=` (6.6 M parameters, `MaxLineBytes` 32 MiB) | 2.4 s, 120 MB, no error | 0.07 s, `contact.too_many_parameters`; the 67 MB left are the pooled line buffer, not the result |
+   | 20 MB of `X;a=;b=;c=;d=:` lines | 131 MB | 26 MB (stops at 200,000 lines) |
+   | 20 MB of `X;a1=;b1=;c1=;d1=:` lines, names distinct | 263 MB | 103 MB |
+   | 32 MB of the same | 430 MB | 103 MB |
+   | 32 MB of `X;A=<32 digits>,<32 digits>:` lines | 162 MB | 118 MB |
+   | 10,000 Apple-style cards (200,000 lines, 160,000 parameter values) | 56 MB | 56 MB, no error |
+
+   The limit counts values, not parameters, because `TYPE=,,,,` costs what `;a=;a=;a=` does; a bare 2.1 parameter
+   counts one. The tokenizer stops at the first value past the limit, so the line costs no more than the limit, and the
+   line is dropped with a located `contact.too_many_parameters`, like a line over `MaxLineBytes`. A parameter costs a
+   result about what a short line does (its record, its array slot, its name when not shared), so it is weighed like
+   one against the existing budget instead of a second file limit. The bound lives in the shared tokenizer as a rule
+   (`ContentLineRules.MaxParameters`, unlimited for iCalendar), so `Elarion.Calendars` can take it on.
+   *Rejected:* a separate `MaxParameters` file limit, which bounds the same memory with one more option to configure;
+   a lower `MaxProperties`, which would refuse real exports to bound files of parameters.
+2. **`ContactErrorCodes.IsStructural` names the errors about the file's form,** as `CalendarErrorCodes.IsStructural`
+   does. `contact.too_many_errors` stays a file error, because it is about the file and `ToAppError` counts its omitted
+   errors through it, but it is not structural: the read it ends is complete. A file error that is structural means
+   the read stopped or never started, so "refuse an incomplete read" is `FileErrors.Any(e => IsStructural(e.Code))`.
+   The XML-doc example that tested `FileErrors.Count > 0` refused complete reads and is corrected. *Rejected:* moving
+   the marker out of `FileErrors` (onto `OmittedErrorCount` alone), which leaves `Errors` and `ToAppError` without the
+   message that says errors were left out, and breaks every reader of the code already shipped.
+3. **The writer.** `ContactWriter.Write(stream, cards)` and `ContactWriter.ToText(card)` write property lists
+   synchronously, so an application that orders and spells its cards itself has the same synchronous path as one that
+   writes contacts. The preferred flag is written `PREF` among the upper-case 3.0 type values: this reverses the first
+   amendment's "kept `TYPE=pref`", because a mixed-case list reads as a mistake to the people who compare cards, while
+   `TYPE` values compare without case (RFC 2426's ABNF strings are case-insensitive, and this package's reader compares
+   them so). Apple writes `type=pref` next to `type=CELL`; a reader that matched only that spelling would be broken for
+   every 2.1 card (`TEL;PREF;CELL`), so the risk is accepted. A tab or line break in a URI value is left out instead of
+   failing the write: RFC 3986 allows none in a URI, the WHATWG URL parser removes them before parsing, and dropping
+   them is what the writer already does with control characters (decision 5 of the first amendment) — an export of
+   stored data should not fail for a pasted line break. A raw value of a property list with a line break still fails,
+   since there the line break may be the caller's own mistake in escaping.

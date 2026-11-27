@@ -10,12 +10,12 @@ namespace Elarion.Contacts;
 /// </summary>
 /// <remarks>
 /// The defaults are sized for the 1–10 node tier (ADR-0025). A per-contact limit (<see cref="MaxPropertiesPerContact"/>,
-/// <see cref="MaxLineBytes"/>, <see cref="MaxPhotoBytes"/>) costs at most that contact or property and the read
+/// <see cref="MaxParametersPerProperty"/>, <see cref="MaxLineBytes"/>, <see cref="MaxPhotoBytes"/>) costs at most that contact or property and the read
 /// continues; a file limit (<see cref="MaxBytes"/>, <see cref="MaxContacts"/>, <see cref="MaxProperties"/>) stops the
 /// read with one error; <see cref="MaxErrors"/> stops listing errors, not the read. The bytes bound the input, the
-/// properties and errors bound what the result holds: a result holds 60 to 150 bytes per property line and at most
-/// about five times the bytes of its values (ADR-0110, decision 9), so the defaults keep one result under about 200 MB
-/// whatever the file holds. The
+/// properties, their parameters and the errors bound what the result holds: a result holds 60 to 150 bytes per property
+/// line and parameter value and at most about five times the bytes of its values (ADR-0110, amendments of 2026-11-27),
+/// so the defaults keep one result under about 200 MB whatever the file holds. The
 /// properties are settable because the configuration binder fills <see cref="ContactOptions.ReadDefaults"/> in place;
 /// do not change an instance a read may be using.
 /// </remarks>
@@ -31,6 +31,9 @@ public sealed record ContactReadOptions {
 
     /// <summary>The default of <see cref="MaxProperties"/>: 1,000,000.</summary>
     public const int DefaultMaxProperties = 1_000_000;
+
+    /// <summary>The default of <see cref="MaxParametersPerProperty"/>: 100.</summary>
+    public const int DefaultMaxParametersPerProperty = 100;
 
     /// <summary>The default of <see cref="MaxErrors"/>: 10,000.</summary>
     public const int DefaultMaxErrors = 10_000;
@@ -63,11 +66,23 @@ public sealed record ContactReadOptions {
     public int MaxPropertiesPerContact { get; set; } = DefaultMaxPropertiesPerContact;
 
     /// <summary>
-    /// The most lines of all vCards of the file together (FR-073): what bounds the memory of a result, since a line of
-    /// a few bytes costs a property of 60 to 150. Reading stops with
+    /// The most lines of all vCards of the file together, each parameter value of a line counting as one more (FR-073,
+    /// FR-090): what bounds the memory of a result, since a line of a few bytes costs a property of 60 to 150 and an
+    /// empty parameter of three bytes costs up to 70 more. Reading stops with
     /// <see cref="ContactErrorCodes.TooManyPropertiesInFile"/> and keeps the entries before the card being read.
     /// </summary>
+    /// <remarks>
+    /// <c>EMAIL;TYPE=INTERNET,HOME:…</c> counts three. A real export of 10,000 contacts counts some 300,000 lines and as
+    /// many parameter values again, well under the default.
+    /// </remarks>
     public int MaxProperties { get; set; } = DefaultMaxProperties;
+
+    /// <summary>
+    /// The most parameter values of one line (FR-090), each value of a list (<c>TYPE=HOME,WORK</c>) and each bare
+    /// parameter (<c>TEL;WORK;VOICE</c>) counting one. A line with more is dropped with a
+    /// <see cref="ContactErrorCodes.TooManyParameters"/> error, without tokenizing the rest of it; the card is read on.
+    /// </summary>
+    public int MaxParametersPerProperty { get; set; } = DefaultMaxParametersPerProperty;
 
     /// <summary>
     /// The most errors a result lists (FR-074). The read goes on; further errors are counted in
@@ -101,6 +116,8 @@ public sealed record ContactReadOptions {
         if (MaxPropertiesPerContact <= 0)
             throw new ArgumentOutOfRangeException(nameof(MaxPropertiesPerContact), MaxPropertiesPerContact, "The property limit must be positive.");
         if (MaxProperties <= 0) throw new ArgumentOutOfRangeException(nameof(MaxProperties), MaxProperties, "The file's property limit must be positive.");
+        if (MaxParametersPerProperty <= 0)
+            throw new ArgumentOutOfRangeException(nameof(MaxParametersPerProperty), MaxParametersPerProperty, "The parameter limit must be positive.");
         if (MaxErrors < 0) throw new ArgumentOutOfRangeException(nameof(MaxErrors), MaxErrors, "The error limit must not be negative.");
         if (MaxLineBytes <= 0) throw new ArgumentOutOfRangeException(nameof(MaxLineBytes), MaxLineBytes, "The line limit must be positive.");
         if (MaxPhotoBytes <= 0) throw new ArgumentOutOfRangeException(nameof(MaxPhotoBytes), MaxPhotoBytes, "The photo limit must be positive.");

@@ -46,7 +46,12 @@ public sealed class ContactReadResult {
     /// <summary>Every vCard read, with or without a contact (FR-019).</summary>
     public IReadOnlyList<ContactEntry> Entries { get; }
 
-    /// <summary>The errors about the file: unreadable, too large, too many contacts, properties or errors.</summary>
+    /// <summary>
+    /// The errors about the file: unreadable, too large, too many contacts, properties or errors. Every one but
+    /// <see cref="ContactErrorCodes.TooManyErrors"/> means the read stopped or never started
+    /// (<see cref="ContactErrorCodes.IsStructural"/>); that one only says that the listing of errors stopped, so do not
+    /// refuse a file because this list is not empty.
+    /// </summary>
     public IReadOnlyList<ContactError> FileErrors { get; }
 
     /// <summary>Every error: the file errors, then each entry's in file order, including those the handler added.</summary>

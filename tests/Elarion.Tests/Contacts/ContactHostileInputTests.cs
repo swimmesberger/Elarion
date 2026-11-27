@@ -262,4 +262,65 @@ public sealed class ContactHostileInputTests {
         result.Entries.Should().OnlyContain(static entry => !entry.HasValue);
         result.Entries.Should().OnlyContain(static entry => entry.Properties.Select(static p => p.Name).SequenceEqual(new[] { "FN", "EMAIL" }));
     }
+
+    [Fact]
+    public async Task ALineOfMillionsOfEmptyParameters_IsDroppedWithALocatedError_InLinearTime() {
+        var builder = new StringBuilder("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Many\r\nX");
+        while (builder.Length < 6_000_000) builder.Append(";a=");
+        builder.Append(":v\r\nEMAIL:a@example.com\r\nEND:VCARD\r\n");
+        var stopwatch = Stopwatch.StartNew();
+
+        var result = await ReadAsync(builder.ToString(), new ContactReadOptions { MaxLineBytes = 8 * 1024 * 1024 });
+
+        stopwatch.Elapsed.Should().BeLessThan(Bound);
+        var entry = Assert.Single(result.Entries);
+        entry.HasValue.Should().BeTrue("a per-line limit costs only the line");
+        entry.Value!.Emails.Should().ContainSingle();
+        entry.Properties.Should().NotContain(static p => p.Name == "X");
+        var error = Assert.Single(entry.Errors);
+        error.Code.Should().Be(ContactErrorCodes.TooManyParameters);
+        error.Property.Should().Be("X");
+        error.LineNumber.Should().Be(4);
+        error.Limit.Should().Be(ContactReadOptions.DefaultMaxParametersPerProperty);
+        ContactErrorCodes.IsStructural(error.Code).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("TEL;TYPE=A,B,C,D:1")]
+    [InlineData("TEL;A=;B=;C=;D=:1")]
+    [InlineData("TEL;WORK;VOICE;CELL;PREF:1")]
+    public async Task EachParameterValue_CountsAgainstMaxParametersPerProperty(string line) {
+        var three = await ReadAsync(Card("FN:A", line), new ContactReadOptions { MaxParametersPerProperty = 3 });
+        var four = await ReadAsync(Card("FN:A", line), new ContactReadOptions { MaxParametersPerProperty = 4 });
+
+        Assert.Single(three.Entries[0].Errors).Code.Should().Be(ContactErrorCodes.TooManyParameters);
+        three.Entries[0].Properties.Should().NotContain(static p => p.Name == "TEL");
+        four.Entries[0].Errors.Should().BeEmpty();
+        four.Entries[0].Value!.Phones.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task ParameterValues_CountAgainstMaxProperties() {
+        var builder = new StringBuilder();
+        for (var card = 0; card < 50; card++) {
+            builder.Append("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:P\r\n");
+            for (var i = 0; i < 18; i++) builder.Append("X;A=;B=;C=;D=:\r\n");
+            builder.Append("END:VCARD\r\n");
+        }
+
+        var result = await ReadAsync(builder.ToString(), new ContactReadOptions { MaxProperties = 1_000 });
+
+        // A card counts 20 lines and 72 parameter values, 92 in all: ten cards fill 920, the eleventh passes 1,000.
+        result.Entries.Should().HaveCount(10);
+        var error = Assert.Single(result.FileErrors);
+        error.Code.Should().Be(ContactErrorCodes.TooManyPropertiesInFile);
+        error.LineNumber.Should().Be(10 * 22 + 1 + 2 + 16);
+    }
+
+    [Fact]
+    public async Task MaxParametersPerProperty_MustBePositive() {
+        var read = async () => await new ContactReader().ReadAsync(new MemoryStream(), new ContactReadOptions { MaxParametersPerProperty = 0 }, TestCancellation);
+
+        (await read.Should().ThrowAsync<ArgumentOutOfRangeException>()).Which.ParamName.Should().Be(nameof(ContactReadOptions.MaxParametersPerProperty));
+    }
 }

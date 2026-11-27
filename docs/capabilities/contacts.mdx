@@ -164,7 +164,7 @@ vCard becomes an entry, so a handler can show a preview before it saves anything
 | `entry.Properties` | Every property in file order, with its group, parameters, value as written and line, mapped or not. |
 | `entry.Value`, `entry.HasValue` | The contact, and whether there is one. |
 | `entry.Errors` | Its errors. |
-| `result.FileErrors` | Problems with the file: unreadable, too large, too many contacts, lines or errors. |
+| `result.FileErrors` | Problems with the file: unreadable, too large, too many contacts, lines or errors. Each but `contact.too_many_errors` means the read stopped or never started. |
 | `result.OmittedErrorCount` | The errors past `MaxErrors`, counted and not listed. |
 | `result.Errors`, `result.HasErrors`, `result.Contacts` | All errors in file order; whether there are any; the contacts of the entries that have one. |
 
@@ -173,6 +173,20 @@ charset, a line over the limit or a line without a colon drops that property: th
 the entry carries the error. An entry has no contact only when nothing usable is left (no formatted name, name,
 organization, e-mail address or phone number) or when the card has more lines than the limit. `HasValue` is therefore
 not `IsValid`: an entry with errors keeps its contact, and the application decides what an error means for it.
+
+A handler that imports what it can refuses only a read that stopped. `contact.too_many_errors` is a file error too, but
+the read it ends is complete: only the listing of errors stopped. So test the file errors with
+`ContactErrorCodes.IsStructural` rather than for being there:
+
+```csharp
+// The file is not a vCard file, or the read stopped early: refuse the upload.
+if (result.FileErrors.Any(static e => ContactErrorCodes.IsStructural(e.Code))) return result.ToAppError("contacts");
+```
+
+`IsStructural` is true for the errors about the file's form: `contact.unreadable`, `contact.too_large`,
+`contact.too_many_contacts`, `contact.too_many_properties_in_file`, `contact.too_many_properties`,
+`contact.too_many_parameters`, `contact.line_too_long`, `contact.malformed_line` and `contact.unexpected_end`. An
+application that refuses broken files tests `result.Errors` the same way.
 
 The handler adds its own errors, under its own code prefix, located like the package's:
 
@@ -195,8 +209,9 @@ the location: `Contact 12 (Jane Doe), line 340: The value of BDAY is not a date.
 | `contact.too_large` | The upload is larger than `MaxBytes`. | `Limit` |
 | `contact.too_many_contacts` | More vCards than `MaxContacts`; the entries before it are kept. | `Limit` |
 | `contact.too_many_properties` | A card has more lines than `MaxPropertiesPerContact`; its entry has no contact. | `Limit` |
-| `contact.too_many_properties_in_file` | The cards hold more lines than `MaxProperties`; the entries before the card being read are kept. | `Limit` |
-| `contact.too_many_errors` | More errors than `MaxErrors`; the rest are counted in `OmittedErrorCount`. | `Limit` |
+| `contact.too_many_properties_in_file` | The cards hold more lines and parameter values than `MaxProperties`; the entries before the card being read are kept. | `Limit` |
+| `contact.too_many_errors` | More errors than `MaxErrors`; the rest are counted in `OmittedErrorCount`. The read is complete; not structural. | `Limit` |
+| `contact.too_many_parameters` | A line has more parameter values than `MaxParametersPerProperty`; the property is dropped. | `Property`, `Limit` |
 | `contact.line_too_long` | An unfolded line is longer than `MaxLineBytes`; the property is dropped. | `Property`, `Limit` |
 | `contact.photo_too_large` | A photo is larger than `MaxPhotoBytes`; it is dropped. | `Property`, `Limit` |
 | `contact.invalid_value` | A value does not read as its kind: `date`, `uri`, `photo`, or `photo-format` for an image the package does not read. | `Property`, `Value`, `ExpectedKind`; `MediaType` for `photo-format` |
@@ -284,6 +299,15 @@ var payload = ContactWriter.ToText(contact, new ContactWriteOptions { FoldLines 
 
 `ContactWriter.Write(stream, contacts, options)` writes synchronously to a stream.
 
+An application that pins its own wire format (the order of the properties, the spelling of a parameter) builds the
+property list itself, from `contact.ToProperties(version)` or by hand, and writes it as it is, synchronously too:
+
+```csharp
+var properties = contact.ToProperties(ContactFormatVersion.V3_0).OrderBy(Rank).ToList();
+var text = ContactWriter.ToText(properties);                 // one card
+ContactWriter.Write(stream, cards);                          // IEnumerable<IReadOnlyList<ContactProperty>>
+```
+
 ### One file per contact for Outlook classic
 
 Outlook classic imports only the first card of a file. For it, write each contact to a file of its own:
@@ -296,11 +320,12 @@ var file = await ContactWriter.ToFileAsync([contact], $"{contact.DisplayName}.vc
 
 UTF-8 without a byte-order mark, CRLF line ends, lines folded at 75 octets without splitting a character or an escape
 (unless `FoldLines` is off). Types are `TYPE=` parameters, `TYPE=INTERNET` among them; a preferred value is
-`TYPE=pref` in 3.0 and `PREF=1` in 4.0; a custom label is an
+`PREF` among the upper-case type values in 3.0 (`TYPE=CELL,VOICE,PREF`) and `PREF=1` in 4.0; a custom label is an
 `itemN.X-ABLabel` property of the value's group. A photo is `ENCODING=b` with its type in 3.0 and a `data:` URI in 4.0.
 A date without a year is `X-APPLE-OMIT-YEAR=1604` with year 1604 in 3.0 and `--MMDD` in 4.0; an organization is
 `X-ABShowAs:COMPANY` in 3.0 and `KIND:org` in 4.0. A web address is a URI, written as it is (`;` and `,`
-unescaped), and so is a 4.0 phone number given as a `tel:` URI, with `VALUE=uri`. Control characters other than the
+unescaped), and so is a 4.0 phone number given as a `tel:` URI, with `VALUE=uri`; a tab or line break in a URI is left
+out, as a browser's URL parser leaves it out. Control characters other than the
 tab (U+0000–U+001F, U+007F–U+009F) are left out of every value: a card a CardDAV server embeds in XML must not hold
 one. A group is `X-ADDRESSBOOKSERVER-KIND:group` with one
 `X-ADDRESSBOOKSERVER-MEMBER` per member in 3.0, which Apple and DAVx5 read, and `KIND:group` with `MEMBER` in 4.0, never
@@ -309,7 +334,7 @@ name when the contact has no formatted name, and in 3.0 an `N` (a group's name w
 contacts give byte-identical files.
 
 A contact the writer cannot represent (an additional property whose name, group or parameter name is not a valid vCard
-name, or whose value holds a line break, or a web address with a line break) fails with a `ContactWriteException` that
+name, or whose value holds a line break) fails with a `ContactWriteException` that
 names the contact (`ItemIndex`) and the property. The writer checks a contact before it writes any of it, so the writer takes further contacts.
 
 ## Limits and options
@@ -318,17 +343,20 @@ On top of the upload limits the handler declares, the read options bound what a 
 at most that contact or property, and the read continues; a file limit stops the read with one error and keeps the
 contacts before it. Reading is one pass, linear in the input, and nothing recurses.
 
-The bytes bound the input; the lines and errors bound the result. Every property of every card stays in the result,
-and a property costs 60 to 150 bytes however short its line: a 20 MB file of four-byte lines held 600 MB before
-`MaxProperties` existed. With the defaults a result holds at most about 200 MB, whatever the file holds; a 20 MB file
-of short lines now holds 70–115 MB, and one of malformed lines 2 MB.
+The bytes bound the input; the lines, their parameters and the errors bound the result. Every property of every card
+stays in the result, and a property costs 60 to 150 bytes however short its line, and each of its parameters up to 70
+more: a 20 MB file of four-byte lines held 600 MB before `MaxProperties` existed, and a 32 MB file of lines with four
+empty parameters 430 MB before parameters counted against it. With the defaults a result holds at most about 200 MB,
+whatever the file holds; a 20 MB file of short lines now holds 26–115 MB, and one of malformed lines 2 MB. A real
+export of 10,000 contacts counts some 200,000 lines and 160,000 parameter values.
 
 | `ContactReadOptions` | Default | Exceeded |
 | --- | --- | --- |
 | `MaxBytes` | 32 MiB | `contact.too_large`; the reader holds no more than the limit |
 | `MaxContacts` | 10,000 | `contact.too_many_contacts`; the read stops |
 | `MaxPropertiesPerContact` | 1,000 | `contact.too_many_properties`; the card has no contact and keeps only its `FN`, `N`, `ORG`, `EMAIL`, `TEL` and `UID` |
-| `MaxProperties` | 1,000,000 | `contact.too_many_properties_in_file`; the read stops |
+| `MaxProperties` | 1,000,000 | `contact.too_many_properties_in_file`; the read stops. Each parameter value of a line counts as one more |
+| `MaxParametersPerProperty` | 100 | `contact.too_many_parameters`; the property is dropped. Each value of a list and each bare parameter counts one |
 | `MaxErrors` | 10,000 | `contact.too_many_errors`; the read goes on, further errors are counted |
 | `MaxLineBytes` | 1 MiB | `contact.line_too_long`; the property is dropped |
 | `MaxPhotoBytes` | 1 MiB | `contact.photo_too_large`; the photo is dropped |

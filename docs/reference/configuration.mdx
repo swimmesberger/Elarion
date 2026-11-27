@@ -191,7 +191,8 @@ Write options (`SpreadsheetWriteOptions`) are passed per call, not configured. S
 | `Contacts:ReadDefaults:MaxBytes` | `33554432` (32 MiB) |
 | `Contacts:ReadDefaults:MaxContacts` | `10000` |
 | `Contacts:ReadDefaults:MaxPropertiesPerContact` | `1000` |
-| `Contacts:ReadDefaults:MaxProperties` | `1000000` (lines of all cards of a file) |
+| `Contacts:ReadDefaults:MaxProperties` | `1000000` (lines of all cards of a file, each parameter value counting one more) |
+| `Contacts:ReadDefaults:MaxParametersPerProperty` | `100` (parameter values of one line) |
 | `Contacts:ReadDefaults:MaxErrors` | `10000` |
 | `Contacts:ReadDefaults:MaxLineBytes` | `1048576` (1 MiB) |
 | `Contacts:ReadDefaults:MaxPhotoBytes` | `1048576` (1 MiB) |

@@ -54,7 +54,7 @@ internal static class ContactSerializer {
         foreach (var phone in contact.Phones) {
             // FR-080: a 4.0 number given as a tel: URI is a URI value, written as it is.
             if (!v3 && phone.Number.StartsWith("tel:", StringComparison.OrdinalIgnoreCase))
-                AddTyped(list, groups, "TEL", UriText("TEL", phone.Number), phone.Types, phone.Preferred, phone.Label, v3, UriValue);
+                AddTyped(list, groups, "TEL", UriText(phone.Number), phone.Types, phone.Preferred, phone.Label, v3, UriValue);
             else
                 AddTyped(list, groups, "TEL", ContentText.Escape(phone.Number), phone.Types, phone.Preferred, phone.Label, v3);
         }
@@ -68,7 +68,7 @@ internal static class ContactSerializer {
 
         // FR-080: URL is a URI value (RFC 2426 section 3.6.8, RFC 6350 section 6.7.8), not text: ';' and ',' stay as they are.
         foreach (var url in contact.Urls)
-            AddTyped(list, groups, "URL", UriText("URL", url.Value), url.Types, url.Preferred, url.Label, v3);
+            AddTyped(list, groups, "URL", UriText(url.Value), url.Types, url.Preferred, url.Label, v3);
 
         if (contact.Birthday is { } birthday) list.Add(Date(null, "BDAY", birthday, v3));
         if (contact.Anniversary is { } anniversary) {
@@ -102,7 +102,8 @@ internal static class ContactSerializer {
         var typeValues = new List<string>();
         foreach (var (flag, typeName) in TypeNames)
             if ((types & flag) != 0) typeValues.Add(v3 ? typeName : typeName.ToLowerInvariant());
-        if (preferred && v3) typeValues.Add("pref");
+        // FR-093: upper case like the other 3.0 type values; TYPE values compare without case (RFC 2426's ABNF).
+        if (preferred && v3) typeValues.Add("PREF");
         if (typeValues.Count > 0) parameters.Add(new ContactParameter("TYPE", typeValues));
         if (preferred && !v3) parameters.Add(new ContactParameter("PREF", "1"));
 
@@ -141,11 +142,9 @@ internal static class ContactSerializer {
         throw new ContactWriteException("The photo has neither bytes nor an address.", null, "PHOTO");
     }
 
-    // A URI value is written unescaped; only a line break, which would end the line, cannot be written.
-    private static string UriText(string property, string value) =>
-        value.AsSpan().IndexOfAny('\r', '\n') >= 0
-            ? throw new ContactWriteException($"The value of {property} holds a line break; a URI cannot.", null, property)
-            : value;
+    // FR-094: a URI value is written unescaped. A URI holds no tab or line break (RFC 3986), and the WHATWG URL parser
+    // removes them before it parses one, so the writer does the same rather than fail an export for a pasted line break.
+    private static string UriText(string value) => value.AsSpan().IndexOfAny('\t', '\r', '\n') < 0 ? value : value.Replace("\t", "").Replace("\r", "").Replace("\n", "");
 
     private static string Structured(params string?[] parts) {
         var builder = new StringBuilder();

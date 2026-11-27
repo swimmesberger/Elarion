@@ -97,6 +97,51 @@ public sealed class ContactWriter : IAsyncDisposable {
     }
 
     /// <summary>
+    /// Writes property lists to <paramref name="destination"/> synchronously (FR-092), one card each, in the order each
+    /// holds: the synchronous form of <see cref="AddAsync(IReadOnlyList{ContactProperty}, CancellationToken)"/>, for an
+    /// application that builds its cards in its own property order and spelling.
+    /// </summary>
+    /// <param name="destination">A writable stream; it stays open.</param>
+    /// <param name="cards">The cards, each a property list without <c>BEGIN</c> and <c>END</c>.</param>
+    /// <param name="options">The write options.</param>
+    /// <exception cref="ContactWriteException">A property cannot be represented; the cards before it were written.</exception>
+    public static void Write(Stream destination, IEnumerable<IReadOnlyList<ContactProperty>> cards, ContactWriteOptions? options = null) {
+        ArgumentNullException.ThrowIfNull(cards);
+        var writer = Create(destination, options);
+        try {
+            foreach (var card in cards) {
+                ArgumentNullException.ThrowIfNull(card, nameof(cards));
+                writer.WriteCard(card, writer._count + 1, allowVersion: true);
+                writer._lines.Flush();
+            }
+        }
+        finally {
+            writer._disposed = true;
+            writer._lines.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// One property list as the text of one card (FR-092), in the order it holds; see
+    /// <see cref="AddAsync(IReadOnlyList{ContactProperty}, CancellationToken)"/> for what the writer replaces.
+    /// </summary>
+    /// <param name="card">The properties, without <c>BEGIN</c> and <c>END</c>.</param>
+    /// <param name="options">The write options.</param>
+    /// <exception cref="ContactWriteException">A property cannot be represented.</exception>
+    /// <example>
+    /// <code>
+    /// var properties = contact.ToProperties(ContactFormatVersion.V3_0).OrderBy(Rank).ToList();
+    /// var text = ContactWriter.ToText(properties);
+    /// </code>
+    /// </example>
+    public static string ToText(IReadOnlyList<ContactProperty> card, ContactWriteOptions? options = null) {
+        ArgumentNullException.ThrowIfNull(card);
+        using var stream = new MemoryStream();
+        Write(stream, [card], options);
+        return System.Text.Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
+    }
+
+    /// <summary>
     /// The card of one contact as text (FR-083), for a payload built in synchronous code, such as a QR code; with
     /// <see cref="ContactWriteOptions.FoldLines"/> off, each property is one line.
     /// </summary>

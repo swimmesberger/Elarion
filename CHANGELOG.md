@@ -321,6 +321,20 @@ minor releases may include breaking changes.
 - **BREAKING: `ClaimPendingAsync` returns `Task<LeasedWorkClaimed<T>>`** instead of `Task<IReadOnlyList<T>>`. The new
   type implements `IReadOnlyList<T>`, so `foreach`, `Count`, indexing and assignments to `IReadOnlyList<T>` compile
   unchanged; only code that names the old task type (a method group, an explicit `Task<IReadOnlyList<T>>`) changes.
+- **BREAKING: `Elarion.Contacts`: parameters count against `MaxProperties`, and the writer spells `PREF` in upper case**
+  (ADR-0110, second amendment of 2026-11-27; spec 0005, FR-090–FR-094). Each parameter value of a line now counts as
+  one more line against `ContactReadOptions.MaxProperties`, so a file of lines with many parameters stops sooner with
+  `contact.too_many_properties_in_file` (a real export of 10,000 contacts counts some 360,000, well under the
+  1,000,000 default). New `ContactReadOptions.MaxParametersPerProperty` (100): a line with more parameter values is
+  dropped with the new `contact.too_many_parameters`, and the card reads on. `ContactErrorCodes.IsStructural(code)`
+  names the errors about a file's form; `contact.too_many_errors` is a file error of a complete read and is not one,
+  so test `FileErrors` with it instead of for being empty (the earlier example `if (result.FileErrors.Count > 0)`
+  refused complete reads). New synchronous `ContactWriter.Write(stream, cards)` and `ContactWriter.ToText(card)` for
+  property lists, which write what `AddAsync(IReadOnlyList<ContactProperty>)` writes. The 3.0 writer spells the
+  preferred flag `PREF` among the upper-case types (`TYPE=CELL,VOICE,PREF`, was `pref`), and leaves a tab or line break
+  out of a URI (`URL`, a 4.0 `tel:` number) instead of throwing `ContactWriteException`. The `PREF` spelling changes
+  the bytes, and so the CardDAV ETag, of a stored card with a preferred value, once, when it is next published. See
+  [Contacts](https://elarion.wimmesberger.dev/docs/capabilities/contacts#limits-and-options).
 - **`Elarion.Calendars`: overrides, `EXRULE`, strict reads and more limits** (ADR-0109, amendment 2026-11-27). Of
   several overrides of one instance, expansion now keeps only the latest (highest `SEQUENCE`, then latest `DTSTAMP`);
   `CalendarExpandOptions.ResolveOverrideVersions = false` keeps them all. `SkipCancelled` (off by default) leaves out
@@ -348,6 +362,10 @@ minor releases may include breaking changes.
   the file stayed in the result, at 60 to 150 bytes per line however short; names, parameters and short values are now
   shared within a read and the result is bounded by `MaxProperties` and `MaxErrors`, so the same files hold 2–115 MB
   and no read holds more than about 200 MB at the defaults.
+- **`Elarion.Contacts`: parameters per line were unbounded.** One 20 MB line of 6.6 million empty parameters read in
+  2.4 s, held 120 MB and reported nothing; a 32 MB file of lines with four empty parameters of distinct names held
+  430 MB, over the documented 200 MB. A line past `MaxParametersPerProperty` is now dropped without tokenizing the rest
+  (0.07 s), and parameters count against `MaxProperties`, so the same file holds 103 MB.
 - **`Elarion.Contacts`: a file concatenated from several exports no longer loses cards.** A byte-order mark before a
   later `BEGIN:VCARD` (UTF-8 or UTF-16) made the line unreadable and the card vanished without an error; a mark at the
   start of a line is now nothing.

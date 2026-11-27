@@ -35,8 +35,18 @@ internal readonly ref struct ParsedContentLine {
 /// </summary>
 internal static class ContentLineParser {
     /// <summary>Tokenizes <paramref name="line"/>; <see langword="false"/> for a line without a name or a colon.</summary>
-    public static bool TryParse(ReadOnlySpan<byte> line, ContentLineRules rules, ContentTextDecoder decoder, out ParsedContentLine parsed) {
+    public static bool TryParse(ReadOnlySpan<byte> line, ContentLineRules rules, ContentTextDecoder decoder, out ParsedContentLine parsed) =>
+        TryParse(line, rules, decoder, out parsed, out _);
+
+    /// <summary>
+    /// Tokenizes <paramref name="line"/>; <see langword="false"/> for a line without a name or a colon, or with more
+    /// parameter values than <see cref="ContentLineRules.MaxParameters"/>, which <paramref name="tooManyParameters"/> tells
+    /// apart.
+    /// </summary>
+    public static bool TryParse(ReadOnlySpan<byte> line, ContentLineRules rules, ContentTextDecoder decoder, out ParsedContentLine parsed,
+        out bool tooManyParameters) {
         parsed = default;
+        tooManyParameters = false;
         var i = SkipSpaces(line, 0);
         var nameStart = i;
         while (i < line.Length && IsNameByte(line[i])) i++;
@@ -55,6 +65,7 @@ internal static class ContentLineParser {
 
         if (name.Length == 0) return false;
         var parameters = new List<ContentParameter>();
+        var parameterValues = 0;
         i = SkipSpaces(line, i);
         while (i < line.Length && line[i] == (byte)';') {
             i = SkipSpaces(line, i + 1);
@@ -68,6 +79,11 @@ internal static class ContentLineParser {
                 var values = new List<string>();
                 i = SkipSpaces(line, i + 1);
                 while (true) {
+                    if (++parameterValues > rules.MaxParameters) {
+                        tooManyParameters = true;
+                        return false;
+                    }
+
                     if (i < line.Length && line[i] == (byte)'"') {
                         var close = line[(i + 1)..].IndexOf((byte)'"');
                         if (close < 0) return false;
@@ -89,6 +105,10 @@ internal static class ContentLineParser {
                 }
 
                 parameters.Add(new ContentParameter(paramName, values));
+            }
+            else if (++parameterValues > rules.MaxParameters) {
+                tooManyParameters = true;
+                return false;
             }
             else if (rules.AllowBareParameters) {
                 // vCard 2.1: TEL;WORK;VOICE and ADR;QUOTED-PRINTABLE.

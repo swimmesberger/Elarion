@@ -174,6 +174,11 @@ NativeAOT.
   10,000 errors and counts the rest, and the result holds less than about 120 MB.
 - Given cards of more lines than the per-card limit, when the file is read, then each entry keeps only the properties
   that name it.
+- Given a 20 MB line of 6.6 million empty parameters, when it is read, then the property is dropped with one located
+  `contact.too_many_parameters` error, the card reads on, and the read takes well under a second.
+- Given a file of short lines with four parameters each, with distinct names, when it is read with the defaults, then
+  reading stops with `contact.too_many_properties_in_file` once lines and parameter values reach 1,000,000, and the
+  result holds less than about 120 MB.
 
 ### Concatenated files, vCard 2.1 backslashes and payloads that are not files (P2)
 
@@ -187,6 +192,12 @@ NativeAOT.
 - Given a contact whose note holds a NUL and a bell character, when it is written, then the card holds neither.
 - Given write options with folding off, when a contact with a 200-character note is written, then the note is one line.
 - Given a contact, when `ContactWriter.ToText` writes it, then the text equals what the asynchronous writer writes.
+- Given a property list in an application's own order and spelling, when `ContactWriter.ToText` writes it, then the
+  card holds the properties in that order and spelling, as `AddAsync` writes it.
+- Given a contact whose web address holds a line break, when it is written, then the `URL` line holds the address
+  without it.
+- Given a read past the error limit, when the application asks whether a file error is structural, then
+  `contact.too_many_errors` is not, and the read's contacts are all there.
 
 ### Published with NativeAOT (P2)
 
@@ -374,8 +385,8 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
 - FR-079: `ContactPhoto.TryFromData` MUST build a photo from bytes of a format FR-028 reads and report other bytes
   without throwing.
 - FR-080: Writing MUST write a URI value as it is, not escaped as text: `URL` in both versions, a photo URI, and in 4.0
-  a phone number given as a `tel:` URI, with `VALUE=uri`. A URI value holding a line break MUST fail the write with a
-  `ContactWriteException`.
+  a phone number given as a `tel:` URI, with `VALUE=uri`. A tab or line break in a URI value MUST be left out
+  (FR-094).
 - FR-081: The write options MUST let the caller turn folding off (`FoldLines`), for a payload that is not a file, such
   as a QR code, whose readers do not unfold.
 - FR-082: Writing MUST leave the control characters U+0000–U+0008, U+000B, U+000C, U+000E–U+001F and U+007F–U+009F out
@@ -393,6 +404,16 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
 - FR-088: A `PHOTO` that does not read MUST NOT keep a later one that reads from being the contact's photo.
 - FR-089: The entry of a card with more properties than the limit of FR-048 MUST keep only its first `FN`, `N`, `ORG`,
   `EMAIL`, `TEL` and `UID`.
+- FR-090: A line MUST NOT have more parameter values than the read limit (`MaxParametersPerProperty`), 100 by default,
+  each value of a list and each bare parameter counting one; a line with more MUST be dropped with a
+  `contact.too_many_parameters` error that names its line and property, without tokenizing the rest of it, and the
+  card MUST read on. Each parameter value of a line MUST count against the file limit of FR-073 as one more line.
+- FR-091: `ContactErrorCodes.IsStructural` MUST say whether a code is about the file's form rather than a contact's
+  values; `contact.too_many_errors` MUST NOT be structural, since the read it ends is complete.
+- FR-092: A property list MUST be writable synchronously: `ContactWriter.Write(stream, cards, options)` and
+  `ContactWriter.ToText(card, options)`, which write what `AddAsync(IReadOnlyList<ContactProperty>)` writes.
+- FR-093: The preferred flag MUST be written `PREF` among the upper-case type values of 3.0 (`TYPE=CELL,VOICE,PREF`).
+- FR-094: Writing MUST leave tabs and line breaks out of a URI value rather than fail, as a URL parser does.
 
 ## Success criteria
 
@@ -429,7 +450,8 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
 - [ADR-0110](../docs/decisions/0110-vcard-contacts.md): the fixed contact model over a lossless property list, the own
   reader and writer, the per-line decoding ladder, the read result, photos, limits, the written versions; its
   amendment of 2026-11-27 decides the file-wide bounds, 2.1 escaping, URI values, control characters and the
-  unfolded payload (FR-072–FR-089).
+  unfolded payload (FR-072–FR-089); its second amendment of that day bounds parameters, names the structural errors
+  and settles the writer's `PREF`, URI line breaks and synchronous property lists (FR-090–FR-094).
 - [ADR-0109](../docs/decisions/0109-icalendar-model-reader-and-writer.md): the sibling format package whose entry,
   error, limit and writer shapes, decoding ladder and content-line layer this package shares.
 - [ADR-0108](../docs/decisions/0108-spreadsheet-records.md): the reference file-format package whose result, codes,
