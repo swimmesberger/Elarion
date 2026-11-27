@@ -73,6 +73,15 @@ surface for free).
 > whitespace-only values — is exported as a not-blank lookahead on the same `pattern` instead of being dropped, so a
 > "not blank" rule needs no Elarion attribute; requiredness itself still comes from nullability.
 
+> **Amendment (2026-11-27):** a single-value rule on a nullable member applies to a present value only. `[Range]`
+> already lets `null` pass, but the BCL `AllowedValuesAttribute` looks `null` up as one more value, so a nullable
+> filter (`[AllowedValues(30, 90, 365)] int? Days`) refused every request that left it out. The generator now adds
+> `null` to the values it renders for the BCL attribute on a nullable member (`Nullable<T>`, or a reference type
+> annotated `?`), and the exporter adds `null` to that member's `enum`, because JSON Schema applies `enum` to `null`
+> too. Rejected: changing the runtime walker (it differs between the .NET 10 and 11 builds, and would not reach the
+> schema) and an Elarion attribute (DataAnnotations stay the vocabulary). A subclass of the attribute, and a direct
+> `Validator.TryValidateObject` call, keep the BCL behaviour.
+
 **Tier 2 — business rules live in the handler** (or a domain `[Service]` it calls): cross-field comparisons,
 conditional rules, and every async/database-backed check, returning `AppError.Validation`/`Conflict` through the
 normal `Result<T>` channel — inside the transaction, where those checks are actually sound. There is no

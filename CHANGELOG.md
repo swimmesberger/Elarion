@@ -171,6 +171,13 @@ minor releases may include breaking changes.
   validated through `IRequestValidator.ValidateAsync`. A marked type with validation attributes outside every module is
   the build error `ELVAL004`; `ELVAL002` now also covers such a type in a compilation without `Elarion.Validation`. See
   [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation#validating-outside-a-handler-request).
+- **`SortMap`: sort by several keys** (ADR-0120). `sort=+city,-name` orders by `City`, then `Name` descending, then
+  the last key's declared tiebreakers; a single key keeps its meaning. A sort combines at most three keys unless the
+  builder sets `MaxLevels(n)`; a repeated or empty key, or a sort above the cap, is refused like an unknown key (`Apply`
+  falls back to the default, `Validate` answers `paging.sort_key_unknown`). `Validate` takes an optional `message`
+  function that words a refusal (`SortRefusal`: reason, key, allowed keys, cap), for an application that does not show
+  English. A sort parameter of 200,000 keys is refused in 0.09 ms and 1.5 KB instead of 0.37 ms and 4 MB. See
+  [Pagination](https://elarion.wimmesberger.dev/docs/capabilities/pagination#sorting-by-several-keys).
 
 - **`Elarion.Typst`: required packages and a package-not-found error** (ADR-0093). `TypstOptions.RequiredPackages`
   (`@local/acme-documents:1.0.0`) makes the startup check refuse a deployment without the application's template
@@ -186,6 +193,12 @@ minor releases may include breaking changes.
   [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#several-models).
 
 ### Changed
+- **BREAKING: `ToOffsetPageAsync` returns `OffsetPage<T>`** (ADR-0120). Offset lists get their own envelope: `Items`,
+  a required `Total`, `HasNext` and `HasPrevious`, with `Map`, `MapAsync`, `Empty` (total `0`) and `ToPage()`. The
+  generated TypeScript type of an offset list is `{ items, total: number, hasNext, hasPrevious }` instead of carrying a
+  nullable total and two cursors that were always `null`. Change a handler's result from `Result<Page<T>>` to
+  `Result<OffsetPage<T>>`, or call `.ToPage()` to keep the `Page<T>` wire contract. `Page<T>` stays the keyset
+  envelope. See [Pagination](https://elarion.wimmesberger.dev/docs/capabilities/pagination).
 - **BREAKING: `DavMember.Size` is `long?`** and no longer required, so a live collection's listing can leave the length
   unknown; `getcontentlength` is then not answered. A custom `IDavCollectionStore` still sets it; code that reads it
   handles `null`.
@@ -229,6 +242,13 @@ minor releases may include breaking changes.
   per item while mapping. See [Calendars](https://elarion.wimmesberger.dev/docs/capabilities/calendars#recurrences).
 
 ### Fixed
+- **`[AllowedValues]` on a nullable member refused a request that left the member out, and listing `null` broke the
+  build.** The BCL attribute looks `null` up as one more value, so `[AllowedValues(30, 90, 365)] int? Days` answered a
+  request without `days` with a validation error. Like `[Range]`, the rule now applies to a present value only: the
+  generated validation metadata adds `null` to the allowed values of a nullable member, and the exported JSON-RPC and
+  MCP `enum` lists `null` too. `[AllowedValues(null, …)]` no longer makes the generated resolver fail with CS8600/CS8625
+  in a nullable-enabled project. See
+  [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation).
 - **A `GET` of a contact through the DAV host ignored `Accept`.** `MapElarionDav()` passed a fixed list of headers to
   the dispatcher without `Accept`, so a client that asked for vCard 4.0 got 3.0 through ASP.NET Core although the
   dispatcher converts; the host now passes it.

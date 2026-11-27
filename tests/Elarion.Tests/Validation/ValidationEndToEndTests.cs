@@ -68,6 +68,33 @@ public sealed class ValidationEndToEndTests {
             }
 
             [AllowAnonymous]
+            // Rows of a request list: each item is walked at its indexed path (rows[0].code).
+            public sealed record ImportHandoversCommand : ICommand {
+                public required IReadOnlyList<HandoverRow> Rows { get; init; }
+            }
+
+            public sealed record HandoverRow([StringLength(10, MinimumLength = 2)] string Code) {
+                [Range(1, 99)] public int Count { get; init; } = 1;
+            }
+
+            public sealed class ImportHandoversHandler : IHandler<ImportHandoversCommand, Result<Unit>> {
+                public ValueTask<Result<Unit>> HandleAsync(ImportHandoversCommand request, CancellationToken ct) =>
+                    ValueTask.FromResult(Result<Unit>.Success(default));
+            }
+
+            // A single-value rule on a nullable member applies to a present value only.
+            public sealed record StatsQuery : ICommand {
+                [AllowedValues(30, 90, 365)] public int? Days { get; init; }
+                [AllowedValues("week", "month")] public string? Span { get; init; }
+                [AllowedValues(null, 1, 2)] public int? Level { get; init; }
+            }
+
+            public sealed class StatsHandler : IHandler<StatsQuery, Result<Unit>> {
+                public ValueTask<Result<Unit>> HandleAsync(StatsQuery request, CancellationToken ct) =>
+                    ValueTask.FromResult(Result<Unit>.Success(default));
+            }
+
+            [AllowAnonymous]
             public sealed class ExportClientsHandler : IStreamHandler<ExportClientsRequest, string> {
                 public ValueTask<Result<IAsyncEnumerable<string>>> HandleAsync(ExportClientsRequest request, CancellationToken ct) =>
                     ValueTask.FromResult(Result<IAsyncEnumerable<string>>.Success(Values()));
@@ -175,6 +202,66 @@ public sealed class ValidationEndToEndTests {
 
         validator.HasMetadata(assembly.GetType("Sample.App.CreateClientCommand")!).Should().BeFalse();
         validator.HasMetadata(assembly.GetType("Sample.App.ClientImportRow")!).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RecordsInARequestList_AreValidatedAtTheirIndexedPath() {
+        var assembly = CompileAndLoad();
+        var services = new ServiceCollection();
+        services.AddElarionValidation();
+        ConfigureGeneratedModuleServices(assembly, services);
+        await using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var validator = scope.ServiceProvider.GetRequiredService<IRequestValidator>();
+        var commandType = assembly.GetType("Sample.App.ImportHandoversCommand")!;
+        var rowType = assembly.GetType("Sample.App.HandoverRow")!;
+
+        object Command(params (string Code, int Count)[] rows) {
+            var list = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(rowType))!;
+            foreach (var (code, count) in rows) {
+                var row = Activator.CreateInstance(rowType, code)!;
+                rowType.GetProperty("Count")!.SetValue(row, count);
+                list.Add(row);
+            }
+
+            var command = Activator.CreateInstance(commandType)!;
+            commandType.GetProperty("Rows")!.SetValue(command, list);
+            return command;
+        }
+
+        var invalid = await validator.ValidateAsync(commandType, Command(("AT-01", 1), ("x", 0)), Ct);
+        var valid = await validator.ValidateAsync(commandType, Command(("AT-01", 1), ("AT-02", 5)), Ct);
+
+        invalid.Should().NotBeNull();
+        invalid!.FieldErrors.Keys.Should().BeEquivalentTo("rows[1].code", "rows[1].count");
+        valid.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AllowedValuesOnANullableMember_LetsNullPass_AndStillRefusesAnUnlistedValue() {
+        var assembly = CompileAndLoad();
+        var services = new ServiceCollection();
+        services.AddElarionValidation();
+        ConfigureGeneratedModuleServices(assembly, services);
+        await using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var validator = scope.ServiceProvider.GetRequiredService<IRequestValidator>();
+        var queryType = assembly.GetType("Sample.App.StatsQuery")!;
+
+        object Query(int? days, string? unit, int? level) {
+            var query = Activator.CreateInstance(queryType)!;
+            queryType.GetProperty("Days")!.SetValue(query, days);
+            queryType.GetProperty("Span")!.SetValue(query, unit);
+            queryType.GetProperty("Level")!.SetValue(query, level);
+            return query;
+        }
+
+        (await validator.ValidateAsync(queryType, Query(null, null, null), Ct)).Should().BeNull();
+        (await validator.ValidateAsync(queryType, Query(90, "week", 2), Ct)).Should().BeNull();
+
+        var invalid = await validator.ValidateAsync(queryType, Query(31, "day", 3), Ct);
+        invalid.Should().NotBeNull();
+        invalid!.FieldErrors.Keys.Should().BeEquivalentTo("days", "span", "level");
     }
 
     private static object CreateRow(Type rowType, string code) {

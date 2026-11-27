@@ -35,11 +35,15 @@ internal static class AttributeArgumentRendering {
         out string rendered) {
         rendered = string.Empty;
         if (constant.IsNull) {
-            // Cast the null so overloaded attribute constructors stay unambiguous.
+            // Cast the null so overloaded attribute constructors stay unambiguous. A construction expression is
+            // compiled in a nullable-enabled file, where a null cast to a non-annotated reference type warns
+            // (CS8600/CS8625, an error under TreatWarningsAsErrors), so it is suppressed there; an attribute argument
+            // is a constant, which nullable analysis does not flag.
+            var suppress = attributeArgument ? string.Empty : "!";
             rendered = constant.Type is { TypeKind: not TypeKind.Error } type &&
                        IsAccessibleFromGeneratedCode(type, currentAssembly)
-                ? $"({type.ToDisplayString(fmt)})null"
-                : "null";
+                ? $"({type.ToDisplayString(fmt)})null{suppress}"
+                : $"null{suppress}";
             return true;
         }
 

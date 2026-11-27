@@ -17,8 +17,7 @@ namespace Elarion.Paging;
 /// </remarks>
 /// <typeparam name="T">The entity type being sorted.</typeparam>
 public sealed class SortMapBuilder<T> {
-    private readonly Dictionary<string, Func<IQueryable<T>, bool?, IOrderedQueryable<T>>> _entries =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, SortEntry<T>> _entries = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly string _defaultKey;
     private readonly List<Func<IOrderedQueryable<T>, IOrderedQueryable<T>>> _tiebreakers = new();
@@ -29,7 +28,9 @@ public sealed class SortMapBuilder<T> {
 
     private string? _currentKey;
     private Func<IQueryable<T>, bool, IOrderedQueryable<T>>? _currentPrimary;
+    private Func<IOrderedQueryable<T>, bool, IOrderedQueryable<T>>? _currentThenBy;
     private bool _currentPrimaryDescending;
+    private int _maxLevels = SortMap<T>.DefaultMaxLevels;
 
     internal SortMapBuilder(string defaultKey) {
         ArgumentException.ThrowIfNullOrWhiteSpace(defaultKey);
@@ -56,6 +57,19 @@ public sealed class SortMapBuilder<T> {
         _currentPrimaryDescending = direction == SortDirection.Descending;
         _currentPrimary = (source, descending) =>
             descending ? source.OrderByDescending(selector) : source.OrderBy(selector);
+        _currentThenBy = (ordered, descending) =>
+            descending ? ordered.ThenByDescending(selector) : ordered.ThenBy(selector);
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the most keys one sort may combine (<c>+city,-name</c> is two); a longer sort is refused like an unknown
+    /// key. <see cref="SortMap{T}.DefaultMaxLevels"/> unless set; <c>1</c> allows a single key only.
+    /// </summary>
+    /// <param name="levels">The most keys per sort, at least 1.</param>
+    public SortMapBuilder<T> MaxLevels(int levels) {
+        ArgumentOutOfRangeException.ThrowIfLessThan(levels, 1);
+        _maxLevels = levels;
         return this;
     }
 
@@ -86,22 +100,15 @@ public sealed class SortMapBuilder<T> {
     public SortMap<T> Build() {
         Flush();
         return new SortMap<T>(_defaultKey, _entries.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
-            _keys.ToArray());
+            _keys.ToArray(), _maxLevels);
     }
 
     private void Flush() {
         if (_currentKey is null) return;
 
-        var primary = _currentPrimary!;
         var primaryDeclaredDescending = _currentPrimaryDescending;
-        var tiebreakers = _tiebreakers.ToArray();
-        _entries[_currentKey] = (source, primaryDescendingOverride) => {
-            var descending = primaryDescendingOverride ?? primaryDeclaredDescending;
-            var ordered = primary(source, descending);
-            foreach (var tiebreaker in tiebreakers) ordered = tiebreaker(ordered);
-
-            return ordered;
-        };
+        _entries[_currentKey] = new SortEntry<T>(
+            _currentPrimary!, _currentThenBy!, primaryDeclaredDescending, _tiebreakers.ToArray());
 
         var declared = new SortKey(_currentKey,
             primaryDeclaredDescending ? SortDirection.Descending : SortDirection.Ascending,

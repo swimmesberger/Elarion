@@ -2,6 +2,8 @@
 
 ## 2026-11-27
 
+* **Creation**: [ADR-0120](decisions/0120-offset-pages-and-multi-key-sorts.md): offset lists return `OffsetPage<T>` with a required total, and a `SortMap` sort may combine several keys
+* **Update**: [ADR-0027](decisions/0027-declarative-request-validation.md) amended: `[AllowedValues]` on a nullable member lets `null` pass and exports it in the `enum`
 * **Update**: [ADR-0111](decisions/0111-caldav.md) amended: Depth noroot, RefuseWhenNoCollections, the Accept header in the host, Identity's may-sign-in check, typed limit data and a bounded user id for app passwords
 * **Update**: [ADR-0113](decisions/0113-carddav-address-books.md) amended: live address books answered by a CTag, read per request for row-filtered per-viewer content, and explicit collection URL segments; specs 0006 and 0007 gain the matching requirements
 * **Update**: [ADR-0108](decisions/0108-spreadsheet-records.md) amended (2026-11-27): run-time worksheets, per-value cells and footer rows, per-call column filters, data-driven choices, a synchronous plain-row read of bytes in memory and the cell's number format; [VisibleWith] and a cell-value union rejected
