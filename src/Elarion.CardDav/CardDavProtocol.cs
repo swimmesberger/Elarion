@@ -42,7 +42,7 @@ internal sealed partial class CardDavProtocol(DavSourceRegistry<CardDavSourceLis
 
     public IReadOnlyList<DavName> CollectionResourceTypes { get; } = [DavNames.Card.AddressBook];
 
-    public IReadOnlyList<DavName> CollectionReports { get; } = [DavNames.Card.AddressBookMultiget];
+    public IReadOnlyList<DavName> CollectionReports { get; } = [DavNames.Card.AddressBookMultiget, DavNames.Card.AddressBookQuery];
 
     public IReadOnlyList<DavProperty> PrincipalProperties => field ??= [
         new(DavNames.Card.AddressBookHomeSet, false, null, (w, r, _, _) => {
@@ -96,6 +96,7 @@ internal sealed partial class CardDavProtocol(DavSourceRegistry<CardDavSourceLis
     public ValueTask<DavResponse?> ReportAsync(DavContext context, DavResource collection, DavXmlElement report, CancellationToken cancellationToken) {
         if (collection.Kind != DavResourceKind.Collection) return ValueTask.FromResult<DavResponse?>(null);
         if (report.Is(DavNames.Card.AddressBookMultiget)) return MultigetAsync(context, collection, report, cancellationToken);
+        if (report.Is(DavNames.Card.AddressBookQuery)) return QueryAsync(context, collection, report, cancellationToken);
         return ValueTask.FromResult<DavResponse?>(null);
     }
 

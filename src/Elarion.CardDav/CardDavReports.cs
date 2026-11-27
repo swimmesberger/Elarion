@@ -63,6 +63,54 @@ internal sealed partial class CardDavProtocol {
         });
     }
 
+    // RFC 6352 §8.6: the contacts that match the filter. Nothing is indexed (ADR-0113 section 3): every card is read and
+    // matched against its property list.
+    private async ValueTask<DavResponse?> QueryAsync(DavContext context, DavResource collection, DavXmlElement report,
+        CancellationToken cancellationToken) {
+        // Evolution sends no filter (sabre/dav accepts that too): every contact matches.
+        var filter = report.Child(DavNames.Card.Filter);
+        if (filter is not null && CardDavFilterEvaluator.Validate(filter) is { } problem) return DavResponse.Error(403, problem.Condition);
+        int? limit = null;
+        if (report.Child(DavNames.Card.Limit)?.Child(DavNames.Card.NResults)?.Text.Trim() is { Length: > 0 } nresults) {
+            if (!int.TryParse(nresults, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsed) || parsed < 1)
+                return DavResponse.Text(400, "CARDDAV:nresults must be a positive integer.");
+            limit = parsed;
+        }
+
+        var selection = SelectionOf(report);
+        if (AsksForUnsupportedAddressData(selection)) return DavResponse.Error(403, SupportedAddressDataCondition);
+        var minimal = DavDispatcher.IsMinimal(context.Request);
+        var readOptions = options.Value.ContactRead;
+        var addressBook = AddressBook(collection);
+        // Depth 0 is read as 1, unlike calendar-query: Evolution sends Depth 0 on the address book and expects its members.
+
+        return DavResponse.Xml(207, async (output, ct) => {
+            DavMultistatus.Start(output);
+            var matched = 0;
+            var truncated = false;
+            await foreach (var stored in context.Store.GetCandidatesAsync(addressBook.Address.Id, null, null, ct).ConfigureAwait(false)) {
+                if (filter is not null) {
+                    using var stream = new MemoryStream(stored.Content.ToArray(), false);
+                    var read = await reader.ReadAsync(stream, readOptions, ct).ConfigureAwait(false);
+                    if (read.Entries.Count == 0 || !CardDavFilterEvaluator.Matches(read.Entries[0].Properties, filter)) continue;
+                }
+
+                if (limit is { } max && matched == max) {
+                    truncated = true;
+                    break;
+                }
+
+                matched++;
+                await DavMultistatus.WriteResourceAsync(output, Member(context, collection, stored), selection, minimal, ct).ConfigureAwait(false);
+                await output.FlushIfFullAsync(ct).ConfigureAwait(false);
+            }
+
+            // RFC 6352 §8.6.1: more matches than the limit are reported as a 507 on the request-URI.
+            if (truncated) DavMultistatus.WriteStatus(output, collection.Href, 507);
+            DavMultistatus.End(output);
+        });
+    }
+
     private static DavResource Member(DavContext context, DavResource collection, DavMember member) =>
         new(context, DavResourceKind.Member, context.MemberHref(collection.Protocol!, collection.Collection!, member.Name)) {
             Protocol = collection.Protocol, Collection = collection.Collection, Member = member,
