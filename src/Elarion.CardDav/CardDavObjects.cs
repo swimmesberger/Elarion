@@ -43,6 +43,36 @@ internal static class CardDavObjects {
         };
     }
 
+    /// <summary>
+    /// Writes a live source's property list as one vCard 3.0 card, in its own order and spelling (ADR-0113, amendment
+    /// 2026-11-27, second), with the checks a contact gets: a <c>UID</c> and an <c>FN</c> to show.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The card has no UID or no formatted name, or more properties than the read limit.</exception>
+    /// <exception cref="ContactWriteException">The writer cannot represent a property.</exception>
+    public static async ValueTask<DavObjectContent> ToContentAsync(IReadOnlyList<ContactProperty> card, string source,
+        ContactReadOptions readOptions, CancellationToken cancellationToken) {
+        var uid = TextOf(card, "UID");
+        if (string.IsNullOrEmpty(uid))
+            throw new InvalidOperationException($"The live address book '{source}' gave a card without a UID; every card needs one.");
+        if (string.IsNullOrWhiteSpace(TextOf(card, "FN")))
+            throw new InvalidOperationException(
+                $"The live address book '{source}' gave the card '{uid}' without an FN; contacts apps would drop it.");
+        var count = card.Count(static p => !string.Equals(p.Name, "VERSION", StringComparison.OrdinalIgnoreCase)) + 1;
+        if (count > readOptions.MaxPropertiesPerContact)
+            throw new InvalidOperationException(
+                $"The live address book '{source}' gave the card '{uid}' with {count} properties, more than "
+                + $"ContactReadOptions.MaxPropertiesPerContact ({readOptions.MaxPropertiesPerContact}).");
+
+        var bytes = await WriteAsync(card, ContactFormatVersion.V3_0, cancellationToken).ConfigureAwait(false);
+        return new DavObjectContent { Name = NameOf(uid), Uid = uid, Content = bytes, ContentType = ContentType, ETag = DavETag.Compute(bytes) };
+    }
+
+    private static string? TextOf(IReadOnlyList<ContactProperty> card, string name) {
+        foreach (var property in card)
+            if (property is not null && string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)) return property.GetText();
+        return null;
+    }
+
     /// <summary>Writes one contact as one card of <paramref name="version"/>.</summary>
     public static async ValueTask<byte[]> WriteAsync(Contact contact, ContactFormatVersion version, CancellationToken cancellationToken) {
         using var stream = new MemoryStream();

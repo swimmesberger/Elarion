@@ -164,6 +164,16 @@ internal sealed class VisibleContacts(AppDbContext db) : ICardDavLiveAddressBook
 writes each `Contact` as vCard 3.0 with the rules of published contacts (a UID and a name to show), under the member
 name and ETag you give.
 
+An application that pins its own card bytes (its property order, the spelling of a parameter, a property of its own)
+gives the card's property list instead of a `Contact`: `new CardDavLiveContact(name, etag, properties)`. It is written as
+`ContactWriter.AddAsync(properties)` writes it, as vCard 3.0, in that order and spelling; it needs a `UID` and an `FN`,
+and its values are escaped as a read entry's are. `contact.ToProperties(ContactFormatVersion.V3_0)` is the writer's own
+list to start from.
+
+An application whose address books are all live needs no store: `AddElarionCardDav()` and its live sources are all it
+registers, without `AddElarionWebDavEntityFrameworkCore` and its tables. `ICardDavPublisher` still resolves, and says
+which store to register if it is used for a published source.
+
 - **Answered by a CTag, without sync tokens.** A live address book answers `getctag`, has no `sync-token`, and does not
   offer `sync-collection` (a `sync-collection` answers `403` with `supported-report`). Every contacts app falls back to
   the CTag: when it changed, the app lists the names and ETags (`PROPFIND Depth: 1`) and fetches the changed contacts
@@ -179,7 +189,9 @@ name and ETag you give.
   photos is kept inside it.
 - **Member names** are the last URL segment (1 to 128 ASCII letters, digits, `-`, `_`, `.`, `~`, `@`), a URL contract
   like the address book's segment; `CardDavAddress.MemberNameOf(uid)` gives the name a published contact would have.
-  A listing does not know a card's length, so `getcontentlength` answers `404` for listed members.
+  A listing does not know a card's length, so `getcontentlength` answers `404` for listed members. A listing that names
+  `address-data` (some clients fetch the cards that way) asks for every card with `DavContentPurpose.Multiget` and
+  carries them, as for a published address book.
 - **Nothing is published into a live source**: `ICardDavPublisher` throws for one. A source is either published or live;
   an application can register both kinds.
 
@@ -197,7 +209,11 @@ address books stay the choice when the content is the same for every viewer.
 - **Versions.** `address-data` without a version answers the stored vCard 3.0; `version="4.0"` answers the same contact
   written as 4.0 (DAVx5 and Evolution prefer it), with the same ETag; another version or content type answers `403`
   with `supported-address-data`. `GET` answers 3.0 unless `Accept` ranks `text/vcard; version=4.0` higher.
-  `address-data` naming properties answers only those, plus `VERSION`, `UID` and `FN`.
+  `address-data` naming properties answers only those, plus `VERSION`, `UID` and `FN`. A `PROPFIND` that names
+  `address-data` carries each card too, at depth 1 for every contact of the address book and at depth 0 for one.
+- **Depth.** `PROPFIND` answers depth `0` and `1` (also `0,noroot` and `1,noroot`); `infinity` answers `403` with
+  `propfind-finite-depth`. A `PROPFIND` without a `Depth` header is answered as depth `1`, as sabre/dav answers it:
+  RFC 4918 reads a missing header as `infinity`, which would refuse a client that leaves it out.
 - **Search.** `addressbook-query` matches `prop-filter`, `param-filter` and `text-match` (`equals`, `contains`,
   `starts-with`, `ends-with`; collations `i;unicode-casemap` by default, `i;ascii-casemap`, `i;octet`;
   `negate-condition`, `is-not-defined`, `test="anyof|allof"`) against each card's properties, including `X-` properties

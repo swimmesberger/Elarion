@@ -335,6 +335,13 @@ minor releases may include breaking changes.
   out of a URI (`URL`, a 4.0 `tel:` number) instead of throwing `ContactWriteException`. The `PREF` spelling changes
   the bytes, and so the CardDAV ETag, of a stored card with a preferred value, once, when it is next published. See
   [Contacts](https://elarion.wimmesberger.dev/docs/capabilities/contacts#limits-and-options).
+- **BREAKING: `Elarion.CardDav`: a live address book may give its own property list, and needs no store**
+  (ADR-0113, second amendment of 2026-11-27; spec 0007, FR-043–FR-046). `CardDavLiveContact` gains a constructor that
+  takes the card's `IReadOnlyList<ContactProperty>`, written as vCard 3.0 in its order and spelling, so an application
+  keeps its own card bytes; it is no longer a positional record (`Contact` is nullable, `Card` is new), so code that
+  deconstructs it changes. An application whose address books are all live no longer needs
+  `AddElarionWebDavEntityFrameworkCore` and its tables: `ICardDavPublisher` resolves the store on first use. See
+  [CardDAV](https://elarion.wimmesberger.dev/docs/capabilities/carddav#live-address-books-contacts-filtered-per-viewer).
 - **`Elarion.Calendars`: overrides, `EXRULE`, strict reads and more limits** (ADR-0109, amendment 2026-11-27). Of
   several overrides of one instance, expansion now keeps only the latest (highest `SEQUENCE`, then latest `DTSTAMP`);
   `CalendarExpandOptions.ResolveOverrideVersions = false` keeps them all. `SkipCancelled` (off by default) leaves out
@@ -362,6 +369,13 @@ minor releases may include breaking changes.
   the file stayed in the result, at 60 to 150 bytes per line however short; names, parameters and short values are now
   shared within a read and the result is bounded by `MaxProperties` and `MaxErrors`, so the same files hold 2–115 MB
   and no read holds more than about 200 MB at the defaults.
+- **A `PROPFIND` that named `address-data` or `calendar-data` answered it empty in a `200` propstat.** A listed
+  member's missing content read as empty content, so the property looked defined; now a `PROPFIND` that names it
+  loads the content and carries the card or calendar data, at depth 1 for every member (a live address book is asked
+  with `DavContentPurpose.Multiget`) and at depth 0 for one.
+- **An application with only live address books failed dependency validation without the DAV store.**
+  `ICardDavPublisher`'s default took `IDavCollectionStore` in its constructor, so `ValidateOnBuild` failed unless the
+  EF store and its three tables were registered.
 - **`Elarion.Contacts`: parameters per line were unbounded.** One 20 MB line of 6.6 million empty parameters read in
   2.4 s, held 120 MB and reported nothing; a 32 MB file of lines with four empty parameters of distinct names held
   430 MB, over the documented 200 MB. A line past `MaxParametersPerProperty` is now dropped without tokenizing the rest

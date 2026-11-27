@@ -169,5 +169,7 @@ public sealed class DavResource {
     public DavMember? Member { get; init; }
 
     /// <summary>The member's content, when it was loaded.</summary>
-    public ReadOnlyMemory<byte>? Content => Member is DavStoredObject { Content.Length: > 0 } stored ? stored.Content : null;
+    // The cast matters: without it the null converts to an empty ReadOnlyMemory through its implicit conversion from an
+    // array, so a member listed without content looked loaded and its data property answered empty in a 200 propstat.
+    public ReadOnlyMemory<byte>? Content => Member is DavStoredObject { Content.Length: > 0 } stored ? stored.Content : (ReadOnlyMemory<byte>?)null;
 }

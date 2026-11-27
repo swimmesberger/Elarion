@@ -208,8 +208,9 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
     }
 
     private async ValueTask<DavResponse> PropFindAsync(DavContext context, DavResource resource, CancellationToken cancellationToken) {
-        // RFC 4918 reads a missing Depth as infinity; sabre/dav and the clients surveyed send it, and a missing one is read
-        // as 1, which answers every client that omits it without walking a tree.
+        // RFC 4918 §9.1 reads a missing Depth as infinity, which this server refuses (403 propfind-finite-depth). A missing
+        // one is read as 1, as sabre/dav reads it, so a client that omits it gets the listing it means instead of a refusal
+        // it may not handle (ADR-0111, amendment 2026-11-27).
         // Some clients send "1,noroot" (Microsoft's extension): the depth before the comma, without the resource itself.
         var (depthHeader, noRoot) = ParseDepth(context.Request.Header("Depth"));
         int depth;
@@ -244,6 +245,12 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
         }
 
         var minimal = IsMinimal(context.Request);
+        // A member's data property (address-data, calendar-data) needs the member's content, which a listing does not load:
+        // it is loaded when one is named, so the property carries the data instead of answering 404 (RFC 6352 §10.4,
+        // RFC 4791 §9.6 allow it in a PROPFIND; sabre/dav answers it).
+        var needsContent = resource.Protocol is { } contentProtocol && contentProtocol.MemberProperties.Any(p => selection.Names(p.Name));
+        if (needsContent && resource is { Kind: DavResourceKind.Member, Content: null })
+            resource = await WithContentAsync(context, resource, cancellationToken).ConfigureAwait(false);
         List<DavResource>? children = null;
         if (depth == 1 && resource.Kind == DavResourceKind.Home) children = await ListHomeAsync(context, resource.Protocol!, cancellationToken).ConfigureAwait(false);
         if (depth == 1 && resource.Kind == DavResourceKind.Principals)
@@ -256,7 +263,10 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
                 foreach (var child in children)
                     await DavMultistatus.WriteResourceAsync(output, child, selection, minimal, ct).ConfigureAwait(false);
             if (depth == 1 && resource.Kind == DavResourceKind.Collection) {
-                await foreach (var member in context.ListMembersAsync(resource.Collection!, ct).ConfigureAwait(false)) {
+                var members = needsContent
+                    ? context.GetMembersAsync(resource.Collection!, null, DavContentPurpose.Multiget, ct)
+                    : context.ListMembersAsync(resource.Collection!, ct);
+                await foreach (var member in members.ConfigureAwait(false)) {
                     var child = new DavResource(context, DavResourceKind.Member, context.MemberHref(resource.Protocol!, resource.Collection!, member.Name)) {
                         Protocol = resource.Protocol, Collection = resource.Collection, Member = member,
                     };
@@ -269,6 +279,19 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
         // macOS reads the DAV header on PROPFIND answers too (sabre/dav's client notes).
         response.Headers["DAV"] = ComplianceHeader;
         return response;
+    }
+
+    // The member again, with its content; the member as it was when it has none any more.
+    private static async ValueTask<DavResource> WithContentAsync(DavContext context, DavResource resource, CancellationToken cancellationToken) {
+        await foreach (var stored in context.GetMembersAsync(resource.Collection!, [resource.Member!.Name], DavContentPurpose.Get, cancellationToken)
+                           .ConfigureAwait(false)) {
+            if (!string.Equals(stored.Name, resource.Member.Name, StringComparison.Ordinal)) continue;
+            return new DavResource(context, DavResourceKind.Member, resource.Href) {
+                Protocol = resource.Protocol, Collection = resource.Collection, Member = stored,
+            };
+        }
+
+        return resource;
     }
 
     private static async ValueTask<List<DavResource>> ListHomeAsync(DavContext context, IDavProtocol protocol, CancellationToken cancellationToken) {

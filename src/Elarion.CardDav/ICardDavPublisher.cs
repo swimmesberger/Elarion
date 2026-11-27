@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Elarion.Contacts;
 using Elarion.WebDav;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Elarion.CardDav;
 
@@ -48,24 +49,32 @@ public interface ICardDavPublisher {
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>The default <see cref="ICardDavPublisher"/> over the scoped <see cref="IDavCollectionStore"/>.</summary>
+/// <summary>
+/// The default <see cref="ICardDavPublisher"/> over the scoped <see cref="IDavCollectionStore"/>, resolved on first use:
+/// an application whose address books are all live registers no store, and still injects nothing that fails.
+/// </summary>
 internal sealed class CardDavPublisher(
-    IDavCollectionStore store,
+    IServiceProvider services,
     DavSourceRegistry<CardDavSourceListing> sources,
     Microsoft.Extensions.Options.IOptions<CardDavOptions> options,
     IEnumerable<CardDavLiveSourceRegistration> liveSources)
     : ICardDavPublisher {
+    private IDavCollectionStore Store => field ??= services.GetService<IDavCollectionStore>() ?? throw new InvalidOperationException(
+        "No IDavCollectionStore is registered, so contacts cannot be published. Call AddElarionWebDavEntityFrameworkCore<TDbContext>() "
+        + "(Elarion.WebDav.EntityFrameworkCore), AddElarionInMemoryDavStore() for tests, or serve the source live with "
+        + "AddElarionCardDavLiveSource<TQuery, TAddressBooks>().");
+
     public async ValueTask<bool> PublishAsync(CardDavAddress address, Contact contact, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(contact);
         Guard(address);
         var content = await CardDavObjects.ToContentAsync(contact, options.Value.ContactRead, cancellationToken).ConfigureAwait(false);
-        return await store.PublishAsync(address.ToCollectionAddress(), content, cancellationToken).ConfigureAwait(false) != DavPublishOutcome.Unchanged;
+        return await Store.PublishAsync(address.ToCollectionAddress(), content, cancellationToken).ConfigureAwait(false) != DavPublishOutcome.Unchanged;
     }
 
     public ValueTask<bool> RemoveAsync(CardDavAddress address, string uid, CancellationToken cancellationToken = default) {
         ArgumentException.ThrowIfNullOrEmpty(uid);
         Guard(address);
-        return store.RemoveAsync(address.ToCollectionAddress(), CardDavObjects.NameOf(uid), cancellationToken);
+        return Store.RemoveAsync(address.ToCollectionAddress(), CardDavObjects.NameOf(uid), cancellationToken);
     }
 
     public ValueTask<DavReplaceOutcome> ReplaceAsync(CardDavAddress address, IAsyncEnumerable<Contact> contacts,
@@ -95,7 +104,7 @@ internal sealed class CardDavPublisher(
             contents.Add(content);
         }
 
-        return await store.ReplaceAsync(address.ToCollectionAddress(), Enumerate(contents, cancellationToken), cancellationToken).ConfigureAwait(false);
+        return await Store.ReplaceAsync(address.ToCollectionAddress(), Enumerate(contents, cancellationToken), cancellationToken).ConfigureAwait(false);
     }
 
     private static async IAsyncEnumerable<DavObjectContent> Enumerate(List<DavObjectContent> contents,

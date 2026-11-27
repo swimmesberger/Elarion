@@ -47,10 +47,12 @@ public interface ICardDavLiveAddressBooks {
 
     /// <summary>
     /// The contacts of address book <paramref name="key"/> named <paramref name="names"/> that the current user sees, or
-    /// all of them when <paramref name="names"/> is <see langword="null"/> (an <c>addressbook-query</c>).
+    /// all of them when <paramref name="names"/> is <see langword="null"/> (an <c>addressbook-query</c>, or a
+    /// <c>PROPFIND</c> listing that names <c>address-data</c>, with <see cref="DavContentPurpose.Multiget"/>).
     /// <paramref name="purpose"/> is <see cref="DavContentPurpose.Get"/>, <see cref="DavContentPurpose.Multiget"/> or
     /// <see cref="DavContentPurpose.Query"/>: a query matches and answers every contact, so it may leave out what no
-    /// search reads, such as photos. One call answers one response, so a byte budget for photos is kept within it.
+    /// search reads, such as photos; the others answer the card a client keeps under its entity tag, so they leave
+    /// nothing out. One call answers one response, so a byte budget for photos is kept within it.
     /// </summary>
     IAsyncEnumerable<CardDavLiveContact> GetAsync(string key, IReadOnlyCollection<string>? names, DavContentPurpose purpose,
         CancellationToken cancellationToken);
@@ -92,11 +94,57 @@ public sealed record CardDavLiveMember(string Name, string ETag) {
     }
 }
 
-/// <summary>A contact of a live address book with its card: its member name, its entity tag and the contact.</summary>
-/// <param name="Name">The member name, as <see cref="ICardDavLiveAddressBooks.ListAsync"/> names it.</param>
-/// <param name="ETag">The entity tag, as the listing gives it.</param>
-/// <param name="Contact">The contact, written as vCard 3.0 like a published one: it needs a UID and a name to show.</param>
-public sealed record CardDavLiveContact(string Name, string ETag, Contact Contact);
+/// <summary>
+/// A contact of a live address book with its card: its member name, its entity tag and either the contact, which the
+/// writer turns into a card in its own order, or the card's property list, written in the order and spelling it holds.
+/// </summary>
+/// <example>
+/// <code>
+/// // The application's own wire format: the writer's properties, reordered, and an extra one.
+/// var card = contact.ToProperties(ContactFormatVersion.V3_0).OrderBy(Rank).Append(new ContactProperty("X-SOURCE", "crm")).ToList();
+/// yield return new CardDavLiveContact(name, etag, card);
+/// </code>
+/// </example>
+public sealed record CardDavLiveContact {
+    /// <summary>A live contact written from <paramref name="contact"/>.</summary>
+    /// <param name="name">The member name, as <see cref="ICardDavLiveAddressBooks.ListAsync"/> names it.</param>
+    /// <param name="etag">The entity tag, as the listing gives it.</param>
+    /// <param name="contact">The contact, written as vCard 3.0 like a published one: it needs a UID and a name to show.</param>
+    public CardDavLiveContact(string name, string etag, Contact contact) {
+        ArgumentNullException.ThrowIfNull(contact);
+        Name = name;
+        ETag = etag;
+        Contact = contact;
+    }
+
+    /// <summary>
+    /// A live contact written from the property list <paramref name="card"/>, as
+    /// <c>ContactWriter.AddAsync(IReadOnlyList&lt;ContactProperty&gt;)</c> writes it: in its order and spelling, as vCard 3.0
+    /// (a <c>VERSION</c> property is replaced). It needs a <c>UID</c> and an <c>FN</c>, and its values are escaped as
+    /// a read entry's are.
+    /// </summary>
+    /// <param name="name">The member name, as <see cref="ICardDavLiveAddressBooks.ListAsync"/> names it.</param>
+    /// <param name="etag">The entity tag, as the listing gives it.</param>
+    /// <param name="card">The properties, without <c>BEGIN</c> and <c>END</c>.</param>
+    public CardDavLiveContact(string name, string etag, IReadOnlyList<ContactProperty> card) {
+        ArgumentNullException.ThrowIfNull(card);
+        Name = name;
+        ETag = etag;
+        Card = card;
+    }
+
+    /// <summary>The member name, the last segment of the contact's URL.</summary>
+    public string Name { get; }
+
+    /// <summary>The entity tag, as the listing gives it.</summary>
+    public string ETag { get; }
+
+    /// <summary>The contact, or <see langword="null"/> when the card is given as <see cref="Card"/>.</summary>
+    public Contact? Contact { get; }
+
+    /// <summary>The card's property list, or <see langword="null"/> when it is written from <see cref="Contact"/>.</summary>
+    public IReadOnlyList<ContactProperty>? Card { get; }
+}
 
 /// <summary>A registered live address-book source: its name and how to resolve its contacts in a request's scope.</summary>
 internal sealed record CardDavLiveSourceRegistration(string Name, Func<IServiceProvider, ICardDavLiveAddressBooks> Resolve);
@@ -128,7 +176,9 @@ internal sealed class CardDavLiveCollection(ICardDavLiveAddressBooks books, stri
 
         await foreach (var live in books.GetAsync(key, names, purpose, cancellationToken).WithCancellation(cancellationToken).ConfigureAwait(false)) {
             if (live is null || (wanted is not null && !wanted.Contains(live.Name))) continue;
-            var content = await CardDavObjects.ToContentAsync(live.Contact, readOptions, cancellationToken).ConfigureAwait(false);
+            var content = live.Card is { } card
+                ? await CardDavObjects.ToContentAsync(card, key, readOptions, cancellationToken).ConfigureAwait(false)
+                : await CardDavObjects.ToContentAsync(live.Contact!, readOptions, cancellationToken).ConfigureAwait(false);
             yield return new DavStoredObject {
                 Name = CheckName(live.Name),
                 Uid = content.Uid,

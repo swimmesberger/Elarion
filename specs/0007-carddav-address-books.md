@@ -196,7 +196,7 @@ The CardDAV server
 - FR-034: Publishing a contact with more properties than `CardDavOptions.ContactRead.MaxPropertiesPerContact` MUST throw,
   so that every stored card can be read back to convert or query it.
 
-Live address books and URL segments (ADR-0113, amendment 2026-11-27)
+Live address books and URL segments (ADR-0113, amendment 2026-11-27; FR-043–FR-046 its second amendment)
 
 - FR-035: An address-book source registered with `AddElarionCardDavLiveSource<TQuery, TAddressBooks>()` MUST serve live
   address books: the source's handler MUST decide which address books the user sees, as for a published source, and
@@ -205,7 +205,7 @@ Live address books and URL segments (ADR-0113, amendment 2026-11-27)
 - FR-036: A live address book MUST answer `getctag` with the CTag `ICardDavLiveAddressBooks.GetCTagAsync` returns
   (by default a hash of the listing's names and ETags), MUST NOT define `sync-token`, MUST NOT list `sync-collection`
   in `supported-report-set`, and MUST answer a `sync-collection` with `403` and the `supported-report` precondition.
-- FR-037: A `PROPFIND` listing of a live address book MUST write no card, and its members' `getcontentlength` MUST
+- FR-037: A `PROPFIND` listing of a live address book MUST write no card unless it names `address-data` (FR-044), and its members' `getcontentlength` MUST
   answer `404` inside the `multistatus`.
 - FR-038: A live address book MUST ask its contacts for the purpose of the request (`DavContentPurpose`: `Get`,
   `Multiget` or `Query`), so an application can leave heavy parts such as photos out of a query.
@@ -218,6 +218,17 @@ Live address books and URL segments (ADR-0113, amendment 2026-11-27)
   (`PublishedAddressBookInfo.Segment`: 1 to 128 ASCII letters, digits, `-`, `_`, `.`, `~` or `@`, not `.` or
   `..`), MUST be matched exactly, MUST NOT change the store address or the sync token, and two address books a user
   sees with the same segment, or an invalid segment, MUST throw.
+- FR-043: An application whose address-book sources are all live MUST build and start without an
+  `IDavCollectionStore` (`ValidateOnBuild` included); `ICardDavPublisher` MUST still resolve, and publishing into a
+  published source without a store MUST throw naming the store to register.
+- FR-044: A `PROPFIND` that names `address-data` MUST carry each member's card: at depth 1 every member of the address
+  book, read with `DavContentPurpose.Multiget` from a live source, and at depth 0 the member; a member whose card was not
+  loaded MUST answer `address-data` in a `404` propstat, never empty in a `200` one.
+- FR-045: A live source MAY give a contact as its property list (`CardDavLiveContact(name, etag, properties)`), which
+  MUST be written as vCard 3.0 in its order and spelling, as `ContactWriter.AddAsync(IReadOnlyList<ContactProperty>)`
+  writes it; a list without a `UID` or an `FN` MUST throw as the application's mistake.
+- FR-046: A `PROPFIND` without a `Depth` header MUST be answered as depth 1 (ADR-0111 plan, sabre/dav's reading), not
+  as RFC 4918's `infinity`, which FR-018 of spec 0006 refuses.
 
 ## Success criteria
 

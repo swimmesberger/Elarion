@@ -36,6 +36,22 @@ public sealed class CardDavProtocolTests {
     }
 
     [Fact]
+    public async Task APropFindNamingAddressData_CarriesThePublishedCards_AtDepth1AndAtDepth0() {
+        await using var harness = await WithContactsAsync();
+        var depth1 = new Dictionary<string, string> { ["Depth"] = "1" };
+        var depth0 = new Dictionary<string, string> { ["Depth"] = "0" };
+
+        var listing = await harness.SendAsync("PROPFIND", Book, CardDavTestHarness.PropFind("D:getetag", "CARD:address-data"), headers: depth1);
+        var member = await harness.SendAsync("PROPFIND", Book + "c-2.vcf", CardDavTestHarness.PropFind("CARD:address-data"), headers: depth0);
+        var withoutData = await harness.SendAsync("PROPFIND", Book, CardDavTestHarness.PropFind("D:getetag"), headers: depth1);
+
+        listing.Prop(BookHref + "c-1.vcf", DavNames.Card.AddressData)!.Text.Should().Contain("FN:Anna Berger");
+        listing.Prop(BookHref + "c-2.vcf", DavNames.Card.AddressData)!.Text.Should().Contain("FN:Bernd Huber");
+        member.Prop(BookHref + "c-2.vcf", DavNames.Card.AddressData)!.Text.Should().Contain("UID:c-2");
+        withoutData.Prop(BookHref + "c-1.vcf", DavNames.D.GetETag).Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task GivenAClientThatAsksForVCard40_WhenItFetchesContacts_ThenItReceivesVCard40WithTheSameETag_AndWithoutAVersionVCard30() {
         await using var harness = await WithContactsAsync();
 
