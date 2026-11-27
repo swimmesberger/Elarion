@@ -45,3 +45,26 @@ public sealed class TypstTimeoutException : TypstException {
     /// <summary>The timeout that was exceeded.</summary>
     public TimeSpan Timeout { get; }
 }
+
+/// <summary>
+/// Typst could not find a package the document imports, such as the application's own
+/// <c>@local/acme-documents:1.0.0</c>: a deployment problem (the package was not bundled or not copied), not a template
+/// defect. Listing the package in <see cref="TypstOptions.RequiredPackages"/> reports it at startup instead.
+/// </summary>
+public sealed class TypstPackageNotFoundException : TypstException {
+    /// <summary>Creates the exception.</summary>
+    public TypstPackageNotFoundException(string message, string package, int exitCode, string diagnostics) : base(message) {
+        Package = package;
+        ExitCode = exitCode;
+        Diagnostics = diagnostics;
+    }
+
+    /// <summary>The package Typst searched for, as Typst names it (<c>@local/acme-documents:1.0.0</c>).</summary>
+    public string Package { get; }
+
+    /// <summary>The process exit code.</summary>
+    public int ExitCode { get; }
+
+    /// <summary>Typst's diagnostics (standard error, then standard output).</summary>
+    public string Diagnostics { get; }
+}

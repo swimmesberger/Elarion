@@ -157,6 +157,32 @@ NativeAOT uses all of it without warnings.
 - Given an event with more properties than the limit, or with components nested deeper than the limit inside it, when
   the file is read, then that event has no typed value and a `calendar.too_many_properties` or
   `calendar.nesting_too_deep` error, and the events after it read.
+- Given a file with more lines, or more events and to-dos, than the limit, when it is read, then reading stops with one
+  `calendar.too_many_lines` or `calendar.too_many_items` error naming the limit, and the result keeps the items read
+  before it; alarms and time zones do not count as items.
+- Given an event whose `TZID` is a vendor prefix of tens of thousands of segments ending in an IANA id, when the file is
+  read without an id limit, then the id resolves in linear time; with the default limit of 128 characters, a longer id
+  is `calendar.unknown_time_zone` without a lookup.
+- Given many reads of files with distinct unknown `TZID`s, when they are done, then no process-wide cache holds any of
+  them.
+- Given a yearly rule with every month, day, hour, minute and second, when it is expanded, then the expansion stops at
+  the candidate cap with `calendar.recurrence_limit` within the time and memory of SC-005, instead of building the
+  31 million candidates of one year.
+- Given a monthly or yearly rule without `COUNT` from a `DTSTART` centuries before the window, when it is expanded, then
+  it skips ahead to the window and finds the window's occurrences under a small candidate cap.
+- Given a cancelled token, when a calendar is expanded, then the expansion throws `OperationCanceledException`.
+
+### Overrides, exception rules and strict reads (P3)
+
+- Given two overrides of one instance (an update sent again), when the series is expanded, then only the one with the
+  highest `SEQUENCE`, then the latest `DTSTAMP`, then the later one gives an occurrence; with the option off, both do.
+- Given an override with `STATUS:CANCELLED`, when the series is expanded with cancelled items skipped, then its
+  instance gives no occurrence; by default the override is an occurrence like any other.
+- Given a weekly series with `EXRULE:FREQ=WEEKLY;INTERVAL=2`, when it is expanded, then every other instance is
+  excluded except `DTSTART`, and the rule is the item's `ExceptionRules` and is written back.
+- Given a rule with both `COUNT` and `UNTIL`, or a value with a control character, when the file is read strictly, then
+  the rule is `calendar.invalid_value` (the item has no value) and the line is skipped with
+  `calendar.control_character`; a lenient read accepts both.
 
 ## Requirements
 
@@ -225,7 +251,9 @@ NativeAOT uses all of it without warnings.
   the rest.
 - FR-025: A `TZID` MUST be normalized by removing surrounding quotes and spaces, a vendor prefix ending in an IANA id
   (`/mozilla.org/20070129_1/Europe/Berlin`, `/freeassociation.sourceforge.net/Europe/Berlin`), and a leading
-  `(UTC±hh:mm) ` display prefix.
+  `(UTC±hh:mm) ` display prefix, in time linear in the id's length. A read MUST NOT resolve an id longer than the
+  time-zone id limit of the read options, 128 characters by default; such an id is `calendar.unknown_time_zone`.
+  A process-wide cache MUST hold only ids the system resolves, never an id that did not resolve.
 - FR-026: A `TZID` MUST resolve through the system's time zones when the system knows the normalized id, as an IANA
   or a Windows id, and otherwise through the file's `VTIMEZONE` of that id, wherever in the file it stands.
 - FR-027: A `TZID` that resolves neither way MUST be a `calendar.unknown_time_zone` error on every item that uses it.
@@ -237,13 +265,17 @@ NativeAOT uses all of it without warnings.
   and MUST return the occurrences that overlap the window in start order with any errors.
 - FR-031: Expansion MUST implement RFC 5545 recurrence for the Gregorian calendar: every `FREQ`, every `BY` part,
   `BYSETPOS`, `WKST`, `COUNT`, `UNTIL`, `INTERVAL`, `RDATE` values of every type, `EXDATE`, and overrides matched by
-  `UID` and `RECURRENCE-ID`.
+  `UID` and `RECURRENCE-ID`, and the RFC 2445 `EXRULE`, whose instances other than `DTSTART` are excluded. Repeated
+  values of a `BY` list MUST count once, and a list with more items than the part has distinct values MUST NOT parse.
 - FR-032: A recurrence MUST move a local time that does not exist forward by the length of the gap, and MUST place an
   ambiguous local time at its first offset.
 - FR-033: Expansion MUST stop at the maximum number of occurrences of the expand options, 10,000 by default, with a
   `calendar.too_many_occurrences` error and the occurrences found before it.
-- FR-034: Expansion MUST stop at the maximum number of candidates examined without producing an occurrence, 100,000
-  by default, with a `calendar.recurrence_limit` error on the series.
+- FR-034: Expansion MUST stop at the maximum number of periods examined without producing an occurrence, 100,000
+  by default, and at the maximum number of candidates a rule builds, 1,000,000 by default, counted as they are built
+  within a period, with a `calendar.recurrence_limit` error on the series. A rule without `COUNT` MUST start a few
+  periods before the window, for every frequency. Expansion MUST take a cancellation token, checked per series and per
+  period.
 - FR-035: Each occurrence MUST carry its recurrence id, its start and end as the file states them and in UTC when they
   resolve, whether its end was stated, computed from a duration or derived, and the item it comes from.
 - FR-036: Expansion MUST expand recurring to-dos, with `DUE` (or `DTSTART` plus `DURATION`) as the end.
@@ -294,6 +326,16 @@ NativeAOT uses all of it without warnings.
   value and a `calendar.too_many_properties` or `calendar.nesting_too_deep` error, its component holding what was read
   within the limits.
 - FR-056: A calendar written by the package MUST read back into items equal to the ones written.
+- FR-057: Reading MUST stop with one `calendar.too_many_lines` error at the number of lines of the read options
+  (1,000,000), and with one `calendar.too_many_items` error at the number of events and to-dos (50,000), keeping the
+  items read before it, and MUST check the cancellation token per item while mapping.
+- FR-058: Of several overrides with one `UID` and `RECURRENCE-ID`, expansion MUST by default keep only the one with the
+  highest `SEQUENCE`, then the latest `DTSTAMP`, then the later one; an expand option MUST turn this off.
+- FR-059: An expand option, off by default, MUST leave out items with `STATUS:CANCELLED`: a cancelled override removes
+  its instance, a cancelled master its series, a cancelled single item itself.
+- FR-060: A strict read option, off by default, MUST report a rule with both `COUNT` and `UNTIL` as
+  `calendar.invalid_value` and skip a line whose value holds a control character other than tab with
+  `calendar.control_character`; the error codes MUST say which of them are structural (about the file's form).
 
 ## Success criteria
 

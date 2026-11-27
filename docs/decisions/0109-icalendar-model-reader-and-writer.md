@@ -246,3 +246,68 @@ item (create, update, skip, de-duplicate).
   Windows-1252, and two ladders would split the design language.
 - **Every limit stops the read.** What this ADR first said. Rejected for the rule both line formats follow: one
   oversized description should cost its event, not every event after it; only a file limit stops.
+
+## Amendment (2026-11-27): hostile input, override versions, `EXRULE` and strict reads
+
+The first application to import uploaded files with the package measured two hostile-input faults and asked for
+controls it had built on its own side. Each is decided here; the published page says what holds.
+
+- **Time-zone ids are bounded and resolved in linear time.** Decision 7's vendor-prefix removal built every suffix of
+  the id by joining its segments, which is quadratic (a 64 KB id of `/a` segments took 3.1 s, and a 4 MiB line hours).
+  The suffixes are now sliced while scanning backwards, and only the last four segments are tried, because an IANA id
+  has at most three. A read refuses an id longer than `CalendarReadOptions.MaxTimeZoneIdLength` (128 characters by
+  default, far above vendor prefixes and Outlook's display names) as `calendar.unknown_time_zone`, without a lookup;
+  a `VTIMEZONE` or `X-WR-TIMEZONE` with such an id is not used.
+- **No process-wide cache keeps untrusted text.** The system-zone cache was keyed by the id as written and cached misses,
+  so every distinct id of every upload stayed for the life of the process (200 reads of a distinct 100 KB id kept
+  39 MB). It now holds only zones the system resolves, keyed by the candidate that resolved, case-insensitively and
+  capped at 1,024 entries; the shared resolver of `CalendarEvent.TryFromComponent` caches nothing, and a read's own
+  resolver caches for that read only. The writer's `VTIMEZONE` cache holds only zones the system knows, because a zone
+  built from an uploaded `VTIMEZONE` carries an id the file chose. Rejected: a bounded LRU of misses (it saves a failed
+  lookup per id and per read, which is cheap, at the price of a policy to tune).
+- **Expansion bounds its work, not only its output (decision 8).** The two caps bounded the occurrences and the periods
+  without a match, plus a hidden cap of a million enumerated instances; none bounded the work inside one period, where a
+  yearly rule with every hour, minute and second builds 31.5 million candidates (2 GB) before filtering.
+  `CalendarExpandOptions.MaxCandidates` (1,000,000) replaces the hidden cap and is counted as candidates are built, so a
+  period stops as soon as it passes the cap; a period cut short is not used, since its `BYSETPOS` positions would be
+  wrong, and the series gets `calendar.recurrence_limit`. A rule without `COUNT` now starts a few periods before the
+  window for monthly and yearly frequencies too, not only for weekly and shorter ones; a rule with `COUNT` is still
+  counted from `DTSTART`, because skipping would need the number of instances of every skipped period, which `BY`
+  parts and `BYSETPOS` make irregular, and `MaxCandidates` bounds it. `Expand` takes a cancellation token, checked per
+  series and per period. Repeated `BY` values count once, and a `BY` list longer than its part has distinct values
+  does not parse. Rejected: a per-period cap next to a per-series one (one total bound covers both and is one setting),
+  and a streaming `IEnumerable` per series (the window and the caps already bound the result; a caller that caps by days
+  passes a smaller window).
+- **Reading has a line and an item limit, and checks its token while mapping.** `MaxLines` (1,000,000) and `MaxItems`
+  (50,000 events and to-dos; alarms and time zones do not count, unlike `MaxComponents`) are file limits like
+  decision 10's: one error, the items before kept. The defaults lie above any file the byte limit lets through in
+  practice; they exist so an application can choose a lower bound declaratively.
+- **Of several overrides of one instance, the latest counts.** A producer that sends an update again leaves two
+  overrides with one `UID` and `RECURRENCE-ID`; the reader reports `calendar.duplicate_uid`, and expansion used to give an
+  occurrence for each. Calendar clients keep the latest, so expansion now does by default
+  (`ResolveOverrideVersions`): the highest `SEQUENCE`, then the latest `DTSTAMP`, then the later in the input. The
+  option turns it off for a caller that wants every component.
+- **Cancelled items are skipped on request, not by default.** `SkipCancelled` leaves out items with `STATUS:CANCELLED`:
+  a cancelled override removes its instance, a cancelled master its series, a cancelled single item itself. It is off
+  by default, against the request to make it the default, because expansion reports what a file states and the
+  CalDAV package's time-range queries and `expand` must return cancelled instances (RFC 4791 matches components, not
+  their status); an application that shows a calendar turns it on, as clients do.
+- **`EXRULE` is applied.** RFC 5545 deprecates it, but RFC 2445 producers and older Outlook exports still write it, and
+  the reader used to keep it as an unmapped property that expansion ignored. It is now `CalendarItem.ExceptionRules`,
+  a property that places the item in time (decision 5: one that does not parse clears the typed value), written back
+  in the fixed property order after `EXDATE`, and applied with RFC 2445 semantics: its instances, computed from
+  `DTSTART` like a rule's, are excluded. `DTSTART` itself is never excluded, as every rule yields it first; this keeps
+  what importers that implemented `EXRULE` on their own side did.
+- **Leniency stays the default; strictness is declarative.** Decision 6 holds. `CalendarReadOptions.Strict` reports the
+  two things the lenient reader accepts silently: a rule with both `COUNT` and `UNTIL` (RFC 5545 forbids it;
+  `calendar.invalid_value`) and a value with a control character other than tab (`calendar.control_character`, the line
+  skipped). `CalendarErrorCodes.IsStructural(code)` names the errors about a file's form, so an application that
+  refuses broken files writes that policy as one predicate. Rejected: a strict mode that turns every error into a file
+  error (it would only move the predicate into the package).
+- **Error wording stays with the application.** The request for translated messages is answered by the formatter
+  `ToAppError` already takes, as in `Elarion.Contacts` and `Elarion.Spreadsheets`. The framework ships no translated
+  messages anywhere (request validation localizes through the application's own resources), and a formatter in one
+  language would be one application's choice made for all. The page shows a formatter by code.
+- **Override matching stays exact.** An override whose `RECURRENCE-ID` names the right day at another time is an extra
+  occurrence, as RFC 5545 says and the page states; matching by day, as one library did, would merge distinct
+  instances of an hourly series.

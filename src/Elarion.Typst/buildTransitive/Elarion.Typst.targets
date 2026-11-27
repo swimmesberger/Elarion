@@ -86,8 +86,27 @@
           CopyToPublishDirectory="PreserveNewest"/>
   </ItemGroup>
 
+  <!--
+    GNU tar (Debian, Ubuntu, and the mcr.microsoft.com/dotnet/sdk images built on them) unpacks .tar.xz only through the
+    external xz program, which those images do not install; bsdtar (macOS, Windows) decompresses xz itself. Checked
+    before the download so the build fails with the remedy instead of with tar's "xz: Cannot exec" (ADR-0093).
+  -->
+  <Target Name="_ElarionTypstCheckUnpacker"
+          Condition="'$(OS)' != 'Windows_NT' and '$(_ElarionTypstArchiveExtension)' == '.tar.xz'">
+    <Exec Command="command -v xz &gt;/dev/null 2&gt;&amp;1 || tar --version 2&gt;/dev/null | grep -qi bsdtar"
+          IgnoreExitCode="true"
+          EchoOff="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="_ElarionTypstUnpackerExitCode"/>
+    </Exec>
+    <Error Condition="'$(_ElarionTypstUnpackerExitCode)' != '0'"
+           Text="Elarion.Typst cannot unpack $(_ElarionTypstArchiveName): this machine's tar needs the xz program, which is not installed. Install it (Debian/Ubuntu, including the mcr.microsoft.com/dotnet/sdk images: apt-get install -y xz-utils; Alpine: apk add xz; Fedora/RHEL: dnf install xz), or set ElarionTypstExecutable to a pre-fetched Typst binary."/>
+  </Target>
+
   <Target Name="ElarionAcquireTypst"
           BeforeTargets="AssignTargetPaths"
+          DependsOnTargets="_ElarionTypstCheckUnpacker"
           Condition="'$(ElarionTypstBundle)' == 'true' and !Exists('$(_ElarionTypstExecutable)')">
     <Error Condition="'$(ElarionTypstExecutable)' != ''"
            Text="ElarionTypstExecutable points at '$(ElarionTypstExecutable)', which does not exist."/>

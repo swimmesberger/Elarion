@@ -130,7 +130,7 @@ public sealed class CalendarRecurrenceRfcTests {
             ExceptionDates = { CalendarDateTime.Zoned(new DateTime(1997, 9, 2, 9, 0, 0), newYork) },
         };
 
-        var occurrences = CalendarRecurrence.Expand([item], Utc(1997, 1, 1), Utc(2001, 1, 1)).Occurrences;
+        var occurrences = CalendarRecurrence.Expand([item], Utc(1997, 1, 1), Utc(2001, 1, 1), cancellationToken: TestContext.Current.CancellationToken).Occurrences;
 
         occurrences.Select(o => o.Start.Value.ToString("yyyyMMdd", CultureInfo.InvariantCulture))
             .Should().Equal("19980213", "19980313", "19981113", "19990813", "20001013");
