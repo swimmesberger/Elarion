@@ -158,6 +158,11 @@ minor releases may include breaking changes.
   occurrence skipped because an earlier run still holds its slot (overlap, coalesced, per-job concurrency) now logs a
   `Warning`, and the database backend's claims purge logs at `Debug`. See
   [Scheduling](https://elarion.wimmesberger.dev/docs/capabilities/scheduling#operational-characteristics).
+- **Web push subscription answers carry a specific code.** Every refusal of `WebPushSubscriptionService` (a malformed
+  or disallowed endpoint, missing or invalid keys, a subscription the store refused) now carries
+  `web_push.subscription_invalid` (`WebPushErrorCodes.SubscriptionInvalid`) instead of the generic `validation`, so a
+  client branches on the code instead of the English message. The kind stays `Validation` (`400`). See
+  [Web push](https://elarion.wimmesberger.dev/docs/capabilities/web-push).
 
 ### Fixed
 - **A NativeAOT application with a body-bound `[HttpEndpoint]` published with trimming warnings.** The generated

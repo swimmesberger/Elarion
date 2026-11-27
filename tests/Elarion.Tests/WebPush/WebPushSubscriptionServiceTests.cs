@@ -52,6 +52,7 @@ public sealed class WebPushSubscriptionServiceTests {
 
         // The same kind as any invalid subscription: nothing says the endpoint is someone else's.
         result.Error.Kind.Should().Be(ErrorKind.Validation);
+        result.Error.Code.Should().Be(WebPushErrorCodes.SubscriptionInvalid);
         (await Store(provider).ListByUsersAsync(["mallory"], TestToken)).Should().BeEmpty();
         var kept = (await Store(provider).ListByUsersAsync(["alice"], TestToken)).Single();
         kept.P256dh.Should().Be(victim.P256dh);
@@ -98,6 +99,7 @@ public sealed class WebPushSubscriptionServiceTests {
         var result = await Service(provider, "alice").SubscribeAsync(subscriber.ToRequest(), cancellationToken: TestToken);
 
         result.Error.Kind.Should().Be(ErrorKind.Validation);
+        result.Error.Code.Should().Be(WebPushErrorCodes.SubscriptionInvalid);
     }
 
     [Fact]
@@ -125,6 +127,7 @@ public sealed class WebPushSubscriptionServiceTests {
         var result = await Service(provider, "alice").SubscribeAsync(request, cancellationToken: TestToken);
 
         result.Error.Kind.Should().Be(ErrorKind.Validation);
+        result.Error.Code.Should().Be(WebPushErrorCodes.SubscriptionInvalid);
     }
 
     [Fact]

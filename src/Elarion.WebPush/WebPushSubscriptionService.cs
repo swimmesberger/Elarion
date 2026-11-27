@@ -130,7 +130,7 @@ public sealed class WebPushSubscriptionService(
             CreatedAt = now,
             LastSeenAt = now
         }, cancellationToken).ConfigureAwait(false);
-        return stored ? Result.Success() : AppError.Validation("The push subscription was rejected.");
+        return stored ? Result.Success() : AppError.Validation("The push subscription was rejected.", WebPushErrorCodes.SubscriptionInvalid);
     }
 
     /// <summary>
@@ -142,7 +142,7 @@ public sealed class WebPushSubscriptionService(
     public async ValueTask<Result> UnsubscribeAsync(string endpoint, CancellationToken cancellationToken = default) {
         if (!TryGetUserId(out var userId)) return AppError.Unauthorized("Unsubscribing from push notifications requires a signed-in user.");
         if (string.IsNullOrEmpty(endpoint) || endpoint.Length > MaxEndpointLength)
-            return AppError.Validation("The subscription endpoint is missing or too long.");
+            return AppError.Validation("The subscription endpoint is missing or too long.", WebPushErrorCodes.SubscriptionInvalid);
 
         await store.RemoveAsync(endpoint, userId, cancellationToken).ConfigureAwait(false);
         return Result.Success();
@@ -162,16 +162,16 @@ public sealed class WebPushSubscriptionService(
         if (string.IsNullOrEmpty(request.Endpoint) || request.Endpoint.Length > MaxEndpointLength
                                                    || !Uri.TryCreate(request.Endpoint, UriKind.Absolute, out var endpoint)
                                                    || endpoint.Scheme != Uri.UriSchemeHttps)
-            return AppError.Validation("The subscription endpoint must be an absolute https URL.");
+            return AppError.Validation("The subscription endpoint must be an absolute https URL.", WebPushErrorCodes.SubscriptionInvalid);
         // Fail closed on the SSRF surface: the server will POST to this URL on the user's behalf.
         if (!options.IsEndpointHostAllowed(endpoint.IdnHost))
-            return AppError.Validation("The subscription endpoint is not a known push service.");
-        if (request.Keys is null) return AppError.Validation("The subscription keys are missing.");
+            return AppError.Validation("The subscription endpoint is not a known push service.", WebPushErrorCodes.SubscriptionInvalid);
+        if (request.Keys is null) return AppError.Validation("The subscription keys are missing.", WebPushErrorCodes.SubscriptionInvalid);
 
         if (!TryDecode(request.Keys.Auth, out var auth) || auth.Length != WebPushEncryption.AuthSecretLength)
-            return AppError.Validation("The subscription auth secret must be 16 bytes of base64url.");
+            return AppError.Validation("The subscription auth secret must be 16 bytes of base64url.", WebPushErrorCodes.SubscriptionInvalid);
         if (!TryDecode(request.Keys.P256dh, out var p256dh) || !IsValidPublicKey(p256dh))
-            return AppError.Validation("The subscription p256dh key must be a base64url P-256 public key.");
+            return AppError.Validation("The subscription p256dh key must be a base64url P-256 public key.", WebPushErrorCodes.SubscriptionInvalid);
         return null;
     }
 
