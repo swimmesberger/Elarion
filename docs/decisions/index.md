@@ -113,3 +113,4 @@
 * [ADR-0110](0110-vcard-contacts.md) - vCard contacts — a fixed contact model over a lossless property list, Elarion's own reader and writer
 * [ADR-0111](0111-caldav.md) - CalDAV — published calendars served from a store, calendar sources as handlers, app passwords, and a sync-step client
 * [ADR-0112](0112-elarion-ships-ui-components.md) - Elarion ships UI components (headless state, styled components, the shell contract); the application keeps the look (proposed)
+* [ADR-0113](0113-carddav-address-books.md) - CardDAV — published address books on the WebDAV core, stored as vCard 3.0 and converted on request

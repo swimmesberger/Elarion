@@ -333,6 +333,18 @@ the current user may see. It decides access per calendar through the handler pip
 rules, feature gates and module enablement apply to calendar apps as to the application.
 _Avoid_: calendar provider, calendar backend, calendar collection
 
+**Published address book**:
+An address book whose contacts an application publishes into Elarion's store (`ICardDavPublisher`) in the transaction
+that changed its own data, and which Elarion serves to contacts apps over CardDAV, with exact sync. It is a projection
+of the application's data, read-only to the apps; the application stays the source.
+_Avoid_: shared address book, contact export, CardDAV collection (in application code)
+
+**Address-book source**:
+A query request implementing `ICardDavSource<TSelf>` whose handler returns the published address books of that source
+the current user may see, deciding access per address book through the handler pipeline, as a calendar source does
+for calendars.
+_Avoid_: contact provider, address-book backend
+
 **App password**:
 A credential Elarion issues to a person for one device or client: a random secret returned once, stored as a hash,
 revocable on its own, and accepted only by the routes of its scope (a calendar app over HTTP Basic, or one feed).
