@@ -144,6 +144,13 @@ minor releases may include breaking changes.
   member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
 
 ### Fixed
+- **`[AllowedValues]` on a nullable member refused a request that left the member out, and listing `null` broke the
+  build.** The BCL attribute looks `null` up as one more value, so `[AllowedValues(30, 90, 365)] int? Days` answered a
+  request without `days` with a validation error. Like `[Range]`, the rule now applies to a present value only: the
+  generated validation metadata adds `null` to the allowed values of a nullable member, and the exported JSON-RPC and
+  MCP `enum` lists `null` too. `[AllowedValues(null, …)]` no longer makes the generated resolver fail with CS8600/CS8625
+  in a nullable-enabled project. See
+  [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation).
 - **A NativeAOT application with a body-bound `[HttpEndpoint]` published with trimming warnings.** The generated
   mapping resolved the request body's JSON metadata with a fallback to the reflection-based
   `JsonSerializerOptions.Default`, which made the publish report `IL2026` and `IL3050`. The fallback is gone; a missing
