@@ -50,7 +50,7 @@ public sealed class CreateClient(BillingDbContext db, ICurrentUser user)
 ```
 
 The validator walks the whole request graph, so constraints on nested objects and collection elements
-are enforced (and reported) too. The supported vocabulary is the set every schema surface can carry:
+are enforced (and reported) too: a record in a request list is checked at its indexed path (`rows[1].code`). The supported vocabulary is the set every schema surface can carry:
 
 | Attribute | Enforced as | Exported as (JSON Schema) |
 | --- | --- | --- |
@@ -63,12 +63,21 @@ are enforced (and reported) too. The supported vocabulary is the set every schem
 | `[EmailAddress]` | email shape | `format: "email"` |
 | `[Url]` | absolute URL | `format: "uri"` |
 | `[Base64String]` | base64 content | `format: "byte"` |
-| `[AllowedValues(...)]` | value ∈ the declared set | `enum` |
+| `[AllowedValues(...)]` | value ∈ the declared set; `null` passes on a nullable member | `enum` (with `null` on a nullable member) |
 
 `[AllowedValues]` pairs naturally with the generated variant registry: declare a switch's vocabulary once
 (`[AllowedValues(ElarionVariants.EmailBackend.Smtp, ElarionVariants.EmailBackend.Office365)]`) and the 400,
 the schema `enum`, the OpenAPI document, and the TypeScript client's `z.enum(...)` all follow — see
 [Feature flags](/docs/concepts/feature-flags#the-variant-registry).
+
+A single-value rule on a nullable member applies to a value that is present. `[Range]` already lets `null` pass; the
+BCL's `AllowedValuesAttribute` would look `null` up as one more value, so `[AllowedValues(30, 90, 365)] int? Days`
+would refuse every request that leaves `days` out. The generated metadata therefore adds `null` to the allowed values
+of a nullable member (`int?`, or a reference type annotated `?`), and the exported `enum` lists `null` too — JSON
+Schema applies `enum` to `null` as well, so an MCP client validating against it would otherwise refuse the same
+request. Listing `null` yourself (`[AllowedValues(null, 30, 90, 365)]`) means the same and compiles in a
+nullable-enabled project. Only the attribute itself is adjusted, not a subclass of it, and code that calls
+`Validator.TryValidateObject` directly runs the BCL attribute unchanged.
 
 ### Not blank, and whole-value patterns
 

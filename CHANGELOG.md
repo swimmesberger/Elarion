@@ -88,6 +88,27 @@ minor releases may include breaking changes.
   form in vCard 3.0 and as `KIND:group` with `MEMBER` in 4.0. `Elarion.CardDav` publishes groups, converts them between
   the versions, and matches `KIND` and `MEMBER` filters against either form; publishing a contact with more properties
   than `CardDav:ContactRead:MaxPropertiesPerContact` throws.
+- **Live address books** (ADR-0113 amendment, spec 0007 FR-035–FR-041). `AddElarionCardDavLiveSource<TQuery,
+  TAddressBooks>()` registers an address-book source whose contacts are read per request, as the current user, from a
+  scoped `ICardDavLiveAddressBooks` (`ListAsync` → names and ETags, `GetAsync(names, DavContentPurpose)` → `Contact`s,
+  `GetCTagAsync`, by default a hash of the listing), for address books whose contacts are filtered per viewer by rules
+  that change without the contacts changing. They are answered by `getctag` only: no `sync-token`, no `sync-collection`
+  (`403 supported-report`), no `getcontentlength` in a listing; a query asks for `DavContentPurpose.Query`, so photos can
+  stay out. The WebDAV core carries it as `DavCollection.Live` (`IDavLiveCollection`) and
+  `DavContext.ListMembersAsync`/`GetMembersAsync`. See
+  [CardDAV](https://elarion.wimmesberger.dev/docs/capabilities/carddav#live-address-books-contacts-filtered-per-viewer).
+- **Explicit collection URL segments.** `PublishedAddressBookInfo.Segment` and `PublishedCalendarInfo.Segment` (and
+  `DavCollection.Segment`) serve a collection at a segment of the application's choice instead of `{source}.{key}`, so a
+  replaced DAV server keeps the URLs devices stored; validated, matched exactly, unique per home, and without effect on
+  the store address or the sync token. `CardDavAddress.MemberNameOf(uid)` gives a published contact's member name.
+- **`WebDav:RefuseWhenNoCollections`** answers `403` on the whole DAV surface (but `OPTIONS`) to a user who sees no
+  collection of any protocol. Default off.
+- **`AddElarionIdentityAppPasswordPrincipals<TUser>(canSignIn)`** also refuses a user a registered
+  `SignInManager<TUser>.CanSignInAsync` refuses (confirmed account, `IUserConfirmation<TUser>`), and takes an optional
+  rule of the application's own (deactivated, past an end date), so it need not replace the principal factory.
+- **`app_password.limit_reached` carries `AppPasswordLimitReachedData { MaxPerUser }`** as its data, so the message can
+  be worded in the user's language without reading the options. See
+  [App passwords](https://elarion.wimmesberger.dev/docs/capabilities/app-passwords#creating-listing-and-revoking).
 - **DAV conformance with other projects' suites.** About 420 cases from Apple's CalDAVTester, litmus, sabre/dav,
   Radicale, Xandikos, Cyrus, python-caldav, dav4jvm and vdirsyncer now run as Elarion's tests, and the faults they found
   are fixed. `CalDavClient` reads a propstat without status as 200, removes what a multiget leaves out, lets the last
@@ -132,6 +153,19 @@ minor releases may include breaking changes.
   that read as the member but are never written or offered. Mapping problems are build errors
   `ELSHEET001`–`ELSHEET008`. See
   [Spreadsheets](https://elarion.wimmesberger.dev/docs/capabilities/spreadsheets).
+- **`Elarion.Spreadsheets`: worksheets shaped per call** (ADR-0108, amendment 2026-11-27). A worksheet whose columns
+  are known only at run time is a `SpreadsheetSheetDefinition` of `SpreadsheetColumnDefinition`s (`Text`, `Number`,
+  `Boolean`, `Date`, `DateTime`, `Time`, `Choice`), written by `SpreadsheetWorkbook.AddWorksheetAsync(sheet, rows)` from
+  rows of values with the same header, formats, widths and dropdowns as a record; each value is a cell of its own type,
+  so a total row's label can stand in a date column. `SpreadsheetWorksheetOptions` gains `IncludedColumns` and
+  `ExcludedColumns` (by property name, for columns that depend on a permission) and `FooterRows`;
+  `SpreadsheetWorkbook.ToFileAsync(fileName, write)` fills an `ElarionFile` with several worksheets.
+  `[SpreadsheetColumn(Choices = nameof(Labels))]` gives a `string` column a dropdown from a static
+  `IReadOnlyList<string>` of the record (`ELSHEET009` otherwise), and `StrictChoices` reads only those labels.
+  `SpreadsheetReader.ReadRows(ReadOnlyMemory<byte>)` and `Open(ReadOnlyMemory<byte>)` read a workbook already in
+  memory synchronously, and `SpreadsheetCell.NumberFormat` carries a number or date cell's format code. The docs now say
+  that a plain-rows read counts the header row against `MaxRows`, and that `too_many_rows` and `too_many_columns` keep
+  the rows read before them.
 - **`[ValidationRoot]`: validate a type outside a handler request** (ADR-0108). A marked type gets the same generated,
   constant-constructed validation metadata as a handler request, in the module whose namespace contains it, and is
   validated through `IRequestValidator.ValidateAsync`. A marked type with validation attributes outside every module is
@@ -168,6 +202,50 @@ minor releases may include breaking changes.
   `IQueryable<T>` runs on the caller's scoped `DbContext`, that handlers may be `internal`, and how shared-kernel JSON
   types are contributed once. See
   [Cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication#what-a-contracts-consumer-must-know).
+- **Constraint violations as results: `IUnitOfWorkFailureTranslator`** (ADR-0003 amendment). `TransactionDecorator`
+  offers an exception that ends its unit of work — from the handler, or from the commit, where PostgreSQL checks a
+  `DEFERRABLE INITIALLY DEFERRED` constraint outside every `SaveChangesInterceptor` — to the registered translators;
+  the first `AppError` one returns becomes the command's failed `Result` after the rollback, instead of an unexpected
+  error. Without a translator nothing changes. `ResultInspection.TryCreateFailure<T>` builds a failed `Result`/`Result<T>`
+  from generic code with an unconstrained response type. See
+  [Persistence & transactions](https://elarion.wimmesberger.dev/docs/concepts/persistence-and-transactions#constraint-violations-as-results).
+- **`[NoTransaction]`: a command without the framework's transaction.** `TransactionDecorator` stays off a handler
+  marked with it, so a command whose work is outside the database (a test mail, a slow external call) no longer holds
+  a pooled connection and a transaction for the whole call; the request stays an `ICommand`. See
+  [Persistence & transactions](https://elarion.wimmesberger.dev/docs/concepts/persistence-and-transactions#commands-without-a-transaction).
+- **Leased work: what a claim saw, and the lost-claim log line** (ADR-0073 amendment). `ClaimPendingAsync` returns
+  `LeasedWorkClaimed<T>`, an `IReadOnlyList<T>` of the won rows with `Candidates` (how many rows the select found;
+  zero means the queue is drained) and `GivenUp` (how many it gave up as exhausted, with or without `OnGivenUp`), so a
+  pass loops `while (claimed.Candidates > 0)` without counting in a callback. `ILogger.LogFinalizeOutcome(outcome,
+  queue, id)` writes the warning for a lost claim and the information line for an `Ineligible` row. See
+  [Coordination](https://elarion.wimmesberger.dev/docs/capabilities/coordination#giving-up-guarding-the-outcome-and-shutting-down).
+- **Who holds a permission: `HoldersOf` and `MembersOf` on the principal directory** (ADR-0095 amendment).
+  `directory.HoldersOf("requests.handle")` lists the principals holding a permission through their own claims or a
+  role's, each once, and `directory.MembersOf("Admin")` the members of a role — composable queries derived the same
+  way as `WhereAuthorizedFor`'s, so an application's "who may be assigned" agrees with the principal. See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#who-holds-a-permission).
+- **`QueryAuthorizers.RequireUserId<TEntity, TKey>()`**: every row, for an authenticated caller whose id parses as
+  `TKey` — the precondition `AllOf(RequireUserId<Contact, Guid>(), AnyOf(…))` that keeps an unrestricted alternative
+  from admitting a caller every `ForUser` alternative would deny. It inverts like `ForUser`.
+- **`HttpContext.SeedElarionCurrentUser()`** seeds the request scope with `HttpContext.User`, as
+  `UseElarionCurrentUser()` does, for an endpoint whose route group authenticates with its own scheme after the
+  middleware ran. See
+  [Current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user#endpoints-that-authenticate-later).
+- **Settings: deployment configuration under the stored value** (ADR-0078 amendment).
+  `[Setting(FallbackConfigurationKey = "Email:Smtp:Host")]` makes the effective value the stored one, else the
+  non-blank deployment value at that key, else the default, in the global scope; unlike `Pinnable` it never refuses a
+  write, and a reset brings the deployment value back. The resolver reports it as
+  `SettingSource.ConfigurationFallback`, `Watch` fires on configuration reloads, and the projection carries it at the
+  setting's key. `ELSDEF008` reports a blank or malformed key, or one on a setting without the global scope. The
+  settings page now says how to read your own write (through `ISettingsManager`; the projection follows after the
+  commit). See [Settings](https://elarion.wimmesberger.dev/docs/concepts/settings#the-effective-value-resolver).
+- **`SortMap`: sort by several keys** (ADR-0120). `sort=+city,-name` orders by `City`, then `Name` descending, then
+  the last key's declared tiebreakers; a single key keeps its meaning. A sort combines at most three keys unless the
+  builder sets `MaxLevels(n)`; a repeated or empty key, or a sort above the cap, is refused like an unknown key (`Apply`
+  falls back to the default, `Validate` answers `paging.sort_key_unknown`). `Validate` takes an optional `message`
+  function that words a refusal (`SortRefusal`: reason, key, allowed keys, cap), for an application that does not show
+  English. A sort parameter of 200,000 keys is refused in 0.09 ms and 1.5 KB instead of 0.37 ms and 4 MB. See
+  [Pagination](https://elarion.wimmesberger.dev/docs/capabilities/pagination#sorting-by-several-keys).
 
 - **`Elarion.Typst`: required packages and a package-not-found error** (ADR-0093). `TypstOptions.RequiredPackages`
   (`@local/acme-documents:1.0.0`) makes the startup check refuse a deployment without the application's template
@@ -201,8 +279,87 @@ minor releases may include breaking changes.
   `web_push.subscription_invalid` (`WebPushErrorCodes.SubscriptionInvalid`) instead of the generic `validation`, so a
   client branches on the code instead of the English message. The kind stays `Validation` (`400`). See
   [Web push](https://elarion.wimmesberger.dev/docs/capabilities/web-push).
+- **BREAKING: `ToOffsetPageAsync` returns `OffsetPage<T>`** (ADR-0120). Offset lists get their own envelope: `Items`,
+  a required `Total`, `HasNext` and `HasPrevious`, with `Map`, `MapAsync`, `Empty` (total `0`) and `ToPage()`. The
+  generated TypeScript type of an offset list is `{ items, total: number, hasNext, hasPrevious }` instead of carrying a
+  nullable total and two cursors that were always `null`. Change a handler's result from `Result<Page<T>>` to
+  `Result<OffsetPage<T>>`, or call `.ToPage()` to keep the `Page<T>` wire contract. `Page<T>` stays the keyset
+  envelope. See [Pagination](https://elarion.wimmesberger.dev/docs/capabilities/pagination).
+- **BREAKING: `DavMember.Size` is `long?`** and no longer required, so a live collection's listing can leave the length
+  unknown; `getcontentlength` is then not answered. A custom `IDavCollectionStore` still sets it; code that reads it
+  handles `null`.
+- **BREAKING (schema): the app-password user id is bounded to 256 characters** (`AppPasswordOptions.MaxUserIdLength`, the
+  length Identity gives its keys), in `IAppPasswords.CreateAsync` (a longer id throws) and in the EF mapping of
+  `elarion_app_passwords.user_id` (`text` becomes `varchar(256)` on PostgreSQL). Add a migration; it fails only if a
+  stored user id is longer, which an Identity key never is.
+- **`PROPFIND` accepts `Depth: 1,noroot` and `0,noroot`** (some clients send it), answering without the requested
+  resource; before, it answered `400`. `Depth: infinity` stays `403 propfind-finite-depth`.
+- **`Elarion.Contacts`: bounded results, vCard 2.1 escaping, URI values and payloads that are not files** (ADR-0110,
+  amendment of 2026-11-27; spec 0005, FR-072–FR-089). Reading: `ContactReadOptions.MaxProperties` (1,000,000 lines in
+  the whole file; `contact.too_many_properties_in_file`) and `MaxErrors` (10,000; further errors are counted in
+  `ContactReadResult.OmittedErrorCount` and named by `contact.too_many_errors`) bound what a result holds; a card over
+  `MaxPropertiesPerContact` keeps only its `FN`, `N`, `ORG`, `EMAIL`, `TEL` and `UID`. A vCard 2.1 value is read with
+  2.1's escaping (only `\;`), and its property holds it in 3.0's: `N:C:\Daten` reads `C:\Daten` and its `Value` is
+  `C:\\Daten`. `TYPE=INTERNET` reads as the new `ContactTypes.Internet`. A partial date (`1985`, `--04`) is
+  `contact.partial_date`; a photo of another format is `contact.invalid_value` with the expected kind `photo-format`
+  and the new `ContactError.MediaType`, which `contact.unreadable` also carries for a file that is not text. The first
+  `PHOTO` that reads is the photo. `ContactPhone`, `ContactEmail`, `ContactAddress` and `ContactUrl` carry `LineNumber`
+  and `Group` (ignored by equality). New: `ContactProperty.GetText`/`GetTexts`, `ContactPhoto.TryRead`,
+  `ContactPhoto.TryFromData`, `ContactWriter.Write` and `ContactWriter.ToText` (synchronous), and
+  `ContactWriteOptions.FoldLines` for QR and NFC payloads. Writing: `URL`, and a 4.0 `tel:` number (`VALUE=uri`), are
+  written as URIs, not escaped as text; control characters other than the tab are left out of every value; an
+  organization is `X-ABShowAs:COMPANY`; no line is folded inside an escape (in `Elarion.Calendars` too, which shares
+  the folder). These change the bytes, and so the CardDAV ETag, of a stored card that holds an organization, a URL
+  with `;` or `,`, a control character, the internet type or a long escaped line, once, when it is next published.
+  See [Contacts](https://elarion.wimmesberger.dev/docs/capabilities/contacts).
+- **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
+  type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
+  member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
+- **BREAKING: `TransactionDecorator` takes the failure translators.** Its constructor gained an
+  `IEnumerable<IUnitOfWorkFailureTranslator>` parameter. The generated pipeline supplies it; code that constructs the
+  decorator by hand (a test) passes `[]`.
+- **BREAKING: `ClaimPendingAsync` returns `Task<LeasedWorkClaimed<T>>`** instead of `Task<IReadOnlyList<T>>`. The new
+  type implements `IReadOnlyList<T>`, so `foreach`, `Count`, indexing and assignments to `IReadOnlyList<T>` compile
+  unchanged; only code that names the old task type (a method group, an explicit `Task<IReadOnlyList<T>>`) changes.
+- **`Elarion.Calendars`: overrides, `EXRULE`, strict reads and more limits** (ADR-0109, amendment 2026-11-27). Of
+  several overrides of one instance, expansion now keeps only the latest (highest `SEQUENCE`, then latest `DTSTAMP`);
+  `CalendarExpandOptions.ResolveOverrideVersions = false` keeps them all. `SkipCancelled` (off by default) leaves out
+  `STATUS:CANCELLED` items, a cancelled override removing its instance. `EXRULE` is read into
+  `CalendarItem.ExceptionRules`, applied in expansion (never to `DTSTART`) and written back in the item's fixed property
+  order, where it used to be an unmapped property written at the end. Repeated `BY` values count once, and a `BY` list
+  longer than its part has values no longer parses. New read options `MaxLines` (1,000,000), `MaxItems` (50,000, events
+  and to-dos only) and `Strict` (refuses `COUNT` with `UNTIL`, skips values with control characters as
+  `calendar.control_character`); `CalendarErrorCodes.IsStructural(code)` names the errors about a file's form.
+  `CalendarRecurrence.Expand` and `CalendarReadResult.Expand` take a `CancellationToken`, and `ReadAsync` checks its token
+  per item while mapping. See [Calendars](https://elarion.wimmesberger.dev/docs/capabilities/calendars#recurrences).
 
 ### Fixed
+- **`[AllowedValues]` on a nullable member refused a request that left the member out, and listing `null` broke the
+  build.** The BCL attribute looks `null` up as one more value, so `[AllowedValues(30, 90, 365)] int? Days` answered a
+  request without `days` with a validation error. Like `[Range]`, the rule now applies to a present value only: the
+  generated validation metadata adds `null` to the allowed values of a nullable member, and the exported JSON-RPC and
+  MCP `enum` lists `null` too. `[AllowedValues(null, …)]` no longer makes the generated resolver fail with CS8600/CS8625
+  in a nullable-enabled project. See
+  [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation).
+- **A `GET` of a contact through the DAV host ignored `Accept`.** `MapElarionDav()` passed a fixed list of headers to
+  the dispatcher without `Accept`, so a client that asked for vCard 4.0 got 3.0 through ASP.NET Core although the
+  dispatcher converts; the host now passes it.
+- **`Elarion.Contacts`: a 20 MB upload no longer holds 600–950 MB after a read.** Every property, parameter and error of
+  the file stayed in the result, at 60 to 150 bytes per line however short; names, parameters and short values are now
+  shared within a read and the result is bounded by `MaxProperties` and `MaxErrors`, so the same files hold 2–115 MB
+  and no read holds more than about 200 MB at the defaults.
+- **`Elarion.Contacts`: a file concatenated from several exports no longer loses cards.** A byte-order mark before a
+  later `BEGIN:VCARD` (UTF-8 or UTF-16) made the line unreadable and the card vanished without an error; a mark at the
+  start of a line is now nothing.
+- **`Elarion.Calendars` reads and expands hostile files in bounded time and memory.** Resolving a vendor-prefixed
+  `TZID` was quadratic in its length (64 KB of `/a` took 3.1 s); it is now linear, tries only an id's last four
+  segments, and a read refuses ids longer than `CalendarReadOptions.MaxTimeZoneIdLength` (128) as
+  `calendar.unknown_time_zone`. The process-wide time-zone cache was keyed by the id as written and cached misses, so
+  every distinct id of every upload stayed in memory (200 reads of a 100 KB id kept 39 MB); it now holds only zones the
+  system knows, and the writer's `VTIMEZONE` cache only system zones. Expansion built every candidate of a period
+  before filtering (a yearly rule with every second of a year allocated 2 GB) and walked monthly and yearly rules from
+  `DTSTART`; the new `CalendarExpandOptions.MaxCandidates` (1,000,000) stops a series as candidates are built, and rules
+  without `COUNT` skip ahead to the window for every frequency (582 ms and 2 GB became 23 ms and 64 MB).
 - **The documented container build of `Elarion.Typst` failed in `mcr.microsoft.com/dotnet/sdk` images.** Their GNU
   tar unpacks the Typst `.tar.xz` only through the `xz` program, which the images do not install, so the build failed
   after the download with `xz: Cannot exec`. The targets now check for an unpacker before downloading and stop with an
@@ -218,6 +375,11 @@ minor releases may include breaking changes.
   went out with an earlier row's values, so distinct rows were dropped (or, with `ON CONFLICT DO NOTHING`, silently
   skipped and missing from the written count). Each row now runs its own command on the same prepared statement. See
   [SQL mapping](https://elarion.wimmesberger.dev/docs/capabilities/sql-mapping#reads-and-writes).
+- **A registered `[ResourceFilter]` in a module assembly had to be public.** The host bootstrapper named the filter
+  class and its entity, so an `internal` one failed to compile in the host. The module's manifest generator now emits a
+  public `{Filter}ElarionRegistration` for a non-public filter, and the bootstrapper registers the filter through it;
+  public filters are registered as before. See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization).
 
 ## [0.4.6] - 2026-11-24
 

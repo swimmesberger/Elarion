@@ -47,6 +47,11 @@ internal static class SettingDefinitionDiscovery {
         "Setting '{0}' is Pinnable but does not allow the 'global' scope; deployment configuration is app-wide",
         "Elarion.Abstractions.Settings", DiagnosticSeverity.Error, true);
 
+    public static readonly DiagnosticDescriptor InvalidFallbackConfigurationKey = new(
+        "ELSDEF008", "Invalid fallback configuration key",
+        "Setting '{0}' has an invalid FallbackConfigurationKey: {1}",
+        "Elarion.Abstractions.Settings", DiagnosticSeverity.Error, true);
+
     public static readonly DiagnosticDescriptor InvalidDefault = new(
         "ELSDEF007", "Invalid setting default",
         "Setting '{0}' default is invalid: {1}", "Elarion.Abstractions.Settings", DiagnosticSeverity.Error, true);
@@ -60,6 +65,7 @@ internal static class SettingDefinitionDiscovery {
         bool IsSecret,
         bool IsPinnable,
         string? Description,
+        string? FallbackConfigurationKey,
         string? DefaultExpression,
         string? DefaultFactory,
         LocationInfo Location);
@@ -146,6 +152,7 @@ internal static class SettingDefinitionDiscovery {
         var isSecret = false;
         var isPinnable = false;
         string? description = null;
+        string? fallbackConfigurationKey = null;
         TypedConstant? defaultConstant = null;
         string? defaultFactory = null;
         foreach (var named in attribute.NamedArguments)
@@ -163,6 +170,9 @@ internal static class SettingDefinitionDiscovery {
                     break;
                 case "Description":
                     description = named.Value.Value as string;
+                    break;
+                case "FallbackConfigurationKey":
+                    fallbackConfigurationKey = named.Value.Value as string;
                     break;
                 case "Default":
                     defaultConstant = named.Value;
@@ -182,6 +192,20 @@ internal static class SettingDefinitionDiscovery {
         if (isPinnable && !scopes.Contains("global")) {
             diagnostics.Add(DiagnosticInfo.Create(PinnableNeedsGlobalScope, location, key));
             return null;
+        }
+
+        if (fallbackConfigurationKey is not null) {
+            if (!IsValidKey(fallbackConfigurationKey)) {
+                diagnostics.Add(DiagnosticInfo.Create(InvalidFallbackConfigurationKey, location, key,
+                    "it must be a non-blank configuration key that does not start or end with ':'"));
+                return null;
+            }
+
+            if (!scopes.Contains("global")) {
+                diagnostics.Add(DiagnosticInfo.Create(InvalidFallbackConfigurationKey, location, key,
+                    "the setting does not allow the 'global' scope, and deployment configuration is app-wide"));
+                return null;
+            }
         }
 
         var hasDefault = defaultConstant is not null || defaultFactory is not null;
@@ -225,6 +249,7 @@ internal static class SettingDefinitionDiscovery {
             isSecret,
             isPinnable,
             description,
+            fallbackConfigurationKey,
             defaultExpression is null ? null : $"({valueType.ToDisplayString(TypeFormat)})({defaultExpression})",
             defaultFactory,
             location);

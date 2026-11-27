@@ -26,8 +26,15 @@ public sealed class CardDavCollection : DavCollection {
 /// address books the registered sources return for the current user, their properties, and the reports
 /// <c>addressbook-multiget</c> and <c>addressbook-query</c>. Every address book is read-only.
 /// </summary>
-internal sealed partial class CardDavProtocol(DavSourceRegistry<CardDavSourceListing> sources, IOptions<CardDavOptions> options, ContactReader reader)
+internal sealed partial class CardDavProtocol(
+    DavSourceRegistry<CardDavSourceListing> sources,
+    IOptions<CardDavOptions> options,
+    ContactReader reader,
+    IEnumerable<CardDavLiveSourceRegistration> liveRegistrations)
     : IDavProtocol {
+    private readonly Dictionary<string, CardDavLiveSourceRegistration> _liveSources =
+        liveRegistrations.ToDictionary(static r => r.Name, StringComparer.Ordinal);
+
     /// <summary>The collection kind of address books in the store.</summary>
     public const string Kind = "addressbook";
 
@@ -79,14 +86,21 @@ internal sealed partial class CardDavProtocol(DavSourceRegistry<CardDavSourceLis
 
     public async ValueTask<IReadOnlyList<DavCollection>> GetCollectionsAsync(DavContext context, CancellationToken cancellationToken) {
         var collections = new List<DavCollection>();
+        var segments = new HashSet<string>(StringComparer.Ordinal);
         foreach (var source in sources.Sources) {
             // A source the user may not use, behind a closed feature gate, or of a disabled module shows no address books.
             var listing = await DavSources.InvokeAsync(source, CardDavSourceKind.Value, context.Services, cancellationToken).ConfigureAwait(false);
             var keys = new HashSet<string>(StringComparer.Ordinal);
+            // A live source's address books read their contacts per request through the application's service.
+            var live = _liveSources.TryGetValue(source.Name, out var registration) ? registration.Resolve(context.Services) : null;
             foreach (var info in listing?.AddressBooks ?? []) {
                 if (info is null) continue;
                 DavSources.CheckKey(source.Name, info.Key, keys, CardDavSourceKind.Value);
-                collections.Add(new CardDavCollection(new CardDavAddress(source.Name, info.Key), info));
+                var segment = DavSources.SegmentOf(source.Name, info.Key, info.Segment, segments, CardDavSourceKind.Value);
+                collections.Add(new CardDavCollection(new CardDavAddress(source.Name, info.Key), info) {
+                    Segment = segment,
+                    Live = live is null ? null : new CardDavLiveCollection(live, info.Key, options.Value.ContactRead),
+                });
             }
         }
 

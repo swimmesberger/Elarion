@@ -260,6 +260,48 @@ public sealed class ValidationResolverGeneratorTests {
     }
 
     [Fact]
+    public void AllowedValuesOnANullableMember_AddsNull_AndANullLiteralCompilesWithoutNullableWarnings() {
+        // A nullable-enabled project with warnings as errors: a listed null used to render as a bare
+        // `(object)null` element (CS8600/CS8625), and an unlisted null made the attribute refuse a missing value.
+        const string source = "#nullable enable\n" + Preamble +
+                              """
+
+                              namespace Sample.App {
+                                  [AppModule("App")]
+                                  public static class AppModule { }
+
+                                  public sealed record StatsQuery : ICommand {
+                                      [AllowedValues(30, 90, 365)] public int? Days { get; init; }
+                                      [AllowedValues(null, 1, 2)] public int? Level { get; init; }
+                                      [AllowedValues("week", "month")] public string? Span { get; init; }
+                                      [AllowedValues(1, 2)] public int Required { get; init; }
+                                      [StringLength(10, ErrorMessage = null)] public string? Note { get; init; }
+                                  }
+
+                                  public sealed class StatsHandler : IHandler<StatsQuery, Result<Unit>> {
+                                      public ValueTask<Result<Unit>> HandleAsync(StatsQuery request, CancellationToken ct) =>
+                                          ValueTask.FromResult(Result<Unit>.Success(default));
+                                  }
+                              }
+                              """;
+
+        var generated = GetGenerated(Run(source), "AppValidatableInfoResolver.g.cs");
+
+        const string allowed = "new global::System.ComponentModel.DataAnnotations.AllowedValuesAttribute(";
+        generated.Should().Contain(allowed + "new object?[] { null, 30, 90, 365 })");
+        generated.Should().Contain(allowed + "new object?[] { null, \"week\", \"month\" })");
+        // A listed null is kept as declared; a non-nullable member keeps refusing what it does not list.
+        generated.Should().Contain(allowed + "new object[] { (object)null!, 1, 2 })");
+        generated.Should().Contain(allowed + "new object[] { 1, 2 })");
+
+        var outputCompilation = CompileGenerated(source);
+        outputCompilation.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity >= DiagnosticSeverity.Warning &&
+                                 diagnostic.Location.SourceTree?.FilePath.EndsWith(".g.cs", StringComparison.Ordinal) == true)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void NestedAnnotatedType_RegistersCarrierAndNestedType() {
         // The request itself carries no attribute; only the nested type does. The runtime walker recurses into
         // a nested value only when its type resolves through TryGetValidatableTypeInfo, so BOTH the carrier
@@ -652,6 +694,13 @@ public sealed class ValidationResolverGeneratorTests {
     /// signature drift in the pinned package version fails this test.
     /// </summary>
     private static void AssertGeneratedOutputCompiles(string source) {
+        var outputCompilation = CompileGenerated(source);
+        outputCompilation.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    private static Compilation CompileGenerated(string source) {
         var compilation = CreateCompilation(source, false);
 
         var driver = CSharpGeneratorDriver.Create(
@@ -666,9 +715,7 @@ public sealed class ValidationResolverGeneratorTests {
         generatorDiagnostics
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .Should().BeEmpty();
-        outputCompilation.GetDiagnostics(TestContext.Current.CancellationToken)
-            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-            .Should().BeEmpty();
+        return outputCompilation;
     }
 
     private static CSharpCompilation CreateCompilation(string source, bool excludeElarionValidationReference) {

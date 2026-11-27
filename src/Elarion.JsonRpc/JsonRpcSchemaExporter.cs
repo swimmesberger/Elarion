@@ -1035,9 +1035,15 @@ public static class JsonRpcSchemaExporter {
             case Base64StringAttribute:
                 obj["format"] = "byte";
                 return ["format"];
-            case AllowedValuesAttribute allowedValues:
-                obj["enum"] = CreateEnumArray(allowedValues.Values);
+            case AllowedValuesAttribute allowedValues: {
+                // A nullable member lets null pass (the generated validation metadata adds it, like [Range] ignores
+                // a missing value), and JSON Schema's enum applies to null too, so the export lists it as well.
+                var values = allowedValues.Values;
+                if (IsNullableSchema(obj) && !values.Contains(null)) values = [.. values, null];
+
+                obj["enum"] = CreateEnumArray(values);
                 return ["enum"];
+            }
             default:
                 return [];
         }
@@ -1158,6 +1164,12 @@ public static class JsonRpcSchemaExporter {
                 value = default;
                 return false;
         }
+    }
+
+    // Whether a schema node's type is a union that admits null (["integer","null"]), the shape of a nullable member.
+    private static bool IsNullableSchema(JsonObject schema) {
+        return schema["type"] is JsonArray union && union.Any(static node =>
+            node is JsonValue value && value.TryGetValue<string>(out var type) && type == "null");
     }
 
     /// <summary>

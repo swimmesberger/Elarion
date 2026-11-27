@@ -97,3 +97,20 @@ risk.
   is the same.
 - **Ship the exclusive-arc helper now.** No consumer needs more than the documented configuration yet. It can follow
   on demand.
+
+## Amendment (2026-11-27): the exclusive-arc helper, asked for, is still not shipped
+
+The demand this record waited for came: an application that moved notes and files to exclusive arcs wrote about 300
+lines generating the per-kind foreign keys, partial indexes and CHECKs, plus query helpers. The helper stays out, for
+two reasons that hold beyond "not yet":
+
+- **Its home would change a package's dependency.** A CHECK constraint, a filtered index and a column name are
+  relational APIs; `Elarion.EntityFrameworkCore` deliberately depends on the provider-neutral EF Core package only,
+  and a new relational package for one model helper is more surface than it saves. The CHECK is also
+  provider-specific (`num_nonnulls` on PostgreSQL, a `CASE` sum elsewhere) and needs the final column names, which
+  depend on the application's naming convention.
+- **What remains is application vocabulary.** With the owner list kept in one array, the configuration is one loop
+  (now shown in the [polymorphic references](../concepts/polymorphic-references.mdx) guide), and a query is a
+  plain foreign-key predicate. The rest of those 300 lines — a `(kind, id)` record reference, purpose-specific
+  CHECKs, mapping the arc back to that reference — is the application's own model, which a framework helper would
+  have to guess at.

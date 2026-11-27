@@ -10,10 +10,12 @@ namespace Elarion.Contacts.Writing;
 /// </summary>
 internal static class ContactSerializer {
     private static readonly (ContactTypes Flag, string Name)[] TypeNames = [
-        (ContactTypes.Home, "HOME"), (ContactTypes.Work, "WORK"), (ContactTypes.Cell, "CELL"), (ContactTypes.Voice, "VOICE"),
-        (ContactTypes.Fax, "FAX"), (ContactTypes.Pager, "PAGER"), (ContactTypes.Text, "TEXT"), (ContactTypes.Video, "VIDEO"),
-        (ContactTypes.Main, "MAIN"),
+        (ContactTypes.Internet, "INTERNET"), (ContactTypes.Home, "HOME"), (ContactTypes.Work, "WORK"), (ContactTypes.Cell, "CELL"),
+        (ContactTypes.Voice, "VOICE"), (ContactTypes.Fax, "FAX"), (ContactTypes.Pager, "PAGER"), (ContactTypes.Text, "TEXT"),
+        (ContactTypes.Video, "VIDEO"), (ContactTypes.Main, "MAIN"),
     ];
+
+    private static readonly ContactParameter UriValue = new("VALUE", "uri");
 
     public static IReadOnlyList<ContactProperty> ToProperties(Contact contact, ContactFormatVersion version) {
         ArgumentNullException.ThrowIfNull(contact);
@@ -22,7 +24,7 @@ internal static class ContactSerializer {
         var groups = new Groups(contact.AdditionalProperties);
 
         if (contact.Kind == ContactKind.Organization)
-            list.Add(v3 ? new ContactProperty("X-ABSHOWAS", "COMPANY") : new ContactProperty("KIND", "org"));
+            list.Add(v3 ? new ContactProperty("X-ABShowAs", "COMPANY") : new ContactProperty("KIND", "org"));
         // FR-070: each version in the form its clients read, never the other's (ADR-0114).
         var isGroup = contact.Kind == ContactKind.Group;
         if (isGroup) list.Add(v3 ? new ContactProperty("X-ADDRESSBOOKSERVER-KIND", "group") : new ContactProperty("KIND", "group"));
@@ -49,8 +51,14 @@ internal static class ContactSerializer {
         if (contact.Title is not null) list.Add(new ContactProperty("TITLE", ContentText.Escape(contact.Title)));
         if (contact.Role is not null) list.Add(new ContactProperty("ROLE", ContentText.Escape(contact.Role)));
 
-        foreach (var phone in contact.Phones)
-            AddTyped(list, groups, "TEL", ContentText.Escape(phone.Number), phone.Types, phone.Preferred, phone.Label, v3);
+        foreach (var phone in contact.Phones) {
+            // FR-080: a 4.0 number given as a tel: URI is a URI value, written as it is.
+            if (!v3 && phone.Number.StartsWith("tel:", StringComparison.OrdinalIgnoreCase))
+                AddTyped(list, groups, "TEL", UriText("TEL", phone.Number), phone.Types, phone.Preferred, phone.Label, v3, UriValue);
+            else
+                AddTyped(list, groups, "TEL", ContentText.Escape(phone.Number), phone.Types, phone.Preferred, phone.Label, v3);
+        }
+
         foreach (var email in contact.Emails)
             AddTyped(list, groups, "EMAIL", ContentText.Escape(email.Address), email.Types, email.Preferred, email.Label, v3);
         foreach (var address in contact.Addresses) {
@@ -58,8 +66,9 @@ internal static class ContactSerializer {
             AddTyped(list, groups, "ADR", value, address.Types, address.Preferred, address.Label, v3);
         }
 
+        // FR-080: URL is a URI value (RFC 2426 section 3.6.8, RFC 6350 section 6.7.8), not text: ';' and ',' stay as they are.
         foreach (var url in contact.Urls)
-            AddTyped(list, groups, "URL", ContentText.Escape(url.Value), url.Types, url.Preferred, url.Label, v3);
+            AddTyped(list, groups, "URL", UriText("URL", url.Value), url.Types, url.Preferred, url.Label, v3);
 
         if (contact.Birthday is { } birthday) list.Add(Date(null, "BDAY", birthday, v3));
         if (contact.Anniversary is { } anniversary) {
@@ -86,8 +95,10 @@ internal static class ContactSerializer {
     }
 
     private static void AddTyped(
-        List<ContactProperty> list, Groups groups, string name, string value, ContactTypes types, bool preferred, string? label, bool v3) {
-        var parameters = new List<ContactParameter>(2);
+        List<ContactProperty> list, Groups groups, string name, string value, ContactTypes types, bool preferred, string? label, bool v3,
+        ContactParameter? first = null) {
+        var parameters = new List<ContactParameter>(3);
+        if (first is not null) parameters.Add(first);
         var typeValues = new List<string>();
         foreach (var (flag, typeName) in TypeNames)
             if ((types & flag) != 0) typeValues.Add(v3 ? typeName : typeName.ToLowerInvariant());
@@ -129,6 +140,12 @@ internal static class ContactSerializer {
 
         throw new ContactWriteException("The photo has neither bytes nor an address.", null, "PHOTO");
     }
+
+    // A URI value is written unescaped; only a line break, which would end the line, cannot be written.
+    private static string UriText(string property, string value) =>
+        value.AsSpan().IndexOfAny('\r', '\n') >= 0
+            ? throw new ContactWriteException($"The value of {property} holds a line break; a URI cannot.", null, property)
+            : value;
 
     private static string Structured(params string?[] parts) {
         var builder = new StringBuilder();

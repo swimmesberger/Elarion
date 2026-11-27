@@ -1,25 +1,24 @@
 namespace Elarion.Abstractions.Paging;
 
 /// <summary>
-/// A single page of results, transport-neutral and shared by every list handler so that
-/// keyset and offset pagination expose one uniform shape across JSON-RPC, MCP, HTTP, and the
-/// generated TypeScript client.
+/// A single page of a keyset (cursor) list, transport-neutral across JSON-RPC, MCP, HTTP, and the
+/// generated TypeScript client. Offset lists return <see cref="OffsetPage{T}"/>, whose total is required
+/// and which carries no cursors (<see cref="OffsetPage{T}.ToPage"/> converts one into this envelope).
 /// </summary>
 /// <typeparam name="T">The item type (typically a response DTO).</typeparam>
 /// <remarks>
 /// Cursors follow the Relay convention: <see cref="StartCursor"/> and <see cref="EndCursor"/>
 /// are opaque tokens identifying the first and last items, used to request the previous/next page.
-/// They are populated for keyset pagination and <c>null</c> for offset pagination, where
-/// <see cref="Total"/> is populated instead.
+/// They are populated by keyset pagination; <see cref="Total"/> is set only by a handler that counts.
 /// </remarks>
 public sealed record Page<T> {
     /// <summary>The items in this page, in result order.</summary>
     public required IReadOnlyList<T> Items { get; init; }
 
-    /// <summary>Opaque cursor for the first item. <c>null</c> when the page is empty or for offset pagination.</summary>
+    /// <summary>Opaque cursor for the first item. <c>null</c> when the page is empty.</summary>
     public string? StartCursor { get; init; }
 
-    /// <summary>Opaque cursor for the last item. <c>null</c> when the page is empty or for offset pagination.</summary>
+    /// <summary>Opaque cursor for the last item. <c>null</c> when the page is empty.</summary>
     public string? EndCursor { get; init; }
 
     /// <summary>Whether a page exists after this one.</summary>
@@ -29,8 +28,9 @@ public sealed record Page<T> {
     public bool HasPrevious { get; init; }
 
     /// <summary>
-    /// Total number of matching items across all pages. Populated only for offset pagination;
-    /// <c>null</c> for keyset pagination, which cannot produce a total cheaply.
+    /// Total number of matching items across all pages, when the handler counted them; <c>null</c> from
+    /// keyset pagination, which cannot produce a total cheaply. An offset list's total is
+    /// <see cref="OffsetPage{T}.Total"/>.
     /// </summary>
     public int? Total { get; init; }
 

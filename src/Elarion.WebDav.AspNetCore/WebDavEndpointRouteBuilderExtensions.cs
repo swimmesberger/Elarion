@@ -1,6 +1,5 @@
-using System.Security.Claims;
-using Elarion.Abstractions.Dispatch;
 using Elarion.AspNetCore;
+using Elarion.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -53,7 +52,9 @@ public static class WebDavEndpointRouteBuilderExtensions {
     /// <remarks>
     /// Requires <c>AddElarionWebDav</c> (or <c>AddElarionCalDav</c>), an authentication scheme (normally
     /// <c>AddElarionAppPasswordAuthentication()</c>, whose feed-token reader must match the prefix when it is not
-    /// <c>/dav</c>), <c>UseAuthentication</c> and <c>UseAuthorization</c>.
+    /// <c>/dav</c>), <c>UseAuthentication</c> and <c>UseAuthorization</c>. The group owns <c>{prefix}/{**path}</c> for
+    /// every protocol; an endpoint the application maps under the prefix with a more specific template wins by route
+    /// precedence, outside the dispatcher, the group's scheme and its scope seeding.
     /// </remarks>
     /// <example>
     /// <code>
@@ -124,13 +125,11 @@ public static class WebDavEndpointRouteBuilderExtensions {
         var services = context.RequestServices;
         // Authentication of the DAV scheme ran in the authorization middleware, after any middleware that seeded the scope
         // with the browser principal; seed it again with the DAV principal, so ICurrentUser and the sources see it.
-        var dispatchContext = new DispatchScopeContext();
-        dispatchContext.Set<ClaimsPrincipal>(context.User);
-        services.SeedScope(dispatchContext);
+        context.SeedElarionCurrentUser();
 
         var request = context.Request;
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var name in (ReadOnlySpan<string>)["Depth", "If-Match", "If-None-Match", "Prefer", "Brief", "CalDAV-Timezones"])
+        foreach (var name in (ReadOnlySpan<string>)["Depth", "If-Match", "If-None-Match", "Prefer", "Brief", "CalDAV-Timezones", "Accept"])
             if (request.Headers.TryGetValue(name, out var value))
                 headers[name] = value.ToString();
 

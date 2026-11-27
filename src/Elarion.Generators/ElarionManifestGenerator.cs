@@ -380,6 +380,7 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
         sb.AppendLine("#pragma warning disable CS1591 // Generated code is not documented; a consuming project that enables GenerateDocumentationFile must not be warned about it.");
         sb.AppendLine();
         AppendAssemblyMetadata(sb, ElarionManifest.SchemaKey, ElarionManifest.SchemaVersion);
+        var registrars = new List<ElarionManifest.ResourceFilter>();
 
         foreach (var module in modules.OrderBy(static m => m.ModuleName, StringComparer.Ordinal)
                      .ThenBy(static m => m.TypeFqn, StringComparer.Ordinal))
@@ -399,8 +400,10 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
                      .ThenBy(static m => m.RequestTypeFqn, StringComparer.Ordinal))
             AppendAssemblyMetadata(sb, ElarionManifest.RpcMethodKey, ElarionManifest.EncodeRpcMethod(method));
 
-        foreach (var filter in resourceFilters.OrderBy(static f => f.SpecFqn, StringComparer.Ordinal))
+        foreach (var filter in resourceFilters.OrderBy(static f => f.SpecFqn, StringComparer.Ordinal)) {
             AppendAssemblyMetadata(sb, ElarionManifest.ResourceFilterKey, ElarionManifest.EncodeResourceFilter(filter));
+            if (filter.RegistrarFqn is not null) registrars.Add(filter);
+        }
 
         foreach (var permission in permissions)
             AppendAssemblyMetadata(sb, ElarionManifest.PermissionKey, ElarionManifest.EncodePermission(permission));
@@ -418,7 +421,40 @@ public sealed class ElarionManifestGenerator : IIncrementalGenerator {
         foreach (var flag in featureFlags)
             AppendAssemblyMetadata(sb, ElarionManifest.FeatureFlagKey, ElarionManifest.EncodeFeatureFlag(flag));
 
+        foreach (var filter in registrars) AppendResourceFilterRegistrar(sb, filter);
+
         return new ManifestOutput(sb.ToString(), diagnostics.ToEquatableArray());
+    }
+
+    // The public registrar of a non-public [ResourceFilter]: the host bootstrapper of another assembly calls it, because
+    // it cannot name the filter itself. It registers exactly what the bootstrapper would (a TryAdd, so a composed rule
+    // the application registered wins).
+    private static void AppendResourceFilterRegistrar(StringBuilder sb, ElarionManifest.ResourceFilter filter) {
+        const string tryAdd = "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions";
+        var registrar = filter.RegistrarFqn!.Substring("global::".Length);
+        var lastDot = registrar.LastIndexOf('.');
+        var className = lastDot < 0 ? registrar : registrar.Substring(lastDot + 1);
+        var serviceType = $"{ElarionGeneratorConventions.QueryAuthorizerTypeFqn}<{filter.EntityFqn}>";
+
+        sb.AppendLine();
+        // A block-scoped namespace: the file also holds the assembly attributes, which a file-scoped one would not allow.
+        if (lastDot >= 0) {
+            sb.AppendLine($"namespace {registrar.Substring(0, lastDot)}");
+            sb.AppendLine("{");
+        }
+
+        sb.AppendLine($"/// <summary>Registers the non-public <c>[ResourceFilter]</c> <c>{filter.SpecFqn.Replace("global::", string.Empty)}</c> for the host bootstrapper.</summary>");
+        sb.AppendLine("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
+        sb.AppendLine($"public static class {className}");
+        sb.AppendLine("{");
+        sb.AppendLine("    public static void Register(global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+        sb.AppendLine("    {");
+        sb.AppendLine(filter.IsShared
+            ? $"        {tryAdd}.TryAddScoped<{serviceType}, {filter.SpecFqn}>(services);"
+            : $"        {tryAdd}.TryAddSingleton<{serviceType}>(services, {filter.SpecFqn}.{ElarionGeneratorConventions.ResourceFilterSpecificationMember});");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        if (lastDot >= 0) sb.AppendLine("}");
     }
 
     private static void AppendAssemblyMetadata(StringBuilder sb, string key, string value) {

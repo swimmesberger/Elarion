@@ -28,7 +28,7 @@ public sealed class SettingDefinitionGeneratorTests {
             [Setting("app:title", Default = "Untitled", Pinnable = true, Description = "The title.")]
             public static partial SettingDefinition<string> Title { get; }
 
-            [Setting("app:retries", Default = 3)]
+            [Setting("app:retries", Default = 3, FallbackConfigurationKey = "Deployment:Retries")]
             public static partial SettingDefinition<int> Retries { get; }
 
             [Setting("app:mode", Default = Mode.On)]
@@ -65,6 +65,8 @@ public sealed class SettingDefinitionGeneratorTests {
         title.Scopes.Should().Equal("global");
 
         ((SettingDefinition<int>)all.Single(d => d.Key == "app:retries")).Default.Should().Be(3);
+        all.Single(d => d.Key == "app:retries").FallbackConfigurationKey.Should().Be("Deployment:Retries");
+        title.FallbackConfigurationKey.Should().BeNull();
         all.Single(d => d.Key == "app:mode").HasDefault.Should().BeTrue();
 
         var smtp = all.Single(d => d.Key == "app:smtp");
@@ -94,6 +96,9 @@ public sealed class SettingDefinitionGeneratorTests {
     [InlineData("""[Setting("a", Default = "x")] public static partial SettingDefinition<int> A { get; }""", "ELSDEF007")]
     [InlineData("""[Setting("a", DefaultFactory = "Missing")] public static partial SettingDefinition<int> A { get; }""", "ELSDEF007")]
     [InlineData("""[Setting("a", Default = 1, DefaultFactory = "M")] public static partial SettingDefinition<int> A { get; } static int M() => 1;""", "ELSDEF007")]
+    [InlineData("""[Setting("a", FallbackConfigurationKey = " ")] public static partial SettingDefinition<string> A { get; }""", "ELSDEF008")]
+    [InlineData("""[Setting("a", FallbackConfigurationKey = "X:", Scopes = ["global"])] public static partial SettingDefinition<string> A { get; }""", "ELSDEF008")]
+    [InlineData("""[Setting("a", FallbackConfigurationKey = "X", Scopes = ["user"])] public static partial SettingDefinition<string> A { get; }""", "ELSDEF008")]
     [InlineData("""[Setting("a")] public static SettingDefinition<string> A { get; } = null!;""", "ELSDEF002")]
     [InlineData("""[Setting("a")] public static partial string A { get; }""", "ELSDEF002")]
     public void InvalidDeclarations_ReportDiagnostics(string members, string id) {

@@ -69,8 +69,8 @@ public sealed class ArchiveInvoice(
 
 The decorator attaches only where a new unit of work belongs — its compile-time
 `AppliesTo` predicate matches **commands and integration-event handlers** and skips queries,
-domain-event handlers (they run inline inside the publisher's transaction), `[Idempotent]`
-handlers, and integration-event consumers under the default-on inbox (both own the boundary
+domain-event handlers (they run inline inside the publisher's transaction), commands marked
+`[NoTransaction]` (see below), `[Idempotent]` handlers, and integration-event consumers under the default-on inbox (both own the boundary
 themselves, so a handler is never wrapped in two nested transactions — only an `[AllowDuplicates]`
 consumer gets the plain transaction).
 
@@ -103,6 +103,55 @@ services.AddElarionUnitOfWork<AppDbContext>();
 `TransactionDecorator` steps aside for it. A [previewable command](/docs/concepts/previewable-commands) uses it to
 run the command and roll it back; it relies on the rollback, so it checks `IUnitOfWork.SupportsRollback` (true for
 the EF Core and SQL-tier units of work, false for the in-memory default) and refuses to preview without it.
+
+### Constraint violations as results
+
+A violated constraint is an exception, so by default the caller gets the framework's
+[unexpected-error answer](/docs/concepts/results-and-errors#unexpected-errors). When the caller can act on it — the
+name is taken, the period overlaps another — register an `IUnitOfWorkFailureTranslator` that maps it to an
+`AppError`:
+
+```csharp
+public sealed class ConstraintTranslator : IUnitOfWorkFailureTranslator {
+    public AppError? Translate(Exception exception) =>
+        (exception as PostgresException ?? exception.InnerException as PostgresException) switch {
+            { SqlState: PostgresErrorCodes.ExclusionViolation, ConstraintName: "ex_periods_overlap" }
+                => AppError.Conflict("The period overlaps another one.", "schedule.overlap"),
+            { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "ux_projects_name" }
+                => AppError.Conflict("A project with this name exists.", "projects.name_taken"),
+            _ => null      // everything else stays an unexpected error
+        };
+}
+
+builder.Services.AddSingleton<IUnitOfWorkFailureTranslator, ConstraintTranslator>();
+```
+
+`TransactionDecorator` offers every exception that ends its unit of work to the translators, in registration order:
+one from the handler (a `SaveChanges` that hit a unique index, wrapped in a `DbUpdateException`) and one from the
+commit itself. The commit matters for a `DEFERRABLE INITIALLY DEFERRED` constraint — an exclusion constraint over
+rows that one `SaveChanges` writes in an order EF Core does not promise — which PostgreSQL checks only at `COMMIT`,
+outside every `SaveChangesInterceptor`. The first error a translator returns becomes the command's failed `Result`,
+and the unit of work rolls back; a cancellation is never translated, and an exception no translator answers
+propagates unchanged. Put no exception text in the message: it names tables, columns and values. Declare the codes on
+the handlers that can return them with `[ProducesError]`.
+
+### Commands without a transaction
+
+A command whose work is mostly outside the database — sending a test mail, calling a slow external service — would
+hold a pooled connection and an open transaction for the whole call. Mark it `[NoTransaction]` and
+`TransactionDecorator` stays off:
+
+```csharp
+[Handler("settings.smtp.test"), NoTransaction]
+public sealed class TestSmtp(ISmtpClient smtp) : IHandler<TestSmtp.Command, Result<Unit>> { … }
+```
+
+The request stays an `ICommand`, so everything else the request kind decides is unchanged. Each `SaveChanges` then
+commits on its own; open a transaction in the handler around writes that must commit together. `[Idempotent]`
+commands and inboxed integration-event consumers own their transaction regardless.
+
+Queries get no transaction, and nothing stops a query handler from writing: the request kind is a declaration the
+framework trusts. A test that scans the query handlers for `SaveChanges`, or a code review rule, is the guard.
 
 ## What enlists, and how
 

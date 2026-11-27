@@ -1,26 +1,35 @@
 ---
 title: Pagination
-description: Transport-neutral keyset (cursor) and offset paging that produces a Page<T>, with composite sorts and an opaque cursor codec.
+description: Transport-neutral keyset (cursor) and offset paging that produces a Page<T> or an OffsetPage<T>, with multi-key sorts and an opaque cursor codec.
 ---
 
-Every list handler returns one shared, transport-neutral envelope, `Page<T>` (from
-`Elarion.Abstractions.Paging`), so a list looks identical across JSON-RPC, MCP, HTTP, and the
-generated TypeScript client:
+A list handler returns one of two transport-neutral envelopes (from `Elarion.Abstractions.Paging`), each the same
+across JSON-RPC, MCP, HTTP, and the generated TypeScript client — `Page<T>` for a keyset list, `OffsetPage<T>` for a
+numbered one:
 
-```csharp title="Elarion.Abstractions.Paging.Page<T>"
-public sealed record Page<T> {
+```csharp title="Elarion.Abstractions.Paging"
+public sealed record Page<T> {                    // keyset: ToKeysetPageAsync
     public required IReadOnlyList<T> Items { get; init; }
-    public string? StartCursor { get; init; }   // keyset only
-    public string? EndCursor { get; init; }      // keyset only
+    public string? StartCursor { get; init; }
+    public string? EndCursor { get; init; }
     public bool HasNext { get; init; }
     public bool HasPrevious { get; init; }
-    public int? Total { get; init; }             // offset only
+    public int? Total { get; init; }             // only when a handler counts
+}
+
+public sealed record OffsetPage<T> {              // offset: ToOffsetPageAsync
+    public required IReadOnlyList<T> Items { get; init; }
+    public required int Total { get; init; }
+    public bool HasNext { get; init; }
+    public bool HasPrevious { get; init; }
 }
 ```
 
 The cursors follow the Relay convention: `StartCursor`/`EndCursor` are opaque tokens for the first
-and last items, populated for keyset pagination and `null` for offset pagination, where `Total` is
-populated instead. `Page<T>.Empty` is a ready-made empty page.
+and last items. Offset paging always counts and never has cursors, so its envelope says exactly that: `Total` is
+required and the generated TypeScript type is `{ items, total: number, hasNext, hasPrevious }`. `Page<T>.Empty` and
+`OffsetPage<T>.Empty` (with `Total = 0`) are ready-made empty pages, and `offsetPage.ToPage()` converts an offset page
+for an endpoint whose contract stays `Page<T>`.
 
 Keyset (seek) pagination is the default for feeds and large lists; offset pagination is available
 where a UI needs page numbers and a total count.
@@ -28,7 +37,7 @@ where a UI needs page numbers and a total count.
 <Callout type="info">
   Pagination ships in a **separate package** (`Elarion.Paging`) so the EF Core marker package stays
   dependency-free. The execution helpers depend on EF Core (`Microsoft.EntityFrameworkCore.Relational`),
-  while the provider-neutral `Page<T>` envelope and the `IKeysetPageRequest`/`IOffsetPageRequest`
+  while the provider-neutral `Page<T>` and `OffsetPage<T>` envelopes and the `IKeysetPageRequest`/`IOffsetPageRequest`
   contracts live in `Elarion.Abstractions.Paging`. Reference `Elarion.Paging` (the runtime helpers) and
   `Elarion.EntityFrameworkCore` (which bundles the generator that emits keyset definitions) in the
   project that owns your entities and handlers:
@@ -185,7 +194,8 @@ columns, or the default `Portable` provider. The opt-in requires the
 
 ## Offset pagination
 
-When a UI needs random page access and a total count, use `ToOffsetPageAsync` with a `SortMap` — an
+When a UI needs random page access and a total count, use `ToOffsetPageAsync`, which returns an `OffsetPage<T>`,
+with a `SortMap` — an
 AOT-safe whitelist that binds sort keys to typed selectors (no dynamic LINQ, and clients can only sort
 by columns you allow). Each entry may chain `ThenBy` tiebreakers (each with a `SortDirection`) for a
 stable composite order. The map is a fixed whitelist that doesn't depend on the request, so build it
@@ -200,7 +210,7 @@ private static readonly SortMap<Client> Sort = SortMap<Client>
     .ThenBy(c => c.Id)
     .Build();
 
-public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, CancellationToken ct) {
+public async ValueTask<Result<OffsetPage<Item>>> HandleAsync(Query query, CancellationToken ct) {
     return await db.Clients
         .Where(c => c.OwnerId == user.UserId)
         .ToOffsetPageAsync(query, c => new Item(c.Id, c.Name, c.CreatedAt), Sort, maxSize: 100, ct);
@@ -223,23 +233,51 @@ A request `Sort` names a key in one of three forms:
 
 A bare key is **not** "ascending": `"createdAt"` above sorts descending, because that is how the key was declared,
 and a client that wants it ascending sends `"+createdAt"`. `"-name"` sorts `Name` descending, `Id` ascending. Keys
-match case-insensitively. A blank `Sort` means the default entry. Offset pages fill `Total`; keyset pages fill the
-cursors instead.
+match case-insensitively. A blank `Sort` means the default entry. In a query string, send `+` as `%2B`: a bare `+`
+decodes to a space, which leaves the key bare.
+
+### Sorting by several keys
+
+`Sort` may list several keys, comma-separated, each in one of the three forms: `"+city,-name"` orders by `City`
+ascending, then `Name` descending. The keys apply from left to right (`OrderBy`, then `ThenBy`), and the declared
+tiebreakers of the **last** key follow, so the order stays stable; the tiebreakers of the other keys are not applied.
+A single key keeps its own tiebreakers, as before. Spaces around a key are ignored.
+
+A sort combines at most `SortMap<T>.DefaultMaxLevels` (3) keys; `.MaxLevels(n)` on the builder changes the cap, and
+`.MaxLevels(1)` allows a single key only. A key named twice, an empty key (`"city,"`) and a sort above the cap are
+refused like an unknown key. The cap is checked before any key is looked up, so a sort parameter of thousands of keys
+costs one pass over the text. The schema exports the keys, not the cap; a client that combines more keys than the
+handler allows gets the validation error below.
+
+### Refusing a bad sort
 
 An **unknown** key also falls back to the default entry — right for a list that must always render, wrong when a
-client sends a key it should not. `Sort.Validate(query.Sort)` checks the key first and answers an unknown one with a
-field-keyed validation error (code `paging.sort_key_unknown`, keyed by the request field, naming the allowed keys),
-so the client bug surfaces instead of a silently re-sorted list:
+client sends a key it should not. `Sort.Validate(query.Sort)` checks the sort first and answers a refused one (an
+unknown or repeated key, or more keys than the cap) with a field-keyed validation error (code
+`paging.sort_key_unknown`, keyed by the request field, naming the allowed keys), so the client bug surfaces instead of
+a silently re-sorted list:
 
 ```csharp
 [ProducesError(PagingErrorCodes.SortKeyUnknown, ErrorKind.Validation)]
-public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, CancellationToken ct) {
+public async ValueTask<Result<OffsetPage<Item>>> HandleAsync(Query query, CancellationToken ct) {
     if (Sort.Validate(query.Sort) is { } unknownSort) return unknownSort;
 
     return await db.Clients
         .Where(c => c.OwnerId == user.UserId)
         .ToOffsetPageAsync(query, c => new Item(c.Id, c.Name, c.CreatedAt), Sort, maxSize: 100, ct);
 }
+```
+
+The default message is English. Pass a `message` function to word it yourself, for example in the application's
+language; it receives a `SortRefusal` with the `Reason` (`UnknownKey`, `RepeatedKey`, `TooManyKeys`), the offending
+`Key`, the `AllowedKeys` and `MaxLevels`, and its text becomes both the error message and the field message:
+
+```csharp
+if (Sort.Validate(query.Sort, message: refusal => refusal.Reason switch {
+        SortRefusalReason.TooManyKeys => $"Höchstens {refusal.MaxLevels} Sortierschlüssel.",
+        _ => $"Unbekannter Sortierschlüssel „{refusal.Key}“."
+    }) is { } badSort)
+    return badSort;
 ```
 
 `Sort.Keys` lists every allowed key in declaration order with its declared direction and which one is the default —
@@ -251,8 +289,8 @@ the allowed keys instead of copying them.
 
 ### Mapping a page
 
-`Page<T>.Map(selector)` projects every item and keeps the cursors, flags and total, so enriching or renaming the
-rows of a page never rebuilds the envelope by hand. `MapAsync` hands the whole item list to the selector at once —
+`Map(selector)` on a `Page<T>` or an `OffsetPage<T>` projects every item and keeps the cursors, flags and total, so
+enriching or renaming the rows of a page never rebuilds the envelope by hand. `MapAsync` hands the whole item list to the selector at once —
 one batched lookup for the page instead of one per row — and requires one result per item, in order:
 
 ```csharp
@@ -265,21 +303,19 @@ return await page.MapAsync(async (rows, token) => {
 
 ### Consuming an offset page
 
-`Page<T>` is one envelope for both strategies, so an offset endpoint still returns the cursor fields —
-they are simply always `null`. The rule for a client is short:
+An offset endpoint returns `OffsetPage<T>`, so the client gets exactly what it can use:
 
-- `total` is **always present** on an offset endpoint (`ToOffsetPageAsync` counts the filtered query
-  every call), so page numbers are computable: `totalPages = Math.ceil(total / size)` — where `size` is
+- `total` is **always present** (`ToOffsetPageAsync` counts the filtered query every call), and the generated type
+  says so (`total: number`), so page numbers are computable: `totalPages = Math.ceil(total / size)` — where `size` is
   the **effective** page size, not necessarily the one you sent.
-- `startCursor` and `endCursor` are **always `null`** — ignore them. Do not build a "next page" from
-  them, and do not treat their absence as an error.
+- There are no cursors to ignore.
 - `hasNext` / `hasPrevious` are filled on both strategies, so a plain prev/next control needs nothing
   else.
 
 The effective size matters because the server clamps `Size` to the handler's `maxSize` (default `100`,
 as described under [keyset pagination](#keyset-pagination) — the same clamp applies to both strategies),
 and substitutes `20` for anything below `1`, itself capped at `maxSize` (so a handler with
-`maxSize: 10` substitutes `10`). `Page<T>` does not echo the size back, so divide by the size the server
+`maxSize: 10` substitutes `10`). `OffsetPage<T>` does not echo the size back, so divide by the size the server
 would actually have used, or the last page number is wrong whenever a client over-asks:
 
 ```ts
@@ -290,8 +326,8 @@ const size = Math.min(requested < 1 ? 20 : requested, MAX_SIZE)
 
 const page = await rpc.clients.list({ page: 1, size, sort: '-createdAt' })
 
-// Offset endpoint: `total` is set, the cursors are not.
-const totalPages = Math.ceil((page.total ?? 0) / size)
+// Offset endpoint: `total` is always a number.
+const totalPages = Math.ceil(page.total / size)
 
 renderRows(page.items)
 renderPager({ totalPages, canPrev: page.hasPrevious, canNext: page.hasNext })
@@ -300,11 +336,10 @@ renderPager({ totalPages, canPrev: page.hasPrevious, canNext: page.hasNext })
 The simplest way to stay honest is to never send a size above the handler's `maxSize` in the first
 place — then requested and effective size are the same number.
 
-The uniform shape is deliberate: every list endpoint — keyset feed or numbered table — hands the client
-the same envelope, so one list component, one Zod schema, and one cache key strategy cover both. A
-strategy-specific response type would buy nothing but a fork in every consumer. If you find yourself
-reading a cursor on an offset endpoint, you are on the wrong strategy — switch the handler to
-`ToKeysetPageAsync` rather than teaching the client to guess.
+The two envelopes share `items`, `hasNext` and `hasPrevious`, so one list component can render either; each adds only
+what its strategy fills. A component that takes both reads `total` where it is a number and the cursors where they are
+strings. If you find yourself wanting a cursor on an offset endpoint, you are on the wrong strategy — switch the
+handler to `ToKeysetPageAsync`.
 
 ### Naming the request fields
 
@@ -324,7 +359,7 @@ public sealed record Query {
     public bool Descending { get; init; }             // this endpoint's own wire shape
 }
 
-public async ValueTask<Result<Page<Item>>> HandleAsync(Query query, CancellationToken ct) {
+public async ValueTask<Result<OffsetPage<Item>>> HandleAsync(Query query, CancellationToken ct) {
     var paging = new OffsetPageRequest {
         Page = query.Page,
         Size = query.PageSize,
@@ -344,6 +379,6 @@ The translation is three lines in one place, and the endpoint keeps the vocabula
     Generated `DbSet`s on the concrete `DbContext` that handlers page against.
   </Card>
   <Card title="Handlers" href="/docs/concepts/handlers">
-    How list handlers accept a paging request and return `Result<Page<T>>`.
+    How list handlers accept a paging request and return `Result<Page<T>>` or `Result<OffsetPage<T>>`.
   </Card>
 </Cards>

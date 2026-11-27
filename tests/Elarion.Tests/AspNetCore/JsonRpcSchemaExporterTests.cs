@@ -197,6 +197,55 @@ public sealed class JsonRpcSchemaExporterTests {
     }
 
     [Fact]
+    public void Generate_OffsetPageResult_RequiresTheTotal_AndHasNoCursors() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<PingRequest, Elarion.Abstractions.Paging.OffsetPage<PingResponse>>(
+                "sample.list",
+                (_, _, _) => ValueTask.FromResult<Result<Elarion.Abstractions.Paging.OffsetPage<PingResponse>>>(
+                    Elarion.Abstractions.Paging.OffsetPage<PingResponse>.Empty))
+            .Freeze();
+
+        using var doc = JsonDocument.Parse(JsonRpcSchemaExporter.Generate(dispatcher, options));
+        var result = doc.RootElement.GetProperty("methods").GetProperty("sample.list").GetProperty("result");
+
+        // What the generated client types as `total: number`: required, and not nullable.
+        result.GetProperty("required").EnumerateArray().Select(static name => name.GetString())
+            .Should().Contain(["items", "total"]);
+        result.GetProperty("properties").GetProperty("total").GetProperty("type").GetString().Should().Be("integer");
+        result.GetProperty("properties").TryGetProperty("startCursor", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Generate_AllowedValuesOnANullableMember_ListsNullInTheEnum() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<NullableChoiceRequest, PingResponse>(
+                "sample.choice",
+                (_, _, _) => ValueTask.FromResult<Result<PingResponse>>(new PingResponse("ok")))
+            .Freeze();
+
+        var schema = JsonRpcSchemaExporter.Generate(dispatcher, options);
+
+        using var doc = JsonDocument.Parse(schema);
+        var properties = doc.RootElement.GetProperty("methods").GetProperty("sample.choice")
+            .GetProperty("params").GetProperty("properties");
+
+        static string?[] Enum(JsonElement property) =>
+            property.GetProperty("enum").EnumerateArray()
+                .Select(static value => value.ValueKind == JsonValueKind.Null ? null : value.ToString()).ToArray();
+
+        // The server lets null pass on a nullable member, so the exported enum must too: JSON Schema applies enum
+        // to null as well, and an MCP client validating against it would refuse a request that leaves days out.
+        Enum(properties.GetProperty("days")).Should().Equal("30", "90", "365", null);
+        Enum(properties.GetProperty("span")).Should().Equal("week", "month", null);
+        // A declared null keeps its place, and is not listed twice.
+        Enum(properties.GetProperty("level")).Should().Equal(null, "1", "2");
+        // A non-nullable member keeps the declared values alone.
+        Enum(properties.GetProperty("mode")).Should().Equal("fast", "slow");
+    }
+
+    [Fact]
     public void Generate_InjectsConstraintKeywords_FromDataAnnotations() {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         var dispatcher = new JsonRpcDispatcher(options)
@@ -588,6 +637,16 @@ public sealed class JsonRpcSchemaExporterTests {
     private sealed record PingRequest(string Message);
 
     private sealed record PingResponse(string Message);
+
+    private sealed record NullableChoiceRequest {
+        [AllowedValues(30, 90, 365)] public int? Days { get; init; }
+
+        [AllowedValues("week", "month")] public string? Span { get; init; }
+
+        [AllowedValues(null, 1, 2)] public int? Level { get; init; }
+
+        [AllowedValues("fast", "slow")] public required string Mode { get; init; }
+    }
 
     private sealed record ConstrainedRequest {
         [StringLength(100, MinimumLength = 3)] public required string Name { get; init; }

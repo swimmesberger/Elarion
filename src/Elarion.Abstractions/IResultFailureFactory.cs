@@ -11,3 +11,12 @@ public interface IResultFailureFactory<TSelf>
     /// </summary>
     static abstract TSelf Failure(AppError error);
 }
+
+/// <summary>
+/// The instance-side twin of <see cref="IResultFailureFactory{TSelf}"/>, so generic code with an unconstrained response
+/// type can build a failure through <see cref="ResultInspection.TryCreateFailure{T}"/> without reflection. Internal: the
+/// result types of this assembly implement it explicitly.
+/// </summary>
+internal interface IResultFailureSource<out TSelf> {
+    TSelf CreateFailure(AppError error);
+}

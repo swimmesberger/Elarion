@@ -3,8 +3,9 @@ using Elarion.Abstractions.Serialization;
 namespace Elarion.Settings;
 
 /// <summary>
-/// The one effective-value resolver. It layers, lowest to highest, the definition's <b>default</b>, the
-/// <b>store</b> value, and — only for definitions declared <c>Pinnable</c> in the global scope — a
+/// The one effective-value resolver. It layers, lowest to highest, the definition's <b>default</b>, a
+/// <b>configuration fallback</b> (only for a definition that declares a <c>FallbackConfigurationKey</c>, in the global
+/// scope), the <b>store</b> value, and — only for definitions declared <c>Pinnable</c> in the global scope — a
 /// <b>configuration</b> value that <i>pins</i> the definition. <see cref="ISettingsManager"/> reads through it, so
 /// code never sees a value other than the one that takes effect; the <c>IConfiguration</c> provider in
 /// <c>Elarion.Settings.Configuration</c> is a projection of it, not a second source of truth.
@@ -92,8 +93,13 @@ internal sealed class SettingResolver : ISettingResolver {
             return new ResolvedSetting(definition, scope, SettingSource.Configuration, true,
                 SettingConfigurationText.ToJson(definition, raw), null);
 
-        if (entry is not { Value: not null } stored)
+        if (entry is not { Value: not null } stored) {
+            if (scope.Kind == SettingsScope.GlobalKind && _pins.GetFallbackText(definition) is { } fallback)
+                return new ResolvedSetting(definition, scope, SettingSource.ConfigurationFallback, false,
+                    SettingConfigurationText.ToJson(definition, fallback), null);
+
             return new ResolvedSetting(definition, scope, SettingSource.Default, false, null, null);
+        }
 
         try {
             var (json, requiresReprotection) = _codec.Decode(scope, definition.Key, stored, definition.IsSecret);

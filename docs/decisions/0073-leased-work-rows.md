@@ -188,3 +188,12 @@ Lease renewal stays manual; nothing heartbeats a claim automatically.
 > `ReleaseClaimsAsync` gives a batch back with undo setters (a shutdown must not burn the attempt the claim counted);
 > and `ClaimPendingAsync(claim, select)` projects the won rows in the claim's read. The test seam is PostgreSQL, not
 > EF InMemory, which cannot execute the claim's `ExecuteUpdate`.
+
+> **Amendment (2026-11-27):** the claim now returns `LeasedWorkClaimed<T>` — still an `IReadOnlyList<T>` of the won
+> rows, plus `Candidates` (how many rows the select found) and `GivenUp` (how many it gave up). An empty claim was
+> documented as "not drained", but nothing told the caller whether the select had found anything, so a consumer kept
+> its pass going by counting in `OnGivenUp`. A list type that carries the counts keeps every `foreach`,
+> `Count` and `IReadOnlyList<T>` assignment compiling; a separate result record with a `Rows` property was rejected for
+> breaking all of them. `ILogger.LogFinalizeOutcome` states the "claim lost" warning (lease expired and taken over, or
+> the row deleted meanwhile) and the `Ineligible` information line once. An EF InMemory test seam stays declined, as
+> above.

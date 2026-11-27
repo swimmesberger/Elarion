@@ -50,4 +50,29 @@ public sealed class SpreadsheetColumnAttribute(string? header = null) : Attribut
     /// <see cref="TrueLabel"/> and a <c>bool</c> property (<c>ELSHEET005</c>).
     /// </summary>
     public string? FalseLabel { get; set; }
+
+    /// <summary>
+    /// The name of a static member of the record (or of a base type) that holds the labels a <c>string</c> column offers
+    /// as a dropdown list: a field or property of a type that is or implements <c>IReadOnlyList&lt;string&gt;</c>,
+    /// public or internal (<c>ELSHEET009</c> otherwise). Use <c>nameof</c>. The list is read once, when the record is
+    /// first written or read. The column is a <see cref="SpreadsheetValueKind.Choice"/> column; it still reads any text
+    /// unless <see cref="StrictChoices"/> is set (FR-077).
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// public static IReadOnlyList&lt;string&gt; ChannelLabels =&gt; ChannelCatalog.Labels;
+    ///
+    /// [SpreadsheetColumn("Channel", Choices = nameof(ChannelLabels))]
+    /// public string? Channel { get; set; }
+    /// </code>
+    /// </example>
+    public string? Choices { get; set; }
+
+    /// <summary>
+    /// Whether reading a column with <see cref="Choices"/> accepts only its labels (ignoring case and surrounding white
+    /// space, and returning the label as it is spelled), reporting any other text as
+    /// <see cref="SpreadsheetErrorCodes.InvalidValue"/> with the labels as <see cref="SpreadsheetError.AllowedValues"/>
+    /// (FR-078). Requires <see cref="Choices"/> (<c>ELSHEET009</c>).
+    /// </summary>
+    public bool StrictChoices { get; set; }
 }

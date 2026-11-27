@@ -1022,6 +1022,49 @@ public sealed class ModuleBootstrapperTransportTests {
     }
 
     [Fact]
+    public void Bootstrapper_RegistersANonPublicReferencedResourceFilter_ThroughItsRegistrar() {
+        var module = EncodeFields(
+            "FilterLib", "FilterLib", "global::FilterLib.FilterModule", null, "0", "0", "0", "0", "0");
+        var owner = EncodeFields("global::FilterLib.ContactAccess", "global::FilterLib.Contact", "FilterLib", "0",
+            "global::FilterLib.ContactAccessElarionRegistration");
+        var library = $$"""
+            using System;
+            using System.Linq.Expressions;
+            using Elarion.Abstractions.Authorization;
+            using Elarion.Abstractions.Identity;
+
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Schema", "2")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.Module.v1", "{{module}}")]
+            [assembly: System.Reflection.AssemblyMetadata("Elarion.Manifest.ResourceFilter.v1", "{{owner}}")]
+
+            namespace FilterLib;
+
+            public static class FilterModule { }
+
+            internal sealed class Contact { public Guid Id { get; set; } }
+
+            internal sealed class ContactAccess : IQueryAuthorizer<Contact> {
+                public static ContactAccess Specification { get; } = new();
+                public Expression<Func<Contact, bool>>? GetFilter(ICurrentUser user, ResourceOperation operation) => null;
+            }
+
+            public static class ContactAccessElarionRegistration {
+                public static void Register(Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+            }
+            """;
+        var filterReference = CompileToImage(library, "Sample.FilterLib");
+
+        var generated = RunGenerator([filterReference], out var compilationWithGenerated);
+
+        Slice(generated, "IServiceCollection AddFilterLibResourceFilters(")
+            .Should().Contain("global::FilterLib.ContactAccessElarionRegistration.Register(services);")
+            .And.NotContain("global::FilterLib.ContactAccess.Specification");
+        compilationWithGenerated.GetDiagnostics(TestContext.Current.CancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Bootstrapper_DiscoversTransportHandlersInHostCompilation() {
         // The single-project layout: Program, [AppModule], and every handler live in one compilation with
         // [assembly: GenerateModuleBootstrapper] — there is no referenced manifest, so the bootstrapper must

@@ -6,8 +6,9 @@ namespace Elarion.Paging;
 
 /// <summary>
 /// Executes keyset (seek) and offset pagination against an EF Core <see cref="IQueryable{T}"/>,
-/// producing the transport-neutral <see cref="Page{T}"/> envelope. Keyset is the default for feeds
-/// and large lists; offset adds a total count and random page access where a UI needs them.
+/// producing the transport-neutral <see cref="Page{T}"/> (keyset) and <see cref="OffsetPage{T}"/> (offset)
+/// envelopes. Keyset is the default for feeds and large lists; offset adds a total count and random page
+/// access where a UI needs them.
 /// </summary>
 public static class QueryablePagingExtensions {
     /// <summary>The default maximum page size applied when a caller does not specify one.</summary>
@@ -79,10 +80,10 @@ public static class QueryablePagingExtensions {
     }
 
     /// <summary>
-    /// Reads one offset page, including a total count. The query is ordered by
+    /// Reads one offset page, including the total count, as an <see cref="OffsetPage{T}"/>. The query is ordered by
     /// <paramref name="sort"/> (an AOT-safe whitelist), then skipped/taken and projected server-side.
     /// </summary>
-    public static async Task<Page<TDto>> ToOffsetPageAsync<TEntity, TDto>(
+    public static async Task<OffsetPage<TDto>> ToOffsetPageAsync<TEntity, TDto>(
         this IQueryable<TEntity> source,
         IOffsetPageRequest request,
         Expression<Func<TEntity, TDto>> selector,
@@ -110,7 +111,7 @@ public static class QueryablePagingExtensions {
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return new Page<TDto> {
+        return new OffsetPage<TDto> {
             Items = items,
             Total = total,
             HasPrevious = page > 1,

@@ -76,8 +76,11 @@ public record DavMember {
     /// <summary>The media type, such as <c>text/calendar; charset=utf-8; component=vevent</c>.</summary>
     public required string ContentType { get; init; }
 
-    /// <summary>The length of the content in bytes.</summary>
-    public required long Size { get; init; }
+    /// <summary>
+    /// The length of the content in bytes, or <see langword="null"/> when it is not known without rendering the content
+    /// (a live collection's listing): <c>getcontentlength</c> is then not defined for the member.
+    /// </summary>
+    public long? Size { get; init; }
 }
 
 /// <summary>A member of a collection with its content.</summary>

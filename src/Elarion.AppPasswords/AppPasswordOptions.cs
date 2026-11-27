@@ -11,6 +11,12 @@ public sealed class AppPasswordOptions {
     /// <summary>The longest app-password name <see cref="IAppPasswords.CreateAsync"/> accepts: 200 characters.</summary>
     public const int MaxNameLength = 200;
 
+    /// <summary>
+    /// The longest user id <see cref="IAppPasswords.CreateAsync"/> accepts: 256 characters, the length ASP.NET Core
+    /// Identity gives its keys, and the length of the stored column.
+    /// </summary>
+    public const int MaxUserIdLength = 256;
+
     /// <summary>The longest <see cref="SecretPrefix"/>: 32 characters.</summary>
     public const int MaxSecretPrefixLength = 32;
 

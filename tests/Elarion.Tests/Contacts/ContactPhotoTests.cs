@@ -51,7 +51,10 @@ public sealed class ContactPhotoTests {
         var entry = Assert.Single((await ReadAsync(Card("FN:A", "PHOTO;ENCODING=b:" + Convert.ToBase64String("not an image"u8.ToArray())))).Entries);
 
         entry.Value!.Photo.Should().BeNull();
-        Assert.Single(entry.Errors).ExpectedKind.Should().Be("photo");
+        var error = Assert.Single(entry.Errors);
+        error.Code.Should().Be(ContactErrorCodes.InvalidValue);
+        error.ExpectedKind.Should().Be("photo-format");
+        error.MediaType.Should().BeNull();
     }
 
     [Fact]
@@ -114,5 +117,56 @@ public sealed class ContactPhotoTests {
 
         file.Should().Throw<ArgumentException>();
         ContactPhoto.FromUri(new Uri("http://example.com/a.png")).Uri!.Scheme.Should().Be("http");
+    }
+
+    [Fact]
+    public async Task APhotoOfAnotherFormat_SaysWhatTheBytesAre() {
+        var pdf = Convert.ToBase64String("%PDF-1.7 rest"u8.ToArray());
+        var heic = Convert.ToBase64String([0, 0, 0, 24, .. "ftypheic"u8, 0, 0, 0, 0]);
+        var declared = Convert.ToBase64String("unknown bytes"u8.ToArray());
+
+        var result = await ReadAsync(
+            Card("FN:A", "PHOTO;ENCODING=b;TYPE=JPEG:" + pdf)
+            + Card("FN:B", "PHOTO:data:image/heic;base64," + heic)
+            + Card("FN:C", "PHOTO;ENCODING=b;TYPE=TIFF:" + declared));
+
+        result.Entries.Select(static e => Assert.Single(e.Errors).MediaType).Should().Equal("application/pdf", "image/heic", "image/tiff");
+        result.Entries.Should().OnlyContain(static e => e.Errors[0].ExpectedKind == "photo-format");
+        result.Entries[0].Errors[0].Message.Should().Be("The photo (application/pdf) is not a JPEG, PNG, GIF, WebP or BMP image.");
+    }
+
+    [Fact]
+    public async Task TheFirstPhotoThatReads_IsThePhoto() {
+        var entry = Assert.Single((await ReadAsync(Card(
+            "FN:A", "PHOTO;ENCODING=b:" + Convert.ToBase64String("%PDF-1"u8.ToArray()),
+            "PHOTO;ENCODING=b:" + Convert.ToBase64String(ContactTestImages.Png),
+            "PHOTO;ENCODING=b:" + Convert.ToBase64String(ContactTestImages.Gif)))).Entries);
+
+        entry.Value!.Photo!.MediaType.Should().Be("image/png");
+        Assert.Single(entry.Errors).MediaType.Should().Be("application/pdf");
+        var further = Assert.Single(entry.Value.AdditionalProperties);
+        ContactPhoto.TryRead(further, 1024, out var gif, out var error).Should().BeTrue();
+        gif!.MediaType.Should().Be("image/gif");
+        error.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryRead_GivesTheErrorAReadWouldGive() {
+        var property = new ContactProperty(null, "PHOTO", [new ContactParameter("ENCODING", "b")], Convert.ToBase64String(ContactTestImages.JpegOf(4096)))
+            { LineNumber = 9 };
+
+        ContactPhoto.TryRead(property, 1024, out var photo, out var error).Should().BeFalse();
+
+        photo.Should().BeNull();
+        error!.Code.Should().Be(ContactErrorCodes.PhotoTooLarge);
+        error.LineNumber.Should().Be(9);
+    }
+
+    [Fact]
+    public void TryFromData_IsFalseForBytesOfNoImageFormat() {
+        ContactPhoto.TryFromData("%PDF-1"u8.ToArray(), out var none).Should().BeFalse();
+        none.Should().BeNull();
+        ContactPhoto.TryFromData(ContactTestImages.Png, out var png).Should().BeTrue();
+        png!.MediaType.Should().Be("image/png");
     }
 }

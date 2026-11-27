@@ -131,13 +131,15 @@ internal sealed class SettingsManager(
     public IChangeToken Watch(SettingDefinition definition, SettingsScope? scope = null) {
         catalog.Require(definition);
         var resolvedScope = ResolveScope(scope);
-        return Combine(changeSource.Watch(resolvedScope, definition.Key), resolvedScope, definition.IsPinnable);
+        return Combine(changeSource.Watch(resolvedScope, definition.Key), resolvedScope,
+            definition.ReadsDeploymentConfiguration);
     }
 
     /// <inheritdoc />
     public IChangeToken Watch(string? keyPrefix = null, SettingsScope? scope = null) {
         var resolvedScope = ResolveScope(scope);
-        var anyPinnable = catalog.All.Any(d => d.IsPinnable && SettingsPath.IsUnderPrefix(d.Key, keyPrefix));
+        var anyPinnable = catalog.All.Any(d =>
+            d.ReadsDeploymentConfiguration && SettingsPath.IsUnderPrefix(d.Key, keyPrefix));
         return Combine(changeSource.Watch(resolvedScope, keyPrefix), resolvedScope, anyPinnable);
     }
 

@@ -200,3 +200,29 @@ What still holds is the point of the decision: the transaction is the applicatio
 only where an application lists it in its `[DecoratorList]`, and it opens the unit of work on the application's own
 scoped context. The one built-in decorator that owns a unit of work by itself is the preview decorator of
 [ADR-0104](0104-previewable-commands.md), and only for a request that asks for a preview or a fingerprinted commit.
+
+## Amendment (2026-11-27): a command can opt out, and a failed commit can be a result
+
+Two gaps showed once applications relied on the request kind alone. A command whose work is outside the database (a
+test mail with a long timeout) had to stay neither command nor query, because as a command the decorator held a
+pooled connection and a transaction across the external call. And a `DEFERRABLE INITIALLY DEFERRED` constraint is
+checked at `COMMIT`, which no `SaveChangesInterceptor` sees, so its violation always reached the caller as an
+unexpected error.
+
+- `[NoTransaction]` (`Elarion.Abstractions.Pipeline`) on a handler makes `AppliesTo` answer `false`. A marker on the
+  handler, like `[Idempotent]` and `[AllowDuplicates]`, rather than a third request kind: the kind also decides the
+  schema's read/write marking and view-as, which must not change.
+- `IUnitOfWorkFailureTranslator` (`Elarion.Abstractions.Pipeline`) maps an exception that ends the decorator's unit
+  of work, from the handler or from the commit, to an `AppError`; the first answer becomes the failed result after the
+  rollback. The decorator takes the translators as `IEnumerable<…>`, so a host registers none and nothing changes. The
+  failure is built through `ResultInspection.TryCreateFailure`, so the decorator keeps its unconstrained response
+  type (a `where TResponse : IResultFailureFactory<TResponse>` constraint would have silently dropped the transaction
+  from every command that does not return a `Result`).
+
+Rejected: a commit hook on `IUnitOfWorkScope` (each provider would have to call it, and the decorator is the one place
+that turns an outcome into a result); shipping a PostgreSQL translator (which constraint a caller can act on, and with
+which message, is the application's knowledge). Not done: running query handlers in a `READ ONLY` transaction or
+refusing `SaveChanges` during a query. The first costs every query a `BEGIN`/`COMMIT` round trip and a pinned
+connection to catch a mistake a test can find; the second needs an ambient "a query is running" signal in the
+persistence layer that core does not have and the EF packages must not read from the pipeline. The `[Idempotent]`
+decorator does not consult the translators yet: its failure path also has to decide the idempotency key's fate.

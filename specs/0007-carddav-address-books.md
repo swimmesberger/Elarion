@@ -152,7 +152,7 @@ Address-book sources and access
 The CardDAV server
 
 - FR-016: The host MUST serve, under the WebDAV prefix (default `/dav`), the address-book home
-  `/dav/addressbooks/{user}/`, each address book at `/dav/addressbooks/{user}/{source}.{key}/` and each contact below it
+  `/dav/addressbooks/{user}/`, each address book at `/dav/addressbooks/{user}/{segment}/` and each contact below it
   as `{name}.vcf`, and the principal `/dav/principals/{user}/` MUST be the same resource CalDAV uses.
 - FR-017: `/.well-known/carddav` at the application root MUST redirect `PROPFIND`, `GET`, `HEAD` and `OPTIONS` with
   `301` to the prefix.
@@ -164,8 +164,8 @@ The CardDAV server
   `supported-address-data`, `supported-report-set`, `current-user-privilege-set`, `owner`, `sync-token`, `getetag`,
   `getcontenttype`), and `getctag`, and MUST answer an unknown property with `404` inside the `multistatus`.
 - FR-020: `supported-address-data` MUST list `text/vcard` in the versions 3.0 and 4.0.
-- FR-021: `REPORT` MUST support `sync-collection` (RFC 6578), `addressbook-multiget` and `addressbook-query` (RFC 6352)
-  on an address book.
+- FR-021: `REPORT` MUST support `sync-collection` (RFC 6578) on a published address book, and `addressbook-multiget`
+  and `addressbook-query` (RFC 6352) on every address book.
 - FR-022: `addressbook-query` MUST support `prop-filter`, `param-filter`, `text-match` with the match types `equals`,
   `contains` (the default), `starts-with` and `ends-with` and with `negate-condition`, `is-not-defined`, and the `test`
   attribute (`anyof`, the default, and `allof`) on `filter` and `prop-filter`; a query without a `filter` MUST match
@@ -195,6 +195,29 @@ The CardDAV server
   `X-ADDRESSBOOKSERVER-KIND` and `X-ADDRESSBOOKSERVER-MEMBER` properties.
 - FR-034: Publishing a contact with more properties than `CardDavOptions.ContactRead.MaxPropertiesPerContact` MUST throw,
   so that every stored card can be read back to convert or query it.
+
+Live address books and URL segments (ADR-0113, amendment 2026-11-27)
+
+- FR-035: An address-book source registered with `AddElarionCardDavLiveSource<TQuery, TAddressBooks>()` MUST serve live
+  address books: the source's handler MUST decide which address books the user sees, as for a published source, and
+  `TAddressBooks` (an `ICardDavLiveAddressBooks` resolved from the request's scope) MUST list, and give, the contacts
+  of each for the current user on every request, without the store.
+- FR-036: A live address book MUST answer `getctag` with the CTag `ICardDavLiveAddressBooks.GetCTagAsync` returns
+  (by default a hash of the listing's names and ETags), MUST NOT define `sync-token`, MUST NOT list `sync-collection`
+  in `supported-report-set`, and MUST answer a `sync-collection` with `403` and the `supported-report` precondition.
+- FR-037: A `PROPFIND` listing of a live address book MUST write no card, and its members' `getcontentlength` MUST
+  answer `404` inside the `multistatus`.
+- FR-038: A live address book MUST ask its contacts for the purpose of the request (`DavContentPurpose`: `Get`,
+  `Multiget` or `Query`), so an application can leave heavy parts such as photos out of a query.
+- FR-039: A live contact MUST be written as vCard 3.0 with the rules of FR-009–FR-010 and FR-031, and served with the ETag
+  and member name the application gave; an invalid name or ETag MUST throw as the application's mistake.
+- FR-040: A contact a viewer does not see MUST answer `404` to a `GET` and inside a multiget, and a change of what the
+  viewer sees MUST change the CTag without any publish.
+- FR-041: Publishing into a live source MUST throw.
+- FR-042: An address book's URL segment MUST be `{source}.{key}` unless the source names one
+  (`PublishedAddressBookInfo.Segment`: 1 to 128 ASCII letters, digits, `-`, `_`, `.`, `~` or `@`, not `.` or
+  `..`), MUST be matched exactly, MUST NOT change the store address or the sync token, and two address books a user
+  sees with the same segment, or an invalid segment, MUST throw.
 
 ## Success criteria
 

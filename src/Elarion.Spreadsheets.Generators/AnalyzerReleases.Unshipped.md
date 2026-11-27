@@ -10,3 +10,4 @@
  ELSHEET006 | Elarion.Spreadsheets | Error    | [SpreadsheetRecord] type shape is unsupported (struct, nested, generic, or abstract)
  ELSHEET007 | Elarion.Spreadsheets | Error    | [SpreadsheetRecord] type declares a member named like a generated one
  ELSHEET008 | Elarion.Spreadsheets | Error    | Two members of one enum share a label, name or alias (ignoring case)
+ ELSHEET009 | Elarion.Spreadsheets | Error    | Choices/StrictChoices misused (not a string property, or no static IReadOnlyList<string> member of that name)

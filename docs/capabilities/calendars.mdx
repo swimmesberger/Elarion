@@ -63,7 +63,26 @@ public sealed class PreviewImport(CalendarReader reader) : IHandler<PreviewImpor
   located like the package's and appear in `Errors` and in `ToAppError`.
 - `ToAppError(fieldPath, format?, maxMessages)` converts to a validation `AppError` with at most 100 messages by default
   and one that counts the rest. Pass a formatter to word each error from its `Code` and data in the application's
-  language.
+  language; the package's messages are English, and it ships no translations, as the other file-format packages do not:
+
+```csharp
+static string German(CalendarError e) => e.Code switch {
+    CalendarErrorCodes.UnknownTimeZone => $"Zeile {e.LineNumber}: Zeitzone „{e.TimeZoneId}“ ist unbekannt.",
+    CalendarErrorCodes.InvalidValue => $"Zeile {e.LineNumber}: {e.Property} ist kein gültiger Wert ({e.ExpectedKind}).",
+    _ => e.ToString(),
+};
+return result.ToAppError("file", German);
+```
+
+- Reading is lenient (see below). An application that refuses broken files instead refuses when
+  `CalendarErrorCodes.IsStructural(error.Code)` holds for an error: the file is not a calendar or past a file limit, a
+  line is malformed, too long or holds a control character, a component ends unexpectedly or exceeds a per-item limit.
+  `Strict = true` in the read options also reports what the lenient reader accepts silently: a rule with both `COUNT`
+  and `UNTIL` (`calendar.invalid_value`, the item has no value) and a value with a control character other than tab
+  (`calendar.control_character`, the line is skipped).
+- Reading and expanding are CPU-bound and run synchronously on the calling thread once the stream is buffered. An
+  application that imports uploads under load passes a token with a time budget to both, and may run them on a
+  bounded number of worker threads rather than the request thread.
 
 ### Files as producers write them
 
@@ -76,7 +95,11 @@ says when that happened. The code pages are held by the package, never registere
 ## Time zones
 
 A `TZID` resolves through the system's zones first, as an IANA or a Windows id, and otherwise through the file's
-`VTIMEZONE` of that id. An id neither knows is `calendar.unknown_time_zone` on each item that uses it. A floating time
+`VTIMEZONE` of that id. An id neither knows is `calendar.unknown_time_zone` on each item that uses it. A vendor prefix
+is removed by trying the id's last few segments, so resolution is linear in the id's length; an id longer than
+`MaxTimeZoneIdLength` (128 characters) is not resolved at all, and a `VTIMEZONE` or `X-WR-TIMEZONE` with such an id is
+not used. Only zones the system knows are cached process-wide; an id from a file that does not resolve leaves nothing
+behind. A floating time
 stays floating; it converts to UTC only in a zone the caller passes (`CalendarExpandOptions.FloatingTimeZone`).
 `X-WR-TIMEZONE` is reported as `CalendarHeader.SuggestedTimeZone`.
 
@@ -97,12 +120,29 @@ foreach (var occurrence in week.Occurrences)
 Expansion implements RFC 5545 recurrence for the Gregorian calendar: every `FREQ` and `BY` part, `BYSETPOS`, `WKST`,
 `COUNT`, `UNTIL`, `RDATE`, `EXDATE` and overrides matched by `UID` and `RECURRENCE-ID`. A local time in a
 daylight-saving gap moves forward by the gap; an ambiguous one takes its first offset. Hourly and shorter rules step in
-elapsed time. An override whose recurrence id is no instance is an extra occurrence, as the major clients treat it, and
-`RANGE=THISANDFUTURE` is read as an override of its one instance.
+elapsed time. A repeated value of a `BY` list counts once, and a list longer than the part has values does not parse.
 
-Two caps bound an expansion: `MaxOccurrences` (10,000) stops with `calendar.too_many_occurrences` and the occurrences
-found; `MaxIterations` (100,000 candidates without an occurrence) stops a series with `calendar.recurrence_limit`. Each
-occurrence says where its end comes from (`EndKind`: stated, from a duration, a default day or no time).
+- **Overrides** match their instance exactly, as RFC 5545 says: an override whose recurrence id is no instance (the
+  right day at another time, say) is an extra occurrence, as the major clients treat it. A date `RECURRENCE-ID` against
+  date-time instances matches the day's instance. `RANGE=THISANDFUTURE` is read as an override of its one instance.
+- **Updates sent again**: of several overrides of one instance, only the latest counts (the highest `SEQUENCE`, then
+  the latest `DTSTAMP`, then the later one), as calendar clients do. `ResolveOverrideVersions = false` keeps them all.
+- **Cancelled items**: by default an item with `STATUS:CANCELLED` is an occurrence like any other, because the
+  expansion reports what the file states. `SkipCancelled = true` leaves them out: a cancelled override removes its
+  instance, a cancelled master its series. An application that shows a calendar turns it on.
+- **`EXRULE`** (RFC 2445, deprecated by RFC 5545 but still written by older producers) is read into `ExceptionRules`,
+  written back, and applied: its instances are excluded, `DTSTART` never.
+
+| Cap | Default | Exceeded |
+| --- | --- | --- |
+| `MaxOccurrences` | 10,000 | The expansion stops with `calendar.too_many_occurrences` and the occurrences found. |
+| `MaxIterations` | 100,000 | A series whose rule finds no instance in that many periods stops with `calendar.recurrence_limit`. |
+| `MaxCandidates` | 1,000,000 | A series whose rule builds that many candidates stops with `calendar.recurrence_limit`, counted as they are built within a period. |
+
+A rule without `COUNT` starts a few periods before the window, whatever its frequency, so a rule from a distant
+`DTSTART` costs only the periods near the window. A rule with `COUNT` must be counted from `DTSTART`; `MaxCandidates`
+bounds that. `Expand` takes a cancellation token, checked per series and per period of a rule. Each occurrence says
+where its end comes from (`EndKind`: stated, from a duration, a default day or no time).
 
 Alarms resolve their trigger times per occurrence with `CalendarAlarm.GetTriggerTimes(occurrence)`.
 
@@ -140,6 +180,13 @@ typed item and written back unchanged. The component tree can be pruned or built
 | `MaxLineBytes` | 4 MiB | The line is dropped with `calendar.line_too_long`; the item keeps its value. |
 | `MaxPropertiesPerComponent` | 1,000 | The item has no value (`calendar.too_many_properties`); reading continues. |
 | `MaxDepth` | 8 | The item has no value (`calendar.nesting_too_deep`); reading continues. |
+| `MaxLines` | 1,000,000 | Reading stops with `calendar.too_many_lines`; the items before it are kept. |
+| `MaxItems` | 50,000 | Reading stops with `calendar.too_many_items`; the items before it are kept. Only events and to-dos count. |
+| `MaxTimeZoneIdLength` | 128 | A longer `TZID` is `calendar.unknown_time_zone` without a lookup. |
+| `Strict` | `false` | Reports `COUNT` with `UNTIL` and control characters (see above). |
+
+The cancellation token of `ReadAsync` is checked every 1,024 lines while the file is parsed, and per item while items
+are mapped.
 
 The keys are listed in the [configuration reference](/docs/reference/configuration#calendars).
 
@@ -148,6 +195,8 @@ The keys are listed in the [configuration reference](/docs/reference/configurati
 `calendar.unreadable`, `calendar.too_large`, `calendar.line_too_long`, `calendar.too_many_components`,
 `calendar.too_many_properties`, `calendar.nesting_too_deep`, `calendar.malformed_line`, `calendar.unexpected_end`,
 `calendar.required`, `calendar.invalid_value`, `calendar.unknown_time_zone`, `calendar.duplicate_uid`,
-`calendar.too_many_occurrences`, `calendar.recurrence_limit` — constants of `CalendarErrorCodes`. Each error carries the
+`calendar.too_many_occurrences`, `calendar.recurrence_limit`, `calendar.too_many_lines`, `calendar.too_many_items`,
+`calendar.control_character` — constants of `CalendarErrorCodes`, whose `IsStructural(code)` says which are about the
+file's form. Each error carries the
 item's index and line, the component and `UID`, the property, its line and value, and the expected kind, the limit or
 the time-zone id where they apply.

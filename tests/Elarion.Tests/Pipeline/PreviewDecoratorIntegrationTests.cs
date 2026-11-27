@@ -45,7 +45,7 @@ public sealed class PreviewDecoratorIntegrationTests(PostgreSqlUnitOfWorkFixture
             new ImportWidgets(sp.GetRequiredService<UnitOfWorkDbContext>());
         if (withTransactionDecorator)
             handler = new TransactionDecorator<PreviewImportCommand, Result<PreviewImportOutcome>>(
-                handler, sp.GetRequiredService<IUnitOfWork>());
+                handler, sp.GetRequiredService<IUnitOfWork>(), []);
         handler = new PreviewDecorator<PreviewImportCommand, PreviewImportOutcome>(
             handler, sp.GetService<IUnitOfWork>(), sp.GetRequiredService<IElarionJsonSerialization>());
         return await handler.HandleAsync(command, Ct);

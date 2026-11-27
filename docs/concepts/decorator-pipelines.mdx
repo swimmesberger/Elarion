@@ -129,7 +129,10 @@ handlers** (which run inside the publisher's transaction) — a rule no `where` 
 [`static bool AppliesTo`](#conditional-attachment-with-appliesto) predicate states it exactly, and also excludes
 handlers whose pipeline already owns the unit of work — [`[Idempotent]`](/docs/concepts/idempotency) commands and
 integration-event consumers under the default-on inbox (only an `[AllowDuplicates]` opt-out gets the plain
-transaction back) — so a handler is never wrapped in two nested transactions:
+transaction back) — so a handler is never wrapped in two nested transactions. A command marked `[NoTransaction]` opts
+out too. The shape, simplified (the shipped decorator also hands an exception from the handler or the commit to the
+registered `IUnitOfWorkFailureTranslator`s, see
+[constraint violations as results](/docs/concepts/persistence-and-transactions#constraint-violations-as-results)):
 
 ```csharp
 namespace Elarion.Pipeline;
@@ -140,7 +143,8 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
 ) : IHandler<TRequest, TResponse> {
     // Attach only where a new unit of work is needed. The generator calls this once per handler type.
     public static bool AppliesTo(HandlerMetadata handler) {
-        if (handler.GetAttribute<IdempotentAttribute>() is not null)
+        if (handler.GetAttribute<IdempotentAttribute>() is not null
+            || handler.GetAttribute<NoTransactionAttribute>() is not null)
             return false;
 
         // The default-on inbox owns an integration consumer's unit of work; [AllowDuplicates] opts out of it.
@@ -170,6 +174,7 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
 | Handler | `AppliesTo` | Result |
 |---|---|---|
 | Command (`ICommand`) | true | opens a transaction |
+| Command marked `[NoTransaction]` | false | not attached — the handler owns its transactions |
 | Query (`IQuery`) | false | not attached |
 | Domain-event handler (`IDomainEvent`, inline in the command) | false | not attached — rides the publisher's transaction |
 | Integration-event handler (`IIntegrationEvent`, fresh post-commit scope) | false | not attached — the default-on inbox (idempotency decorator) owns the unit of work |

@@ -115,3 +115,4 @@
 * [ADR-0112](0112-elarion-ships-ui-components.md) - Elarion ships UI components (headless state, styled components, the shell contract); the application keeps the look (proposed)
 * [ADR-0113](0113-carddav-address-books.md) - CardDAV — published address books on the WebDAV core, stored as vCard 3.0 and converted on request
 * [ADR-0114](0114-contact-groups.md) - Contact groups — a group kind and members in the contact model, Apple's form in vCard 3.0 and KIND:group in 4.0
+* [ADR-0120](0120-offset-pages-and-multi-key-sorts.md) - Offset pages have their own envelope (`OffsetPage<T>`, required total, no cursors), and a sort may combine several keys

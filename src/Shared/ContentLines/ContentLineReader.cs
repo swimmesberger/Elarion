@@ -43,6 +43,7 @@ internal sealed class ContentLineReader : IDisposable {
     public bool Read() {
         while (true) {
             if (!NextPhysical(out var start, out var length, out var lineNumber)) return false;
+            if (_rules.SkipByteOrderMarks) SkipByteOrderMarks(ref start, ref length);
             var line = _data.Span.Slice(start, length);
             if (IsBlank(line)) continue;
             if (_rules.SkipCommentLines && line[0] == (byte)'#') continue;
@@ -103,6 +104,13 @@ internal sealed class ContentLineReader : IDisposable {
             }
 
             return;
+        }
+    }
+
+    private void SkipByteOrderMarks(ref int start, ref int length) {
+        while (length >= 3 && _data.Span.Slice(start, 3).SequenceEqual("\uFEFF"u8)) {
+            start += 3;
+            length -= 3;
         }
     }
 

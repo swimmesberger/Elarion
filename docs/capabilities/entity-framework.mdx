@@ -362,13 +362,13 @@ before auditing records it. An interceptor your persistence assembly adds in `On
 
 ## Pagination
 
-List handlers page against the `DbContext` and return the shared, transport-neutral `Page<T>`
-envelope (keyset cursors or offset totals). The keyset definition generator (`[Keyset<TEntity>]`)
+List handlers page against the `DbContext` and return a transport-neutral envelope: `Page<T>` with
+keyset cursors, or `OffsetPage<T>` with a required total. The keyset definition generator (`[Keyset<TEntity>]`)
 ships in the EF Core generators package alongside the DbSet generation, but the runtime helpers,
 contracts, and the row-value seek note all live with the rest of pagination.
 
 <Cards>
   <Card title="Pagination" href="/docs/capabilities/pagination">
-    Keyset (cursor) and offset paging, the `Page<T>` envelope, sort maps, and the opaque cursor codec.
+    Keyset (cursor) and offset paging, the `Page<T>` and `OffsetPage<T>` envelopes, sort maps, and the opaque cursor codec.
   </Card>
 </Cards>
