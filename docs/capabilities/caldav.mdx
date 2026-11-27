@@ -16,6 +16,8 @@ answers the calendar apps' WebDAV requests from it, so sync is exact on every no
 | `Elarion.WebDav.AspNetCore` | The host: `MapElarionDav()`, `/.well-known/caldav`, the app-password scheme on the DAV routes only. |
 | `Elarion.AppPasswords` (+ `.EntityFrameworkCore`, `.AspNetCore`) | The credential calendar apps send: see [App passwords](/docs/capabilities/app-passwords). |
 
+Address books are served from the same packages and host by [CardDAV](/docs/capabilities/carddav).
+
 Why it is shaped this way, and what was rejected, is in
 [ADR-0111](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0111-caldav.md).
 

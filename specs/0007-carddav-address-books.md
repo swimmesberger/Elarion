@@ -165,8 +165,8 @@ The CardDAV server
 - FR-024: An `addressbook-query` with a `limit` lower than the number of matches MUST answer that many contacts and a
   `507` response for the request URL inside the `multistatus`.
 - FR-025: `address-data` without a version, or with `version="3.0"`, MUST answer the stored vCard 3.0; with
-  `version="4.0"` it MUST answer the same contact written as vCard 4.0; another content type or version MUST answer
-  `403` with the `supported-address-data` precondition (in a report: inside the `multistatus` for that contact).
+  `version="4.0"` it MUST answer the same contact written as vCard 4.0; another content type or version in an
+  `addressbook-multiget` or `addressbook-query` MUST answer `403` with the `supported-address-data` precondition.
 - FR-026: `address-data` naming properties (`prop name="…"`) MUST answer only those properties, together with
   `VERSION`, `UID` and `FN`, which a card always needs (Apple drops a card without `FN`).
 - FR-027: The ETag of a contact MUST be the same whichever version `address-data` asks for.

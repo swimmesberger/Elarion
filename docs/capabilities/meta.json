@@ -36,6 +36,7 @@
     "calendars",
     "caldav",
     "contacts",
+    "carddav",
     "telemetry"
   ]
 }

@@ -2,6 +2,7 @@
 
 ## 2026-11-27
 
+* **Update**: CardDAV built ([plan 0007](../specs/0007-carddav-address-books.plan.md), as-built notes): the source machinery moved into the WebDAV core, a protocol may answer another representation on GET, and [spec 0007](../specs/0007-carddav-address-books.md) FR-025 now says an unsupported address-data is refused per report, not per contact; the published [CardDAV](capabilities/carddav.mdx) page describes the shipped behaviour.
 * **Update**: [ADR-0113](decisions/0113-carddav-address-books.md) accepted and [spec 0007](../specs/0007-carddav-address-books.md) approved; implementation follows its [plan](../specs/0007-carddav-address-books.plan.md).
 * **Creation**: proposed [ADR-0113](decisions/0113-carddav-address-books.md), CardDAV address books on the WebDAV core of ADR-0111 (contacts stored as vCard 3.0 and converted to 4.0 on request, queries answered by parsing cards, one address book per account on Apple documented rather than worked around; groups, vCard feeds, a client and the directory gateway left out), with [spec 0007](../specs/0007-carddav-address-books.md), its plan and the research note [CardDAV clients](research/2026-11-27-carddav-clients.md); the [glossary](../GLOSSARY.md) gains published address book and address-book source.
 * **Update**: CalDAV slices 2–6 built; the plan's as-built notes record where the WebDAV core, the store, the host, the feeds and the client depart from it ([plan 0006](../specs/0006-caldav-calendars.plan.md))

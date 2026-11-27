@@ -303,6 +303,11 @@ var options = contactOptions.Value.ReadDefaults with { MaxContacts = 50_000 };  
 
 The keys are listed in the [configuration reference](/docs/reference/configuration#contacts).
 
+## Serving contacts to contacts apps
+
+To show the application's contacts in iOS, macOS, Thunderbird, DAVx5 or Evolution, publish them over
+[CardDAV](/docs/capabilities/carddav), which stores and serves them with this package's writer.
+
 ## Out of scope
 
 - Writing vCard 2.1; jCard (RFC 7095) and xCard.

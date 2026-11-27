@@ -71,6 +71,20 @@ minor releases may include breaking changes.
   endpoint), seeds the dispatch scope with the DAV principal after authentication, and redirects
   `/.well-known/caldav` with `301` to the prefix. iOS, macOS, Thunderbird, DAVx5 and Evolution add an account from the
   host name, an e-mail and an app password.
+- **CardDAV server: `Elarion.CardDav`** (ADR-0113, spec 0007). Contacts appear as read-only address books in iOS,
+  macOS, Thunderbird, DAVx5 and Evolution, beside the calendars, from the same store, host and app passwords. A module
+  declares an address-book source, a query request implementing `ICardDavSource<TSelf>` registered with
+  `AddElarionCardDavSource<TQuery>()`, whose ordinary handler returns the address books (`PublishedAddressBookInfo`:
+  key, name, description) the current user may see; a source without a registered handler stops the host from
+  starting. `ICardDavPublisher` publishes, removes and replaces `Elarion.Contacts` contacts in the handler's transaction
+  as vCard 3.0 (no change for equal bytes; a missing UID or name, or a duplicate UID in a replace, throw). Address books
+  answer `addressbook-home-set`, `supported-address-data` (3.0 and 4.0) and the core properties, and the reports
+  `addressbook-multiget` and `addressbook-query` (`prop-filter`, `param-filter`, `text-match` with every match type and
+  collation, `limit`); `address-data` and `Accept` convert a card to vCard 4.0 with the stored ETag. `MapElarionDav()`
+  adds `/.well-known/carddav`, and `OPTIONS` names `addressbook`. `CardDavOptions` embeds `ContactReadOptions`. See
+  [CardDAV](https://elarion.wimmesberger.dev/docs/capabilities/carddav).
+- **`Elarion.WebDav`: a protocol may answer another representation on `GET`.** `IDavProtocol.GetRepresentationAsync`
+  (a default member answering the stored bytes) returns a `DavRepresentation`; CardDAV uses it for vCard 4.0.
 - **`Elarion.AspNetCore`: endpoints can opt out of cross-origin protection.**
   `.DisableElarionCrossOriginProtection(pathPrefix)` adds `CrossOriginProtectionExemptMetadata`, which
   `UseElarionCrossOriginProtection` honours for the selected endpoint and, through the metadata's path prefix, before

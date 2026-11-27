@@ -174,6 +174,30 @@ What Apple reads and does not get: `CS:me-card`, `max-image-size`, `push-transpo
 
 The member `GET` already answers the stored content type; `text/vcard; charset=utf-8` is what the publisher stores.
 
+## As built
+
+Where the implementation settles or departs from the above:
+
+- **Shared source machinery**: `DavSources.Register`/`AddRegistry`/`InvokeAsync`/`CheckKey`, `DavSourceRegistry<TListing>`
+  and `DavSourceHandlerValidator<TListing, TOptions>` in `Elarion.WebDav`, with a `DavSourceKind` (noun and
+  registration method) per protocol for the messages; the kind is a `DavSourceKindOf<TListing>` service so the
+  validator registers by type and `AddElarion…Dav` stays safe to call repeatedly. The caller makes its options
+  validate on start, since a generic `ValidateOnStart` needs a trimming annotation the shared helper cannot carry.
+- **`GET` representations**: `IDavProtocol.GetRepresentationAsync` is a default interface member returning `null`
+  (the stored bytes), with a public `DavRepresentation(Content, ContentType)`; CardDAV answers 4.0 with
+  `text/vcard; charset=utf-8; version=4.0`. No `Vary: Accept`: DAV answers are private and not cached by intermediaries.
+- **An unsupported `address-data`** is refused with `403 supported-address-data` by `addressbook-multiget` and
+  `addressbook-query` before any member is written; in a `PROPFIND` or a `sync-collection`, which the core answers
+  without asking the protocol, it falls back to the stored 3.0 card rather than failing the whole answer.
+- **Replace holds the set in memory** before the store sees it, to refuse a duplicate UID before anything is applied;
+  at the tier an address book is a few thousand cards.
+- **`CardDavFilterEvaluator` is internal**; `CalDavFilterEvaluator` stays public. A filter element other than
+  `prop-filter`, an unknown `test`, an unknown match type or a nameless filter answers `supported-filter`.
+- **Benchmarks**: `CardDavBenchmarks` (unchanged sync and a query over 1,000 contacts, through the dispatcher on the
+  in-memory store). No CalDAV benchmark existed to extend.
+- **Not done**: the NativeAOT publish of a host with both protocols (SC-004) was not run in this change; the package is
+  `IsAotCompatible` and builds without trimming or AOT warnings. The real devices (SC-001) are a manual check.
+
 ## Tests
 
 Seams as in plan 0006: the dispatcher in process through `DavTestHarness` with the in-memory store, the EF store on
