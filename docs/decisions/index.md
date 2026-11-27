@@ -114,3 +114,4 @@
 * [ADR-0111](0111-caldav.md) - CalDAV — published calendars served from a store, calendar sources as handlers, app passwords, and a sync-step client
 * [ADR-0112](0112-elarion-ships-ui-components.md) - Elarion ships UI components (headless state, styled components, the shell contract); the application keeps the look (proposed)
 * [ADR-0113](0113-carddav-address-books.md) - CardDAV — published address books on the WebDAV core, stored as vCard 3.0 and converted on request
+* [ADR-0114](0114-contact-groups.md) - Contact groups — a group kind and members in the contact model, Apple's form in vCard 3.0 and KIND:group in 4.0

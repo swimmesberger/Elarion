@@ -44,6 +44,16 @@ unchanged.
 - Given a contact with a photo, a birthday without a year and an organization, when it is published, then a client
   receives one vCard 3.0 card with the photo inline, the birthday and the organization, under the contact's UID.
 
+### Publish a group inside an address book (P2)
+
+- Given a group "Team red" whose members are two published contacts, when it is published, then a client fetching it
+  as vCard 3.0 receives `X-ADDRESSBOOKSERVER-KIND:group` with both members, and one asking for 4.0 receives
+  `KIND:group` with both members, under the same ETag.
+- Given a published group, when a client sends an `addressbook-query` for `KIND` equal to `group`, or for
+  `X-ADDRESSBOOKSERVER-KIND` equal to `group`, then the group is answered and the members are not.
+- Given a group with 2,500 members and `CardDav:ContactRead:MaxPropertiesPerContact` raised to 3,000, when it is
+  published and fetched as 4.0, then the card holds all 2,500 members; with the default limit, publishing it throws.
+
 ### Decide who sees which address book in a handler (P1)
 
 - Given an address-book source `customers` whose handler requires the permission `customers.read` and returns one
@@ -179,6 +189,12 @@ The CardDAV server
   and a feed token MUST NOT authenticate any address-book URL.
 - FR-031: Every published card MUST carry a non-empty `FN`, and `N`, `UID` and `VERSION`, because Apple drops a card
   without `FN`.
+- FR-032: A group contact (spec 0005 FR-068–FR-071) MUST publish, sync and convert between vCard 3.0 and 4.0 like any
+  contact; its members MUST NOT be checked against the address book.
+- FR-033: An `addressbook-query` `prop-filter` named `KIND` or `MEMBER` MUST also match the stored
+  `X-ADDRESSBOOKSERVER-KIND` and `X-ADDRESSBOOKSERVER-MEMBER` properties.
+- FR-034: Publishing a contact with more properties than `CardDavOptions.ContactRead.MaxPropertiesPerContact` MUST throw,
+  so that every stored card can be read back to convert or query it.
 
 ## Success criteria
 
@@ -194,8 +210,6 @@ The CardDAV server
 
 - Two-way editing from contacts apps (`PUT`/`DELETE` into an application's data); ADR-0111 describes its seam, and it
   would come for calendars and address books together.
-- Contact groups as cards (`KIND:group` with `MEMBER`, Apple's `X-ADDRESSBOOKSERVER-KIND:group`); an application
-  groups contacts by address book, or by `CATEGORIES`, which the published card carries.
 - A CardDAV client that syncs external address books into an application.
 - vCard feed URLs: no contacts app subscribes to an address-book URL without an account (ADR-0113).
 - The directory gateway of the expired draft `draft-daboo-carddav-directory-gateway` (Apple's search-only directory)
@@ -209,5 +223,6 @@ The CardDAV server
 ## Decisions
 
 - [ADR-0113](../docs/decisions/0113-carddav-address-books.md): what CardDAV adds to ADR-0111.
+- [ADR-0114](../docs/decisions/0114-contact-groups.md): group cards, which amend ADR-0113 section 4.
 - [ADR-0111](../docs/decisions/0111-caldav.md): the WebDAV core, store, host and app passwords this builds on.
 - [ADR-0110](../docs/decisions/0110-vcard-contacts.md): the contact model, reader and writer.
