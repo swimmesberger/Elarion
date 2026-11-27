@@ -91,6 +91,8 @@ audience validation is off or the Development stand-in is active.
 | `AutomaticRefreshInterval` | `01:00:00` | How long fetched keys are used before a background refresh (library minimum: 5 minutes). |
 | `RefreshInterval` | `00:01:00` | Minimum time between refreshes triggered by an unknown key id (library minimum: 1 second). |
 | `LastKnownGoodLifetime` | `00:00:00` (off) | IdentityModel's last-known-good grace for a configuration a refresh replaced (see below). |
+| `AwaitRefreshOnUnknownKey` | `false` | A token naming an unknown key id waits for one fetch of the keys instead of being refused (see below). |
+| `UnknownKeyRefreshTimeout` | `00:00:05` | How long such a request waits for that fetch before it is refused. |
 | `Development:*` | see below | The stand-in identity. |
 | `Fixed:*` | off | One identity every request is signed in as, in any environment ([below](#fixed-identity-without-a-proxy)). |
 
@@ -215,7 +217,7 @@ the library's behaviour, pinned by the package's tests:
 | First requests after startup | One fetch; every concurrent request waits for it, none is validated against an empty key list. |
 | Key endpoint down at startup | Requests are refused (401, fail-closed); the next request after the endpoint recovers fetches again and succeeds. |
 | Routine refresh | In the background every `AutomaticRefreshInterval`; requests keep using the current keys. |
-| Token with an unknown key id | That request is refused and a background refresh is requested (at most once per `RefreshInterval`); the new key is accepted as soon as it lands. |
+| Token with an unknown key id | That request is refused and a background refresh is requested (at most once per `RefreshInterval`); the new key is accepted as soon as it lands. With `AwaitRefreshOnUnknownKey`, the request waits for the fetch instead (below). |
 | Refresh fails, or returns no keys / a foreign issuer | The current keys keep serving. |
 | A key the issuer withdrew | Stops validating once the refresh lands, unless `LastKnownGoodLifetime` grants a grace. |
 
@@ -223,6 +225,22 @@ Most proxies publish a new key well before they sign with it, so the routine ref
 first token arrives; lower `AutomaticRefreshInterval` if yours rotates faster. `LastKnownGoodLifetime` is off by
 default although IdentityModel's own default is one hour: that grace keeps accepting tokens signed with a key the
 issuer withdrew, which is the wrong default when a key is withdrawn because it leaked. An outage never needs it.
+
+An issuer that rotates by replacing its key, without publishing the next one ahead, signs with a key nobody fetched
+yet, so the requests until the background refresh lands are refused. `AwaitRefreshOnUnknownKey: true` lets them wait:
+a token whose key id the current keys do not hold waits for one fetch of the key endpoint, then validates against what
+it found.
+
+- **Single-flight.** Concurrent requests naming the unknown key share one fetch.
+- **Rate-limited.** At most one such fetch per `RefreshInterval`; a request in that window whose key is still unknown
+  is refused at once, so forged key ids cannot make the instance call the endpoint more often than the background
+  refresh already may.
+- **Bounded.** A request waits at most `UnknownKeyRefreshTimeout` (five seconds); the fetch goes on for later ones.
+- **Short-lived.** The keys that fetch found validate tokens for `RefreshInterval`, while the regular refresh, which it
+  requests, catches up; a key the issuer withdraws stops validating at the latest then. A failed or refused fetch
+  (another issuer, no keys) changes nothing.
+
+Pre-publishing the next key remains the better fix where the issuer allows it; the option is for issuers that do not.
 
 The keys are fetched with the named `HttpClient` `ProxyIdentityDefaults.HttpClientName` (10-second timeout);
 configure it with `services.AddHttpClient(ProxyIdentityDefaults.HttpClientName)` to add an outbound proxy or a handler.

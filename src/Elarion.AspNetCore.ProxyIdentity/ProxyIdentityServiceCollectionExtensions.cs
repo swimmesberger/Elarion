@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
@@ -103,9 +104,38 @@ public static class ProxyIdentityServiceCollectionExtensions {
             .AddJwtBearer(ProxyIdentityDefaults.AuthenticationScheme, jwt => ConfigureJwtBearer(jwt, options));
         // Created lazily, once per scheme options instance: the HTTP client factory does not exist at registration time.
         services.AddOptions<JwtBearerOptions>(ProxyIdentityDefaults.AuthenticationScheme)
-            .Configure<IHttpClientFactory>((jwt, clients) =>
-                jwt.ConfigurationManager = ProxySigningKeys.Create(options, clients.CreateClient(ProxyIdentityDefaults.HttpClientName)));
+            .Configure<IHttpClientFactory, ILoggerFactory>((jwt, clients, loggers) => {
+                jwt.ConfigurationManager = ProxySigningKeys.Create(options, clients.CreateClient(ProxyIdentityDefaults.HttpClientName));
+                if (options.AwaitRefreshOnUnknownKey) {
+                    AwaitRefreshOnUnknownKey(jwt, new UnknownKeyRefresher(
+                        options,
+                        clients.CreateClient(ProxyIdentityDefaults.HttpClientName),
+                        TimeProvider.System,
+                        loggers.CreateLogger<UnknownKeyRefresher>()));
+                }
+            });
         return builder;
+    }
+
+    /// <summary>
+    /// <see cref="ProxyIdentityOptions.AwaitRefreshOnUnknownKey"/>: before validation, a token naming a key the current
+    /// keys do not hold waits for the refresher's fetch; during validation, the keys it fetched are offered beside the
+    /// configuration's.
+    /// </summary>
+    private static void AwaitRefreshOnUnknownKey(JwtBearerOptions jwt, UnknownKeyRefresher refresher) {
+        jwt.TokenValidationParameters.IssuerSigningKeyResolverUsingConfiguration =
+            (_, _, kid, _, configuration) => refresher.ResolveKeys(kid, configuration);
+        var onMessageReceived = jwt.Events.OnMessageReceived;
+        jwt.Events.OnMessageReceived = async context => {
+            await onMessageReceived(context).ConfigureAwait(false);
+            if (context.Result is null
+                && context.Token is { } token
+                && UnknownKeyRefresher.KeyId(token) is { } kid
+                && context.Options.ConfigurationManager is { } configurationManager) {
+                await refresher.EnsureKeyAsync(kid, configurationManager, context.HttpContext.RequestAborted)
+                    .ConfigureAwait(false);
+            }
+        };
     }
 
     private static void ConfigureJwtBearer(JwtBearerOptions jwt, ProxyIdentityOptions options) {
@@ -240,6 +270,9 @@ public static class ProxyIdentityServiceCollectionExtensions {
         }
         if (options.RefreshInterval < TimeSpan.FromSeconds(1)) {
             return $"{section}:RefreshInterval must be at least one second (the IdentityModel minimum).";
+        }
+        if (options.AwaitRefreshOnUnknownKey && options.UnknownKeyRefreshTimeout <= TimeSpan.Zero) {
+            return $"{section}:UnknownKeyRefreshTimeout must be positive while {section}:AwaitRefreshOnUnknownKey is true.";
         }
         return null;
     }

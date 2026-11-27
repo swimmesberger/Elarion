@@ -142,6 +142,11 @@ minor releases may include breaking changes.
   `Content-Length`, so a browser shows the download's progress, and counts the bytes written: a content that writes
   more or fewer aborts the connection like any other failure after the first byte. See
   [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints#streamed-files-http-only-endpoints).
+- **Proxy identity: `AwaitRefreshOnUnknownKey`.** For an issuer that rotates by replacing its signing key, a token
+  naming a key the current keys do not hold can wait for one fetch of the key endpoint instead of being refused until
+  the background refresh lands. The fetch is single-flight, at most one per `RefreshInterval`, awaited at most
+  `UnknownKeyRefreshTimeout` (five seconds), and the keys it found validate for `RefreshInterval`. Off by default. See
+  [Proxy identity](https://elarion.wimmesberger.dev/docs/capabilities/proxy-identity#signing-keys).
 
 ### Changed
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
