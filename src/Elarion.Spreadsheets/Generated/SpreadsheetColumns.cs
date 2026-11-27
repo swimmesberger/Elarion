@@ -17,8 +17,12 @@ public static class SpreadsheetColumns {
     /// <param name="format">The declared number format, or <see langword="null"/>.</param>
     /// <param name="width">The declared width in characters; zero or less when the writer measures it.</param>
     /// <param name="aliases">Older headers that still read as the column.</param>
-    /// <param name="choices">The labels of a choice column; empty otherwise.</param>
+    /// <param name="choices">
+    /// The labels of a choice column, copied once when the column table is built, so a text column's <c>Choices</c>
+    /// member is read then; empty otherwise.
+    /// </param>
     /// <param name="isReadable">Whether reading sets the property; <see langword="false"/> for a write-only column.</param>
+    /// <exception cref="InvalidOperationException">The choices member of a text column is or holds <see langword="null"/>.</exception>
     public static SpreadsheetColumn<T> Create<T>(
         int index,
         string header,
@@ -28,9 +32,14 @@ public static class SpreadsheetColumns {
         string? format,
         double width,
         string[] aliases,
-        string[] choices,
+        IReadOnlyList<string>? choices,
         bool isReadable = true) where T : class {
+        if (choices is null || choices.Any(static choice => choice is null))
+            throw new InvalidOperationException(
+                $"The choices of column '{header}' of the spreadsheet record '{typeof(T).Name}' are null or hold null; "
+                + "a choices member must hold its labels before the record is first written or read.");
+
         return new SpreadsheetColumn<T>(
-            index, header, propertyName, kind, isNullable, format, width > 0 ? width : null, aliases, choices, isReadable);
+            index, header, propertyName, kind, isNullable, format, width > 0 ? width : null, aliases, [.. choices], isReadable);
     }
 }

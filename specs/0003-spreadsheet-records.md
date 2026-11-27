@@ -196,6 +196,23 @@ can be read as plain rows of typed cells with the same formats and limits.
 - Given a workbook with several worksheets, when it is read naming the second worksheet, then the records come from
   that worksheet; naming a worksheet that does not exist gives one error that names it.
 
+### Worksheets the application shapes per call (P2, added 2026-11-27)
+
+- Given a schema whose columns are composed at run time (numbered slots, columns from a setting), when the application
+  declares the worksheet's name and columns and writes rows of values, then the worksheet has the declared headers,
+  number and date formats, widths and dropdown lists, as a record's would.
+- Given a row that holds the label "Total" in a date column, or a second block of other types below the first, when it
+  is written, then each value is a cell of its own type, and a value of the column's kind keeps the column's format.
+- Given a record with a column only some callers may see, when a caller without it exports, then the application leaves
+  the column out for that call, and the other columns close up.
+- Given a record export, when the application adds footer rows, then they follow the records, and the dropdown lists
+  stop above them.
+- Given a text column whose dropdown labels are data, when the record is written, then the column offers those labels;
+  when it is read, then it takes any text, or, if declared strict, only the labels, reporting others with the allowed
+  labels.
+- Given a workbook already in memory, when it is read as plain rows, then the read is synchronous, and each number or
+  date cell carries the number format the file gives it.
+
 ## Requirements
 
 The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 2119 and RFC 8174.
@@ -337,6 +354,24 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
   ignoring case and surrounding whitespace, and an alias MUST never be written or offered in a dropdown list.
 - FR-072: Two members of one enum whose labels, names or aliases are equal ignoring case MUST fail the build with
   `ELSHEET008` naming both.
+- FR-073: The application MUST be able to write a worksheet whose name and columns (header, kind, number format, width,
+  dropdown labels) it declares at run time, from rows of values in column order, synchronous or asynchronous, with the
+  header, formats, widths, dropdown lists, streaming and limits of a record's worksheet.
+- FR-074: In such a row and in a footer row, each value's type MUST decide its cell, and the column's format MUST apply
+  only to a value of the column's kind, or of its family when the column declares a format; a value of an unsupported
+  type, or more values than columns, MUST fail the write naming the row.
+- FR-075: A record worksheet MUST accept footer rows of such values below the records, and its dropdown lists MUST stop
+  above them.
+- FR-076: A record worksheet MUST accept, per call, the columns to include and to exclude by property name, keeping the
+  record's order; a name that matches no column MUST fail before anything is written, leaving the workbook usable.
+- FR-077: A `string` property MUST be able to take its dropdown labels from a static `IReadOnlyList<string>` member of
+  its record, named in `[SpreadsheetColumn(Choices = …)]`; a property that is not a string, or a member that is missing,
+  not static, not public or internal, or of another type, MUST fail the build with `ELSHEET009`.
+- FR-078: Such a column MUST read any text by default, and with `StrictChoices` only its labels (ignoring case and
+  surrounding white space), reporting other text as `invalid_value` with the labels as allowed values.
+- FR-079: A workbook already in memory MUST be readable as plain rows synchronously, without copying memory backed by an
+  array.
+- FR-080: A number or date cell read without a record MUST carry the number format the file gives it.
 
 ## Success criteria
 
@@ -364,7 +399,9 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
   handler covers an import.
 - Numbered column groups ("Phone 1", "Phone 2", …) mapped to one collection property; a record declares them as
   separate properties.
-- Showing a cell's value as the spreadsheet formats it; a preview formats the record's values or uses the cell text.
+- Showing a cell's value as the spreadsheet formats it; a preview formats the record's values or uses the cell text,
+  and a plain-rows read hands over the cell's number format (FR-080) for an application that renders it itself.
+- A record property whose type changes from row to row; footer rows and run-time worksheets carry values of any type.
 - Deciding what an import does with a row (create, update, skip), resolving references between worksheets, and
   committing all or nothing: those are the application's.
 - Enumerating the rows of an import one at a time without collecting them.

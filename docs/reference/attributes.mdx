@@ -1005,7 +1005,7 @@ See [SQL mapping](/docs/capabilities/sql-mapping).
   class with one `SpreadsheetColumn<T>` per column. Every public instance property with a getter is a column, in
   declaration order; a get-only property is written and not read. The attribute class is marked `[ValidationRoot]`, so
   a record's DataAnnotations are validated on every row read. Unsupported shapes are build errors
-  (`ELSHEET001`–`ELSHEET008`).
+  (`ELSHEET001`–`ELSHEET009`).
 
 | Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -1025,6 +1025,8 @@ See [SQL mapping](/docs/capabilities/sql-mapping).
 | `Width` | `double` | `0` (measured) | The width in characters; measured from the header and the first 200 values when not set, at most 80. |
 | `Aliases` | `string[]?` | `null` | Older headers that still read as this column; the column's own header wins when a file has both. |
 | `TrueLabel`, `FalseLabel` | `string?` | `null` | On a boolean, both together: the texts written, offered as a dropdown and read (`ELSHEET005` otherwise). |
+| `Choices` | `string?` | `null` | On a `string`: `nameof` a static `IReadOnlyList<string>` field or property of the record whose labels the column offers as a dropdown (`ELSHEET009` otherwise). |
+| `StrictChoices` | `bool` | `false` | With `Choices`: reading accepts only those labels and reports other text as `invalid_value`. |
 
 ### `[SpreadsheetIgnore]`
 

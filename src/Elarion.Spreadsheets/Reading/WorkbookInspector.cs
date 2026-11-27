@@ -42,7 +42,10 @@ internal static class WorkbookInspector {
     /// <summary>Inspects the workbook in <paramref name="content"/>, or returns the error that refuses it.</summary>
     public static WorkbookInspection? Inspect(MemoryStream content, long maxUnpackedBytes, out SpreadsheetError? error) {
         error = null;
-        var bytes = content.GetBuffer().AsSpan(0, (int)content.Length);
+        // The buffer of a stream that wraps an application's memory may start at an offset (SpreadsheetReader.Open).
+        if (!content.TryGetBuffer(out var buffer)) throw new InvalidOperationException("The workbook buffer is not visible.");
+
+        var bytes = buffer.AsSpan();
         if (bytes.StartsWith(CompoundFileMagic)) return InspectCompoundFile(bytes, out error);
         if (bytes.StartsWith(ZipMagic)) return InspectZip(content, maxUnpackedBytes, out error);
 
