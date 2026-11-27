@@ -2,6 +2,7 @@
 
 ## 2026-11-27
 
+* **Update**: ADR-0073 amended — the claim returns its candidate and given-up counts, and a logger helper states the lost-claim line ([ADR-0073](decisions/0073-leased-work-rows.md))
 * **Update**: ADR-0003 amended — `[NoTransaction]` and `IUnitOfWorkFailureTranslator` on the transaction decorator, and why queries get no read-only transaction ([ADR-0003](decisions/0003-decorator-attachment-predicates.md))
 * **Update**: contact groups built ([ADR-0114](decisions/0114-contact-groups.md)): the [contacts](capabilities/contacts.mdx) and [CardDAV](capabilities/carddav.mdx) pages describe them, the [glossary](../GLOSSARY.md) gains *contact group*, and the [DAV conformance](research/2026-11-27-dav-conformance-suites.md) note no longer lists group cards among the pinned differences.
 * **Update**: [ADR-0114](decisions/0114-contact-groups.md) accepted and specs [0005](../specs/0005-vcard-contacts.md) and [0007](../specs/0007-carddav-address-books.md) approved again with the contact-group requirements; implementation follows plan 0005.

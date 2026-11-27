@@ -148,6 +148,12 @@ minor releases may include breaking changes.
   marked with it, so a command whose work is outside the database (a test mail, a slow external call) no longer holds
   a pooled connection and a transaction for the whole call; the request stays an `ICommand`. See
   [Persistence & transactions](https://elarion.wimmesberger.dev/docs/concepts/persistence-and-transactions#commands-without-a-transaction).
+- **Leased work: what a claim saw, and the lost-claim log line** (ADR-0073 amendment). `ClaimPendingAsync` returns
+  `LeasedWorkClaimed<T>`, an `IReadOnlyList<T>` of the won rows with `Candidates` (how many rows the select found;
+  zero means the queue is drained) and `GivenUp` (how many it gave up as exhausted, with or without `OnGivenUp`), so a
+  pass loops `while (claimed.Candidates > 0)` without counting in a callback. `ILogger.LogFinalizeOutcome(outcome,
+  queue, id)` writes the warning for a lost claim and the information line for an `Ineligible` row. See
+  [Coordination](https://elarion.wimmesberger.dev/docs/capabilities/coordination#giving-up-guarding-the-outcome-and-shutting-down).
 
 ### Changed
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
@@ -156,6 +162,9 @@ minor releases may include breaking changes.
 - **BREAKING: `TransactionDecorator` takes the failure translators.** Its constructor gained an
   `IEnumerable<IUnitOfWorkFailureTranslator>` parameter. The generated pipeline supplies it; code that constructs the
   decorator by hand (a test) passes `[]`.
+- **BREAKING: `ClaimPendingAsync` returns `Task<LeasedWorkClaimed<T>>`** instead of `Task<IReadOnlyList<T>>`. The new
+  type implements `IReadOnlyList<T>`, so `foreach`, `Count`, indexing and assignments to `IReadOnlyList<T>` compile
+  unchanged; only code that names the old task type (a method group, an explicit `Task<IReadOnlyList<T>>`) changes.
 
 ### Fixed
 - **A NativeAOT application with a body-bound `[HttpEndpoint]` published with trimming warnings.** The generated

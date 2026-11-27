@@ -40,10 +40,12 @@ public static class LeasedWorkDbSetExtensions {
     /// <param name="ct">The cancellation token.</param>
     /// <typeparam name="TRow">The leased work row type.</typeparam>
     /// <returns>
-    /// The claimed rows, possibly empty. Empty does not mean the queue is drained: every candidate may have been given
-    /// up or won by a concurrent worker. Loop until the candidate select finds nothing, or poll on a timer.
+    /// The claimed rows, possibly empty, with the claim's <see cref="LeasedWorkClaimed{T}.Candidates"/> and
+    /// <see cref="LeasedWorkClaimed{T}.GivenUp"/> counts. Empty does not mean the queue is drained: every candidate may
+    /// have been given up or won by a concurrent worker. Loop while <see cref="LeasedWorkClaimed{T}.Candidates"/> is not
+    /// zero, or poll on a timer.
     /// </returns>
-    public static async Task<IReadOnlyList<TRow>> ClaimPendingAsync<TRow>(
+    public static async Task<LeasedWorkClaimed<TRow>> ClaimPendingAsync<TRow>(
         this DbSet<TRow> rows,
         LeasedWorkClaim<TRow> claim,
         CancellationToken ct)
@@ -68,8 +70,8 @@ public static class LeasedWorkDbSetExtensions {
     /// <param name="ct">The cancellation token.</param>
     /// <typeparam name="TRow">The leased work row type.</typeparam>
     /// <typeparam name="TResult">The projected type.</typeparam>
-    /// <returns>The claimed rows' projections in queue order, possibly empty.</returns>
-    public static async Task<IReadOnlyList<TResult>> ClaimPendingAsync<TRow, TResult>(
+    /// <returns>The claimed rows' projections in queue order, possibly empty, with the claim's counts.</returns>
+    public static async Task<LeasedWorkClaimed<TResult>> ClaimPendingAsync<TRow, TResult>(
         this DbSet<TRow> rows,
         LeasedWorkClaim<TRow> claim,
         Expression<Func<TRow, TResult>> select,
@@ -79,7 +81,7 @@ public static class LeasedWorkDbSetExtensions {
         return await ClaimCoreAsync(rows, claim, claimed => claimed.Select(select), ct).ConfigureAwait(false);
     }
 
-    private static async Task<IReadOnlyList<TResult>> ClaimCoreAsync<TRow, TResult>(
+    private static async Task<LeasedWorkClaimed<TResult>> ClaimCoreAsync<TRow, TResult>(
         DbSet<TRow> rows,
         LeasedWorkClaim<TRow> claim,
         Func<IQueryable<TRow>, IQueryable<TResult>> shape,
@@ -103,7 +105,7 @@ public static class LeasedWorkDbSetExtensions {
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        if (candidateIds.Count == 0) return [];
+        if (candidateIds.Count == 0) return LeasedWorkClaimed<TResult>.None;
 
         await WhereClaimable(rows.Where(row => candidateIds.Contains(row.Id)), claim.Eligible, claim.NowUtc)
             .ExecuteUpdateAsync(
@@ -116,9 +118,11 @@ public static class LeasedWorkDbSetExtensions {
                 ct)
             .ConfigureAwait(false);
 
+        var givenUpCount = 0;
         IReadOnlyList<TRow> givenUp = [];
         if (claim.Exhausted is { } exhausted)
-            givenUp = await GiveUpExhaustedAsync(rows, claim, candidateIds, exhausted, ct).ConfigureAwait(false);
+            (givenUpCount, givenUp) = await GiveUpExhaustedAsync(rows, claim, candidateIds, exhausted, ct)
+                .ConfigureAwait(false);
 
         var won = await shape(claim.OrderBy(rows.AsNoTracking()
                     .Where(row => candidateIds.Contains(row.Id) && row.LockId == lockId))
@@ -127,13 +131,13 @@ public static class LeasedWorkDbSetExtensions {
             .ConfigureAwait(false);
 
         if (givenUp.Count > 0) await ReportGivenUpAsync(rows, claim, candidateIds, givenUp, ct).ConfigureAwait(false);
-        return won;
+        return new LeasedWorkClaimed<TResult>(won, candidateIds.Count, givenUpCount);
     }
 
     // Ends the claim of every won row that has used up its attempts, with the consumer's give-up setters, before the
     // won rows are read back — so the worker never sees them. The lease guard keeps another worker's rows untouched.
-    // Returns the rows actually given up, as claimed, when OnGivenUp wants them.
-    private static async Task<IReadOnlyList<TRow>> GiveUpExhaustedAsync<TRow>(
+    // Returns how many rows were given up and, when OnGivenUp wants them, those rows as claimed.
+    private static async Task<(int Count, IReadOnlyList<TRow> Reported)> GiveUpExhaustedAsync<TRow>(
         DbSet<TRow> rows,
         LeasedWorkClaim<TRow> claim,
         List<Guid> candidateIds,
@@ -142,8 +146,9 @@ public static class LeasedWorkDbSetExtensions {
         where TRow : class, ILeasedWorkRow {
         var lockId = claim.LockId;
         if (claim.OnGivenUp is null) {
-            await GiveUpAsync(rows.Where(row => candidateIds.Contains(row.Id) && row.LockId == lockId)).ConfigureAwait(false);
-            return [];
+            var count = await GiveUpAsync(rows.Where(row => candidateIds.Contains(row.Id) && row.LockId == lockId))
+                .ConfigureAwait(false);
+            return (count, []);
         }
 
         var reported = await rows.AsNoTracking()
@@ -151,21 +156,22 @@ public static class LeasedWorkDbSetExtensions {
             .Where(exhausted)
             .ToListAsync(ct)
             .ConfigureAwait(false);
-        if (reported.Count == 0) return [];
+        if (reported.Count == 0) return (0, []);
 
         // Restricted to the rows read, and the predicate restated: a concurrent writer that made a row eligible again
         // in between keeps it claimed (it is returned as won), and only what this statement gave up is reported.
         var reportedIds = reported.Select(row => row.Id).ToList();
         var givenUp = await GiveUpAsync(rows.Where(row => reportedIds.Contains(row.Id) && row.LockId == lockId))
             .ConfigureAwait(false);
-        if (givenUp == reported.Count) return reported;
+        if (givenUp == reported.Count) return (givenUp, reported);
 
         var kept = await rows.AsNoTracking()
             .Where(row => reportedIds.Contains(row.Id) && row.LockId == lockId)
             .Select(row => row.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
-        return reported.Where(row => !kept.Contains(row.Id)).ToList();
+        var actuallyGivenUp = reported.Where(row => !kept.Contains(row.Id)).ToList();
+        return (actuallyGivenUp.Count, actuallyGivenUp);
 
         Task<int> GiveUpAsync(IQueryable<TRow> mine) =>
             mine.Where(exhausted).ExecuteUpdateAsync(
