@@ -27,12 +27,19 @@ internal static class ProxySigningKeys {
         return (string.IsNullOrWhiteSpace(options.MetadataAddress) ? DiscoveryAddress(options.Issuer!) : options.MetadataAddress, false);
     }
 
-    public static ConfigurationManager<OpenIdConnectConfiguration> Create(ProxyIdentityOptions options, HttpClient httpClient) {
+    /// <summary>The address, configuration retriever and document retriever every fetch of the keys uses.</summary>
+    public static (string Address, IConfigurationRetriever<OpenIdConnectConfiguration> Retriever, IDocumentRetriever Documents)
+        Retrieval(ProxyIdentityOptions options, HttpClient httpClient) {
         var (address, isJwks) = Source(options);
         IConfigurationRetriever<OpenIdConnectConfiguration> retriever = isJwks
             ? new JwksConfigurationRetriever(options.Issuer!)
             : new OpenIdConnectConfigurationRetriever();
         var documents = new HttpDocumentRetriever(httpClient) { RequireHttps = options.RequireHttpsMetadata };
+        return (address, retriever, documents);
+    }
+
+    public static ConfigurationManager<OpenIdConnectConfiguration> Create(ProxyIdentityOptions options, HttpClient httpClient) {
+        var (address, retriever, documents) = Retrieval(options, httpClient);
         return new ConfigurationManager<OpenIdConnectConfiguration>(
             address, retriever, documents, new IssuerBoundConfigurationValidator(options.Issuer!)) {
             AutomaticRefreshInterval = options.AutomaticRefreshInterval,

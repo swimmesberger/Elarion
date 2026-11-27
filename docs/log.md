@@ -2,6 +2,10 @@
 
 ## 2026-11-27
 
+* **Update**: [ADR-0098](decisions/0098-streamed-files-for-http-only-endpoints.md) notes that .NET 11 closed the ZipArchive synchronous-dispose gap (probed on 10.0.15 and 11.0.0); the holding body stays while net10.0 is targeted.
+* **Update**: [ADR-0080](decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md) gains an amendment (the generated client's isRetryable, mapError and timeouts; web-push answers get a specific code) and [ADR-0101](decisions/0101-a-decision-required-answer.md) one (withDecisions throws RpcDecisionCancelledError on a cancel and sends no empty decisions).
+* **Update**: [ADR-0084](decisions/0084-authenticating-proxy-identity.md) gains an amendment: an opt-in, single-flight, rate-limited and bounded wait for a token naming an unknown signing key (AwaitRefreshOnUnknownKey).
+* **Update**: [ADR-0098](decisions/0098-streamed-files-for-http-only-endpoints.md) gains an amendment: a streamed file states its length, sent as Content-Length and checked against the bytes written.
 * **Update**: ADR-0095 amendment extended — a registered `[ResourceFilter]` in a module assembly may be internal, registered through a generated public registrar ([ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md))
 * **Update**: ADR-0090 amended — the exclusive-arc helper is still not shipped (relational dependency, application vocabulary); the [polymorphic references](concepts/polymorphic-references.mdx) guide shows the arc configured from one owner list with partial indexes ([ADR-0090](decisions/0090-references-between-records-stay-in-the-database.md))
 * **Update**: ADR-0078 amended — a declared `FallbackConfigurationKey` layer below the store, and read-your-writes through the manager rather than a per-request projection ([ADR-0078](decisions/0078-settings-definitions-and-effective-value-resolver.md))

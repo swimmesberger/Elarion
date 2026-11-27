@@ -586,6 +586,64 @@ public sealed class InMemorySchedulerTests {
     }
 
     [Fact]
+    public async Task RoutineRun_LogsStartAndCompletionAtDebug_WithDuration() {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider();
+        var logs = new LevelLogCollector();
+        var descriptor = CreateCountingDescriptor("test.quietRun", ScheduledJobSchedule.FixedRate("50ms"));
+        await using var provider = CreateProvider(
+            time,
+            new ConfigurationBuilder().Build(),
+            new SchedulerOptions { Enabled = true, MaxConcurrentExecutions = 8 },
+            logs,
+            descriptor);
+        var hostedService = provider.GetRequiredService<IHostedService>();
+        var counter = provider.GetRequiredService<RunCounter>();
+
+        await hostedService.StartAsync(cts.Token);
+        await AdvanceUntilAsync(time, Interval, () => counter.Count >= 2);
+        await hostedService.StopAsync(cts.Token);
+
+        var runLines = logs.Entries.Where(entry => entry.Message.Contains("test.quietRun")).ToList();
+        runLines.Should().NotBeEmpty();
+        runLines.Should().OnlyContain(entry => entry.Level == LogLevel.Debug);
+        runLines.Should().Contain(entry => entry.Message.Contains("completed in") && entry.Message.Contains(" ms."));
+        // The scheduler's own lifecycle stays at Information.
+        logs.Entries.Should().Contain(entry =>
+            entry.Level == LogLevel.Information && entry.Message.Contains("scheduler started"));
+    }
+
+    [Fact]
+    public async Task OverrunningRun_LogsSkippedOccurrenceAtWarning() {
+        using var cts = new CancellationTokenSource(WaitTimeout);
+        var time = new FakeTimeProvider();
+        var logs = new LevelLogCollector();
+        var descriptor = CreateBlockingDescriptor("test.overrun", ScheduledJobOverlap.Skip);
+        await using var provider = CreateProvider(
+            time,
+            new ConfigurationBuilder().Build(),
+            new SchedulerOptions { Enabled = true, MaxConcurrentExecutions = 8 },
+            logs,
+            descriptor);
+        var hostedService = provider.GetRequiredService<IHostedService>();
+        var probe = provider.GetRequiredService<OverlapProbe>();
+
+        await hostedService.StartAsync(cts.Token);
+        await WaitUntilAsync(() => probe.StartedCount >= 1);
+        for (var i = 0; i < 3 && !logs.Entries.Any(entry => entry.Level == LogLevel.Warning); i++) {
+            time.Advance(Interval);
+            await Task.Delay(50, cts.Token);
+        }
+
+        probe.ReleaseAll();
+        await hostedService.StopAsync(cts.Token);
+
+        logs.Entries.Should().Contain(entry => entry.Level == LogLevel.Warning &&
+                                               entry.Message.Contains("test.overrun") &&
+                                               entry.Message.Contains("overlap"));
+    }
+
+    [Fact]
     public async Task RecurringJob_Queue_CoalescesIntoSinglePendingRun() {
         using var cts = new CancellationTokenSource(WaitTimeout);
         var time = new FakeTimeProvider();
@@ -1244,7 +1302,9 @@ public sealed class InMemorySchedulerTests {
         params ScheduledJobDescriptor[] descriptors) {
         var services = new ServiceCollection();
         services.AddLogging(builder => {
-            if (loggerProvider is not null) builder.AddProvider(loggerProvider);
+            if (loggerProvider is null) return;
+            builder.SetMinimumLevel(LogLevel.Trace);
+            builder.AddProvider(loggerProvider);
         });
         services.AddSingleton(configuration);
         services.AddSingleton<TimeProvider>(timeProvider);
@@ -1503,6 +1563,44 @@ public sealed class InMemorySchedulerTests {
 
         public async Task WaitCancelledAsync(CancellationToken ct) {
             await _cancelled.Task.WaitAsync(ct);
+        }
+    }
+
+    private sealed class LevelLogCollector : ILoggerProvider, ILogger {
+        private readonly List<(LogLevel Level, string Message)> _entries = [];
+
+        public IReadOnlyList<(LogLevel Level, string Message)> Entries {
+            get {
+                lock (_entries) {
+                    return [.. _entries];
+                }
+            }
+        }
+
+        public ILogger CreateLogger(string categoryName) {
+            return this;
+        }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel) {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) {
+            lock (_entries) {
+                _entries.Add((logLevel, formatter(state, exception)));
+            }
+        }
+
+        public void Dispose() {
         }
     }
 

@@ -109,6 +109,36 @@ headers) — it mixes deciding with writing, and a refusal after a flush could n
 the handler** — it runs inside the transaction and holds the database connection for the whole parse, which is what the
 post-pipeline content exists to avoid.
 
+## Amendment (2026-11-27): a stated length
+
+A content that cannot seek has no length ASP.NET can read, so the response went out chunked even when the reader knew
+the size beforehand (a decoded message part whose size the store recorded), and a browser showed no progress.
+`ElarionStreamedFile.Length` states it:
+
+1. **Optional, on the served file.** `with { Length = … }` on `FromStream` or `FromWriter`; a `Deferred` file carries
+   none, like its other response properties, and the file its open answers states it.
+2. **Sent with the body.** The forward-only content and the writer run inside ASP.NET's push result, which writes them
+   only after the conditional checks; `Content-Length` is set there, so a `304` never carries it.
+3. **Checked.** The body counts the bytes: a write past the length fails at that write (the excess is never sent), a
+   content that ends short fails at its end. Both come after the first byte, so the connection aborts, as for any other
+   failure mid-stream; a wrong length is a broken file, not a smaller one.
+4. **A seekable stream keeps its own.** It still states its length and serves ranges through ASP.NET's stream result; a
+   stated length that disagrees with what is left from its position fails before the first byte.
+
+Rejected: **trusting the length without counting** — Kestrel catches a mismatch, but other servers (the test server,
+a proxy) differ, and a short body that completes looks like a complete file; **ranges for forward-only content with a
+length** — a range needs to skip, which a forward-only stream can do only by reading, so it stays a seekable stream's
+feature.
+
+## Note (2026-11-27): .NET 11 closed the `ZipArchive` gap
+
+Probed on this repository's toolchain: an archive written with `ZipArchive.CreateAsync`, `ZipArchiveEntry.OpenAsync`
+and `await using` into a stream that refuses synchronous writes fails on .NET 10.0.15 (the entry stream's
+`Dispose` writes the deflate trailer and the data descriptor synchronously, with `Fastest` and `NoCompression`
+alike) and completes with only asynchronous writes on .NET 11.0.0. The body that holds synchronous writes stays: the
+packages still target `net10.0`, and on `net11.0` it costs nothing when nothing is held. Revisit it when `net10.0`
+is dropped.
+
 ## Rejected alternatives
 
 - **A stream on `ElarionFile`.** Rejected again, for ADR-0039's reasons: the type crosses every surface, and a stream

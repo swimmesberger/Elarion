@@ -71,6 +71,26 @@ The options are **composed** from contributions, in order (first-match-wins):
   `JsonSerializerOptions`.
 </Callout>
 
+### Shared-kernel types
+
+Value types every module uses (a record reference, a money amount) live in the shared kernel, outside every module.
+They need no entry in each module's context: a source-generated context generates the metadata of every type its
+listed types reach, and a type it never reaches is served by the next resolver in the chain. When a shared type is
+also serialized on its own (an error payload, a polymorphic base), give it **one** context in the shared kernel and
+contribute that context once, with a stable instance:
+
+```csharp
+[JsonSerializable(typeof(RecordRef))]
+[JsonSerializable(typeof(Money))]
+public sealed partial class SharedKernelJsonContext : JsonSerializerContext;
+
+builder.Services.ConfigureElarionJson(o => o.TypeInfoResolvers.Add(SharedKernelJsonContext.Default));
+```
+
+The chain composes each resolver instance once, however many times it is contributed, so a module's
+`ConfigureServices` may contribute it too (for a test host that composes only that module). A shared type listed in
+several contexts needs a `TypeInfoPropertyName` only when two types *in the same context* share a simple name.
+
 ### Framework types (`ElarionFrameworkJsonContext`)
 
 Some framework-owned types must be serializable but are **not statically reachable** from your

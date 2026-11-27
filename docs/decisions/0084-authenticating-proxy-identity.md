@@ -75,6 +75,27 @@ Ship the adapter as a new optional package, `Elarion.AspNetCore.ProxyIdentity`:
   withdrawn because it leaked. Apps whose issuer withdraws keys while tokens signed with them are still in use can opt in.
 - Proxies that do not publish a JWKS (per-key PEM endpoints) are out of scope.
 
+## Amendment (2026-11-27): an opt-in wait for an unknown key
+
+An issuer that rotates by *replacing* its key, without publishing the next one ahead, makes the trade-off above worse
+than one refused request: every request until the background refresh lands is refused, and a browser application
+sends the person to its sign-in page. `ProxyIdentity:AwaitRefreshOnUnknownKey` (off by default) lets such a request
+wait:
+
+1. **Beside the library, not instead of it.** The `ConfigurationManager` stays the key store, with its caching and
+   refresh. Only a token whose `kid` the current configuration does not hold reaches the new path, which fetches the
+   key endpoint once with the same retriever and the same issuer-bound validation.
+2. **The library's bounds.** The fetch is single-flight and at most one per `RefreshInterval` — the bound IdentityModel
+   already applies to refresh requests — so forged key ids add no load the background refresh would not already
+   allow. A request waits at most `UnknownKeyRefreshTimeout` (five seconds by default).
+3. **Short-lived keys.** What the fetch found is offered to validation through
+   `IssuerSigningKeyResolverUsingConfiguration` for `RefreshInterval`, and the regular refresh is requested; a
+   withdrawn key therefore stops validating at the latest `RefreshInterval` after the fetch that found it.
+
+The rejected hand-rolled store below stays rejected: the cache, its refresh and its concurrency are still the
+library's. What is added is one awaited, bounded, rate-limited fetch for the case the library handles only in the
+background.
+
 ## Rejected alternatives
 
 - **A hand-rolled key store with a refresh-on-unknown-`kid` wait.** It would make the first request after a rotation

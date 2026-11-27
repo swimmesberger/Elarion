@@ -98,6 +98,12 @@ public sealed class RecurringBillingJob(
 - `TimeProvider` is used throughout, so tests can drive millisecond schedules deterministically with a
   fake clock. Production precision is bounded by OS timer resolution and host load.
 - Scheduling, enqueue, cancel, and execution all emit [telemetry](/docs/capabilities/telemetry).
+- A routine run is not news. Under the `Elarion.Scheduling` log category, a run's start and its successful
+  completion (with its duration in milliseconds) log at `Debug`, the scheduler's own lifecycle (started with
+  N descriptors, shutting down, stopped) at `Information`, a cancelled run or an occurrence skipped because an
+  earlier run still holds its slot (the job overran its schedule) at `Warning`, and a failed run at `Error`.
+  The claims purge of the database backend logs its deleted rows at `Debug`. To see every run, raise the
+  category's level (`Logging:LogLevel:Elarion.Scheduling` = `Debug`).
 
 <Callout type="warn">
   If you need durable queues or retry history that survives restarts, use dedicated job

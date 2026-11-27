@@ -71,7 +71,11 @@ public enum FileDisposition {
 ///         if (download is not null) await download.DisposeAsync();
 ///         return AppError.NotFound("No such attachment.");
 ///     }
-///     return ElarionStreamedFile.FromStream(part.Content, part.ContentType, owner: download) with { FileName = part.FileName };
+///     // The part decodes forward-only, but its size is known: state it, so the browser shows progress.
+///     return ElarionStreamedFile.FromStream(part.Content, part.ContentType, owner: download) with {
+///         FileName = part.FileName,
+///         Length = part.SizeBytes,
+///     };
 /// });
 /// </code>
 /// </example>
@@ -101,7 +105,10 @@ public sealed record ElarionStreamedFile : IAsyncDisposable {
     /// A file whose bytes are <paramref name="content"/>, copied to the response from its current position. The
     /// content stream, and <paramref name="owner"/> after it, are disposed with the response.
     /// </summary>
-    /// <param name="content">The content; a seekable stream also lets the response state its length.</param>
+    /// <param name="content">
+    /// The content; a seekable stream also lets the response state its length. For a forward-only stream whose size is
+    /// known, state it with <c>with { Length = … }</c>.
+    /// </param>
     /// <param name="contentType">The MIME content type.</param>
     /// <param name="owner">
     /// What else lives as long as <paramref name="content"/> is read, such as the <c>BlobDownload</c> whose
@@ -211,6 +218,25 @@ public sealed record ElarionStreamedFile : IAsyncDisposable {
     /// files behind authorization <c>private</c>, so no shared cache hands them to another user.
     /// </summary>
     public string? CacheControl { get; init; }
+
+    /// <summary>
+    /// The number of bytes the content holds, when it is known before it is written but the content cannot state it
+    /// itself: a forward-only stream whose size the reader knows (a decoded message part), or a writer that produces a
+    /// known count. Sent as <c>Content-Length</c>, so a client shows the download's progress, and checked against the
+    /// bytes actually written: a content that writes more or fewer bytes fails, which aborts the connection like any
+    /// other failure after the first byte. <see langword="null"/> (the default) leaves the length to the content: a
+    /// seekable stream states its own, anything else is sent chunked. On a seekable stream it must equal the bytes
+    /// from the current position to the end. A <see cref="Deferred"/> file carries none; the file its open answers does.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public long? Length {
+        get;
+        init {
+            if (value is < 0) throw new ArgumentOutOfRangeException(nameof(value), value, "A length is not negative.");
+
+            field = value;
+        }
+    }
 
     /// <summary>The content stream of a <see cref="FromStream"/> file; <see langword="null"/> for a writer.</summary>
     public Stream? Content => _content;

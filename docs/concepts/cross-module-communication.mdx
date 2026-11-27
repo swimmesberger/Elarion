@@ -128,6 +128,23 @@ internal sealed class CustomerLookup(ISalesApi api) : ICustomerLookup {
 Handlers are resolved **lazily, per call**, from the service provider — a default facade can span the
 whole module, so the forwarder never builds a handler's pipeline until you invoke that method.
 
+### What a contract's consumer must know
+
+- **Declare the dependency.** The implementation is registered with the module that owns the contract, so it is
+  gone when that feature module is disabled, and a consumer that injects it fails when it is resolved. Name the
+  owner in the consumer's `[AppModule(..., DependsOn = "Owner")]`; the analyzer reports an undeclared one as
+  `ELMOD008` (a Core module's contract needs none, Core modules are never disabled). `DependsOn` orders the modules
+  and documents the dependency; it does not switch the consumer off with its owner.
+- **A contract that returns `IQueryable<T>` shares the caller's `DbContext`.** The query is composed by the caller
+  and runs when the caller enumerates it, on the scoped `DbContext` the implementation was resolved with — the
+  caller's request scope, its transaction and its change tracker. That is what lets the caller join, filter and
+  page it in one SQL statement; it also means the implementation must not dispose or save that context, and that
+  the query cannot outlive the scope (return a materialized list, or a `Result<T>`, from a contract that crosses a
+  scope or a transport).
+- **Module-private types stay internal.** A handler may be `internal` like the services it injects: the generators
+  register and expose an internal handler (its request and response included) exactly like a public one, so a
+  module-private service need not be made public to be injected (no `CS0051`).
+
 ## Choosing which handlers appear
 
 Membership is **opt-out** and uses the same scope vocabulary as `[EntityConfiguration]`/`[GenerateDbSets]`:

@@ -430,6 +430,7 @@ return ElarionStreamedFile.Deferred(async ct => {
 
     return ElarionStreamedFile.FromStream(part.Content, part.ContentType, owner: download) with {
         FileName = part.FileName,
+        Length = part.SizeBytes,   // the part decodes forward-only, but its size is known: the browser shows progress
     };
 });
 ```
@@ -445,6 +446,7 @@ answers the file or the refusal.
 | `EntityTag` | a strong `ETag`; a matching `If-None-Match` answers `304` without writing the content |
 | `LastModified` | `Last-Modified`, honoured for `If-Modified-Since` |
 | `CacheControl` | `Cache-Control`; keep files behind authorization `private` |
+| `Length` | `Content-Length`, for content that cannot state it itself (a forward-only stream, a writer); checked against the bytes written. Unset, a seekable stream states its own length and anything else is sent chunked. |
 
 What happens around the bytes:
 
@@ -454,11 +456,17 @@ What happens around the bytes:
 - **Failures.** Before the first byte, an exception is an ordinary unexpected error, and a deferred file's refusal is
   its ordinary error response. After it, the status is already sent, so the connection is aborted: the client sees a
   failed download, never a truncated file that looks complete.
+- **A stated length.** `Length` is sent as `Content-Length` with the body (not on a `304`), and the bytes written are
+  counted: a content that writes past it fails at that write, one that writes fewer fails at its end, and either
+  aborts the connection like any failure after the first byte. On a seekable stream the length must equal what is
+  left from its position, or the response fails before the first byte.
 - **Synchronous writes.** The server refuses synchronous writes to the body. `ZipArchive` makes a few even through its
   async API: an entry stream from `OpenAsync` flushes its compressed trailer and data descriptor in the synchronous
   `Dispose` that `await using` falls back to. The body a writer receives holds such writes (up to 1 MiB at a time) and
   sends them with the next asynchronous write, so the code above needs no `AllowSynchronousIO`. Write the bulk of the
-  content asynchronously; a writer that writes everything synchronously fails at that limit.
+  content asynchronously; a writer that writes everything synchronously fails at that limit. On .NET 11 the entry
+  stream disposes asynchronously and `ZipArchive` writes nothing synchronously; the holding is what keeps the same
+  code working on .NET 10.
 - **Inline disposition.** Show in place only content types the browser renders safely (PDF, raster images). A
   user-supplied `text/html` or `image/svg+xml` served inline from your origin runs as part of it; `nosniff` does not
   change that.

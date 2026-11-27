@@ -138,3 +138,28 @@ Rejected alternatives:
   Precedence is therefore per code.
 - **Turning off the runtime check for kind-default codes.** It silences the warning but leaves the schema and the
   client without the codes, and it cannot express a decorator's specific codes.
+
+## Amendment (2026-11-27): the generated client words, bounds and retries failures
+
+With the codes stable, two applications on the same framework still answered failures differently: each wrapped the
+generated client to bound calls with a timeout, word failures in its language and keep its query library from
+retrying a decided answer, and each copied the framework's codes into its own list of final ones. The generated
+client now owns the parts that follow from the contract:
+
+1. **`isRetryable(error)`** derives from the kinds and the framework's codes: a network failure, a timeout, a `408`,
+   `429` or `5xx` transport answer, `internal` and `idempotency.in_progress` are retryable; every answer the server
+   decided (each other kind), a params or protocol error and a caller's abort are final. It looks through `cause`, so
+   it still works behind the application's own error type.
+2. **`mapError(error, context)`** in `RpcClientOptions` turns every error a call or batch throws into the
+   application's own, so the wording lives in one place and the generated recognisers keep working through `cause`.
+3. **`timeoutMs`**, `timeoutFor(method)` and a per-call `timeoutMs` abort a request with `RpcTimeoutError`; a
+   handler's `[ClientTag("timeout", …)]`, already the documented example of a tag, is read as the method's default.
+4. **Specific codes for the framework's own answers.** The web-push subscription answers carry
+   `web_push.subscription_invalid` instead of the generic `validation`; the idempotency answers already carried
+   theirs.
+
+Rejected: **a retry loop inside the client** — the query library above it already retries, and two retry layers
+multiply; the client answers only whether a retry can help. **Retryability declared per code on the server** — the
+kinds already decide it for every code but two framework ones, and a declaration per code would be one more thing to
+keep right.
+

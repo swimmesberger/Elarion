@@ -121,6 +121,24 @@ public sealed class ProxyIdentityOptions {
     public TimeSpan LastKnownGoodLifetime { get; set; } = TimeSpan.Zero;
 
     /// <summary>
+    /// Whether a request whose token names a signing key the current keys do not hold waits for one fetch of the key
+    /// endpoint before it is validated, instead of being refused while a background refresh runs. For an issuer that
+    /// rotates by replacing its key, without publishing the next one ahead: the first request after the rotation already
+    /// signs in. The fetch is single-flight (concurrent requests share it), rate-limited by <see cref="RefreshInterval"/>
+    /// (a request in that window that still names an unknown key is refused at once, so forged key ids cannot make the
+    /// instance call the endpoint more often), and awaited at most <see cref="UnknownKeyRefreshTimeout"/>. Keys it
+    /// fetched validate tokens for <see cref="RefreshInterval"/>, while the regular refresh catches up; a failed or
+    /// refused fetch changes nothing. Defaults to <see langword="false"/>.
+    /// </summary>
+    public bool AwaitRefreshOnUnknownKey { get; set; }
+
+    /// <summary>
+    /// How long a request waits for the fetch <see cref="AwaitRefreshOnUnknownKey"/> starts before it is refused; the
+    /// fetch itself goes on for later requests. Defaults to five seconds.
+    /// </summary>
+    public TimeSpan UnknownKeyRefreshTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// The Development stand-in identity used while <see cref="Enabled"/> is <see langword="false"/> and
     /// <see cref="Fixed"/> is not enabled.
     /// </summary>

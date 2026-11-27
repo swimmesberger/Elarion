@@ -46,8 +46,21 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer {
         "(under no module). The analyzer inspects only the dependency surface — constructor parameters, " +
         "fields, and properties.");
 
+    private static readonly DiagnosticDescriptor UndeclaredContractDependency = new(
+        "ELMOD008",
+        "A module injects another module's contract without declaring the dependency",
+        "Module '{0}' injects '{1}', a [ModuleContract] of module '{2}', but does not declare DependsOn = \"{2}\"",
+        "Elarion.Modules",
+        DiagnosticSeverity.Warning,
+        true,
+        "A contract's implementation is registered with the module that owns it, so it is gone when that " +
+        "feature module is disabled, and a consumer that injects it fails when it is resolved. Declare the " +
+        "dependency with [AppModule(..., DependsOn = \"Owner\")], which also initializes the owner first, so " +
+        "the dependency is visible where the module is declared. A contract of a Core module needs no " +
+        "declaration: Core modules are never disabled.");
+
     private static readonly ImmutableArray<DiagnosticDescriptor> SupportedDiagnosticsArray =
-        ImmutableArray.Create(CrossModuleInternalReference);
+        ImmutableArray.Create(CrossModuleInternalReference, UndeclaredContractDependency);
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => SupportedDiagnosticsArray;
@@ -84,8 +97,10 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer {
         foreach (var member in type.GetMembers())
             switch (member) {
                 case IMethodSymbol { MethodKind: MethodKind.Constructor } ctor:
-                    foreach (var parameter in ctor.Parameters)
+                    foreach (var parameter in ctor.Parameters) {
                         Check(context, state, owner, parameter.Type, parameter.Locations);
+                        CheckContractDependency(context, state, owner, parameter.Type, parameter.Locations);
+                    }
                     break;
                 case IFieldSymbol { IsImplicitlyDeclared: false } field:
                     Check(context, state, owner, field.Type, field.Locations);
@@ -124,6 +139,33 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer {
                 referencedModule.Name,
                 owner.Name));
             return;
+        }
+    }
+
+    // An injected contract of another feature module needs that module in the consumer's DependsOn (ELMOD008). Only
+    // constructor parameters count: they are what the container resolves.
+    private static void CheckContractDependency(
+        SymbolAnalysisContext context,
+        BoundaryState state,
+        ModuleInfo owner,
+        ITypeSymbol referenced,
+        ImmutableArray<Location> locations) {
+        foreach (var candidate in Flatten(referenced)) {
+            if (candidate is not INamedTypeSymbol named || !HasAttribute(named, state.ContractAttribute))
+                continue;
+
+            var referencedNamespace = named.ContainingNamespace?.ToDisplayString() ?? string.Empty;
+            var referencedModule = FindBest(referencedNamespace, state.Modules);
+            if (referencedModule is null || referencedModule.Equals(owner) || referencedModule.IsCore ||
+                owner.DependsOn.Contains(referencedModule.Name))
+                continue;
+
+            context.ReportDiagnostic(Diagnostic.Create(
+                UndeclaredContractDependency,
+                locations.FirstOrDefault() ?? Location.None,
+                owner.Name,
+                named.Name,
+                referencedModule.Name));
         }
     }
 
@@ -174,7 +216,22 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer {
                 var ns = type.ContainingNamespace is { IsGlobalNamespace: false } containing
                     ? containing.ToDisplayString()
                     : string.Empty;
-                modules.Add(new ModuleInfo(name, ns));
+                var isCore = false;
+                var dependsOn = ImmutableHashSet<string>.Empty.WithComparer(StringComparer.Ordinal);
+                foreach (var argument in data.NamedArguments)
+                    switch (argument.Key) {
+                        // AppModuleKind.Core = 1.
+                        case "Kind" when argument.Value.Value is int kind:
+                            isCore = kind == 1;
+                            break;
+                        case "DependsOn" when argument.Value.Value is string list:
+                            dependsOn = dependsOn.Union(list.Split(',')
+                                .Select(static entry => entry.Trim())
+                                .Where(static entry => entry.Length > 0));
+                            break;
+                    }
+
+                modules.Add(new ModuleInfo(name, ns, isCore, dependsOn));
             }
 
             break;
@@ -202,7 +259,16 @@ public sealed class ModuleBoundaryAnalyzer : DiagnosticAnalyzer {
                candidateNamespace.StartsWith(moduleNamespace + ".", StringComparison.Ordinal);
     }
 
-    private sealed record ModuleInfo(string Name, string Namespace);
+    private sealed record ModuleInfo(string Name, string Namespace, bool IsCore, ImmutableHashSet<string> DependsOn) {
+        // Identity is the declaration (name and namespace); the flags ride along.
+        public bool Equals(ModuleInfo? other) {
+            return other is not null && Name == other.Name && Namespace == other.Namespace;
+        }
+
+        public override int GetHashCode() {
+            return StringComparer.Ordinal.GetHashCode(Name) ^ StringComparer.Ordinal.GetHashCode(Namespace);
+        }
+    }
 
     private sealed record BoundaryState(
         IReadOnlyList<ModuleInfo> Modules,

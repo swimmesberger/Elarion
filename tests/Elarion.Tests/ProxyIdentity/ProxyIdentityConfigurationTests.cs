@@ -29,6 +29,7 @@ public sealed class ProxyIdentityConfigurationTests {
             { "no subject claim", "ProxyIdentity:Claims:Subject=", "Claims:Subject is empty" },
             { "refresh below the library minimum", "ProxyIdentity:RefreshInterval=00:00:00.5", "RefreshInterval must be at least one second" },
             { "automatic refresh below the library minimum", "ProxyIdentity:AutomaticRefreshInterval=00:01:00", "AutomaticRefreshInterval must be at least five minutes" },
+            { "unknown-key wait without a timeout", "ProxyIdentity:AwaitRefreshOnUnknownKey=true;ProxyIdentity:UnknownKeyRefreshTimeout=00:00:00", "UnknownKeyRefreshTimeout must be positive" },
         };
     }
 

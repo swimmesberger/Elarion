@@ -81,10 +81,23 @@ internal sealed class ElarionStreamedFileHttpResult(ElarionStreamedFile file) : 
         var cancellationToken = httpContext.RequestAborted;
         // The file name is null on purpose: the disposition above is the file's own (inline or attachment), which the
         // ASP.NET results would overwrite with an attachment.
-        IResult inner = file.Content is { } content
-            ? TypedResults.Stream(content, file.ContentType, null, file.LastModified, entityTag)
-            : TypedResults.Stream(
-                body => WriteAsync(file, body, cancellationToken), file.ContentType, null, file.LastModified, entityTag);
+        IResult inner;
+        if (file.Content is { CanSeek: true } seekable) {
+            // A seekable stream states its own length (and serves ranges); a stated length must agree with it.
+            if (file.Length is { } length && length != seekable.Length - seekable.Position)
+                throw new InvalidOperationException(
+                    $"The streamed file {file.FileName} states a length of {length} bytes, but its content holds " +
+                    $"{seekable.Length - seekable.Position}.");
+
+            inner = TypedResults.Stream(seekable, file.ContentType, null, file.LastModified, entityTag);
+        }
+        else {
+            // A forward-only stream or a writer: the stated length is sent with the body, never on a 304, which
+            // writes none, and checked against the bytes written.
+            inner = TypedResults.Stream(
+                body => WriteAsync(httpContext.Response, file, body, cancellationToken),
+                file.ContentType, null, file.LastModified, entityTag);
+        }
 
         try {
             await inner.ExecuteAsync(httpContext).ConfigureAwait(false);
@@ -103,10 +116,111 @@ internal sealed class ElarionStreamedFileHttpResult(ElarionStreamedFile file) : 
         }
     }
 
-    private static async Task WriteAsync(ElarionStreamedFile file, Stream body, CancellationToken cancellationToken) {
-        var tolerant = new SynchronousWriteBufferingStream(body, SynchronousWriteLimit);
-        await file.WriteToAsync(tolerant, cancellationToken).ConfigureAwait(false);
-        await tolerant.FlushPendingAsync(cancellationToken).ConfigureAwait(false);
+    private static async Task WriteAsync(
+        HttpResponse response,
+        ElarionStreamedFile file,
+        Stream body,
+        CancellationToken cancellationToken) {
+        LengthCheckingStream? counted = null;
+        if (file.Length is { } length) {
+            response.ContentLength = length;
+            body = counted = new LengthCheckingStream(body, length);
+        }
+
+        if (file.Content is { } content) {
+            // A forward-only stream: copied asynchronously, so it needs no tolerance for synchronous writes.
+            await content.CopyToAsync(body, cancellationToken).ConfigureAwait(false);
+        }
+        else {
+            var tolerant = new SynchronousWriteBufferingStream(body, SynchronousWriteLimit);
+            await file.WriteToAsync(tolerant, cancellationToken).ConfigureAwait(false);
+            await tolerant.FlushPendingAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        counted?.EnsureComplete();
+    }
+}
+
+/// <summary>
+/// The response body of a streamed file that states its <see cref="ElarionStreamedFile.Length"/>: counts what is
+/// written and fails as soon as the content writes past the stated length, or, at the end, when it wrote fewer bytes.
+/// Either failure comes after the first byte, so the response aborts instead of sending a file of the wrong size.
+/// </summary>
+internal sealed class LengthCheckingStream(Stream inner, long length) : Stream {
+    private long _written;
+
+    public override bool CanRead => false;
+    public override bool CanSeek => false;
+    public override bool CanWrite => true;
+    public override long Length => throw new NotSupportedException();
+
+    public override long Position {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public override void Write(byte[] buffer, int offset, int count) {
+        ValidateBufferArguments(buffer, offset, count);
+        Count(count);
+        inner.Write(buffer, offset, count);
+    }
+
+    public override void Write(ReadOnlySpan<byte> buffer) {
+        Count(buffer.Length);
+        inner.Write(buffer);
+    }
+
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) {
+        ValidateBufferArguments(buffer, offset, count);
+        return WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+    }
+
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) {
+        Count(buffer.Length);
+        return inner.WriteAsync(buffer, cancellationToken);
+    }
+
+    public override void Flush() {
+        inner.Flush();
+    }
+
+    public override Task FlushAsync(CancellationToken cancellationToken) {
+        return inner.FlushAsync(cancellationToken);
+    }
+
+    /// <summary>Fails when the content wrote fewer bytes than it stated.</summary>
+    public void EnsureComplete() {
+        if (_written != length)
+            throw new InvalidOperationException(
+                $"The streamed file stated a length of {length} bytes but its content wrote {_written}.");
+    }
+
+    private void Count(int count) {
+        if (_written + count > length)
+            throw new InvalidOperationException(
+                $"The streamed file stated a length of {length} bytes but its content writes more.");
+
+        _written += count;
+    }
+
+    public override int Read(byte[] buffer, int offset, int count) {
+        throw new NotSupportedException();
+    }
+
+    public override long Seek(long offset, SeekOrigin origin) {
+        throw new NotSupportedException();
+    }
+
+    public override void SetLength(long value) {
+        throw new NotSupportedException();
+    }
+
+    // The response body belongs to the server.
+    protected override void Dispose(bool disposing) {
+    }
+
+    public override ValueTask DisposeAsync() {
+        return ValueTask.CompletedTask;
     }
 }
 

@@ -71,6 +71,30 @@ public sealed class StreamedFileEndToEndTests {
                     await Task.Yield();
                     return AppError.NotFound("No such attachment.", "mail.attachment_not_found");
                 }),
+                // A forward-only content (a decoded part) whose size is known before it is read.
+                "sized" => ElarionStreamedFile.FromStream(
+                    new ForwardOnlyStream(new byte[100_000]), "application/octet-stream") with {
+                    Length = 100_000,
+                    EntityTag = "sized-1"
+                },
+                "sized-writer" => ElarionStreamedFile.FromWriter(
+                    (body, ct) => body.WriteAsync(new byte[70_000], ct).AsTask(), "application/octet-stream") with {
+                    Length = 70_000
+                },
+                "sized-short" => ElarionStreamedFile.FromWriter(async (body, ct) => {
+                    await body.WriteAsync(new byte[64 * 1024], ct);
+                    await body.FlushAsync(ct);
+                }, "application/octet-stream") with {
+                    Length = 100_000
+                },
+                "sized-long" => ElarionStreamedFile.FromStream(
+                    new ForwardOnlyStream(new byte[100_000]), "application/octet-stream") with {
+                    Length = 1_000
+                },
+                "sized-seekable-wrong" => ElarionStreamedFile.FromStream(
+                    new MemoryStream(new byte[10]), "application/octet-stream") with {
+                    Length = 11
+                },
                 _ => AppError.NotFound("No such export.")
             };
             return ValueTask.FromResult(result);
@@ -249,6 +273,119 @@ public sealed class StreamedFileEndToEndTests {
 
         var tooMuch = () => body.Write(new byte[9]);
         tooMuch.Should().Throw<InvalidOperationException>().WithMessage("*asynchronous*");
+    }
+
+    [Fact]
+    public async Task ForwardOnlyContent_WithAStatedLength_IsSentWithContentLength() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+
+        var response = await host.Client.GetAsync("/exports/sized", HttpCompletionOption.ResponseHeadersRead, ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentLength.Should().Be(100_000);
+        response.Headers.TransferEncodingChunked.Should().NotBe(true);
+        (await response.Content.ReadAsByteArrayAsync(ct)).Should().HaveCount(100_000);
+
+        using var conditional = new HttpRequestMessage(HttpMethod.Get, "/exports/sized");
+        conditional.Headers.IfNoneMatch.Add(new EntityTagHeaderValue("\"sized-1\""));
+        (await host.Client.SendAsync(conditional, ct)).StatusCode.Should().Be(HttpStatusCode.NotModified);
+    }
+
+    [Fact]
+    public async Task Writer_WithAStatedLength_IsSentWithContentLength() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+
+        var response = await host.Client.GetAsync("/exports/sized-writer", HttpCompletionOption.ResponseHeadersRead, ct);
+
+        response.Content.Headers.ContentLength.Should().Be(70_000);
+        (await response.Content.ReadAsByteArrayAsync(ct)).Should().HaveCount(70_000);
+    }
+
+    [Theory]
+    [InlineData("sized-short")]
+    [InlineData("sized-long")]
+    public async Task StatedLength_TheContentDoesNotMatch_AbortsTheConnection(string kind) {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+
+        var download = async () => await host.Client.GetByteArrayAsync($"/exports/{kind}", ct);
+
+        await download.Should().ThrowAsync<HttpRequestException>();
+    }
+
+    [Fact]
+    public async Task StatedLength_DisagreeingWithASeekableStream_FailsBeforeAnyByte() {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await StartAsync(ct);
+
+        var response = await host.Client.GetAsync("/exports/sized-seekable-wrong", ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+    }
+
+    [Fact]
+    public void Length_RejectsANegativeValue() {
+        var file = ElarionStreamedFile.FromStream(new MemoryStream(), "text/plain");
+
+        var act = () => file with { Length = -1 };
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+        (file with { Length = 0 }).Length.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task LengthCheckingBody_FailsPastTheLength_AndWhenShort() {
+        var ct = TestContext.Current.CancellationToken;
+        var body = new LengthCheckingStream(new MemoryStream(), 4);
+
+        await body.WriteAsync(new byte[] { 1, 2, 3 }, ct);
+        var incomplete = () => body.EnsureComplete();
+        incomplete.Should().Throw<InvalidOperationException>().WithMessage("*wrote 3*");
+
+        var tooMuch = async () => await body.WriteAsync(new byte[] { 4, 5 }, ct);
+        await tooMuch.Should().ThrowAsync<InvalidOperationException>().WithMessage("*writes more*");
+
+        await body.WriteAsync(new byte[] { 4 }, ct);
+        body.EnsureComplete();
+    }
+
+    private sealed class ForwardOnlyStream(byte[] content) : Stream {
+        private readonly MemoryStream _inner = new(content);
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) {
+            return _inner.Read(buffer, offset, count);
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) {
+            return _inner.ReadAsync(buffer, cancellationToken);
+        }
+
+        public override void Flush() {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) {
+            throw new NotSupportedException();
+        }
+
+        public override void SetLength(long value) {
+            throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count) {
+            throw new NotSupportedException();
+        }
     }
 
     private static async Task<TestHost> StartAsync(CancellationToken ct) {

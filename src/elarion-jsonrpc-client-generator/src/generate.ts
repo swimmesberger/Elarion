@@ -321,21 +321,36 @@ export function generateRpcClientFiles(
     ? generateStartAdapterSource({generatedBy, sourceLabel, clientFileName})
     : undefined
 
+  // The sources import each other with `.js` specifiers; `importExtension: 'ts'` names the `.ts` files instead.
+  const withImports = (source: string): string =>
+    options.importExtension === 'ts' ? useTsImports(source, [typesFileName, schemasFileName, clientFileName]) : source
+  const withOptionalImports = (source: string | undefined): string | undefined =>
+    source === undefined ? undefined : withImports(source)
+
   return {
     methodCount: methods.length,
     typesFileName,
     schemasFileName,
     clientFileName,
-    typesSource: typesLines.join('\n'),
-    schemasSource: schemasLines.join('\n'),
-    clientSource,
+    typesSource: withImports(typesLines.join('\n')),
+    schemasSource: withImports(schemasLines.join('\n')),
+    clientSource: withImports(clientSource),
     sessionClientFileName: sessionClientSource === undefined ? undefined : sessionClientFileName,
-    sessionClientSource,
+    sessionClientSource: withOptionalImports(sessionClientSource),
     frameworkAdapterFileName: frameworkAdapterSource === undefined ? undefined : frameworkAdapterFileName,
-    frameworkAdapterSource,
+    frameworkAdapterSource: withOptionalImports(frameworkAdapterSource),
     eventsClientFileName: eventsClientSource === undefined ? undefined : eventsClientFileName,
-    eventsClientSource,
+    eventsClientSource: withOptionalImports(eventsClientSource),
   }
+}
+
+// Rewrites the relative imports of the generated files (`from './rpc-schemas.js'`) to their `.ts` files.
+function useTsImports(source: string, fileNames: readonly string[]): string {
+  let result = source
+  for (const fileName of fileNames) {
+    result = result.replaceAll(`'${moduleSpecifier(fileName)}'`, `'${moduleSpecifier(fileName, 'ts')}'`)
+  }
+  return result
 }
 
 function uploadPaths(schema: JsonSchema, path: string): string[][] {

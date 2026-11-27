@@ -1158,9 +1158,11 @@ describe('JSON-RPC client generator', () => {
 
     expect(await clientModule.withDecisions(seam, 'math.add', {left: 30, right: 12}, () => 'confirm')).toBe(42)
     expect(calls).toEqual(['math.add', 'math.add'])
-    // Cancelling throws the seam's own error.
-    await expect(clientModule.withDecisions(seam, 'math.add', {left: 1, right: 2}, () => undefined))
-      .rejects.toThrow('Localized failure')
+    // Cancelling throws RpcDecisionCancelledError, with the seam's own error as its cause.
+    const cancelled = await clientModule.withDecisions(seam, 'math.add', {left: 1, right: 2}, () => undefined)
+      .catch((error: unknown) => error)
+    expect(cancelled).toMatchObject({name: 'RpcDecisionCancelledError', question: {code: 'math.big_sum'}})
+    expect((cancelled as Error).cause).toMatchObject({message: 'Localized failure'})
   })
 
   it('asks the application for a declared decision and resends with the answer', async () => {
@@ -1207,8 +1209,9 @@ describe('JSON-RPC client generator', () => {
       ['math.big_sum', ['confirm'], false, {limit: 10}],
       ['math.per_item', ['keep', 'drop'], true, undefined],
     ])
+    // The first call sends the params as given: no empty decisions list.
     expect(sent).toEqual([
-      [],
+      undefined,
       [{code: 'math.big_sum', option: 'confirm'}],
       [
         {code: 'math.big_sum', option: 'confirm'},
@@ -1217,9 +1220,189 @@ describe('JSON-RPC client generator', () => {
       ],
     ])
 
-    // A cancelled question throws the decision error; an undeclared one is never asked.
-    await expect(clientModule.withDecisions(client, 'math.add', {left: 1, right: 2}, () => undefined))
-      .rejects.toMatchObject({code: 'math.big_sum', isDecisionRequired: true})
+    // A cancelled question throws RpcDecisionCancelledError (the decision error is its cause), so a caller tells a
+    // cancel from a failure; an undeclared one is never asked.
+    const cancelled = await clientModule.withDecisions(client, 'math.add', {left: 1, right: 2}, () => undefined)
+      .catch((error: unknown) => error)
+    expect(cancelled).toMatchObject({name: 'RpcDecisionCancelledError', question: {code: 'math.big_sum'}})
+    expect((cancelled as Error).cause).toMatchObject({code: 'math.big_sum', isDecisionRequired: true})
+  })
+
+  it('aborts a request after its timeout with RpcTimeoutError, honouring the timeout tag and per-call overrides', async () => {
+    const schema = rpcClientTestSchema()
+    schema.methods['user.get'] = {...schema.methods['user.get'], tags: {timeout: '150ms'}}
+    const generated = generateRpcClientFiles(schema)
+    const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as {
+      createRpcClient(options: Record<string, unknown>): {
+        call(method: string, params: unknown, options?: Record<string, unknown>): Promise<unknown>
+      }
+      isRetryable(error: unknown): boolean
+    }
+    const waited: number[] = []
+    // A server that answers only when the request is aborted, after recording how long it waited.
+    const hanging: FetchLike = (_input, init) => new Promise((_resolve, reject) => {
+      const started = Date.now()
+      const abort = () => {
+        waited.push(Date.now() - started)
+        reject(init?.signal?.reason ?? new Error('aborted'))
+      }
+      // Like fetch, an already aborted signal rejects at once.
+      if (init?.signal?.aborted) abort()
+      else init?.signal?.addEventListener('abort', abort)
+    })
+    const client = clientModule.createRpcClient({
+      url: 'https://example.test/rpc', fetch: hanging, timeoutMs: 40, validateParams: false, validateResults: false,
+    })
+
+    const timedOut = await client.call('math.add', {left: 1, right: 2}).catch((error: unknown) => error)
+    expect(timedOut).toMatchObject({name: 'RpcTimeoutError', timeoutMs: 40, methods: ['math.add']})
+    expect(clientModule.isRetryable(timedOut)).toBe(true)
+
+    // The method's timeout tag wins over the client's default.
+    expect(await client.call('user.get', {id: '1'}).catch((error: unknown) => error))
+      .toMatchObject({name: 'RpcTimeoutError', timeoutMs: 150})
+
+    // A per-call timeout wins over both; the caller's own abort is not a timeout.
+    expect(await client.call('user.get', {id: '1'}, {timeoutMs: 20}).catch((error: unknown) => error))
+      .toMatchObject({name: 'RpcTimeoutError', timeoutMs: 20})
+    const cancel = new AbortController()
+    const cancelled = client.call('math.add', {left: 1, right: 2}, {signal: cancel.signal, timeoutMs: false})
+      .catch((error: unknown) => error)
+    cancel.abort()
+    const cancelError = await cancelled
+    expect(cancelError).not.toMatchObject({name: 'RpcTimeoutError'})
+    expect(clientModule.isRetryable(cancelError)).toBe(false)
+    expect(waited.length).toBe(4)
+  })
+
+  it('maps every thrown error through mapError, keeping the original reachable as the cause', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as {
+      createRpcClient(options: Record<string, unknown>): {
+        call(method: string, params: unknown): Promise<unknown>
+        batch(items: readonly { method: string; params: unknown }[]): Promise<unknown>
+      }
+      isRetryable(error: unknown): boolean
+    }
+    const contexts: unknown[] = []
+    const client = clientModule.createRpcClient({
+      url: 'https://example.test/rpc',
+      fetch: async (_input: unknown, init?: RequestInit) => {
+        const request = JSON.parse(String(init?.body)) as { id: string } | { id: string }[]
+        if (Array.isArray(request)) return new Response('busy', {status: 503, statusText: 'Service Unavailable'})
+        return jsonResponse({jsonrpc: '2.0', id: request.id, error: {
+          code: -32001, message: 'No such user.', data: {code: 'not_found'},
+        }})
+      },
+      validateResults: false,
+      mapError: (error: unknown, context: unknown) => {
+        contexts.push(context)
+        return new Error('Nicht gefunden.', {cause: error})
+      },
+    })
+
+    const mapped = await client.call('user.get', {id: '1'}).catch((error: unknown) => error) as Error
+    expect(mapped.message).toBe('Nicht gefunden.')
+    expect(mapped.cause).toMatchObject({code: 'not_found', isNotFound: true})
+    // A decided answer is final, also through the mapped error's cause.
+    expect(clientModule.isRetryable(mapped)).toBe(false)
+
+    const batchError = await client.batch([{method: 'math.add', params: {left: 1, right: 2}}])
+      .catch((error: unknown) => error) as Error
+    expect(batchError.cause).toMatchObject({name: 'RpcTransportError', status: 503})
+    expect(clientModule.isRetryable(batchError)).toBe(true)
+    expect(contexts).toEqual([{methods: ['user.get'], batch: false}, {methods: ['math.add'], batch: true}])
+  })
+
+  it('tells retryable failures from final ones', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as {
+      isRetryable(error: unknown): boolean
+      RpcError: new (rpcCode: number, message: string, data?: unknown) => Error
+      RpcTransportError: new (status: number, statusText: string, body: string) => Error
+      RpcProtocolError: new (message: string) => Error
+    }
+    const {isRetryable, RpcError, RpcTransportError, RpcProtocolError} = clientModule
+
+    expect(isRetryable(new RpcError(-32603, 'Internal error', {code: 'internal'}))).toBe(true)
+    expect(isRetryable(new RpcError(-32002, 'Busy', {code: 'idempotency.in_progress'}))).toBe(true)
+    expect(isRetryable(new TypeError('Failed to fetch'))).toBe(true)
+    expect(isRetryable(new RpcTransportError(502, 'Bad Gateway', ''))).toBe(true)
+    expect(isRetryable(new RpcTransportError(429, 'Too Many Requests', ''))).toBe(true)
+
+    for (const [rpcCode, code] of [
+      [-32602, 'validation'], [-32001, 'not_found'], [-32002, 'conflict'], [-32003, 'forbidden'],
+      [-32004, 'business_rule'], [-32005, 'unauthorized'], [-32006, 'decision_required'], [-32601, 'method_not_found'],
+    ] as const) {
+      expect(isRetryable(new RpcError(rpcCode, 'final', {code}))).toBe(false)
+    }
+    expect(isRetryable(new RpcTransportError(404, 'Not Found', ''))).toBe(false)
+    expect(isRetryable(new RpcProtocolError('bad id'))).toBe(false)
+    expect(isRetryable(new TypeError('x is not a function'))).toBe(false)
+    expect(isRetryable(undefined)).toBe(false)
+  })
+
+  it('type-checks the timeout and error-mapping options under NodeNext', () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const usage = [
+      "import { createRpcClient, isRetryable, RpcTimeoutError } from './rpc-client.js'",
+      '',
+      'export const client = createRpcClient({',
+      "  url: 'https://example.test/rpc',",
+      '  timeoutMs: 30_000,',
+      "  timeoutFor: (method) => method === 'user.get' ? 180_000 : undefined,",
+      "  mapError: (error, context) => new Error(context.methods.join(','), { cause: error }),",
+      '})',
+      "export const once = client.call('math.add', { left: 1, right: 2 }, { timeoutMs: false })",
+      'export const retry = (count: number, error: unknown): boolean =>',
+      '  count < 3 && (isRetryable(error) || error instanceof RpcTimeoutError)',
+      '',
+    ].join('\n')
+    const schemasStub = [
+      'export const rpcParamsSchemas: Record<string, any> = {}',
+      'export const rpcResultSchemas: Record<string, any> = {}',
+      'export const rpcErrorDataSchemas: Record<string, Record<string, any>> = {}',
+      '',
+    ].join('\n')
+
+    expect(typeCheck({
+      'rpc-types.ts': generated.typesSource,
+      'rpc-client.ts': generated.clientSource,
+      'rpc-schemas.ts': schemasStub,
+      'usage.ts': usage,
+    })).toEqual([])
+  })
+
+  it('names the .ts files in its imports with importExtension ts, so plain Node loads the client', async () => {
+    const generated = generateRpcClientFiles(decisionTestSchema(), {importExtension: 'ts'})
+
+    expect(generated.clientSource).toContain("from './rpc-types.ts'")
+    expect(generated.clientSource).toContain("from './rpc-schemas.ts'")
+    expect(generated.clientSource).not.toContain("'./rpc-schemas.js'")
+    expect(generateRpcClientFiles(decisionTestSchema()).clientSource).toContain("from './rpc-schemas.js'")
+
+    // Node with type stripping (unflagged since Node 23.6) imports the generated .ts files themselves.
+    if (!(process.features as { typescript?: unknown }).typescript) return
+    const dir = mkdtempSync(join(tmpdir(), 'elarion-rpc-node-'))
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({type: 'module'}), 'utf-8')
+    writeFileSync(join(dir, 'rpc-types.ts'), generated.typesSource, 'utf-8')
+    writeFileSync(join(dir, 'rpc-client.ts'), generated.clientSource, 'utf-8')
+    writeFileSync(join(dir, 'rpc-schemas.ts'), [
+      'export const rpcParamsSchemas: Record<string, any> = {}',
+      'export const rpcResultSchemas: Record<string, any> = {}',
+      'export const rpcErrorDataSchemas: Record<string, Record<string, any>> = {}',
+      '',
+    ].join('\n'), 'utf-8')
+    writeFileSync(join(dir, 'check.ts'), [
+      "import { decisionQuestion, RpcError } from './rpc-client.ts'",
+      "const error = new RpcError(-32006, 'Big sum', { code: 'math.big_sum', data: { limit: 10 } })",
+      "console.log(decisionQuestion('math.add', error)?.code)",
+      '',
+    ].join('\n'), 'utf-8')
+    const {spawnSync} = await import('node:child_process')
+    const run = spawnSync(process.execPath, [join(dir, 'check.ts')], {encoding: 'utf-8'})
+    expect(run.stderr).not.toContain('Error')
+    expect(run.stdout.trim()).toBe('math.big_sum')
   })
 
   it('propagates a transform result of null instead of falling back to the raw value', async () => {
@@ -1673,6 +1856,45 @@ describe('JSON-RPC client generator', () => {
     expect(await adapter.module.createStartRpcApi({url: '/rpc', forwardHeaders: ['x-tenant']}).headersFor())
       .toEqual({})
     expect(adapter.module.forwardRequestHeaders(['cookie'])).toEqual({})
+  })
+
+  it('maps an SSR failure to its response status and rewrites the rendered response', async () => {
+    const adapter = await loadGeneratedStartAdapter({})
+    // The errors come from the core client instance the adapter imported (the test runner may load a module twice).
+    const {RpcError, RpcTransportError} = (globalThis as unknown as Record<string, {
+      RpcError: new (rpcCode: number, message: string, data?: unknown) => Error
+      RpcTransportError: new (status: number, statusText: string, body: string) => Error
+    }>)[`${adapter.dir}:core`]
+    const {ssrStatusFor, withResponseStatus} = adapter.module
+
+    expect(ssrStatusFor(new RpcError(-32003, 'No.', {code: 'forbidden'}))).toBe(403)
+    expect(ssrStatusFor(new RpcError(-32005, 'Sign in.', {code: 'unauthorized'}))).toBe(401)
+    expect(ssrStatusFor(new RpcError(-32001, 'Gone.', {code: 'not_found'}))).toBe(404)
+    const maintenance = new RpcTransportError(503, 'Service Unavailable', '{"code":"unavailable"}')
+    expect(ssrStatusFor(maintenance)).toBe(503)
+    expect(ssrStatusFor(new Error('Wartung.', {cause: maintenance}))).toBe(503)
+    expect(ssrStatusFor(new RpcError(-32602, 'Bad.', {code: 'validation'}))).toBeUndefined()
+    expect(ssrStatusFor(new TypeError('boom'))).toBeUndefined()
+
+    const rendered = new Response('<html>maintenance</html>', {status: 200, headers: {'content-type': 'text/html'}})
+    const rewritten = withResponseStatus(rendered, 503)
+    expect(rewritten.status).toBe(503)
+    expect(rewritten.headers.get('content-type')).toBe('text/html')
+    expect(rewritten.headers.get('cache-control')).toBe('no-store')
+    expect(await rewritten.text()).toBe('<html>maintenance</html>')
+  })
+
+  it('recognises an unavailable service in the core client, through a mapped error', async () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema())
+    const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as {
+      isServiceUnavailable(error: unknown): boolean
+      RpcTransportError: new (status: number, statusText: string, body: string) => Error
+    }
+    const unavailable = new clientModule.RpcTransportError(503, 'Service Unavailable', '')
+
+    expect(clientModule.isServiceUnavailable(unavailable)).toBe(true)
+    expect(clientModule.isServiceUnavailable(new Error('mapped', {cause: unavailable}))).toBe(true)
+    expect(clientModule.isServiceUnavailable(new clientModule.RpcTransportError(500, 'Internal', ''))).toBe(false)
   })
 
   it('omits the framework adapter by default', () => {
@@ -2147,6 +2369,10 @@ interface StartAdapterModule {
   forwardRequestHeaders(names: readonly string[]): HeadersInit
 
   forwardRequestCookie(): HeadersInit
+
+  ssrStatusFor(error: unknown): number | undefined
+
+  withResponseStatus(response: Response, status: number): Response
 }
 
 // Loads the generated start-adapter.ts against stand-ins for its imports: `@tanstack/react-start` runs the
@@ -2156,7 +2382,7 @@ interface StartAdapterModule {
 async function loadGeneratedStartAdapter(
   requestHeaders: Record<string, string>,
   environment: 'server' | 'client' = 'server'
-): Promise<{ module: StartAdapterModule; receivedOptions(): Record<string, unknown> }> {
+): Promise<{ module: StartAdapterModule; dir: string; receivedOptions(): Record<string, unknown> }> {
   const generated = generateRpcClientFiles(rpcClientTestSchema(), {framework: 'tanstack-start'})
   const dir = mkdtempSync(join(tmpdir(), 'elarion-start-adapter-'))
   const jsSource = ts.transpileModule(generated.frameworkAdapterSource as string, {
@@ -2190,19 +2416,31 @@ async function loadGeneratedStartAdapter(
     '',
   ].join('\n'), 'utf-8')
   writeFileSync(join(dir, 'rpc-client.mjs'), [
-    'export let receivedOptions',
-    'export function createRpcApi(options) {',
-    '  receivedOptions = options',
+    // Kept on a per-directory global: the test runner may load this module once for the adapter and once for the
+    // test, and a module-level binding would then be a different instance.
+    // The error types and their recognisers are the real generated ones.
+    "export { isServiceUnavailable, RpcError, RpcTransportError } from './rpc-client-real.mjs'",
+    "import * as real from './rpc-client-real.mjs'",
+    `globalThis[${JSON.stringify(dir + ':core')}] = real`,
+    `export function createRpcApi(options) {`,
+    `  globalThis[${JSON.stringify(dir)}] = options`,
     "  return { headersFor: () => options.headers({ methods: ['math.add'], batch: false }) }",
     '}',
     '',
   ].join('\n'), 'utf-8')
 
+  writeFileSync(join(dir, 'rpc-client-real.mjs'), ts.transpileModule(generated.clientSource, {
+    compilerOptions: {module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022},
+  }).outputText.replace("from './rpc-schemas.js'", "from './rpc-schemas.mjs'"), 'utf-8')
+  writeFileSync(join(dir, 'rpc-schemas.mjs'),
+    'export const rpcParamsSchemas = {}\nexport const rpcResultSchemas = {}\nexport const rpcErrorDataSchemas = {}\n', 'utf-8')
+
   const module = await import(pathToFileURL(join(dir, 'start-adapter.mjs')).href) as StartAdapterModule
-  const client = await import(pathToFileURL(join(dir, 'rpc-client.mjs')).href) as {
-    receivedOptions: Record<string, unknown>
+  return {
+    module,
+    dir,
+    receivedOptions: () => (globalThis as unknown as Record<string, Record<string, unknown>>)[dir],
   }
-  return {module, receivedOptions: () => client.receivedOptions}
 }
 
 async function loadGeneratedClient(clientSource: string): Promise<GeneratedClientModule> {

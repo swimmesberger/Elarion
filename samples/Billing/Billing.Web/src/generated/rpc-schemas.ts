@@ -109,3 +109,31 @@ export const rpcErrorDataSchemas = {
 } as const
 
 export type RpcErrorDataSchemas = typeof rpcErrorDataSchemas
+
+/**
+ * The limits each method's params declare — the schema's constraint keywords (`maxLength`, `maxItems`, `minimum`, …)
+ * and an upload member's `maxBytes`/`contentTypes`/`fileExtensions` — by member path (`items` for the elements of a
+ * list), as literal types. Show a limit from here instead of copying it; params validation already enforces each one.
+ */
+export const rpcLimits = {
+  "clients.create": {
+    name: {
+      minLength: 1,
+      maxLength: 200,
+    },
+    email: {
+      maxLength: 320,
+    },
+  },
+  "invoices.create": {
+    amountCents: {
+      minimum: 1,
+    },
+    currency: {
+      minLength: 3,
+      maxLength: 3,
+    },
+  },
+} as const
+
+export type RpcLimits = typeof rpcLimits

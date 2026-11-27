@@ -14,6 +14,7 @@ interface CliOptions {
   eventsClientFileName?: string
   frameworkAdapterFileName?: string
   framework?: 'tanstack-start'
+  importExtension?: 'js' | 'ts'
   sourceLabel?: string
   watch?: boolean
 }
@@ -96,6 +97,14 @@ function parseArgs(argv: string[]): CliOptions {
       index += 1
       continue
     }
+    if (arg === '--import-extension') {
+      if (next !== 'js' && next !== 'ts') {
+        throw new Error(`Unsupported import extension ${next}. Supported: js, ts`)
+      }
+      options.importExtension = next
+      index += 1
+      continue
+    }
     if (arg === '--source-label') {
       options.sourceLabel = next
       index += 1
@@ -124,6 +133,8 @@ Options:
   --framework <name>    Emit an opt-in framework adapter alongside the neutral core client.
                           Supported: tanstack-start (needs the @tanstack/react-start peer dependency)
   --framework-adapter <file> Framework adapter filename (default: start-adapter.ts)
+  --import-extension <js|ts> Extension of the imports between the generated files (default: js). ts lets
+                          plain Node (type stripping, node --test) load them without a bundler
   --source-label <text> Source label written into generated file headers
   --watch               Regenerate whenever the schema file changes (Ctrl+C to stop)
 `)
@@ -165,6 +176,7 @@ function generateOnce(options: CliOptions): boolean {
     sessionClientFileName: options.sessionClientFileName,
     eventsClientFileName: options.eventsClientFileName,
     framework: options.framework,
+    importExtension: options.importExtension,
     frameworkAdapterFileName: options.frameworkAdapterFileName,
   })
 

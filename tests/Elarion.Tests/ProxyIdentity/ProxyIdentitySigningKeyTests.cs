@@ -184,6 +184,101 @@ public sealed class ProxyIdentitySigningKeyTests {
         (await host.WhoAmIAsync(header: token)).Status.Should().Be(HttpStatusCode.OK);
     }
 
+    [Fact]
+    public async Task AwaitRefreshOnUnknownKey_TheFirstRequestAfterARotationSignsIn() {
+        var keys = new FakeKeyEndpoint();
+        keys.Documents[ProxyIdentityTestHost.JwksUrl] = TestSigningKey.Jwks(_keyA);
+        await using var host = await ProxyIdentityTestHost.StartAsync(AwaitingSettings(), keys);
+        (await host.WhoAmIAsync(header: _keyA.Mint(Issuer, Audience))).Status.Should().Be(HttpStatusCode.OK);
+
+        // The issuer replaced its key without publishing the next one ahead.
+        keys.Documents[ProxyIdentityTestHost.JwksUrl] = TestSigningKey.Jwks(_keyB);
+        var rotated = _keyB.Mint(Issuer, Audience);
+
+        (await host.WhoAmIAsync(header: rotated)).Status.Should().Be(HttpStatusCode.OK);
+        (await host.WhoAmIAsync(header: rotated)).Status.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task AwaitRefreshOnUnknownKey_ConcurrentRequestsShareOneFetch() {
+        var keys = new FakeKeyEndpoint();
+        keys.Documents[ProxyIdentityTestHost.JwksUrl] = TestSigningKey.Jwks(_keyA);
+        await using var host = await ProxyIdentityTestHost.StartAsync(AwaitingSettings(), keys);
+        (await host.WhoAmIAsync(header: _keyA.Mint(Issuer, Audience))).Status.Should().Be(HttpStatusCode.OK);
+        var before = keys.Hits(ProxyIdentityTestHost.JwksUrl);
+
+        keys.Documents[ProxyIdentityTestHost.JwksUrl] = TestSigningKey.Jwks(_keyB);
+        var rotated = _keyB.Mint(Issuer, Audience);
+        keys.Hold();
+        var requests = Enumerable.Range(0, 16).Select(_ => host.WhoAmIAsync(header: rotated)).ToList();
+        await WaitUntilAsync(() => keys.Hits(ProxyIdentityTestHost.JwksUrl) > before);
+        await Task.Delay(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
+        requests.Should().OnlyContain(request => !request.IsCompleted);
+        keys.Release();
+        var answers = await Task.WhenAll(requests);
+
+        answers.Should().AllSatisfy(answer => answer.Status.Should().Be(HttpStatusCode.OK));
+        // Our one fetch, plus at most the background refresh IdentityModel was asked for afterwards.
+        keys.Hits(ProxyIdentityTestHost.JwksUrl).Should().BeLessThanOrEqualTo(before + 2);
+    }
+
+    [Fact]
+    public async Task AwaitRefreshOnUnknownKey_ForgedKeyIds_FetchAtMostOncePerRefreshInterval() {
+        var keys = new FakeKeyEndpoint();
+        keys.Documents[ProxyIdentityTestHost.JwksUrl] = TestSigningKey.Jwks(_keyA);
+        await using var host = await ProxyIdentityTestHost.StartAsync(AwaitingSettings(), keys);
+        (await host.WhoAmIAsync(header: _keyA.Mint(Issuer, Audience))).Status.Should().Be(HttpStatusCode.OK);
+        var before = keys.Hits(ProxyIdentityTestHost.JwksUrl);
+
+        for (var index = 0; index < 10; index++) {
+            var forged = TestSigningKey.Create($"forged-{index}").Mint(Issuer, Audience);
+            (await host.WhoAmIAsync(header: forged)).Status.Should().Be(HttpStatusCode.Unauthorized);
+        }
+
+        // One awaited fetch, plus at most the one background refresh IdentityModel allows in the same interval.
+        await Task.Delay(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
+        keys.Hits(ProxyIdentityTestHost.JwksUrl).Should().BeLessThanOrEqualTo(before + 2);
+    }
+
+    [Fact]
+    public async Task AwaitRefreshOnUnknownKey_ABoundedWait_RefusesWhenTheEndpointHangs() {
+        var keys = new FakeKeyEndpoint();
+        keys.Documents[ProxyIdentityTestHost.JwksUrl] = TestSigningKey.Jwks(_keyA);
+        var settings = AwaitingSettings();
+        settings["ProxyIdentity:UnknownKeyRefreshTimeout"] = "00:00:00.200";
+        await using var host = await ProxyIdentityTestHost.StartAsync(settings, keys);
+        (await host.WhoAmIAsync(header: _keyA.Mint(Issuer, Audience))).Status.Should().Be(HttpStatusCode.OK);
+
+        keys.Documents[ProxyIdentityTestHost.JwksUrl] = TestSigningKey.Jwks(_keyB);
+        keys.Hold();
+        var stopwatch = Stopwatch.StartNew();
+        var answer = await host.WhoAmIAsync(header: _keyB.Mint(Issuer, Audience));
+        stopwatch.Stop();
+        keys.Release();
+
+        answer.Status.Should().Be(HttpStatusCode.Unauthorized);
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task WithoutAwaitRefreshOnUnknownKey_TheRequestThatFindsTheRotationIsRefused() {
+        var keys = new FakeKeyEndpoint();
+        keys.Documents[ProxyIdentityTestHost.JwksUrl] = TestSigningKey.Jwks(_keyA);
+        await using var host = await ProxyIdentityTestHost.StartAsync(ProxyIdentityTestHost.JwksSettings(), keys);
+        (await host.WhoAmIAsync(header: _keyA.Mint(Issuer, Audience))).Status.Should().Be(HttpStatusCode.OK);
+
+        keys.Documents[ProxyIdentityTestHost.JwksUrl] = TestSigningKey.Jwks(_keyB);
+        keys.Hold();
+        (await host.WhoAmIAsync(header: _keyB.Mint(Issuer, Audience))).Status.Should().Be(HttpStatusCode.Unauthorized);
+        keys.Release();
+    }
+
+    private static Dictionary<string, string?> AwaitingSettings() {
+        var settings = ProxyIdentityTestHost.JwksSettings();
+        settings["ProxyIdentity:AwaitRefreshOnUnknownKey"] = "true";
+        return settings;
+    }
+
     private FakeKeyEndpoint DiscoveryEndpoint(string documentIssuer) {
         var keys = new FakeKeyEndpoint();
         keys.Documents[DiscoveryUrl] = $$"""{"issuer":"{{documentIssuer}}","jwks_uri":"{{DiscoveredJwksUrl}}"}""";

@@ -205,7 +205,8 @@ Subscribing is an upsert **by endpoint**: the same device re-subscribing refresh
 time, and re-subscribing under a *different* account reassigns the row instead of colliding on the unique
 endpoint. The reassignment requires the subscription's stored `auth` secret, which the same browser always
 sends. A request for an endpoint another user owns, with other keys, writes nothing and fails with the same
-`Validation` error (`400`) as an invalid subscription, so a user who learned someone else's endpoint cannot
+`Validation` error (`400`, code `web_push.subscription_invalid`, `WebPushErrorCodes.SubscriptionInvalid`) as an
+invalid subscription, so a user who learned someone else's endpoint cannot
 redirect it to keys of their own. The check is part of the store's single `INSERT … ON CONFLICT … DO UPDATE …
 WHERE` statement, not a read before the write, so concurrent subscribes for one endpoint leave exactly one owner.
 The secret is compared with plain SQL equality rather than in constant time. That is acceptable because it is

@@ -65,6 +65,9 @@ public sealed class GetClient(AppDbContext db)
 }
 ```
 
+A handler may also be `internal`, with an internal request and response: the generators register and expose it
+exactly like a public one, so the module-private services it injects can stay internal too.
+
 ## The contract
 
 A handler implements `IHandler<TRequest, TResponse>`:

@@ -171,6 +171,37 @@ minor releases may include breaking changes.
   validated through `IRequestValidator.ValidateAsync`. A marked type with validation attributes outside every module is
   the build error `ELVAL004`; `ELVAL002` now also covers such a type in a compilation without `Elarion.Validation`. See
   [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation#validating-outside-a-handler-request).
+- **`ElarionStreamedFile.Length`: a streamed file states its size.** A forward-only stream whose size is known (a
+  decoded message part) or a writer that produces a known count sets `with { Length = … }`; the response sends it as
+  `Content-Length`, so a browser shows the download's progress, and counts the bytes written: a content that writes
+  more or fewer aborts the connection like any other failure after the first byte. See
+  [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints#streamed-files-http-only-endpoints).
+- **Proxy identity: `AwaitRefreshOnUnknownKey`.** For an issuer that rotates by replacing its signing key, a token
+  naming a key the current keys do not hold can wait for one fetch of the key endpoint instead of being refused until
+  the background refresh lands. The fetch is single-flight, at most one per `RefreshInterval`, awaited at most
+  `UnknownKeyRefreshTimeout` (five seconds), and the keys it found validate for `RefreshInterval`. Off by default. See
+  [Proxy identity](https://elarion.wimmesberger.dev/docs/capabilities/proxy-identity#signing-keys).
+- **Generated TypeScript client: timeouts, error mapping and retries.** `RpcClientOptions.timeoutMs`, `timeoutFor(method)`
+  and a per-call `timeoutMs` abort a request with `RpcTimeoutError`, and a handler's `[ClientTag("timeout", "180s")]` is
+  read as its method's default; `mapError(error, context)` turns every error a call or batch throws into the
+  application's own; `isRetryable(error)` tells what a retry can clear (network, timeout, `408`/`429`/`5xx`,
+  `internal`, `idempotency.in_progress`) from a decided answer; `isServiceUnavailable(error)` recognises a `503`. All
+  look through `cause`. See
+  [TypeScript client](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#timeouts-error-mapping-and-retries).
+- **Generated TypeScript client: `--import-extension ts`.** The generated files can import each other by their `.ts`
+  names, so plain Node (type stripping, `node --test`) loads them without a bundler. The default stays `.js`.
+- **TanStack Start adapter: the status of a failed SSR render.** `ssrStatusFor(error)` maps the server's unauthorized,
+  forbidden and not-found answers to `401`, `403` and `404` and an unavailable service (a `503` from the server or the
+  platform in front of it) to `503`; `withResponseStatus(response, status)` rewrites a rendered response. See
+  [TypeScript client](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#the-status-of-a-failed-ssr-render).
+
+- **`ELMOD008`: a module that injects another module's contract declares the dependency.** A `[ModuleContract]`'s
+  implementation is registered with the module that owns it, so it is gone when that feature module is disabled. The
+  analyzer now warns when a type injects a contract of another feature module that its module's `DependsOn` does
+  not name (a Core module's contract needs none). Module contracts also document that a contract returning
+  `IQueryable<T>` runs on the caller's scoped `DbContext`, that handlers may be `internal`, and how shared-kernel JSON
+  types are contributed once. See
+  [Cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication#what-a-contracts-consumer-must-know).
 - **Constraint violations as results: `IUnitOfWorkFailureTranslator`** (ADR-0003 amendment). `TransactionDecorator`
   offers an exception that ends its unit of work — from the handler, or from the commit, where PostgreSQL checks a
   `DEFERRABLE INITIALLY DEFERRED` constraint outside every `SaveChangesInterceptor` — to the registered translators;
@@ -230,6 +261,24 @@ minor releases may include breaking changes.
   [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#several-models).
 
 ### Changed
+- **BREAKING: `withDecisions` throws `RpcDecisionCancelledError` when `ask` cancels.** It threw the decision error, so a
+  caller could not tell a declined question from a failed call. The new error carries the `question` and the decision
+  error as `cause`; code that recognised a cancel by `error.isDecisionRequired` checks for `RpcDecisionCancelledError`
+  instead. Its first call also no longer adds an empty `decisions: []` to the params.
+- **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
+  type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
+  member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
+- **The scheduler logs a routine run at `Debug`.** A run's start and successful completion moved from `Information` to
+  `Debug`, and the completion line now carries the run's duration, so a job on a short interval no longer floods a
+  console. The scheduler's lifecycle stays at `Information`, cancelled runs at `Warning`, failed runs at `Error`; an
+  occurrence skipped because an earlier run still holds its slot (overlap, coalesced, per-job concurrency) now logs a
+  `Warning`, and the database backend's claims purge logs at `Debug`. See
+  [Scheduling](https://elarion.wimmesberger.dev/docs/capabilities/scheduling#operational-characteristics).
+- **Web push subscription answers carry a specific code.** Every refusal of `WebPushSubscriptionService` (a malformed
+  or disallowed endpoint, missing or invalid keys, a subscription the store refused) now carries
+  `web_push.subscription_invalid` (`WebPushErrorCodes.SubscriptionInvalid`) instead of the generic `validation`, so a
+  client branches on the code instead of the English message. The kind stays `Validation` (`400`). See
+  [Web push](https://elarion.wimmesberger.dev/docs/capabilities/web-push).
 - **BREAKING: `ToOffsetPageAsync` returns `OffsetPage<T>`** (ADR-0120). Offset lists get their own envelope: `Items`,
   a required `Total`, `HasNext` and `HasPrevious`, with `Map`, `MapAsync`, `Empty` (total `0`) and `ToPage()`. The
   generated TypeScript type of an offset list is `{ items, total: number, hasNext, hasPrevious }` instead of carrying a
