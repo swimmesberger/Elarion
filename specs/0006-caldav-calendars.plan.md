@@ -257,6 +257,29 @@ As built in slice 1, where it settles or departs from the above:
   its own `AppPasswords` set during migration. No store is registered by `AddElarionAppPasswords`;
   `AddElarionInMemoryAppPasswordStore()` exists for tests.
 
+As built in slice 2 (`Elarion.WebDav`, `Elarion.WebDav.EntityFrameworkCore`), where it settles or departs from the above:
+
+- **Collection id**: not a version 7 UUID but a name-based one (version 8, SHA-256 over kind, source and key), exposed as
+  `DavCollectionAddress.Id`. Every node computes it without a read, and a calendar a source lists but nothing was
+  published to yet still has a stable sync token at counter 0; a token beyond the counter (a store that was reset) is
+  refused like an expired one.
+- **Journal retention needs a time**: `elarion_dav_changes` has a `changed_at` column; a change prunes the rows beyond the
+  row cap or older than the retention and raises `low_water` to the highest pruned counter, in one statement.
+- **Locking**: a publish compares the stored ETag without a lock first (no write for equal bytes, FR-006), then inserts
+  the collection row if missing, takes the row lock with `SELECT … FOR UPDATE`, re-checks, writes and gives each change
+  its own counter value; the counter and the low-water mark are written by the pruning statement.
+- **Naming**: the row cap is `MaxJournalRowsPerCollection`, since the store is shared with CardDAV later. The tables have
+  foreign keys from objects and changes to collections. The EF store requires PostgreSQL and says so when it is not.
+- **The in-memory store ships**: `AddElarionInMemoryDavStore()` keeps the same counters, journal and pruning without a
+  transaction, for tests and single-node development, as slice 1 shipped `AddElarionInMemoryAppPasswordStore()`; the
+  dispatcher tests and the store contract run on it and on PostgreSQL.
+- **Dispatcher details**: a missing `Depth` on `PROPFIND` is read as `1` (sabre/dav's default) rather than RFC 4918's
+  `infinity`; a body with more elements than `MaxXmlElements` answers `413`, a deeper one `400`; an initial
+  `sync-collection` (empty token) answers every member regardless of `limit`; `getctag` is the sync token. The name
+  tables and the XML helpers are internal and shared with `Elarion.CalDav`, `Elarion.WebDav.AspNetCore` and the EF store
+  through `InternalsVisibleTo`; the seams (`IDavProtocol`, `DavCollection`, `DavProperty`, `IDavCollectionStore`,
+  `DavDispatcher`, `DavRequest`, `DavResponse`, `DavXmlElement`) are public.
+
 ## Adopting existing app passwords
 
 An application that already issues its own Basic credentials for DAV clients (as the consuming application whose

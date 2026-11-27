@@ -468,6 +468,14 @@ App-password table generation for `[GenerateElarionAppPasswords]` (ADR-0111). Se
 | --- | --- | --- | --- |
 | ELAPW001 | Error | A context is annotated with `[GenerateElarionAppPasswords]` but not `[GenerateDbSets]`, so the app-password `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionAppPasswords]`. |
 
+## ELDAV — DAV store (EF Core)
+
+Store-table generation for `[GenerateElarionDavStore]` (ADR-0111). See [CalDAV](/docs/capabilities/caldav).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELDAV001 | Error | A context is annotated with `[GenerateElarionDavStore]` but not `[GenerateDbSets]`, so the store's `DbSet`s and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionDavStore]`. |
+
 ## ELDEV — Device identity (EF Core)
 
 Device-identity-table generation for `[GenerateElarionDeviceIdentity]` (ADR-0054). See

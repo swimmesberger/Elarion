@@ -76,6 +76,9 @@
     <ProjectReference Include="../../src/Elarion.AppPasswords.AspNetCore/Elarion.AppPasswords.AspNetCore.csproj"/>
     <ProjectReference Include="../../src/Elarion.AppPasswords.EntityFrameworkCore/Elarion.AppPasswords.EntityFrameworkCore.csproj"/>
     <ProjectReference Include="../../src/Elarion.AppPasswords.EntityFrameworkCore.Generators/Elarion.AppPasswords.EntityFrameworkCore.Generators.csproj"/>
+    <ProjectReference Include="../../src/Elarion.WebDav/Elarion.WebDav.csproj"/>
+    <ProjectReference Include="../../src/Elarion.WebDav.EntityFrameworkCore/Elarion.WebDav.EntityFrameworkCore.csproj"/>
+    <ProjectReference Include="../../src/Elarion.WebDav.EntityFrameworkCore.Generators/Elarion.WebDav.EntityFrameworkCore.Generators.csproj"/>
     <ProjectReference Include="../../src/Elarion.WebPush/Elarion.WebPush.csproj"/>
     <ProjectReference Include="../../src/Elarion.WebPush.AspNetCore/Elarion.WebPush.AspNetCore.csproj"/>
     <ProjectReference Include="../../src/Elarion.WebPush.EntityFrameworkCore/Elarion.WebPush.EntityFrameworkCore.csproj"/>

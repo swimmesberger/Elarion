@@ -28,6 +28,17 @@ minor releases may include breaking changes.
   limits bound hostile uploads. `ContactWriter` writes vCard 3.0 or 4.0 deterministically, forward-only to a stream, an
   `ElarionFile` or a streamed file. No reflection and no third-party library, so the application still publishes with
   NativeAOT. See [Contacts](https://elarion.wimmesberger.dev/docs/capabilities/contacts).
+- **WebDAV core and store: `Elarion.WebDav`, `Elarion.WebDav.EntityFrameworkCore`** (ADR-0111, spec 0006). The
+  foundation of CalDAV: `DavDispatcher` answers `OPTIONS`, `PROPFIND` (depth 0 and 1; `infinity` is `403
+  propfind-finite-depth`), `REPORT sync-collection` (RFC 6578, with `507` truncation and `403 valid-sync-token` for an
+  expired or foreign token) and `GET` over the current user's principal, homes, published collections and their
+  objects, read-only (`403 need-privileges` for every write method), from request records without ASP.NET Core. Bodies
+  are read with DTDs refused and `MaxBodyBytes`, `MaxXmlDepth`, `MaxXmlElements` (`WebDavOptions`).
+  `[GenerateElarionDavStore]` maps the `elarion_dav_collections`, `elarion_dav_objects` and `elarion_dav_changes` tables
+  onto the application's `DbContext` (`ELDAV001` without `[GenerateDbSets]`); the EF store joins the context's
+  transaction, writes nothing for unchanged bytes, serialises writers per collection under its row lock and prunes its
+  journal while the collection changes (`JournalRetention`, `MaxJournalRowsPerCollection`). See
+  [CalDAV](https://elarion.wimmesberger.dev/docs/capabilities/caldav).
 - **App passwords: `Elarion.AppPasswords`, `Elarion.AppPasswords.EntityFrameworkCore`, `Elarion.AppPasswords.AspNetCore`**
   (ADR-0111, spec 0006). Calendar apps and calendar subscriptions authenticate without a browser sign-in.
   `IAppPasswords` creates a named app password for a user with a scope (`AppPasswordScope.Dav`, or

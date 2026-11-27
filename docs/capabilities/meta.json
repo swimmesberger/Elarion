@@ -34,6 +34,7 @@
     "pdf-documents",
     "spreadsheets",
     "calendars",
+    "caldav",
     "contacts",
     "telemetry"
   ]

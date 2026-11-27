@@ -1,0 +1,87 @@
+---
+title: CalDAV
+description: Publish an application's calendars read-only to iOS, macOS, Thunderbird, DAVx5 and Evolution and as ICS feeds, decide who sees which calendar in a handler, and sync external CalDAV calendars step by step, NativeAOT-safe and exact on several nodes over one PostgreSQL.
+icon: CalendarSync
+---
+
+People see the application's shifts, bookings and deadlines in the calendar app they already use. A module publishes
+calendar objects in the handler that changes its data; the framework keeps them in a store with a change journal and
+answers the calendar apps' WebDAV requests from it, so sync is exact on every node and after every restart.
+
+| Package | Role |
+| --- | --- |
+| `Elarion.WebDav` | The WebDAV core without a wire: the hardened XML reader, the `DavDispatcher`, `sync-collection`, the store seam `IDavCollectionStore`. NativeAOT-safe. |
+| `Elarion.WebDav.EntityFrameworkCore` | The store and its journal on the application's `DbContext`: `[GenerateElarionDavStore]`. PostgreSQL. |
+
+Why it is shaped this way, and what was rejected, is in
+[ADR-0111](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0111-caldav.md).
+
+## The published-collection store
+
+Calendar apps poll. They ask "what changed since my token?" (RFC 6578 `sync-collection`), and the answer must name every
+changed and every removed object, on every node, after every restart. The store keeps, per published collection, the
+objects as written, a counter, and a journal of changes:
+
+| Table | Holds |
+| --- | --- |
+| `elarion_dav_collections` | One row per published collection: kind, source, key, the counter `sync_seq` and the journal's `low_water` mark. |
+| `elarion_dav_objects` | The objects: name, `uid`, strong `etag`, `content`, `content_type`, the time span they cover (`range_start`, `range_end`). |
+| `elarion_dav_changes` | One row per change: the counter it was given, the object name, added/changed/removed, and when. |
+
+Map the tables onto the application's context and register the store:
+
+```csharp
+[GenerateDbSets]
+[GenerateElarionDavStore]                       // or modelBuilder.UseElarionDavStore() in OnModelCreating
+public partial class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options);
+
+builder.Services.AddElarionWebDavEntityFrameworkCore<AppDbContext>(builder.Configuration.GetSection("WebDav"));
+```
+
+Then create the tables with a migration. The store is scoped over the request's context: a publish joins the context's
+transaction, so a published object becomes visible exactly when the handler commits and disappears with a rollback.
+Without a transaction, a write runs in a transaction of its own.
+
+- **No change, no write.** Publishing bytes equal to the stored ones compares the entity tag and writes nothing, so a
+  handler may re-publish after every save, and a nightly re-projection costs no client a refetch.
+- **Every change counts.** Any other change takes the collection's row lock, increments the counter and appends one
+  journal row per changed object, so tokens strictly increase across nodes.
+- **The journal prunes itself.** Each change also removes the collection's journal rows beyond `MaxJournalRowsPerCollection`
+  or older than `JournalRetention` and raises the low-water mark. A client holding an older token gets `403` with
+  `valid-sync-token` and resyncs in full. No job has to run.
+- **The sync token** is `urn:elarion:sync:{collection id}:{counter}`: a URI (Evolution reads anything else as a CTag),
+  bound to its collection, and valid on every node. A collection's id is derived from its kind, source and key, so a
+  calendar nothing was published to yet has a stable token at `0`. The same value serves as `getctag`.
+
+`AddElarionInMemoryDavStore()` keeps the same counters and journal in memory, for tests and single-node development.
+
+## The WebDAV dispatcher
+
+`DavDispatcher.HandleAsync(DavRequest, IServiceProvider, CancellationToken)` answers a request without a wire, so it runs
+in tests without a server. It serves the current user's principal `{prefix}/principals/{user}/`, a home per protocol
+such as `{prefix}/calendars/{user}/`, each published collection `{prefix}/calendars/{user}/{source}.{key}/` and its
+objects; another user's principal or home answers `404`.
+
+| Request | Answer |
+| --- | --- |
+| `OPTIONS` | `200`, `DAV: 1, 3` and the protocols' classes (`calendar-access`), an `Allow` header without a write method. |
+| `PROPFIND` depth `0` or `1` | The live properties of RFC 4918, RFC 3744, RFC 5397 and RFC 6578 and the protocol's, an unknown one in a `404` propstat; `Prefer: return=minimal` leaves those out. A missing `Depth` is read as `1`. |
+| `PROPFIND` depth `infinity` | `403` with `propfind-finite-depth`. |
+| `REPORT sync-collection` | Level `1`: the changed objects and the removed ones (as `404`) since the token, with a new token; a `limit` lower than the changes answers the first ones and a `507` on the collection, and the client continues from the token; an expired or foreign token `403` with `valid-sync-token`. |
+| `GET`, `HEAD` on an object | Its bytes, `Content-Type` and `ETag`; `If-None-Match` answers `304`. |
+| `PUT`, `DELETE`, `PROPPATCH`, `MKCALENDAR`, `MOVE`, `COPY`, … | `403` with `need-privileges`, nothing changes. Every collection grants `read` and `read-current-user-privilege-set` only. |
+
+Request bodies are read with DTDs and external entities refused and with `MaxBodyBytes`, `MaxXmlDepth` and
+`MaxXmlElements`: a larger body answers `413` without reading the rest, a deeper or malformed one `400`.
+
+## Configuration
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `WebDav:Prefix` | `/dav` | The path the DAV routes are served under. |
+| `WebDav:MaxBodyBytes` | `1048576` | The largest request body. |
+| `WebDav:MaxXmlDepth` | `32` | The deepest element nesting of a request body. |
+| `WebDav:MaxXmlElements` | `10000` | The most elements in a request body. |
+| `WebDav:MaxMultigetHrefs` | `1000` | The most objects one multiget names. |
+| `WebDav:JournalRetention` | `90.00:00:00` | How long the journal keeps a change. |
+| `WebDav:MaxJournalRowsPerCollection` | `10000` | The most changes one collection's journal keeps. |

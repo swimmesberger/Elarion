@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The EF Core store of Elarion's published DAV collections (ADR-0111): the elarion_dav_collections, elarion_dav_objects and elarion_dav_changes tables on the PostgreSQL the application already runs, mapped onto its own DbContext through [GenerateElarionDavStore] or modelBuilder.UseElarionDavStore(). Publishing joins the context's transaction, so a published calendar object is visible exactly when the handler commits; one counter per collection under its row lock gives sync tokens that hold on every node, and the change journal prunes itself while a collection changes.</Description>
+    <PackageTags>elarion;webdav;caldav;sync;entity-framework-core;postgresql;dotnet</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.WebDav\Elarion.WebDav.csproj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+  </ItemGroup>
+
+  <!-- Bundle the source generator's analyzer into this package. NuGet analyzer assets are not
+       transitive, so the generator lives in the package each annotated assembly references directly.
+       ReferenceOutputAssembly=false keeps it off the runtime surface; PrivateAssets=all keeps it from
+       becoming a downstream package dependency. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.WebDav.EntityFrameworkCore.Generators\Elarion.WebDav.EntityFrameworkCore.Generators.csproj"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"/>
+  </ItemGroup>
+
+  <Target Name="_BundleElarionDavStoreGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Elarion.WebDav.EntityFrameworkCore.Generators\Elarion.WebDav.EntityFrameworkCore.Generators.csproj"
+             Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_ElarionDavStoreGeneratorAnalyzer"/>
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_ElarionDavStoreGeneratorAnalyzer)"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs/"
+            Visible="false"/>
+    </ItemGroup>
+  </Target>
+
+</Project>
