@@ -294,3 +294,39 @@ Rejected or not done:
   bound in two. Rejected for documenting the difference.
 - **Measuring footer rows for widths.** A total row rarely sets a width, and measuring needs a row number before the
   records are counted. Rejected.
+
+## Amendment (2026-11-27, second round): general columns, worksheet options everywhere, title rows, hidden worksheets, synchronous writes
+
+The same application moved its remaining exports onto run-time worksheets and reported five smaller gaps:
+
+1. **A column of text and numbers.** A column whose values are not of one kind had to be declared `Number(header)`
+   without a format, which reads wrong and gave text values the text format. Decided: `SpreadsheetColumnDefinition.General`
+   and a new `SpreadsheetValueKind.General`, which only a run-time column has. Its cells take each value's own built-in
+   style, except that text keeps the default format instead of `@`, and the column carries no style, so the column and
+   the cells typed below the data stay "General". A date in it still gets its date format, or it would show as a serial.
+   A general column takes no number format: one format for values of several kinds would apply to only some of them.
+2. **Worksheet options for a run-time worksheet.** Without them a total row was a data row and got the dropdowns.
+   Decided: `AddWorksheetAsync(sheet, rows, options, ct)` overloads, for synchronous and asynchronous rows, whose options
+   parameter has no default, so the existing `AddWorksheetAsync(sheet, rows, ct)` stays and neither call is ambiguous.
+   `Name` overrides the definition's name; `IncludedColumns` and `ExcludedColumns` are refused with an
+   `ArgumentException`, because the definition is already built per call and names no properties.
+3. **Worksheet options for the one-line file.** Decided: `ToFileAsync(records, fileName, worksheetOptions, options, ct)`
+   overloads beside the existing ones, again with a required options parameter; they write through
+   `ToFileAsync(fileName, write)`. Only a literal `null` as the third argument becomes ambiguous. `WriteAsync` and
+   `ToStreamedFile` did not get the overload: `Create` and `ToStreamedFile(fileName, write)` already take every option,
+   and the gap was reported for the in-memory file only.
+4. **A synchronous write into memory.** Decided: `ToBytes(records, worksheetOptions, options)` and
+   `ToBytes(sheet, rows, worksheetOptions, options)`. They drive the one asynchronous write path over a `MemoryStream`
+   and an `IEnumerable`, where every awaited operation (the zip archive, the deflate stream, the memory stream, the
+   synchronous rows) completes before it returns, so no task is waited on; a write that did not complete synchronously
+   throws instead of blocking. A second, synchronous copy of the writer was rejected: it would duplicate the streaming
+   loop for no behaviour of its own. A synchronous `AddWorksheet` on any stream was rejected for the same reason that
+   reads of a stream stay asynchronous: a stream that is not memory may need to wait.
+5. **Title rows and hidden worksheets.** `SpreadsheetWorksheetOptions.TitleRows` writes per-value rows above the header
+   row; the header row moves down, the frozen pane follows it (so the title stays visible), the dropdown lists start
+   below it, and a write error names the row the spreadsheet shows. The reader is unchanged: it already reads a header
+   row below other lines with `SpreadsheetWorksheetSelection.HeaderRow`. `SpreadsheetWorksheetOptions.Hidden` writes
+   `state="hidden"`; the first visible worksheet is the selected tab, and `bookViews` names it as the active tab only
+   when it is not the first, so a workbook without hidden worksheets keeps its bytes. A workbook whose worksheets are all
+   hidden is refused when it is disposed, like a workbook without any, because a spreadsheet application cannot show it.
+   `veryHidden` was not offered: it hides a worksheet from the "Unhide" list, which an export has no reason to do.

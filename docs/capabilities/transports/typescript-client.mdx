@@ -641,10 +641,11 @@ instead of copying them. Each is emitted only when the schema has an entry for i
 | `rpcLimits` | Every params member's limits by method and member path, as literal types: `minLength`, `maxLength`, `minimum`, `exclusiveMinimum`, `maximum`, `exclusiveMaximum`, `minItems`, `maxItems`, and an upload member's `maxBytes`, `contentTypes` and `fileExtensions`. A nested member is reached through its parent, a list's elements through `items`. | The DataAnnotations the schema already exports, and [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) |
 | `rpcPresets` | Named request values per method, each typed as the method's params. | [`[RequestPreset]`](/docs/reference/attributes#requestpreset) on the handler |
 | `rpcSortKeys` | The keys the handler's sort map allows, in declaration order, with the direction a bare key applies and which one is the default. | The handler's [`SortMap`](/docs/capabilities/pagination#offset-pagination) |
+| `rpcMaxSortLevels` | How many of those keys one sort may combine (`+city,-name`), per method in `rpcSortKeys`. | The same `SortMap` (`MaxLevels`) |
 | `rpcConstants` | Each module's exported constants, as literal types. | [`[ClientConstants]`](/docs/reference/attributes#clientconstants) |
 
 ```ts
-import { rpcConstants, rpcLimits, rpcPresets, rpcSortKeys } from './generated/rpc-schemas'
+import { rpcConstants, rpcLimits, rpcMaxSortLevels, rpcPresets, rpcSortKeys } from './generated/rpc-schemas'
 
 // "up to 10 receipts" and the disabled button read the server's [MaxLength(10)], typed as 10.
 const maxReceipts = rpcLimits['documents.upload'].receipts.maxItems
@@ -655,6 +656,8 @@ const page = await rpc.invoices.list({ ...rpcPresets['invoices.list'].toTransfer
 
 // A column header toggles between +key and -key for the keys the handler allows.
 const sortable = rpcSortKeys['invoices.list'].map((sortKey) => sortKey.key)
+// Shift-click adds a sort level until the handler's cap (3 unless its SortMap sets MaxLevels).
+const maxSortLevels = rpcMaxSortLevels['invoices.list']
 
 const currencies = rpcConstants.billing.currencies   // readonly ["EUR", "CHF"]
 ```

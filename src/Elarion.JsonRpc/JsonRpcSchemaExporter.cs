@@ -100,7 +100,10 @@ public static class JsonRpcSchemaExporter {
             if (exportOptions?.HandlerTypes?.TryGetValue(route.RequestType, out var handlerType) == true) {
                 if (BuildPresetsNode(route, handlerType, requestSchema, valueOptions) is { } presetsNode)
                     method["presets"] = presetsNode;
-                if (BuildSortKeysNode(handlerType) is { } sortKeysNode) method["sortKeys"] = sortKeysNode;
+                if (BuildSortKeysNode(handlerType, out var maxSortLevels) is { } sortKeysNode) {
+                    method["sortKeys"] = sortKeysNode;
+                    if (maxSortLevels is { } levels) method["maxSortLevels"] = levels;
+                }
             }
 
             methodsObj[route.Name] = method;
@@ -261,13 +264,15 @@ public static class JsonRpcSchemaExporter {
     /// Builds a method's <c>sortKeys</c> array from the one <c>SortMap</c> static field its handler declares — each key
     /// in declaration order with the direction a bare key applies and, on the default key, <c>default: true</c> — or
     /// <see langword="null"/> when the handler declares none or more than one (the generator warns, ELRPC012).
+    /// <paramref name="maxLevels"/> is the map's <c>MaxLevels</c>: how many keys one sort may combine.
     /// </summary>
     /// <remarks>
     /// The map is read by reflection because this build-time export references no paging package; the shape read
-    /// (<c>Keys</c> with <c>Key</c>, <c>Direction</c>, <c>IsDefault</c>) is <c>SortMap&lt;T&gt;.Keys</c>.
+    /// (<c>Keys</c> with <c>Key</c>, <c>Direction</c>, <c>IsDefault</c>, and <c>MaxLevels</c>) is <c>SortMap&lt;T&gt;</c>'s.
     /// </remarks>
     [RequiresUnreferencedCode(SchemaReflectionMessage)]
-    private static JsonArray? BuildSortKeysNode(Type handlerType) {
+    private static JsonArray? BuildSortKeysNode(Type handlerType, out int? maxLevels) {
+        maxLevels = null;
         var maps = handlerType
             .GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
             .Where(static field => field.FieldType is { IsGenericType: true } type
@@ -277,6 +282,7 @@ public static class JsonRpcSchemaExporter {
 
         if (sortMap.GetType().GetProperty("Keys")?.GetValue(sortMap) is not System.Collections.IEnumerable keys)
             return null;
+        if (sortMap.GetType().GetProperty("MaxLevels")?.GetValue(sortMap) is int levels) maxLevels = levels;
 
         var array = new JsonArray();
         foreach (var key in keys) {
