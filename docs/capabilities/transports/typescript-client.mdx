@@ -31,6 +31,13 @@ files simply do not exist.
 The schema and client files import `zod` (v3 and v4 are both supported), so install it as a runtime
 dependency in the consuming app.
 
+The generated files import each other with `.js` specifiers (`from './rpc-schemas.js'`), which a bundler and `tsc`
+under `moduleResolution: NodeNext` resolve to the `.ts` files. Plain Node does not: to load the generated modules
+without a build step — a module that calls `decisionQuestion` under `node --test`, a script — generate with
+`--import-extension ts` (`importExtension: 'ts'`), which names the `.ts` files themselves. Node runs them with its
+type stripping (unflagged since Node 23.6); `tsc` then needs `allowImportingTsExtensions` with `noEmit`, or
+`rewriteRelativeImportExtensions`.
+
 <Callout type="warn">
   **Pin the generator to the backend's version.** The npm `latest` dist-tag tracks stable releases and
   can lag behind the backend packages, which publish a `-preview.N` build from every push to `main`.
@@ -354,6 +361,28 @@ import { forwardRequestHeaders } from './generated/start-adapter'
 const rpc = createRpcApi({ url: '/rpc', headers: () => forwardRequestHeaders(['cookie', 'authorization']) })
 ```
 
+#### The status of a failed SSR render
+
+A page rendered on the server answers `200` unless something sets another status, so a page whose loader met a
+refusal would answer `200` with the error view. The adapter exports what a server entry needs to answer the right
+status: `ssrStatusFor(error)` maps an error to `401`, `403` or `404` for the server's unauthorized, forbidden and
+not-found answers, to `503` when the service (or the platform or proxy in front of it) answered `503 Service
+Unavailable` — maintenance, a stopped installation — and to `undefined` otherwise; `withResponseStatus(response,
+status)` returns the rendered response with that status (the body streams unchanged, and a `503` gets
+`Cache-Control: no-store` unless it states one). Record the error a loader or error boundary met in a place your
+server entry can read for the request, then rewrite:
+
+```ts
+import { ssrStatusFor, withResponseStatus } from './generated/start-adapter'
+
+const response = await render(request)
+const status = ssrStatusFor(renderError(request)) // the error your loader or boundary recorded for this request
+return status === undefined ? response : withResponseStatus(response, status)
+```
+
+In the page itself, `isServiceUnavailable(error)` (from the core client, also through a mapped error's `cause`) tells
+a "back soon" state from a failure.
+
 <Callout type="warn">
   The header read must stay inside `createIsomorphicFn().server(...)`. Importing `@tanstack/react-start/server`
   from any module the client bundle can reach — even a dynamic import behind a `typeof window` guard — fails
@@ -436,6 +465,41 @@ the framework default from [`AppErrorMapper`](/docs/reference/result-and-errors)
 custom `IAppErrorTranslator<RpcError>` changes the wire codes, so keep the frontend aligned. A network or
 HTTP-level failure throws `RpcTransportError` and a malformed JSON-RPC envelope throws `RpcProtocolError`.
 
+### Timeouts, error mapping and retries
+
+`RpcClientOptions` bounds every request and gives the application one place to word failures:
+
+```ts
+import { createRpcApi, isRetryable, RpcError, RpcTimeoutError } from './generated/rpc-client'
+
+export const rpc = createRpcApi({
+  url: '/rpc',
+  timeoutMs: 30_000,                                        // every request
+  timeoutFor: (method) => method === 'reports.export' ? 180_000 : undefined,
+  mapError: (error) => new AppFailure(localize(error), { cause: error }),
+})
+
+// TanStack Query: retry only what a retry can clear.
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: (count, error) => count < 3 && isRetryable(error) } },
+})
+```
+
+- **Timeouts.** A request still unanswered after its timeout is aborted and throws `RpcTimeoutError` (`timeoutMs`,
+  `methods`). The timeout of a method is, first to last: the call's `timeoutMs` option (`false` sends it without
+  one), `timeoutFor(method)`, the handler's `[ClientTag("timeout", "180s")]` (`rpcMethodInfo[m].tags.timeout`, in
+  `ms`, `s` or `m`; a bare number is seconds), and the client's `timeoutMs`. A batch waits for the longest of its
+  methods. The caller's own `AbortSignal` still cancels, and its abort is never reported as a timeout.
+- **Error mapping.** `mapError(error, context)` receives every error a call or batch throws — `RpcError`,
+  `RpcTransportError`, `RpcTimeoutError`, a params or protocol error, a network failure — and what it returns is
+  thrown instead (`undefined` keeps the original). Keep the original as `cause`: `isRetryable`,
+  `isServiceUnavailable` and the decision helpers look through it. The errors inside a batch's item results are not
+  mapped.
+- **Retries.** `isRetryable(error)` is true for a network failure, a timeout, a `408`, `429` or `5xx` transport
+  answer, an unexpected server error (`code: "internal"`) and `idempotency.in_progress`, and false for every answer
+  the server decided (validation, not found, conflict, forbidden, unauthorized, business rule, a decision), a params
+  or protocol error and a call the caller aborted.
+
 An unexpected server error (an exception, `code: "internal"`) carries a support reference in `error.reference` —
 the server's configured [unexpected-error](/docs/concepts/results-and-errors#unexpected-errors) answer. Show it next
 to the message instead of matching the message text; it is `undefined` for every other error:
@@ -479,8 +543,9 @@ const outcome = await withDecisions(client, 'banking.imports.commit', { statemen
 ```
 
 The question carries `code`, `message`, the declared `options`, `perItem`, the typed `data` and the `RpcError`.
-Returning `undefined` cancels: `withDecisions` throws the error the call failed with, which you can recognize with
-`error.isDecisionRequired`. A later answer for the same code and item replaces an earlier one, and `maxQuestions`
+Returning `undefined` cancels: `withDecisions` throws `RpcDecisionCancelledError` (with the `question` and, as its
+`cause`, the decision error), so a caller tells a cancel from a failure of the call. The first call sends the params
+as given, without an empty `decisions` list. A later answer for the same code and item replaces an earlier one, and `maxQuestions`
 (default 10) stops a server that keeps asking. Each resend is a new request, so an idempotent method gets a new
 idempotency key unless the options fix one.
 

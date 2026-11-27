@@ -25,7 +25,9 @@ The generated files are:
 | `rpc-client.ts`  | Browser/Node.js fetch client with typed single calls, batching, headers, `AbortSignal`, JSON-RPC errors, and Zod-backed params/result validation. |
 
 The generated schema and client files import `zod`, so consuming applications should install `zod` as a runtime
-dependency.
+dependency. They import each other with `.js` specifiers, for a bundler and `tsc` under `NodeNext`; pass
+`--import-extension ts` to name the `.ts` files instead, so plain Node (type stripping, `node --test`) loads them
+without a build step.
 
 ## Generated API client
 
@@ -121,6 +123,12 @@ try {
 `-32603`) cover `Validation`/`Internal`; and the standard `isParseError`/`isInvalidRequest`/`isMethodNotFound` getters
 stay available. The application codes are also exported as `ElarionErrorCodes` for `switch` statements.
 
+`timeoutMs` (with `timeoutFor(method)`, a handler's `[ClientTag("timeout", "180s")]` and a per-call `timeoutMs`) aborts
+a request that takes too long with `RpcTimeoutError`; `mapError(error, context)` turns every thrown error into the
+application's own (keep the original as `cause`); `isRetryable(error)` tells a failure a retry can clear (network,
+timeout, `408`/`429`/`5xx`, `internal`, `idempotency.in_progress`) from a decided answer; `isServiceUnavailable(error)`
+recognises a `503` (maintenance, a stopped installation).
+
 ## Framework adapters
 
 The core client stays framework-neutral, but you can opt into a framework adapter emitted as a separate file. Pass
@@ -132,7 +140,8 @@ npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generate
 
 It exports `createStartRpcApi` — a `createRpcApi` with request-scoped header forwarding pre-wired for SSR (the
 `cookie` by default) — plus the isomorphic headers functions on their own: `forwardRequestHeaders(names)` and
-`forwardRequestCookie`. The core client never imports the adapter, so consumers that don't opt in stay
+`forwardRequestCookie`, and for a server entry `ssrStatusFor(error)` (`401`, `403`, `404`, `503`) and
+`withResponseStatus(response, status)`. The core client never imports the adapter, so consumers that don't opt in stay
 framework-neutral and their output is byte-identical.
 
 ```ts

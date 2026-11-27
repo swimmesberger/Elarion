@@ -186,6 +186,13 @@ export interface GenerateRpcClientOptions {
   framework?: 'tanstack-start'
   /** Output filename for the framework adapter (default `start-adapter.ts`). */
   frameworkAdapterFileName?: string
+  /**
+   * The extension of the relative imports between the generated files. `js` (the default) is what a bundler and
+   * `tsc` with `moduleResolution: NodeNext` expect. `ts` imports the `.ts` files themselves, so plain Node (type
+   * stripping, `node --test`) loads the generated modules without a build step; `tsc` then needs
+   * `allowImportingTsExtensions` (with `noEmit`) or `rewriteRelativeImportExtensions`.
+   */
+  importExtension?: 'js' | 'ts'
 }
 
 export interface GeneratedRpcClientFiles {

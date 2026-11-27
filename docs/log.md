@@ -2,6 +2,7 @@
 
 ## 2026-11-27
 
+* **Update**: [ADR-0080](decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md) gains an amendment (the generated client's isRetryable, mapError and timeouts; web-push answers get a specific code) and [ADR-0101](decisions/0101-a-decision-required-answer.md) one (withDecisions throws RpcDecisionCancelledError on a cancel and sends no empty decisions).
 * **Update**: [ADR-0084](decisions/0084-authenticating-proxy-identity.md) gains an amendment: an opt-in, single-flight, rate-limited and bounded wait for a token naming an unknown signing key (AwaitRefreshOnUnknownKey).
 * **Update**: [ADR-0098](decisions/0098-streamed-files-for-http-only-endpoints.md) gains an amendment: a streamed file states its length, sent as Content-Length and checked against the bytes written.
 * **Update**: contact groups built ([ADR-0114](decisions/0114-contact-groups.md)): the [contacts](capabilities/contacts.mdx) and [CardDAV](capabilities/carddav.mdx) pages describe them, the [glossary](../GLOSSARY.md) gains *contact group*, and the [DAV conformance](research/2026-11-27-dav-conformance-suites.md) note no longer lists group cards among the pinned differences.

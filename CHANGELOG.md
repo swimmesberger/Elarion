@@ -147,8 +147,25 @@ minor releases may include breaking changes.
   the background refresh lands. The fetch is single-flight, at most one per `RefreshInterval`, awaited at most
   `UnknownKeyRefreshTimeout` (five seconds), and the keys it found validate for `RefreshInterval`. Off by default. See
   [Proxy identity](https://elarion.wimmesberger.dev/docs/capabilities/proxy-identity#signing-keys).
+- **Generated TypeScript client: timeouts, error mapping and retries.** `RpcClientOptions.timeoutMs`, `timeoutFor(method)`
+  and a per-call `timeoutMs` abort a request with `RpcTimeoutError`, and a handler's `[ClientTag("timeout", "180s")]` is
+  read as its method's default; `mapError(error, context)` turns every error a call or batch throws into the
+  application's own; `isRetryable(error)` tells what a retry can clear (network, timeout, `408`/`429`/`5xx`,
+  `internal`, `idempotency.in_progress`) from a decided answer; `isServiceUnavailable(error)` recognises a `503`. All
+  look through `cause`. See
+  [TypeScript client](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#timeouts-error-mapping-and-retries).
+- **Generated TypeScript client: `--import-extension ts`.** The generated files can import each other by their `.ts`
+  names, so plain Node (type stripping, `node --test`) loads them without a bundler. The default stays `.js`.
+- **TanStack Start adapter: the status of a failed SSR render.** `ssrStatusFor(error)` maps the server's unauthorized,
+  forbidden and not-found answers to `401`, `403` and `404` and an unavailable service (a `503` from the server or the
+  platform in front of it) to `503`; `withResponseStatus(response, status)` rewrites a rendered response. See
+  [TypeScript client](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#the-status-of-a-failed-ssr-render).
 
 ### Changed
+- **BREAKING: `withDecisions` throws `RpcDecisionCancelledError` when `ask` cancels.** It threw the decision error, so a
+  caller could not tell a declined question from a failed call. The new error carries the `question` and the decision
+  error as `cause`; code that recognised a cancel by `error.isDecisionRequired` checks for `RpcDecisionCancelledError`
+  instead. Its first call also no longer adds an empty `decisions: []` to the params.
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
   type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
   member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.

@@ -60,6 +60,17 @@ export interface RpcClientOptions {
   readonly transformResult?: <M extends RpcMethod>(method: M, result: unknown) => unknown
   readonly instrumentation?: RpcInstrumentation
   readonly idempotency?: RpcIdempotencyOptions
+  // Bounds every request: one still unanswered after this many milliseconds is aborted and throws
+  // RpcTimeoutError. A method's [ClientTag("timeout", "180s")] (rpcMethodInfo[m].tags.timeout, in ms, s or m)
+  // overrides it for that method, timeoutFor overrides both, and RpcRequestOptions.timeoutMs one call. A batch
+  // waits for the longest of its methods. Unset, a request waits as long as fetch does.
+  readonly timeoutMs?: number
+  readonly timeoutFor?: (method: RpcMethod) => number | undefined
+  // Turns every error a call or batch throws (RpcError, RpcTransportError, RpcTimeoutError, a params or
+  // protocol error, a network failure) into the one the caller sees: a localized message, the application's
+  // error type. Keep the original as `cause`, so isRetryable and the decision helpers still recognise it.
+  // Returning undefined rethrows the original. The errors inside a batch's item results are not mapped.
+  readonly mapError?: (error: unknown, context: RpcRequestContext) => unknown
 }
 
 export interface RpcRequestOptions {
@@ -68,6 +79,8 @@ export interface RpcRequestOptions {
   // Override the idempotency key for this call: a fixed key (reuse across your own retries), or `false` to
   // send no key. When omitted, an idempotent operation gets an auto-generated key.
   readonly idempotencyKey?: string | false
+  // This call's timeout in milliseconds, instead of the client's; `false` sends it without one.
+  readonly timeoutMs?: number | false
 }
 
 export interface BatchItem<M extends RpcMethod = RpcMethod> {
@@ -241,6 +254,7 @@ export const ElarionErrorCodes = {
   forbidden: -32003,
   businessRule: -32004,
   unauthorized: -32005,
+  decisionRequired: -32006,
 } as const
 
 // Every error carries a stable string `code` (the contract clients branch on) and `data` (its typed
@@ -309,6 +323,11 @@ export class RpcError<TCode extends string = string, TData = unknown> extends Er
   get isUnauthorized() {
     return this.rpcCode === ElarionErrorCodes.unauthorized
   }
+
+  /** The server needs the caller's decision before it runs the call (ADR-0101); answer it and resend. */
+  get isDecisionRequired() {
+    return this.rpcCode === ElarionErrorCodes.decisionRequired
+  }
 }
 
 export class RpcTransportError extends Error {
@@ -330,6 +349,63 @@ export class RpcProtocolError extends Error {
     super(message)
     this.name = 'RpcProtocolError'
   }
+}
+
+// Thrown when a request is still unanswered after its timeout (RpcClientOptions.timeoutMs); the request is
+// aborted. A caller's own AbortSignal still throws the fetch abort error, so a cancel is never a timeout.
+export class RpcTimeoutError extends Error {
+  readonly timeoutMs: number
+  readonly methods: readonly RpcMethod[]
+
+  constructor(timeoutMs: number, methods: readonly RpcMethod[]) {
+    super(`RPC request ${methods.join(', ')} timed out after ${timeoutMs} ms.`)
+    this.name = 'RpcTimeoutError'
+    this.timeoutMs = timeoutMs
+    this.methods = methods
+  }
+}
+
+// The framework's error codes a retry can clear: the same idempotency key still being processed elsewhere.
+const rpcRetryableCodes: ReadonlySet<string> = new Set(['idempotency.in_progress'])
+
+/**
+ * Whether sending the same call again can succeed — for a query client's retry policy. Retryable: a network
+ * failure, a timeout, a 408, 429 or 5xx transport answer, an unexpected server error (code "internal"), and a
+ * request whose idempotency key is still in progress. Final: every answer the server decided (validation, not
+ * found, conflict, forbidden, unauthorized, business rule, a decision to make), a params or protocol error, and
+ * a call the caller aborted. An error mapError wrapped is judged by its `cause`.
+ */
+export function isRetryable(error: unknown): boolean {
+  for (let current = error, depth = 0; current !== undefined && current !== null && depth < 8; depth++) {
+    if (current instanceof RpcTimeoutError) return true
+    if (current instanceof RpcTransportError) {
+      return current.status === 408 || current.status === 429 || current.status >= 500
+    }
+    if (current instanceof RpcError) {
+      return current.code === 'internal' || rpcRetryableCodes.has(current.code)
+    }
+    if (current instanceof RpcProtocolError || current instanceof RpcParamsValidationError) return false
+    if (current instanceof Error && current.name === 'AbortError') return false
+    // fetch rejects a network failure with a TypeError ("Failed to fetch", "fetch failed", "Load failed",
+    // "NetworkError when attempting to fetch resource.").
+    if (current instanceof TypeError && /fetch|network|load failed/i.test(current.message)) return true
+    current = current instanceof Error ? current.cause : undefined
+  }
+  return false
+}
+
+/**
+ * Whether the service is unavailable rather than the call refused: the server, or the platform or proxy in front
+ * of it, answered 503 Service Unavailable — maintenance, a stopped or restarting installation, an overload. Show
+ * a "back soon" state instead of an error; the call is retryable. An error mapError wrapped is judged by its
+ * `cause`.
+ */
+export function isServiceUnavailable(error: unknown): boolean {
+  for (let current = error, depth = 0; current !== undefined && current !== null && depth < 8; depth++) {
+    if (current instanceof RpcTransportError) return current.status === 503
+    current = current instanceof Error ? current.cause : undefined
+  }
+  return false
 }
 
 // Thrown locally (before the request reaches the wire) when params fail the generated Zod
@@ -426,18 +502,46 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
     requestOptions?: RpcRequestOptions,
     span?: RpcClientSpan
   ): Promise<unknown> {
-    const response = await fetchImpl(options.url, {
-      method: 'POST',
-      headers: await buildHeaders(options.headers, context, requestOptions?.headers, span?.headers),
-      body: JSON.stringify(payload),
-      signal: requestOptions?.signal,
-    })
+    const timeout = resolveTimeout(context, requestOptions)
+    const timer = timeout === undefined ? undefined : new AbortController()
+    const handle = timer === undefined
+      ? undefined
+      : setTimeout(() => timer.abort(new RpcTimeoutError(timeout as number, context.methods)), timeout)
+    try {
+      const response = await fetchImpl(options.url, {
+        method: 'POST',
+        headers: await buildHeaders(options.headers, context, requestOptions?.headers, span?.headers),
+        body: JSON.stringify(payload),
+        signal: anySignal(requestOptions?.signal, timer?.signal),
+      })
 
-    if (!response.ok) {
-      throw new RpcTransportError(response.status, response.statusText, await response.text())
+      if (!response.ok) {
+        throw new RpcTransportError(response.status, response.statusText, await response.text())
+      }
+
+      return await response.json()
+    } catch (error) {
+      // Our timer fired, not the caller's signal: the timeout, not the fetch abort error, is the failure.
+      if (timer?.signal.aborted && !requestOptions?.signal?.aborted) throw timer.signal.reason
+      throw error
+    } finally {
+      if (handle !== undefined) clearTimeout(handle)
     }
+  }
 
-    return response.json()
+  // The per-call override, else the longest of the methods' timeouts (timeoutFor, the timeout tag, timeoutMs).
+  function resolveTimeout(context: RpcRequestContext, requestOptions?: RpcRequestOptions): number | undefined {
+    const override = requestOptions?.timeoutMs
+    if (override === false) return undefined
+    if (typeof override === 'number') return override
+    let timeout: number | undefined
+    for (const method of context.methods) {
+      const forMethod = options.timeoutFor?.(method)
+        ?? parseTimeoutTag(rpcMethodInfo[method]?.tags.timeout)
+        ?? options.timeoutMs
+      if (forMethod !== undefined && (timeout === undefined || forMethod > timeout)) timeout = forMethod
+    }
+    return timeout
   }
 
   // Pre-flight params validation runs on the caller-supplied params, before the idempotency key is
@@ -466,7 +570,7 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
     return rpcResultSchemas[method].parse(transformed) as RpcResult<M>
   }
 
-  return {
+  const client: RpcClient = {
     async call<M extends RpcMethod>(
       method: M,
       params: RpcParams<M>,
@@ -579,6 +683,44 @@ export function createRpcClient(options: RpcClientOptions): RpcClient {
       }
     },
   }
+
+  const mapError = options.mapError
+  if (!mapError) return client
+  const mapped = (error: unknown, context: RpcRequestContext): unknown => mapError(error, context) ?? error
+  return {
+    ...client,
+    call: (method, params, requestOptions) => client.call(method, params, requestOptions).catch((error: unknown) => {
+      throw mapped(error, { methods: [method], batch: false })
+    }),
+    batch: (items, requestOptions) => client.batch(items, requestOptions).catch((error: unknown) => {
+      throw mapped(error, { methods: items.map((item) => item.method), batch: true })
+    }),
+  }
+}
+
+// A [ClientTag("timeout", ...)] value in milliseconds: "1500ms", "30s", "3m", or a bare number of seconds.
+function parseTimeoutTag(value: string | undefined): number | undefined {
+  const match = value === undefined ? null : /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m)?\s*$/i.exec(value)
+  if (!match) return undefined
+  const amount = Number(match[1])
+  const unit = (match[2] ?? 's').toLowerCase()
+  return unit === 'ms' ? amount : unit === 'm' ? amount * 60_000 : amount * 1000
+}
+
+// Aborts when either signal does: the caller's cancel and the timeout.
+function anySignal(first: AbortSignal | undefined, second: AbortSignal | undefined): AbortSignal | undefined {
+  if (!first) return second
+  if (!second) return first
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([first, second])
+  const controller = new AbortController()
+  for (const signal of [first, second]) {
+    if (signal.aborted) {
+      controller.abort(signal.reason)
+      break
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
+  }
+  return controller.signal
 }
 
 function createRequest<M extends RpcMethod>(
@@ -750,6 +892,7 @@ function defaultErrorCode(rpcCode: number): string {
     case ElarionErrorCodes.forbidden: return 'forbidden'
     case ElarionErrorCodes.businessRule: return 'business_rule'
     case ElarionErrorCodes.unauthorized: return 'unauthorized'
+    case ElarionErrorCodes.decisionRequired: return 'decision_required'
     default: return 'internal'
   }
 }

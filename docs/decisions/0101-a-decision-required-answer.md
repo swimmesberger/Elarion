@@ -125,6 +125,13 @@ favour of a typed overload and a new confirmation name (a second name for the co
 already pairs with); reading the declared options at run time from the handler's `[RequiresDecision]` (the extensions
 know only the request, and the type argument states the options at the call).
 
+## Amendment (2026-11-27): a cancel is not the decision error, and the first call sends no answers
+
+`withDecisions` threw the decision error when `ask` cancelled, so a caller could not tell "the person declined" from
+"the call failed", and its first call added `decisions: []` to the params. It now throws `RpcDecisionCancelledError`
+(the question, and the decision error as `cause`), and sends the params unchanged until the first answer. A caller
+that recognised a cancel by `isDecisionRequired` checks for the new error, or for the decision error in `cause`.
+
 ## Rejected alternatives
 
 - **A `Confirm` flag convention without a new kind.** What applications do now; a generic client still cannot
