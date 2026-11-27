@@ -49,6 +49,12 @@ minor releases may include breaking changes.
   time-range table over recurrences, floating times in the calendar's zone), `free-busy-query`, `expand`,
   `limit-recurrence-set` and partial `calendar-data`. `CalDavOptions` embeds `CalendarReadOptions` and
   `CalendarExpandOptions`. See [CalDAV](https://elarion.wimmesberger.dev/docs/capabilities/caldav).
+- **CalDAV feeds** (ADR-0111, spec 0006). Every published calendar is also one `.ics` document at
+  `{prefix}/feeds/{token}.ics` for Outlook and Google Calendar, where the token is an app password created with
+  `AppPasswordScope.CalendarFeed(address)`; `CalDavLinks.FeedUrl` builds the URL. The feed answers `404` when the token
+  is unknown, revoked or of another scope, or its user no longer sees the calendar through its source; it holds each
+  `VTIMEZONE` once, streams from the store, and answers `304` to a current `If-None-Match`. `CalDav:FeedsEnabled`
+  turns it off.
 - **CalDAV host: `Elarion.WebDav.AspNetCore`** (ADR-0111, spec 0006). `app.MapElarionDav()` maps the DAV route group
   under `WebDav:Prefix` with the WebDAV methods, requiring only the schemes of `WebDavHostOptions.AuthenticationSchemes`
   (the app-password scheme by default, so a browser session never drives DAV and an app password reaches no other

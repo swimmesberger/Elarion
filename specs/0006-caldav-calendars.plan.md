@@ -316,6 +316,18 @@ As built in slice 4 (`Elarion.WebDav.AspNetCore`):
 - **Replays**: the iOS, macOS, Thunderbird, DAVx5 and Evolution sequences run against a Kestrel host in
   `CalDavClientReplayTests`; the Apple CalDAVTester job and the NativeAOT sample are not part of this slice.
 
+As built in slice 5 (feeds):
+
+- **`Elarion.CalDav` references `Elarion.AppPasswords`** (abstractions-only, AOT-compatible) for the scope type and its
+  claim: `AppPasswordScope.CalendarFeed(CalDavAddress)` is a C# 14 static extension, and the feed reads the
+  `elarion:app_password_scope` claim through `ICurrentUser.GetClaimValues`. ADR-0111's table lists only `Elarion.WebDav`
+  and `Elarion.Calendars`; an application that only syncs external calendars now also gets `Elarion.AppPasswords`.
+- **Links**: `davLinks.FeedUrl(feed)` is `CalDavLinks.FeedUrl(origin, feed)` (and `FeedPath(feed)`), since the public
+  origin is not known outside a request.
+- **The feed's ETag** is a hash of the collection's sync token and what the source says about the calendar, not the
+  bare counter, so a renamed calendar also refreshes; the feed carries `Cache-Control: private, no-cache`. A method other
+  than `GET` or `HEAD` answers `405`.
+
 ## Adopting existing app passwords
 
 An application that already issues its own Basic credentials for DAV clients (as the consuming application whose

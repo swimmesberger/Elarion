@@ -11,6 +11,8 @@
   <ItemGroup>
     <ProjectReference Include="../Elarion.WebDav/Elarion.WebDav.csproj"/>
     <ProjectReference Include="../Elarion.Calendars/Elarion.Calendars.csproj"/>
+    <!-- Feed tokens are app passwords bound to one calendar: the scope type and its claim. -->
+    <ProjectReference Include="../Elarion.AppPasswords/Elarion.AppPasswords.csproj"/>
   </ItemGroup>
 
   <ItemGroup>

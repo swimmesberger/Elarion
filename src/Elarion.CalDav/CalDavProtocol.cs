@@ -130,7 +130,7 @@ internal sealed partial class CalDavProtocol(CalDavSourceRegistry sources, IOpti
     }
 
     public ValueTask<DavResponse?> HandleOtherAsync(DavContext context, IReadOnlyList<string> segments, CancellationToken cancellationToken) =>
-        ValueTask.FromResult<DavResponse?>(null);
+        FeedAsync(context, segments, cancellationToken);
 
     internal static CalDavCollection Calendar(DavResource resource) => (CalDavCollection)resource.Collection!;
 

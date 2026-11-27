@@ -40,6 +40,7 @@ public static class CalDavServiceCollectionExtensions {
         services.TryAddSingleton<CalDavSourceRegistry>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IDavProtocol, CalDavProtocol>());
         services.TryAddScoped<ICalDavPublisher, CalDavPublisher>();
+        services.TryAddSingleton<CalDavLinks>();
         return services;
     }
 

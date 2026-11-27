@@ -166,6 +166,30 @@ user's e-mail, which DAVx5 asks for otherwise).
 `comp`/`prop` selection; `CalDAV-Timezones: F` (RFC 7809) leaves standard `VTIMEZONE`s out. `CalendarExpandOptions` in
 `CalDavOptions.CalendarExpand` caps every expansion. `CalDavFilterEvaluator.Matches` evaluates a filter on its own.
 
+## Feeds for Outlook and Google Calendar
+
+Outlook and Google Calendar cannot add a CalDAV account; they subscribe to a URL, which cannot carry a password. Every
+published calendar is also served as one `.ics` document at `{prefix}/feeds/{token}.ics`, where the token is an
+[app password](/docs/capabilities/app-passwords) bound to that calendar:
+
+```csharp
+var address = new CalDavAddress("shifts", $"u-{user.UserId}");
+var feed = await appPasswords.CreateAsync(user.UserId, "Outlook", AppPasswordScope.CalendarFeed(address), ct);
+if (!feed.IsSuccess) return feed.Error;
+Uri url = links.FeedUrl(new Uri("https://app.example.com"), feed.Value);   // CalDavLinks; show it once
+```
+
+- The URL is the credential: revoking the app password ends the feed, and each feed is revoked on its own.
+- On every request the feed runs the calendar's source as the token's user: a feed of a calendar the user no longer
+  sees, an unknown or revoked token, and a CalDAV (`dav`) app password in the URL all answer `404`, without a challenge.
+- The document holds the calendar's name, description and color, each `VTIMEZONE` once, and the same objects as the
+  calendar. It streams from the store; its `ETag` follows the calendar's sync token, so `If-None-Match` answers `304`
+  until something changed.
+- `CalDav:FeedsEnabled` turns feeds off. A feed token is never accepted as a Basic password, nor the reverse.
+
+Outlook.com refreshes subscriptions about every three hours, Google Calendar less often; calendar apps on CalDAV see a
+change within their polling interval.
+
 ## The published-collection store
 
 Calendar apps poll. They ask "what changed since my token?" (RFC 6578 `sync-collection`), and the answer must name every
