@@ -347,6 +347,14 @@ As built in slice 6 (`CalDavClient`):
   answers in `CalDavClientServerQuirkTests`, reproducing the research note's findings; the round trip runs against the
   host of this repository.
 
+As built after review:
+
+- **A source without a handler fails the start**: `AddElarionCalDavSource<TQuery>()` records the handler service it
+  needs, and an options validator run on start (`ValidateOnStart` on `CalDavOptions`) refuses a source whose
+  `IHandler<TQuery, Result<CalDavSourceListing>>` is not registered, naming the source. Before, the first DAV request
+  answered `500`. A test also proves that a source handler without `[Handler]` is registered in its module behind the
+  authorization decorator, so its `[RequirePermission]` applies (FR-011).
+
 ## Adopting existing app passwords
 
 An application that already issues its own Basic credentials for DAV clients (as the consuming application whose

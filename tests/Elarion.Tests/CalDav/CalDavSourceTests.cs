@@ -4,6 +4,7 @@ using Elarion.CalDav;
 using Elarion.Tests.WebDav;
 using Elarion.WebDav;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Elarion.Tests.CalDav;
@@ -141,4 +142,28 @@ public sealed class CalDavSourceTests {
     public sealed record BadName : ICalDavSource<BadName> {
         public static string SourceName => "has space";
     }
+
+    [Fact]
+    public async Task SourceWithoutAHandler_FailsTheStartNamingTheSource() {
+        await using var harness = CalDavTestHarness.Create(services => services.AddElarionCalDavSource<OrphanCalendars>());
+
+        var validate = () => _ = harness.Services.GetRequiredService<IOptions<CalDavOptions>>().Value;
+
+        validate.Should().Throw<OptionsValidationException>().Which.Failures.Should().ContainSingle()
+            .Which.Should().Contain("'orphans'").And.Contain("IHandler<OrphanCalendars, Result<CalDavSourceListing>>");
+    }
+
+    [Fact]
+    public async Task SourcesWithTheirHandlers_PassTheStartCheck() {
+        await using var harness = CalDavTestHarness.Create();
+
+        var validate = () => _ = harness.Services.GetRequiredService<IOptions<CalDavOptions>>().Value;
+
+        validate.Should().NotThrow();
+    }
+}
+
+/// <summary>A source whose handler the application forgot.</summary>
+public sealed record OrphanCalendars : ICalDavSource<OrphanCalendars> {
+    public static string SourceName => "orphans";
 }

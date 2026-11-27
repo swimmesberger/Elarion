@@ -108,7 +108,8 @@ it is invoked in process.
 
 A source name and a key are 1 to 64 ASCII letters, digits, `-` and `_`; a calendar's URL segment is `{source}.{key}`.
 Two sources with one name fail when the second is registered; an invalid or repeated key fails when it is returned,
-naming the source.
+naming the source. A source whose handler is not registered (the class is outside the module, or the module that holds
+it is not enabled) stops the host from starting, with a message naming the source.
 
 Access is decided per calendar, not per object. A calendar whose content differs between viewers is published as one
 calendar per viewer (`u-{user}` above); losing access to a calendar needs no log, because the calendar leaves the home.

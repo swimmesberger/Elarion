@@ -5,6 +5,7 @@ using Elarion.WebDav;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace Elarion.CalDav;
 
@@ -36,6 +37,8 @@ public static class CalDavServiceCollectionExtensions {
         var builder = services.AddOptions<CalDavOptions>();
         if (configuration is not null) builder.Configure(options => Bind(configuration, options));
         if (configure is not null) builder.Configure(configure);
+        builder.ValidateOnStart();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<CalDavOptions>, CalDavSourceHandlerValidator>());
 
         services.TryAddSingleton<CalDavSourceRegistry>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IDavProtocol, CalDavProtocol>());
@@ -52,6 +55,10 @@ public static class CalDavServiceCollectionExtensions {
     /// <typeparam name="TQuery">The source's query request.</typeparam>
     /// <param name="services">The service collection.</param>
     /// <exception cref="InvalidOperationException">The source name is invalid, or another source has the same name (FR-013).</exception>
+    /// <remarks>
+    /// The host refuses to start when no <c>IHandler&lt;TQuery, Result&lt;CalDavSourceListing&gt;&gt;</c> is registered for
+    /// the source, so a missing handler is not first noticed by a calendar app.
+    /// </remarks>
     public static IServiceCollection AddElarionCalDavSource<TQuery>(this IServiceCollection services) where TQuery : ICalDavSource<TQuery>, new() {
         ArgumentNullException.ThrowIfNull(services);
         var name = TQuery.SourceName;
@@ -63,7 +70,8 @@ public static class CalDavServiceCollectionExtensions {
                                                                            && existing.Name == name)
                 throw new InvalidOperationException($"Two calendar sources are named '{name}'; {typeof(TQuery).Name} must use another name.");
 
-        services.AddSingleton(new CalDavSourceRegistration(name, static (provider, cancellationToken) =>
+        services.AddSingleton(new CalDavSourceRegistration(name, typeof(TQuery), typeof(IHandler<TQuery, Result<CalDavSourceListing>>),
+            static (provider, cancellationToken) =>
             provider.GetRequiredService<IHandler<TQuery, Result<CalDavSourceListing>>>().HandleAsync(new TQuery(), cancellationToken)));
         return services;
     }

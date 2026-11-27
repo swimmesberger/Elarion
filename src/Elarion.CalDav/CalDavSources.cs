@@ -99,9 +99,17 @@ public sealed record CalDavAddress {
     }
 }
 
-/// <summary>A registered calendar source: its name and how to invoke its handler as the current user.</summary>
-internal sealed class CalDavSourceRegistration(string name, Func<IServiceProvider, CancellationToken, ValueTask<Result<CalDavSourceListing>>> invoke) {
+/// <summary>A registered calendar source: its name, its query, the handler service it needs, and how to invoke it as the current user.</summary>
+internal sealed class CalDavSourceRegistration(
+    string name,
+    Type queryType,
+    Type handlerServiceType,
+    Func<IServiceProvider, CancellationToken, ValueTask<Result<CalDavSourceListing>>> invoke) {
     public string Name { get; } = name;
+
+    public Type QueryType { get; } = queryType;
+
+    public Type HandlerServiceType { get; } = handlerServiceType;
 
     public Func<IServiceProvider, CancellationToken, ValueTask<Result<CalDavSourceListing>>> Invoke { get; } = invoke;
 }
@@ -119,4 +127,23 @@ internal sealed class CalDavSourceRegistry {
     public IReadOnlyCollection<CalDavSourceRegistration> Sources => _sources.Values;
 
     public bool Contains(string name) => _sources.ContainsKey(name);
+}
+
+/// <summary>
+/// Fails the host's start when a registered source has no handler, instead of the first DAV request answering 500
+/// (spec 0006 FR-013): the handler is resolved only per request, so nothing else would notice it is missing.
+/// </summary>
+internal sealed class CalDavSourceHandlerValidator(IEnumerable<CalDavSourceRegistration> sources, Microsoft.Extensions.DependencyInjection.IServiceProviderIsService services)
+    : Microsoft.Extensions.Options.IValidateOptions<CalDavOptions> {
+    public Microsoft.Extensions.Options.ValidateOptionsResult Validate(string? name, CalDavOptions options) {
+        var missing = sources.Where(source => !services.IsService(source.HandlerServiceType))
+            .Select(static source =>
+                $"The calendar source '{source.Name}' ({source.QueryType.Name}) has no handler: no IHandler<{source.QueryType.Name}, "
+                + "Result<CalDavSourceListing>> is registered. Add the handler class to the module that calls AddElarionCalDavSource, "
+                + "or register it.")
+            .ToList();
+        return missing.Count == 0
+            ? Microsoft.Extensions.Options.ValidateOptionsResult.Success
+            : Microsoft.Extensions.Options.ValidateOptionsResult.Fail(missing);
+    }
 }

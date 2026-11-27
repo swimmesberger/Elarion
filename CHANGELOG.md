@@ -42,7 +42,8 @@ minor releases may include breaking changes.
 - **CalDAV server: `Elarion.CalDav`** (ADR-0111, spec 0006). A module declares a calendar source, a query request
   implementing `ICalDavSource<TSelf>` registered with `AddElarionCalDavSource<TQuery>()`, whose ordinary handler returns
   the calendars (`PublishedCalendarInfo`: key, name, color, description, component kinds, time zone) the current user
-  may see; every DAV request runs the sources through the handler pipeline as that user. `ICalDavPublisher` publishes,
+  may see; every DAV request runs the sources through the handler pipeline as that user, and a source without a
+  registered handler stops the host from starting. `ICalDavPublisher` publishes,
   removes and replaces `Elarion.Calendars` objects in the handler's transaction (no change for equal bytes; `METHOD`, a
   missing `DTSTAMP` or an unregistered source throw). Calendars answer the properties iOS, macOS, Thunderbird, DAVx5 and
   Evolution read, read-only, and the reports `calendar-multiget`, `calendar-query` (every RFC 4791 filter, the §9.9
