@@ -2,6 +2,7 @@
 
 ## 2026-11-27
 
+* **Update**: CalDAV slices 2–6 built; the plan's as-built notes record where the WebDAV core, the store, the host, the feeds and the client depart from it ([plan 0006](../specs/0006-caldav-calendars.plan.md))
 * **Update**: [specs 0004 plan](../specs/0004-icalendar-files.plan.md) — Elarion.Calendars implemented; time zones convert to TimeZoneInfo with one rule per year, the shape its rule engine evaluates without seams
 * **Update**: [ADR-0110](decisions/0110-vcard-contacts.md) is implemented: Elarion.Contacts ships the reader, the writer and the contact model as [spec 0005](../specs/0005-vcard-contacts.md) describes, with the published [contacts](capabilities/contacts.mdx) page; the shared content-line layer now folds before a non-blank character, consumes the soft breaks of an over-long quoted-printable line, and sniffs BOM-less UTF-16 on code-unit boundaries.
 

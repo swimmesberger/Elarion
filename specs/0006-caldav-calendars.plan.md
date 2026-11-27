@@ -328,6 +328,25 @@ As built in slice 5 (feeds):
   bare counter, so a renamed calendar also refreshes; the feed carries `Cache-Control: private, no-cache`. A method other
   than `GET` or `HEAD` answers `405`.
 
+As built in slice 6 (`CalDavClient`):
+
+- **One more code**: `caldav.forbidden` (`CalDavErrorCodes.Forbidden`) for a `403`, such as a write to a read-only
+  calendar, which `caldav.unauthorized` would misname.
+- **Shape**: `CalDavError` is a sealed record; `CalDavResult<T>` has static `Success` and `Failure`; `DeleteAsync`
+  returns a `CalDavWriteOutcome` without an ETag; `CalDavSyncStep.HasMore` says when another step should run;
+  `CalDavClientOptions` also has `MaxXmlElements`, `MaxRedirects`, `RequestTimeout` (a `TimeoutException`, a transport
+  failure) and a `TimeProvider` for the `DTSTAMP` of written objects that carry none.
+- **Redirects** are followed by the client with method, body and credentials kept, up to `MaxRedirects`, so the
+  `HttpClient` should not follow them itself.
+- **Bounding a step**: the client sends no `DAV:limit` (Nextcloud cuts without `507`, iCloud ignores it). It fetches at
+  most `MaxObjectsPerStep` changed objects and, when it deferred some, keeps the previous token or CTag, so the next step
+  lists the same changes and fetches only those whose ETag it does not hold yet; a `507` from the server is continued
+  from its token. The initial step and the fallback are both a `sync-collection` with an empty token when the calendar
+  offers it, compared with the stored ETags; servers without it get `getctag`, then a depth-1 `PROPFIND` of ETags.
+- **Fixtures**: iCloud, Google, Nextcloud, Fastmail, Zimbra and a server without `sync-collection` are handwritten
+  answers in `CalDavClientServerQuirkTests`, reproducing the research note's findings; the round trip runs against the
+  host of this repository.
+
 ## Adopting existing app passwords
 
 An application that already issues its own Basic credentials for DAV clients (as the consuming application whose

@@ -190,6 +190,61 @@ Uri url = links.FeedUrl(new Uri("https://app.example.com"), feed.Value);   // Ca
 Outlook.com refreshes subscriptions about every three hours, Google Calendar less often; calendar apps on CalDAV see a
 change within their polling interval.
 
+## Syncing an external calendar: the client
+
+`CalDavClient` brings calendars from iCloud, Nextcloud, Fastmail, Google or any CalDAV server into the application, one
+step at a time. The application stores each step's state where it keeps the rest of the account, and schedules the steps
+with its own job.
+
+```csharp
+var http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false });   // the client follows redirects itself
+var client = new CalDavClient(http, new CalDavClientOptions {
+    Authorization = ct => ValueTask.FromResult<AuthenticationHeaderValue?>(
+        new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{user}:{appPassword}")))),
+});
+
+CalDavResult<CalDavAccount> account = await client.DiscoverAsync(new Uri("https://caldav.example.com"), ct);
+if (!account.HasValue) return account.Error;                      // caldav.unauthorized, caldav.not_found, …
+
+CalDavResult<CalDavSyncStep> step = await client.SyncAsync(account.Value.Calendars[0], stored.State, ct);
+if (!step.HasValue) return step.Error;                            // keep the previous state
+foreach (var changed in step.Value.Changed) { /* changed.Name, changed.ETag, changed.Data (a CalendarReadResult) */ }
+foreach (var name in step.Value.Removed) { /* … */ }
+stored.State = step.Value.State;                                  // a string; step.Value.HasMore: run another step
+```
+
+- **Discovery** asks the URL for `current-user-principal`, then `/.well-known/caldav`, then `calendar-home-set` on the
+  principal at depth 0 (iCloud refuses depth 1 there), then lists the home's calendars with their names, colors,
+  component kinds, whether they are writable, and whether they offer `sync-collection`.
+- **A sync step** uses `sync-collection` when the calendar offers it, and compares the ETags of a full listing when it
+  does not (after a `getctag` check) or when the server refuses the token (`403`, `409`, `412`). Changed objects are
+  fetched with `calendar-multiget` in batches of `MultigetBatchSize`; an object a multiget answers `404` for (Zimbra) is
+  a removal. At most `MaxObjectsPerStep` objects are fetched per step; the rest follow in the next. A name can appear in
+  `Removed` again in a later step; removing is idempotent.
+- **Credentials** come from the `Authorization` delegate per request: an app password as Basic, or an OAuth bearer
+  token the application refreshes (Google's CalDAV endpoint accepts only that).
+- **Writes**: `PutAsync(calendar, name, calendarObject, ifMatch)` sends `If-Match`, or `If-None-Match: *` to create;
+  `DeleteAsync` sends `If-Match`. A failed precondition is `caldav.conflict`. The new ETag is returned when the server
+  sends a strong one, else `null` and the next step fetches it.
+- **What the server sends is input.** A refused credential (`caldav.unauthorized`), a refused request
+  (`caldav.forbidden`), a missing calendar (`caldav.not_found`), another error status (`caldav.server_error`), an answer
+  that is not WebDAV (`caldav.invalid_response`) or over a limit (`caldav.too_large`, with the limit) is a result with a
+  `CalDavError` (code, message, status, URL), never an exception; an object that is not valid iCalendar comes back with
+  the `calendar.*` errors of its read result. Only cancellation, misconfiguration (an option out of range, a state from
+  elsewhere) and transport failures throw.
+
+| `CalDavClientOptions` | Default | Meaning |
+| --- | --- | --- |
+| `Authorization` | none | The `Authorization` header of each request. |
+| `MaxResponseBytes` | 32 MiB | The largest answer read. |
+| `MaxXmlDepth` | `32` | The deepest nesting of an answer. |
+| `MaxXmlElements` | `500000` | The most elements of an answer. |
+| `MaxObjectsPerStep` | `5000` | The most objects one step fetches. |
+| `MultigetBatchSize` | `100` | The objects per `calendar-multiget`. |
+| `MaxRedirects` | `5` | The redirects one request follows, with its method, body and credentials. |
+| `RequestTimeout` | the `HttpClient`'s | How long one request may take (`TimeoutException`). |
+| `CalendarRead` | `CalendarReadOptions` defaults | How calendar data is read. |
+
 ## The published-collection store
 
 Calendar apps poll. They ask "what changed since my token?" (RFC 6578 `sync-collection`), and the answer must name every

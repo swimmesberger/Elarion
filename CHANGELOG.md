@@ -49,6 +49,15 @@ minor releases may include breaking changes.
   time-range table over recurrences, floating times in the calendar's zone), `free-busy-query`, `expand`,
   `limit-recurrence-set` and partial `calendar-data`. `CalDavOptions` embeds `CalendarReadOptions` and
   `CalendarExpandOptions`. See [CalDAV](https://elarion.wimmesberger.dev/docs/capabilities/caldav).
+- **CalDAV client** (ADR-0111, spec 0006). `CalDavClient` over an application's `HttpClient` discovers an account from a
+  URL (`current-user-principal`, `/.well-known/caldav`, `calendar-home-set`), lists its calendars (name, color,
+  component kinds, writable, `sync-collection`), and syncs a calendar one step at a time: `SyncAsync(calendar, state)`
+  returns the changed objects read by `CalendarReader`, the removed names and a new state string, using
+  `sync-collection` and falling back to an ETag comparison. `PutAsync` and `DeleteAsync` send `If-Match` (or
+  `If-None-Match: *`). Credentials come from an `Authorization` delegate (Basic app passwords, OAuth bearer tokens).
+  Refusals, missing calendars, oversized or invalid answers are `CalDavResult` errors with `CalDavErrorCodes`
+  (`caldav.*`), never exceptions; limits are `CalDavClientOptions` (`MaxResponseBytes`, `MaxXmlDepth`,
+  `MaxObjectsPerStep`, …). The state serializes through a source-generated JSON context, so NativeAOT stays clean.
 - **CalDAV feeds** (ADR-0111, spec 0006). Every published calendar is also one `.ics` document at
   `{prefix}/feeds/{token}.ics` for Outlook and Google Calendar, where the token is an app password created with
   `AppPasswordScope.CalendarFeed(address)`; `CalDavLinks.FeedUrl` builds the URL. The feed answers `404` when the token
