@@ -78,6 +78,32 @@ public sealed class DavContext {
         return collections;
     }
 
+    /// <summary>
+    /// Every member of <paramref name="collection"/> without content: from its live source, or from the store for a
+    /// published collection, ordered by name.
+    /// </summary>
+    public IAsyncEnumerable<DavMember> ListMembersAsync(DavCollection collection, CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(collection);
+        return collection.Live is { } live
+            ? live.ListMembersAsync(this, cancellationToken)
+            : Store.ListMembersAsync(collection.Address.Id, cancellationToken);
+    }
+
+    /// <summary>
+    /// The members of <paramref name="collection"/> named <paramref name="names"/> that exist, or all of them when
+    /// <paramref name="names"/> is <see langword="null"/>, with content unless <paramref name="purpose"/> is
+    /// <see cref="DavContentPurpose.Metadata"/>: from its live source, or from the store for a published collection
+    /// (which reads every member with content when no names are given).
+    /// </summary>
+    public IAsyncEnumerable<DavStoredObject> GetMembersAsync(DavCollection collection, IReadOnlyCollection<string>? names, DavContentPurpose purpose,
+        CancellationToken cancellationToken) {
+        ArgumentNullException.ThrowIfNull(collection);
+        if (collection.Live is { } live) return live.GetMembersAsync(this, names, purpose, cancellationToken);
+        return names is null
+            ? Store.GetCandidatesAsync(collection.Address.Id, null, null, cancellationToken)
+            : Store.GetObjectsAsync(collection.Address.Id, names, purpose != DavContentPurpose.Metadata, cancellationToken);
+    }
+
     /// <summary>Percent-encodes one URL path segment.</summary>
     public static string Escape(string segment) => Uri.EscapeDataString(segment);
 }
@@ -127,8 +153,17 @@ public sealed class DavResource {
     /// <summary>The collection of a collection or member resource.</summary>
     public DavCollection? Collection { get; init; }
 
-    /// <summary>The collection's sync state, for a collection resource.</summary>
+    /// <summary>The collection's sync state, for a published collection resource.</summary>
     public DavCollectionState? State { get; init; }
+
+    /// <summary>
+    /// The collection's CTag, for a collection resource: the sync token of a published collection, the live source's CTag
+    /// of a live one.
+    /// </summary>
+    public string? CTag {
+        get => field ?? State?.SyncToken;
+        init;
+    }
 
     /// <summary>The member, for a member resource; a <see cref="DavStoredObject"/> when its content was loaded.</summary>
     public DavMember? Member { get; init; }

@@ -12,7 +12,7 @@ a record. There is no reflection, so an application that writes and reads spread
 | Piece | Role |
 | --- | --- |
 | `[SpreadsheetRecord]`, `[SpreadsheetColumn]`, `[SpreadsheetIgnore]`, `[SpreadsheetChoice]` | Declare the worksheet: its name, the columns, their headers, aliases, order, formats, widths, boolean labels and the extra spellings of enum members. |
-| `SpreadsheetWorkbook` | Writes records as an `.xlsx` workbook, forward-only to a stream, an `ElarionFile` or an `ElarionStreamedFile`. |
+| `SpreadsheetWorkbook` | Writes records, or rows of a worksheet declared at run time (`SpreadsheetSheetDefinition`), as an `.xlsx` workbook, forward-only to a stream, an `ElarionFile` or an `ElarionStreamedFile`. |
 | `SpreadsheetReader` | Reads `.xlsx`, `.xlsb` and `.xls` workbooks into records, or into plain rows of typed cells. |
 | `SpreadsheetReadResult<T>` | Every row with its cell texts, its errors and its record; the columns the file contains; the conversion to an `AppError`. |
 | `SpreadsheetOptions` | The read limits and the extra date formats and yes/no words, bound from configuration. |
@@ -149,6 +149,33 @@ string.
 | `Width` | The width in characters; without it, the column is as wide as its header and the values of the first 200 records, at most 80. |
 | `Aliases` | Older headers that still read as this column. When a file carries both, the column's own header wins and the alias column is ignored. |
 | `TrueLabel`, `FalseLabel` | Both together, on a boolean only: the texts written for it, offered as a dropdown and read besides the usual yes/no words. |
+| `Choices` | On a `string` only: `nameof` a static field or property of the record that holds the labels offered as a dropdown, such as labels loaded from data or a subset of an enum. |
+| `StrictChoices` | With `Choices`: reading accepts only those labels, ignoring case, and reports any other text as `invalid_value` with the labels as `AllowedValues`. |
+
+### Dropdown labels that are data
+
+An enum column offers its members. When the labels are data rather than an enum (a catalog's labels, a subset of a
+domain enum, a yes/no column that older files fill with free text), point a `string` column at a static
+`IReadOnlyList<string>` of the record with `Choices`:
+
+```csharp
+[SpreadsheetRecord("Contacts")]
+public sealed partial class ContactRow {
+    public static IReadOnlyList<string> ChannelLabels => ChannelCatalog.Labels;
+
+    [SpreadsheetColumn("E-mail 1 label", Choices = nameof(ChannelLabels))]
+    public string? EmailLabel { get; init; }
+
+    [SpreadsheetColumn("Platform", Choices = nameof(ChannelLabels), StrictChoices = true)]
+    public string? Platform { get; init; }
+}
+```
+
+The column is a choice column: it writes its value as text and offers the list as a dropdown, as an enum column does.
+The list is read once, when the record is first written or read. Reading a column without `StrictChoices` takes any
+text, so an older file with free text still imports; with `StrictChoices` a value must be one of the labels and reads as
+the label is spelled. The member must be static, public or internal, and of a type that is or implements
+`IReadOnlyList<string>`, such as `string[]`; anything else fails the build (`ELSHEET009`).
 
 ## Export
 
@@ -214,8 +241,72 @@ await using (var workbook = SpreadsheetWorkbook.Create(stream)) {
 }
 ```
 
-`ToStreamedFile("customers.xlsx", async (workbook, ct) => …)` does the same into a response body.
+`ToStreamedFile("customers.xlsx", async (workbook, ct) => …)` does the same into a response body, and
+`ToFileAsync("customers.xlsx", async (workbook, ct) => …)` into an `ElarionFile`.
 `SpreadsheetWorkbook.WriteAsync(stream, records)` is the one-worksheet shortcut.
+
+### Columns a caller may not see
+
+`SpreadsheetWorksheetOptions` chooses the record's columns per call, by property name. `ExcludedColumns` leaves columns
+out and `IncludedColumns` writes only the ones it names; the others keep the record's order and close up. So a column
+that depends on a permission needs no second record:
+
+```csharp
+var options = new SpreadsheetWorksheetOptions {
+    ExcludedColumns = permissions.Holds(ElarionPermissions.Payments.Read) ? null : [nameof(InvoiceRow.PaidAmount)]
+};
+await workbook.AddWorksheetAsync(invoices, options, ct);
+```
+
+A name that matches no property throws an `ArgumentException` before anything is written. The writer does not read
+`[VisibleWith]`: a spreadsheet record is written outside the handler pipeline that answers that attribute, so the
+handler decides with its `IPermissionChecker` and says so in the options.
+
+### Totals and a second block below the records
+
+`FooterRows` writes rows below the records. Each value takes the cell its own type needs, so the label of a total row
+can stand in a date column, and a second block of other columns can follow:
+
+```csharp
+await workbook.AddWorksheetAsync(expenses, new SpreadsheetWorksheetOptions {
+    FooterRows = [
+        ["Total", null, expenses.Sum(expense => expense.Amount)],
+        [],
+        ["Booked hours"],
+        [new DateOnly(2026, 11, 3), 7.5, "Holiday"],
+    ]
+}, ct);
+```
+
+A value of the column's kind takes the column's format: the total above shows as `#,##0.00` if the amount column
+declares that. Any other value takes its own default, so `Total` is a text cell even in a date column. Values follow the
+written columns from the first, after any filter, and a shorter row ends with empty cells. The dropdown lists stop above
+the footer rows. A reader reads footer rows as data rows, so give a worksheet meant for importing again none.
+
+### Columns known only at run time
+
+When a worksheet's columns come from data, such as numbered slots (`E-mail 1` to `E-mail 4`) or columns that depend on a
+setting, a `[SpreadsheetRecord]` class would repeat that schema. A `SpreadsheetSheetDefinition` declares the worksheet at
+run time instead, with the same header, formats, widths and dropdown lists:
+
+```csharp
+var sheet = new SpreadsheetSheetDefinition("Contacts", [
+    SpreadsheetColumnDefinition.Text("ID"),
+    .. Enumerable.Range(1, 4).Select(slot => SpreadsheetColumnDefinition.Choice($"E-mail {slot} label", channelLabels)),
+    SpreadsheetColumnDefinition.Number("Area", format: "#,##0.00"),
+    SpreadsheetColumnDefinition.Date("Born", format: "dd.mm.yyyy") with { Width = 12 },
+]);
+
+await workbook.AddWorksheetAsync(sheet, contacts.Select(contact => (IReadOnlyList<object?>)contact.ToRow()), ct);
+```
+
+The factories are `Text`, `Number`, `Boolean`, `Date`, `DateTime`, `Time` and `Choice`. Each row is a list of values in
+column order, typed as footer values are: text, a boolean, a number, a date or time (`DateTime`, `DateOnly`,
+`TimeOnly`), a `DateTimeOffset`, a `Guid`, an enum (written as its name), or `null` for an empty cell. A value of another
+type, or a row with more values than columns, fails with a `SpreadsheetWriteException` naming the row. Rows may be an
+`IEnumerable` or an `IAsyncEnumerable` and stream like records. Because each value carries its own type, a definition
+also serves a worksheet of several blocks. A definition only writes; read such a worksheet back as
+[plain rows](#plain-rows) and match the headers with the same column list.
 
 ### What a written file looks like
 
@@ -379,7 +470,8 @@ constants on `SpreadsheetErrorCodes`:
 | `spreadsheet.invalid_value` | A value does not convert. | the cell, `ExpectedKind`, and `AllowedValues` for a choice |
 | `validation` | A DataAnnotations rule failed. The message is the validator's. | the cell |
 
-A file-level error (the first seven) is the only error of its result, which then holds no rows. To word errors in the
+A file-level error (the first seven) is the only error of its result. `too_many_rows` and `too_many_columns` keep the
+rows read before the limit; the other five leave the result without rows. To word errors in the
 application's language, pass a formatter that switches on the code and never parses a message:
 
 ```csharp
@@ -430,8 +522,16 @@ foreach (var row in result.Rows.Where(row => row.RowNumber > header.RowNumber)) 
 ```
 
 Each `SpreadsheetCell` has a `Kind` (`Blank`, `Text`, `Number`, `Boolean`, `Date` or `Error`), its `Text`, and
-`TryGetNumber`, `TryGetDouble`, `TryGetBoolean` and `TryGetDate`. Plain rows use the same format detection, worksheet
-choice, cell rules and limits as records, and they also stop at `MaxColumns`.
+`TryGetNumber`, `TryGetDouble`, `TryGetBoolean` and `TryGetDate`. A number or date cell also carries the
+`NumberFormat` of the file, such as `#,##0.00 "€"` or `dd.mm.yyyy`, for a preview that shows a value the way the file
+does; `Text` stays invariant (`2026-11-24`, `1234.5`). Plain rows use the same format detection, worksheet choice, cell
+rules and limits as records, and they also stop at `MaxColumns`. A plain-rows read knows no header row, so `MaxRows`
+counts every non-empty row, the header row and any lines above it included: allow for them when the limit is meant for
+data rows.
+
+A workbook already in memory, such as an `ElarionFile`'s `Bytes`, reads synchronously with
+`reader.ReadRows(file.Bytes)`, or opens with `reader.Open(file.Bytes)` for several worksheets, without copying the
+bytes.
 
 ## Limits and options
 
@@ -441,7 +541,7 @@ unpacks anything. It never processes a document type definition or resolves an e
 | `SpreadsheetReadOptions` | Default | Meaning |
 | --- | --- | --- |
 | `MaxUnpackedBytes` | 256 MiB | The largest unpacked workbook (`spreadsheet.too_large`). |
-| `MaxRows` | 100,000 | The most data rows read; empty rows do not count (`spreadsheet.too_many_rows`). |
+| `MaxRows` | 100,000 | The most rows read; empty rows do not count. A record read counts the data rows below its header; a plain-rows read every non-empty row, header included (`spreadsheet.too_many_rows`). |
 | `MaxColumns` | 256 | The most columns of a plain-rows read (`spreadsheet.too_many_columns`). |
 | `DateFormats` | none | Extra .NET date formats for text in date columns, such as `M/d/yyyy HH:mm`. |
 | `TrueWords`, `FalseWords` | none | Extra yes and no words for boolean columns. |
@@ -474,6 +574,7 @@ The defaults fit the 1–10 node tier Elarion targets. A read holds the whole up
 
 - Styling beyond the fixed header style, formulas, merged cells, images, charts, comments, hyperlinks, and data
   validation other than the dropdown lists of choice columns.
+- A record property whose type changes from row to row. Footer rows and run-time worksheets carry values of any type.
 - Writing `.xls` or `.xlsb`, and reading or writing CSV.
 - Password-protected workbooks, beyond reporting `spreadsheet.unreadable`.
 - Custom value converters. A computed get-only property covers an export, and a text property converted in the handler
@@ -486,8 +587,8 @@ The defaults fit the 1–10 node tier Elarion targets. A read holds the whole up
 
 ## Build-time checks
 
-If a record builds, it maps. The generator reports `ELSHEET001`–`ELSHEET008` for an unsupported property type, a type
+If a record builds, it maps. The generator reports `ELSHEET001`–`ELSHEET009` for an unsupported property type, a type
 that is not `partial`, duplicate headers or aliases, an invalid worksheet name, misused boolean labels, a struct or
-nested or generic type, a member that collides with the generated `Columns` or `SpreadsheetMapper`, and two enum
-members that share a label, name or alias. See
+nested or generic type, a member that collides with the generated `Columns` or `SpreadsheetMapper`, two enum
+members that share a label, name or alias, and `Choices` that names no static `IReadOnlyList<string>` of the record. See
 [Diagnostics](/docs/reference/diagnostics#elsheet--spreadsheet-records).

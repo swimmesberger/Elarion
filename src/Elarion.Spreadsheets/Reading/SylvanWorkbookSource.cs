@@ -98,7 +98,7 @@ internal sealed class SylvanWorkbookSource : IWorkbookSource {
             return _reader.GetExcelDataType(ordinal) switch {
                 ExcelDataType.String => SpreadsheetCell.FromText(_reader.GetString(ordinal)),
                 ExcelDataType.Numeric => ReadNumber(ordinal),
-                ExcelDataType.DateTime => SpreadsheetCell.FromDate(_reader.GetDateTime(ordinal)),
+                ExcelDataType.DateTime => SpreadsheetCell.FromDate(_reader.GetDateTime(ordinal), _reader.GetFormat(ordinal)?.Format),
                 ExcelDataType.Boolean => SpreadsheetCell.FromBoolean(_reader.GetBoolean(ordinal)),
                 ExcelDataType.Error => SpreadsheetCell.FromError(ErrorText(_reader.GetFormulaError(ordinal))),
                 _ => SpreadsheetCell.Blank
@@ -117,10 +117,13 @@ internal sealed class SylvanWorkbookSource : IWorkbookSource {
     private SpreadsheetCell ReadNumber(int ordinal) {
         var value = _reader.GetDouble(ordinal);
         if (!double.IsFinite(value)) return SpreadsheetCell.FromError("#NUM!");
-        if (_reader.GetFormat(ordinal)?.Kind is not (FormatKind.Date or FormatKind.Time) || value < 0)
-            return SpreadsheetCell.FromNumber(value);
 
-        if (value < 1) return SpreadsheetCell.FromDays(value);
+        // The cell's own format, so a caller can show the value as the file does (FR-080).
+        var format = _reader.GetFormat(ordinal);
+        if (format?.Kind is not (FormatKind.Date or FormatKind.Time) || value < 0)
+            return SpreadsheetCell.FromNumber(value, format?.Format);
+
+        if (value < 1) return SpreadsheetCell.FromDays(value, format.Format);
 
         // The library knows the workbook's date system (1900 or 1904); its date carries the day, the fraction the time.
         DateTime date;
@@ -129,10 +132,10 @@ internal sealed class SylvanWorkbookSource : IWorkbookSource {
         }
         catch (Exception exception) when (exception is FormatException or InvalidCastException or ArgumentException
                                               or OverflowException) {
-            return SpreadsheetCell.FromNumber(value);
+            return SpreadsheetCell.FromNumber(value, format.Format);
         }
 
-        return SpreadsheetCell.FromDays((date - DateOrigin).Days + (value - Math.Floor(value)));
+        return SpreadsheetCell.FromDays((date - DateOrigin).Days + (value - Math.Floor(value)), format.Format);
     }
 
     private static string ErrorText(ExcelErrorCode code) {

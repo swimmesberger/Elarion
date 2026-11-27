@@ -210,4 +210,50 @@ public sealed class ContactValueTests {
         new Contact { FormattedName = "A", Phones = [new ContactPhone("1")] }.Should().Be(new Contact { FormattedName = "A", Phones = [new ContactPhone("1")] });
         ContactPhoto.FromData(ContactTestImages.Png).Should().Be(ContactPhoto.FromData(ContactTestImages.Png.ToArray()));
     }
+
+    [Theory]
+    [InlineData("1985")]
+    [InlineData("1985-04")]
+    [InlineData("--04")]
+    [InlineData("---12")]
+    public async Task APartialBirthday_IsAPartialDateErrorNotAnInvalidValue(string value) {
+        var entry = Assert.Single((await ReadAsync(Card("FN:A", "BDAY:" + value))).Entries);
+
+        entry.Value!.Birthday.Should().BeNull();
+        var error = Assert.Single(entry.Errors);
+        error.Code.Should().Be(ContactErrorCodes.PartialDate);
+        error.ExpectedKind.Should().Be("date");
+        error.Value.Should().Be(value);
+    }
+
+    [Theory]
+    [InlineData("soon")]
+    [InlineData("1985-13")]
+    [InlineData("--13")]
+    public async Task AnInvalidBirthday_StaysAnInvalidValue(string value) {
+        var entry = Assert.Single((await ReadAsync(Card("FN:A", "BDAY:" + value))).Entries);
+
+        Assert.Single(entry.Errors).Code.Should().Be(ContactErrorCodes.InvalidValue);
+    }
+
+    [Fact]
+    public async Task MappedValues_CarryTheLineAndGroupTheyWereReadFrom() {
+        var contact = await ReadOneAsync(Card(
+            "FN:A", "TEL:1", "item1.EMAIL:a@example.com", "item1.X-ABLabel:Club", "URL:https://example.com", "ADR:;;Ring 1;Graz;;;"));
+
+        contact.Phones.Single().LineNumber.Should().Be(4);
+        contact.Emails.Single().LineNumber.Should().Be(5);
+        contact.Emails.Single().Group.Should().Be("item1");
+        contact.Urls.Single().LineNumber.Should().Be(7);
+        contact.Addresses.Single().LineNumber.Should().Be(8);
+        contact.Phones.Single().Should().Be(new ContactPhone("1"));
+    }
+
+    [Fact]
+    public void GetText_UnescapesAPropertyTheModelDoesNotMap() {
+        var property = new ContactProperty("NOTE", "a\\, b\\; c\\nd\\\\e");
+
+        property.GetText().Should().Be("a, b; c\nd\\e");
+        new ContactProperty("X-LIST", "a\\,b,c").GetTexts().Should().Equal("a,b", "c");
+    }
 }

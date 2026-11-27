@@ -291,6 +291,18 @@ All in `tests/Elarion.Tests`, named after the acceptance scenarios.
 
 Tasks 2–5, 6–7 and 8 are independent streams after task 1 (8 does not need it); 9 follows 6; 10 and 11 close.
 
+### Follow-up (2026-11-27): worksheets shaped per call
+
+12. **Writer engine on an internal column list** — FR-073 to FR-076: `WorksheetColumn` and a per-row write delegate
+    replace the record-typed engine; `SpreadsheetCellWriter` gains a column map (filters) and per-value writes
+    (definitions, footer rows); `SpreadsheetSheetDefinition`, `SpreadsheetColumnDefinition`, `ToFileAsync(fileName,
+    write)`. Tests in `SpreadsheetRuntimeSheetTests`; the write benchmark is compared before and after.
+13. **Text choices** — FR-077, FR-078: `Choices`/`StrictChoices` on `[SpreadsheetColumn]`, `ELSHEET009`, the column
+    table reading the member, `SpreadsheetCellReader.ReadTextChoice`. Generator tests for the emitted table and reads and
+    for each diagnostic reason.
+14. **Reads from memory and number formats** — FR-079, FR-080: `SpreadsheetReader.Open`/`ReadRows` over
+    `ReadOnlyMemory<byte>`, the inspector reading a visible buffer at its offset, `SpreadsheetCell.NumberFormat`.
+
 ## Reader go/no-go (task 1)
 
 Keep Sylvan.Data.Excel when all four hold:

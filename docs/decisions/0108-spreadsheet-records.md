@@ -234,3 +234,63 @@ needs a formatted report references a spreadsheet library itself; nothing in the
 - **A format-neutral tabular seam (CSV and `.xlsx` behind one interface).** The record mapping is format-neutral in
   shape, so a CSV writer can join the package later without changing a record. Not decided now, because no second
   format is in scope.
+
+## Amendment (2026-11-27): run-time worksheets, per-value cells, column filters, data-driven choices
+
+The first application to adopt the package moved its reads and its record-shaped exports onto it, and kept another
+spreadsheet library for the rest. The gaps it reported, and what was decided:
+
+1. **Worksheets whose columns are known only at run time.** Schemas composed from data (numbered slots, columns that
+   depend on a setting) cannot be `[SpreadsheetRecord]` classes without repeating the schema in a second place. The
+   mapper is a static member of the record type, so per-call columns had no public way in. Decided: a write-only
+   `SpreadsheetSheetDefinition(name, columns)` of `SpreadsheetColumnDefinition`s (`Text`, `Number`, `Boolean`, `Date`,
+   `DateTime`, `Time`, `Choice`; `Width` with `with`), written by `SpreadsheetWorkbook.AddWorksheetAsync(sheet, rows)`
+   where a row is an `IReadOnlyList<object?>` and rows are an `IEnumerable` or an `IAsyncEnumerable`, plus
+   `ToFileAsync(fileName, write)` beside `ToStreamedFile(fileName, write)`. The writer engine now works on an internal
+   column list and a per-row write delegate, so records and definitions share the header, styles, widths, dropdowns,
+   streaming and limits. A definition does not read: an application reads such a worksheet as plain rows, which keep
+   every cell, and matches its own headers.
+2. **Per-value cells.** A run-time row's value decides its cell (text, boolean, number, date, time, `DateTimeOffset`,
+   `Guid`, an enum's name, or empty), and takes the column's style when it is of the column's kind, or of its family
+   (integer and number; date, date-and-time and time) and the column declares a format; otherwise the value's built-in
+   style. So "Total" in a date column is a text cell, and a second block of other types can follow the first. A value of
+   any other type is a `SpreadsheetWriteException` naming the cell, never `ToString()`.
+3. **Footer rows on a record worksheet.** `SpreadsheetWorksheetOptions.FooterRows` writes per-value rows below the
+   records, for totals and a second block; the dropdown lists stop above them. They are not measured for widths, so
+   no row number is invented for an error during measuring.
+4. **A per-call column filter.** `SpreadsheetWorksheetOptions.IncludedColumns` and `ExcludedColumns`, by property name,
+   so a column that depends on a permission needs no second record. The generated `WriteRow` still writes every column;
+   the cell writer maps each to its written column or drops it, so the generated code is unchanged. A name no column
+   has throws before anything is written and leaves the workbook usable.
+5. **Data-driven dropdowns.** `[SpreadsheetColumn(Choices = nameof(Member))]` on a `string` property makes it a choice
+   column whose labels a static `IReadOnlyList<string>` member of the record (or a base type) holds; the generator
+   checks the member (`ELSHEET009`) and the column table copies the list once, when the mapper's type is initialised.
+   Reading takes any text, so files with free text keep importing; `StrictChoices = true` accepts only the labels
+   (ignoring case, returned as spelled) and reports others as `invalid_value` with `AllowedValues`.
+6. **A synchronous plain-row read of bytes in memory.** `SpreadsheetReader.Open(ReadOnlyMemory<byte>)` and
+   `ReadRows(ReadOnlyMemory<byte>, …)` wrap the caller's array in place (copying only memory not backed by an array);
+   the inspector reads the stream's visible buffer at its offset. Record reads stay asynchronous, because validation is.
+7. **The number format on read.** `SpreadsheetCell.NumberFormat` carries a number or date cell's format code from the
+   file, so a preview can render a value the way the file does. `Text` stays invariant and the format takes no part in
+   equality. Rendering the format is still the application's (the out-of-scope line above stands).
+8. **Documentation of two read limits.** A plain-rows read counts every non-empty row against `MaxRows`, header and
+   info lines included, because it knows no header row; the semantics stay, the docs say so. `too_many_rows` and
+   `too_many_columns` keep the rows read before the limit; the other file-level errors leave none.
+
+Rejected or not done:
+
+- **Honouring `[VisibleWith]` on a record's property.** The permission constants an application writes there
+  (`ElarionPermissions.X.Read`) are emitted by another generator and do not bind in this one; resolving them would
+  duplicate the core generator's syntax fallback, and the writer runs outside the handler pipeline that supplies the
+  caller's checker, so it would need the checker passed in anyway. The filter, set from the handler's own
+  `IPermissionChecker`, gives the same result with one line and no second resolution of permissions. Revisit if
+  records that are also JSON responses become common.
+- **A `SpreadsheetCellValue` union property type.** Would let one record property hold a date or a label, but makes
+  reading such a column ambiguous and widens every generated read. Footer rows and run-time worksheets cover the
+  reported cases. Rejected.
+- **Choices from a member of another type** (`Choices = nameof(Catalog.Labels)` only yields `"Labels"`). A second
+  type argument would be needed; a one-line static property on the record that returns the other list is enough.
+- **Renaming `MaxRows` for plain rows.** The count is the same mechanism in both reads; a second option would split one
+  bound in two. Rejected for documenting the difference.
+- **Measuring footer rows for widths.** A total row rarely sets a width, and measuring needs a row number before the
+  records are counted. Rejected.

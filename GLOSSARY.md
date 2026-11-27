@@ -320,6 +320,12 @@ alias. A property the mapping cannot handle is a build error. Reading keeps ever
 carries, and reports a problem in the file as a coded, located error in the result, never as an exception.
 _Avoid_: Excel model, sheet DTO, export row, import row
 
+**Sheet definition**:
+A worksheet declared at run time (`SpreadsheetSheetDefinition`): its name and its columns (header, kind, format, width,
+dropdown labels), written from rows of values in column order, each value a cell of its own type. It serves schemas
+composed from data, where a spreadsheet record would repeat the schema; it only writes, and is read back as plain rows.
+_Avoid_: dynamic record, untyped sheet, schema sheet
+
 **Published calendar**:
 A calendar whose objects an application publishes into Elarion's store (`ICalDavPublisher`) in the transaction that
 changed its own data, and which Elarion serves to calendar apps over CalDAV and as an ICS feed, with exact sync. It
@@ -340,10 +346,17 @@ of the application's data, read-only to the apps; the application stays the sour
 _Avoid_: shared address book, contact export, CardDAV collection (in application code)
 
 **Address-book source**:
-A query request implementing `ICardDavSource<TSelf>` whose handler returns the published address books of that source
-the current user may see, deciding access per address book through the handler pipeline, as a calendar source does
+A query request implementing `ICardDavSource<TSelf>` whose handler returns the published (or, for a live source, live)
+address books of that source the current user may see, deciding access per address book through the handler pipeline, as a calendar source does
 for calendars.
 _Avoid_: contact provider, address-book backend
+
+**Live address book**:
+An address book whose contacts Elarion reads per request, as the current user, from the application's
+`ICardDavLiveAddressBooks` instead of from the store, so each viewer sees the contacts the application's row rules allow
+at that moment. It is answered by a CTag only, without sync tokens; its address-book source is registered with
+`AddElarionCardDavLiveSource`. In the WebDAV core, a collection read this way is a *live collection*.
+_Avoid_: dynamic address book, virtual address book, unpublished address book
 
 **App password**:
 A credential Elarion issues to a person for one device or client: a random secret returned once, stored as a hash,

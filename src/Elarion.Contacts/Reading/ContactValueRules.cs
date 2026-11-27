@@ -107,6 +107,22 @@ internal static class ContactValueRules {
         return true;
     }
 
+    /// <summary>
+    /// Whether a date the reader cannot hold is a partial date of vCard 4.0 (FR-023): a year (<c>1985</c>), a year and a
+    /// month (<c>1985-04</c>), a month (<c>--04</c>) or a day (<c>---12</c>), so the error tells it from free text.
+    /// </summary>
+    public static bool IsPartialDate(ContactProperty property) {
+        var text = ContentText.Unescape(property.Value).Trim();
+        var time = text.IndexOfAny(['T', 't']);
+        if (time >= 0) text = text[..time];
+        if (text.StartsWith("---", StringComparison.Ordinal))
+            return text.Length == 5 && AllDigits(text[3..]) && Number(text, 3, 2) is >= 1 and <= 31;
+        if (text.StartsWith("--", StringComparison.Ordinal))
+            return text.Length == 4 && AllDigits(text[2..]) && Number(text, 2, 2) is >= 1 and <= 12;
+        if (text.Length == 4) return AllDigits(text) && Number(text, 0, 4) >= 1;
+        return text.Length == 7 && text[4] == '-' && AllDigits(text[..4]) && AllDigits(text[5..]) && Number(text, 5, 2) is >= 1 and <= 12;
+    }
+
     private static ContactTypes TypeOf(string token) => token.ToUpperInvariant() switch {
         "HOME" => ContactTypes.Home,
         "WORK" => ContactTypes.Work,
@@ -117,6 +133,7 @@ internal static class ContactValueRules {
         "TEXT" => ContactTypes.Text,
         "VIDEO" => ContactTypes.Video,
         "MAIN" or "MAIN-NUMBER" => ContactTypes.Main,
+        "INTERNET" => ContactTypes.Internet,
         _ => ContactTypes.None,
     };
 

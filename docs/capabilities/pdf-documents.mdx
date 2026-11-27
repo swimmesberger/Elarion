@@ -135,6 +135,7 @@ compiler = "0.15.1"
 ```csharp
 builder.Services.AddElarionTypst(options => {
     options.PdfStandards.Add(TypstPdfStandard.PdfA2b);   // archival PDF/A for business records
+    options.RequiredPackages.Add("@local/acme-documents:1.0.0");   // checked at startup
 });
 ```
 
@@ -264,7 +265,15 @@ brand switch. They are passed on the command line, so the document's data belong
 ## Images and other files
 
 Assets are written to `/assets/<name>`. A name is a plain file name made of ASCII letters, digits, `.`, `-`, and `_`.
-It cannot contain a directory or `..`, so it cannot escape the workspace or break the generated main file.
+It cannot contain a directory or `..`, so it cannot escape the workspace or break the generated main file. The
+`TypstAsset` constructor throws an `ArgumentException` for any other name. When the name comes from a user, check it
+first with `TypstAsset.IsValidName(name)`, or use `TypstAsset.TryCreate(name, content, out var asset)`, and reject it
+with your own error:
+
+```csharp
+if (!TypstAsset.TryCreate(upload.FileName, upload.Content, out var attachment))
+    return AppError.Validation("The file name cannot be used in a document.", code: "document.attachment-name");
+```
 
 Typst stops the whole compilation on an image it cannot decode. For pictures from users (inspection photos, scanned
 receipts), let `TypstImage` decide what is printable. It detects PNG, JPEG, GIF, and WebP from the bytes and rejects
@@ -290,6 +299,32 @@ foreach (var (photo, index) in inspection.Photos.Select((photo, index) => (photo
 
 SVG and PDF files can be passed as plain `TypstAsset`s; `TypstImage` covers raster formats only.
 
+### Several models
+
+A request has one `Data` model. A second model that is independent of the document's own, such as a letterhead every
+document of the application receives, goes in as a JSON asset. `TypstAsset.FromJson` serializes it with a
+source-generated context, like `TypstData.FromValue`:
+
+```csharp
+var request = new TypstCompileRequest {
+    Source = TypstSource.Package("@local/acme-documents:1.0.0", "invoice"),
+    Data = TypstData.FromValue(invoice, DocumentJsonContext.Default.InvoiceDocument),
+    Assets = [TypstAsset.FromJson("letterhead.json", letterhead, DocumentJsonContext.Default.Letterhead)]
+};
+```
+
+The template parses it from the asset's bytes (`json` accepts bytes since Typst 0.13):
+
+```typst
+#let invoice(data, assets: (:)) = {
+  let letterhead = json(assets.at("letterhead.json"))
+  …
+}
+```
+
+This keeps each document's model type to itself: the application adds the letterhead to every request in its document
+service, and no document model has to carry it.
+
 ## Using the PDF
 
 `TypstPdf.Content` is a read-only stream backed by a temporary file, which is deleted when the `TypstPdf` is disposed.
@@ -311,6 +346,7 @@ blob write. Every exception derives from `TypstException`:
 | Exception | Meaning |
 | --- | --- |
 | `TypstCompilationException` | Typst rejected the document because of a template or data defect. `Diagnostics` holds Typst's error output, with file, line, and message. |
+| `TypstPackageNotFoundException` | A package the document imports is not installed, for example because the build did not bundle your package. `Package` names it (`@local/acme-documents:1.0.0`). This is a deployment problem, not a template defect; `RequiredPackages` reports it at startup instead. |
 | `TypstTimeoutException` | The compilation exceeded its timeout, and the process tree was killed. |
 | `TypstUnavailableException` | The executable cannot be started. This is a deployment problem, which the startup check normally catches first. |
 | `OperationCanceledException` | The caller cancelled, for example because the browser navigated away. The process was killed. |
@@ -328,6 +364,8 @@ try {
     return new InvoicePdfCreated { Blob = blob.Value };
 } catch (TypstTimeoutException) {
     return AppError.BusinessRule("The document took too long to generate. Please try again.", code: "document.timeout");
+} catch (TypstPackageNotFoundException) {
+    return AppError.BusinessRule("The document templates are not installed.", code: "document.templates-missing");
 } catch (TypstException) {
     return AppError.Internal("The document could not be generated.", code: "document.failed");
 }
@@ -344,6 +382,7 @@ try {
 | `PackagePath` | `packages/` in the toolchain directory, if present | `--package-path`: your package and any vendored `@preview` packages. |
 | `PackageCachePath` | Typst's per-user cache | `--package-cache-path`. |
 | `FontPaths` | `fonts/` in the toolchain directory, if present | Additional `--font-path` directories. |
+| `RequiredPackages` | none | Packages the startup check requires in `PackagePath`, such as `@local/acme-documents:1.0.0`. |
 | `IgnoreSystemFonts` | `true` | Hides the host's fonts, so output is the same on every machine. |
 | `PdfStandards` | none (PDF 1.7) | `--pdf-standard`, for example `PdfA2b`, `PdfA3b`, or `PdfUa1`. A request can override it. |
 | `PdfTags` | `true` | Tagged, accessible PDF. Set it to `false` for smaller files when no standard requires tags. |
@@ -360,6 +399,21 @@ above is a key (`Typst:Timeout` = `00:00:30`, `Typst:PdfStandards:0` = `PdfA2b`,
 environment variable). The options are read once at registration; changing configuration later has no effect on a
 running host.
 
+**Code defaults, then configuration.** `AddElarionTypst(section, configure)` binds the section first and runs
+`configure` after it, so the delegate always wins over configuration. For defaults of your own that deployment
+configuration can still override, such as a shorter timeout or a `Warn` startup check, use two calls. Both apply to
+the same options instance, in order:
+
+```csharp
+builder.Services.AddElarionTypst(options => {                      // 1. the application's defaults
+    options.Timeout = TimeSpan.FromSeconds(30);
+    options.StartupCheck = TypstStartupCheck.Warn;
+});
+builder.Services.AddElarionTypst(builder.Configuration.GetSection(TypstOptions.SectionName));   // 2. deployment wins
+```
+
+A key that configuration does not set keeps the code default.
+
 **Reproducible output.** Typst writes the creation date into the PDF and uses it for `datetime.today()`. Set
 `TypstCompileRequest.CreationTimestamp`, for example to the invoice date, and the same data produces a byte-identical
 file.
@@ -367,7 +421,11 @@ file.
 ### Startup check
 
 With the default `TypstStartupCheck.Fail`, the host refuses to start when the executable, a configured package
-directory, or a font directory is missing. `typst --version` runs next to the startup rather than in its path, so a
+directory, a font directory, or a package listed in `RequiredPackages` is missing. List your own template package
+there: without it, a deployment that lacks the package starts, and every document fails with
+`TypstPackageNotFoundException`. A required package is installed when
+`<PackagePath>/<namespace>/<name>/<version>/typst.toml` exists. `TypstToolchain.HasPackage("@local/acme-documents:1.0.0")`
+runs the same test at render time, for example to answer with a "templates not installed" error before compiling. `typst --version` runs next to the startup rather than in its path, so a
 virus scanner that holds up a large executable does not delay the web server. If the version check fails, the host
 stops, and the exception is logged. `Warn` logs a warning and keeps running; documents then fail with
 `TypstUnavailableException`. `Warn` suits a host where PDFs are one optional feature among many.
@@ -388,16 +446,21 @@ The package's `build`/`buildTransitive` targets read these MSBuild properties:
 The binary follows `$(RuntimeIdentifier)` when one is set, so `dotnet publish -r linux-x64` on a Mac bundles the Linux
 binary. Without a RID, it follows the SDK's platform. Linux builds use Typst's statically linked musl binaries, which
 run on glibc and musl distributions alike, including distroless and chiseled images. Windows, macOS, and Linux on
-x64 and arm64 are covered. The Linux and macOS archives are unpacked with `tar -xJf`; a Windows build agent that
-publishes for Linux needs a `tar` with xz support, or a pre-fetched binary through `ElarionTypstExecutable`.
+x64 and arm64 are covered.
+
+The Linux and macOS archives are `.tar.xz` files, unpacked with `tar -xJf`. bsdtar (macOS, Windows) decompresses xz
+itself. GNU tar (Debian, Ubuntu, and the `mcr.microsoft.com/dotnet/sdk` images built on them) needs the `xz` program,
+which those images do not install. Without it, the build stops before the download with an error that names the
+package to install. Install `xz-utils` (Alpine: `xz`), or bundle a pre-fetched binary through `ElarionTypstExecutable`.
 
 ### Containers
 
-A container image needs no Typst installation step. The binary, your package, and your fonts are part of the publish
-output:
+The runtime image needs no Typst installation step. The binary, your package, and your fonts are part of the publish
+output. The SDK image needs `xz-utils` to unpack the Typst archive:
 
 ```dockerfile
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+RUN apt-get update && apt-get install -y --no-install-recommends xz-utils && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
 RUN dotnet publish src/Acme.Api -c Release -r linux-x64 -o /app
@@ -466,14 +529,26 @@ var toolchain = new TypstToolchain(new TypstOptions());
 Assert.SkipUnless(toolchain.ExecutableExists, $"Typst is not available at '{toolchain.ExecutablePath}'.");
 ```
 
+- **A compiler without a host.** `TypstCompiler.Create(options, loggerFactory)` builds the compiler that
+  `AddElarionTypst` registers, without a service collection. Use it when a test needs its own executable (a stand-in
+  script), package directory, or working directory. The logger factory is optional:
+
+```csharp
+var options = new TypstOptions { WorkingDirectory = workspace, PackagePath = emptyPackages };
+using var compiler = TypstCompiler.Create(options);
+
+var act = () => compiler.CompilePdfAsync(request, cancellationToken);
+await act.Should().ThrowAsync<TypstPackageNotFoundException>();   // the "templates not installed" path
+```
+
 ## Telemetry
 
 Register the `Elarion.Typst` activity source and meter (`TypstTelemetry.ActivitySourceName`,
 `TypstTelemetry.MeterName`). Each compilation creates a `typst compile` span, tagged with the document
 (`elarion.typst.document`: the package function) and the outcome. Two metrics are recorded:
 
-- `elarion.typst.compile.duration` (seconds), by outcome: `success`, `compilation_error`, `timeout`, `unavailable`, or
-  `cancelled`.
+- `elarion.typst.compile.duration` (seconds), by outcome: `success`, `compilation_error`, `package_not_found`,
+  `timeout`, `unavailable`, or `cancelled`.
 - `elarion.typst.compile.queue.duration` (seconds): the time spent waiting for a free `MaxConcurrency` slot. A rising
   queue time means documents are requested faster than the configured concurrency can render them.
 
@@ -482,7 +557,8 @@ Register the `Elarion.Typst` activity source and meter (`TypstTelemetry.Activity
 If your application already runs `typst compile` through `Process.Start`, the move is mostly deletion:
 
 1. Remove the Typst install step from the Dockerfile and CI, the process wrapper, the availability probe, and any
-   temporary-directory handling. Add the package reference and `ElarionTypstAssetsDirectory`.
+   temporary-directory handling. Add the package reference and `ElarionTypstAssetsDirectory`. A probe for your own
+   template package becomes an entry in `RequiredPackages` (startup) or a `TypstToolchain.HasPackage` call (render time).
 2. Move the templates into `packages/local/<app>-documents/1.0.0/`, add `typst.toml`, and turn each top-level template
    file into a function `#let invoice(data, assets: (:))` that takes the data as a parameter instead of reading
    `json(sys.inputs.data-file)`. Extra parameters such as a document kind become `WithArgument` calls.

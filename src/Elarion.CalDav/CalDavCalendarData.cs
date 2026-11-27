@@ -27,11 +27,11 @@ internal static class CalDavCalendarData {
         var caps = options.CalendarExpand with { FloatingTimeZone = zone };
 
         if (requested?.Child(DavNames.C.Expand) is { } expand && CalDavFilterEvaluator.TryParseRange(expand, out var from, out var to)) {
-            root = Expand(calendar, from, to, caps);
+            root = Expand(calendar, from, to, caps, cancellationToken);
             includeTimeZones = false; // every expanded time is in UTC
         }
         else if (requested?.Child(DavNames.C.LimitRecurrenceSet) is { } limit && CalDavFilterEvaluator.TryParseRange(limit, out var lFrom, out var lTo)) {
-            LimitRecurrenceSet(calendar, lFrom, lTo, caps);
+            LimitRecurrenceSet(calendar, lFrom, lTo, caps, cancellationToken);
         }
 
         if (!includeTimeZones) RemoveTimeZones(root, requested?.Child(DavNames.C.Expand) is not null);
@@ -43,7 +43,8 @@ internal static class CalDavCalendarData {
     }
 
     // RFC 4791 §9.6.5: every instance overlapping the range as its own component in UTC, no rules, no time zones.
-    private static CalendarComponent Expand(CalendarReadResult calendar, DateTimeOffset from, DateTimeOffset to, CalendarExpandOptions caps) {
+    private static CalendarComponent Expand(CalendarReadResult calendar, DateTimeOffset from, DateTimeOffset to, CalendarExpandOptions caps,
+        CancellationToken cancellationToken) {
         var source = calendar.Root!;
         var root = new CalendarComponent(source.Name);
         foreach (var property in source.Properties) root.Properties.Add(property.Clone());
@@ -53,7 +54,7 @@ internal static class CalDavCalendarData {
         foreach (var entry in calendar.Events.Where(static e => e.HasValue)) components[entry.Value!] = entry.Component;
         foreach (var entry in calendar.Todos.Where(static e => e.HasValue)) components[entry.Value!] = entry.Component;
 
-        foreach (var occurrence in CalendarRecurrence.Expand(calendar.Items, from, to, caps).Occurrences) {
+        foreach (var occurrence in CalendarRecurrence.Expand(calendar.Items, from, to, caps, cancellationToken).Occurrences) {
             if (!components.TryGetValue(occurrence.Item, out var original)) continue;
             var instance = original.Clone();
             foreach (var name in RecurrenceProperties) RemoveAll(instance, name);
@@ -72,9 +73,10 @@ internal static class CalDavCalendarData {
     }
 
     // RFC 4791 §9.6.6: the master, and only the overrides whose instance overlaps the range.
-    private static void LimitRecurrenceSet(CalendarReadResult calendar, DateTimeOffset from, DateTimeOffset to, CalendarExpandOptions caps) {
+    private static void LimitRecurrenceSet(CalendarReadResult calendar, DateTimeOffset from, DateTimeOffset to, CalendarExpandOptions caps,
+        CancellationToken cancellationToken) {
         var inRange = new HashSet<CalendarItem>(ReferenceEqualityComparer.Instance);
-        foreach (var occurrence in CalendarRecurrence.Expand(calendar.Items, from, to, caps).Occurrences) inRange.Add(occurrence.Item);
+        foreach (var occurrence in CalendarRecurrence.Expand(calendar.Items, from, to, caps, cancellationToken).Occurrences) inRange.Add(occurrence.Item);
         var root = calendar.Root!;
         foreach (var entry in calendar.Events.Cast<object>().Concat(calendar.Todos)) {
             var (component, value) = entry switch {

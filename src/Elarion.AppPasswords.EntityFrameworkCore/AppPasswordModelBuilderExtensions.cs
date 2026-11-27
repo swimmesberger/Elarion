@@ -35,7 +35,8 @@ public static class AppPasswordModelBuilderExtensions {
                 .HasColumnName(snakeCase ? "id" : "Id")
                 .ValueGeneratedNever();
             builder.Property(entity => entity.UserId)
-                .HasColumnName(snakeCase ? "user_id" : "UserId");
+                .HasColumnName(snakeCase ? "user_id" : "UserId")
+                .HasMaxLength(AppPasswordOptions.MaxUserIdLength);
             builder.Property(entity => entity.Name)
                 .HasColumnName(snakeCase ? "name" : "Name")
                 .HasMaxLength(AppPasswordOptions.MaxNameLength);

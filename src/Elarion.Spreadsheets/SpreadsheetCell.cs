@@ -36,8 +36,8 @@ public enum SpreadsheetCellKind {
 /// <para>
 /// <see cref="Text"/> follows FR-037: the text of a text cell, the number in invariant notation without an exponent,
 /// a date in ISO 8601 (<c>2026-11-24</c>, <c>2026-11-24T10:30:00</c>, or <c>10:30:00</c> for a time), <c>true</c> or
-/// <c>false</c>, an error's code such as <c>#N/A</c>, and empty for a blank cell. The struct holds a kind, one number and
-/// one string; a number's text is computed on access.
+/// <c>false</c>, an error's code such as <c>#N/A</c>, and empty for a blank cell. The struct holds a kind, one number
+/// and two strings (the text and the number format); a number's text is computed on access.
 /// </para>
 /// </remarks>
 public readonly struct SpreadsheetCell : IEquatable<SpreadsheetCell> {
@@ -47,10 +47,11 @@ public readonly struct SpreadsheetCell : IEquatable<SpreadsheetCell> {
     private readonly string? _text;
     private readonly double _number;
 
-    private SpreadsheetCell(SpreadsheetCellKind kind, string? text, double number) {
+    private SpreadsheetCell(SpreadsheetCellKind kind, string? text, double number, string? numberFormat = null) {
         Kind = kind;
         _text = text;
         _number = number;
+        NumberFormat = numberFormat;
     }
 
     /// <summary>A blank cell.</summary>
@@ -58,6 +59,14 @@ public readonly struct SpreadsheetCell : IEquatable<SpreadsheetCell> {
 
     /// <summary>The kind of value the cell holds.</summary>
     public SpreadsheetCellKind Kind { get; }
+
+    /// <summary>
+    /// The number format a number or date cell carries in the file, in the spreadsheet's format notation, for example
+    /// <c>#,##0.00 "€"</c>, <c>dd.mm.yyyy</c> or <c>General</c>; <see langword="null"/> for the other kinds and for a
+    /// cell built without one (FR-080). It lets a caller show a value the way the file does; <see cref="Text"/> stays
+    /// invariant, and the format takes no part in equality.
+    /// </summary>
+    public string? NumberFormat { get; }
 
     /// <summary>The cell's text, as FR-037 defines it; empty for a blank cell.</summary>
     public string Text => Kind switch {
@@ -74,10 +83,12 @@ public readonly struct SpreadsheetCell : IEquatable<SpreadsheetCell> {
     }
 
     /// <summary>Creates a number cell, rounded to the 15 significant digits a spreadsheet holds.</summary>
-    public static SpreadsheetCell FromNumber(double value) {
+    /// <param name="value">The number.</param>
+    /// <param name="numberFormat">The cell's <see cref="NumberFormat"/>, or <see langword="null"/>.</param>
+    public static SpreadsheetCell FromNumber(double value, string? numberFormat = null) {
         if (!double.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value), value, "A cell holds only finite numbers.");
 
-        return new SpreadsheetCell(SpreadsheetCellKind.Number, null, RoundToSpreadsheetPrecision(value));
+        return new SpreadsheetCell(SpreadsheetCellKind.Number, null, RoundToSpreadsheetPrecision(value), numberFormat);
     }
 
     /// <summary>Creates a boolean cell.</summary>
@@ -86,8 +97,11 @@ public readonly struct SpreadsheetCell : IEquatable<SpreadsheetCell> {
     }
 
     /// <summary>Creates a date cell holding the wall-clock date and time of <paramref name="value"/>.</summary>
-    public static SpreadsheetCell FromDate(DateTime value) {
-        return new SpreadsheetCell(SpreadsheetCellKind.Date, null, (double)(value - DateOrigin).Ticks / TimeSpan.TicksPerDay);
+    /// <param name="value">The date and time.</param>
+    /// <param name="numberFormat">The cell's <see cref="NumberFormat"/>, or <see langword="null"/>.</param>
+    public static SpreadsheetCell FromDate(DateTime value, string? numberFormat = null) {
+        return new SpreadsheetCell(
+            SpreadsheetCellKind.Date, null, (double)(value - DateOrigin).Ticks / TimeSpan.TicksPerDay, numberFormat);
     }
 
     /// <summary>Creates an error cell with its code, for example <c>#DIV/0!</c>.</summary>
@@ -97,8 +111,8 @@ public readonly struct SpreadsheetCell : IEquatable<SpreadsheetCell> {
     }
 
     /// <summary>A date cell from its days since 1899-12-30; a value below one is a time without a date.</summary>
-    internal static SpreadsheetCell FromDays(double days) {
-        return new SpreadsheetCell(SpreadsheetCellKind.Date, null, days);
+    internal static SpreadsheetCell FromDays(double days, string? numberFormat = null) {
+        return new SpreadsheetCell(SpreadsheetCellKind.Date, null, days, numberFormat);
     }
 
     /// <summary>The raw day count of a date cell, whose fraction is the time of day.</summary>

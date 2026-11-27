@@ -44,7 +44,7 @@ public sealed partial class SpreadsheetRecordGenerator {
                 .Append(SourceLiterals.String(column.Format)).Append(", ")
                 .Append(DoubleLiteral(column.Width)).Append(", ")
                 .Append(StringArray(column.Aliases)).Append(", ")
-                .Append(StringArray(column.Choices))
+                .Append(column.ChoicesExpression ?? StringArray(column.Choices))
                 .Append(IsReadable(model, column) ? "" : ", isReadable: false").AppendLine("),");
         }
 
@@ -186,7 +186,7 @@ public sealed partial class SpreadsheetRecordGenerator {
         }
 
         var call = column.WriteKind switch {
-            WriteKind.Text => "ReadText",
+            WriteKind.Text => column.StrictChoices ? "ReadTextChoice" : "ReadText",
             WriteKind.Boolean or WriteKind.LabelledBoolean => "ReadBoolean",
             WriteKind.UnsignedInteger => "ReadUnsignedInteger",
             WriteKind.Single => "ReadSingle",

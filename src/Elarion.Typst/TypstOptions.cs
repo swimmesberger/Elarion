@@ -77,6 +77,18 @@ public sealed class TypstOptions {
     public bool PdfTags { get; set; } = true;
 
     /// <summary>
+    /// Packages the application cannot render without, as specifications such as <c>@local/acme-documents:1.0.0</c>.
+    /// The startup check (<see cref="StartupCheck"/>) reports each one missing from <see cref="PackagePath"/>, so a
+    /// deployment without the template package surfaces on start, like a missing executable. Empty: no package is checked.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// builder.Services.AddElarionTypst(options => options.RequiredPackages.Add("@local/acme-documents:1.0.0"));
+    /// </code>
+    /// </example>
+    public IList<string> RequiredPackages { get; } = [];
+
+    /// <summary>
     /// The upper bound for one compilation, from process start to exit. The process tree is killed when it is
     /// exceeded. Default 60 seconds.
     /// </summary>
@@ -113,13 +125,19 @@ public sealed class TypstOptions {
             throw new ArgumentOutOfRangeException(nameof(MaxConcurrency), MaxConcurrency, "TypstOptions.MaxConcurrency must be at least 1.");
         if (Jobs is < 1)
             throw new ArgumentOutOfRangeException(nameof(Jobs), Jobs, "TypstOptions.Jobs must be at least 1 when set.");
+        foreach (var package in RequiredPackages) {
+            if (!TypstPackageSpec.TryParse(package, out _))
+                throw new ArgumentException(
+                    $"TypstOptions.RequiredPackages holds '{package}', which is not a Typst package specification of the form "
+                    + "@namespace/name:major.minor.patch.", nameof(RequiredPackages));
+        }
     }
 }
 
 /// <summary>What the host does at startup when the Typst toolchain is incomplete.</summary>
 public enum TypstStartupCheck {
     /// <summary>
-    /// Refuse to start when the executable or a configured directory is missing, and stop the host when
+    /// Refuse to start when the executable, a configured directory, or a required package is missing, and stop the host when
     /// <c>typst --version</c> fails (it runs beside the startup, not on its path). The default: a missing toolchain
     /// surfaces on deployment, not on the first download.
     /// </summary>
