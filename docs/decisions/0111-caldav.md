@@ -252,3 +252,39 @@ push (Apple's needs a certificate only Apple issues, WebDAV-Push is a draft only
 - **Managed external-calendar subscriptions** (stored accounts, encrypted credentials, a framework sync job): more
   framework than the first products need; the sync step makes them a thin layer an application or a later package
   adds.
+
+## Amendment (2026-11-27): what an application adopting the packages changed
+
+An application that moved its hand-written DAV server and app passwords onto these packages found gaps; these
+decisions close them. Live collections and explicit URL segments are decided in
+[ADR-0113's amendment](0113-carddav-address-books.md#amendment-2026-11-27-live-address-books-answered-by-a-ctag-and-explicit-url-segments).
+
+- **`Depth: 1,noroot` and `0,noroot`** are read as their depth without the requested resource (Microsoft's extension,
+  sent by some clients); before, they answered `400`. `Depth: infinity` stays `403 propfind-finite-depth`, as RFC 4918
+  allows: reading it as 1 would answer the root without the collections below the homes, which a client asking for
+  infinity would take as the whole tree.
+- **The principal resolves with and without its trailing slash**, as every path already did; a test pins it, because
+  clients store the spelling they first saw. `HomeSegment` is documented as a URL contract.
+- **`WebDavOptions.RefuseWhenNoCollections`** answers `403` to every request but `OPTIONS` from a user who sees no
+  collection of any protocol, for an application whose DAV access used to be one permission. Default off: an empty
+  home is what RFC clients expect. An option rather than an `OnResolved` hook, because the one known need is this rule
+  and a hook would have to expose the dispatcher's internals.
+- **The host owns `{prefix}/{**path}`.** An application's own endpoint under the prefix with a more specific template
+  wins by route precedence, outside the dispatcher; delegating a home to application code through
+  `IDavProtocol.HandleOtherAsync` is not added, since a live collection now covers the case that needed it.
+- **The host forwards `Accept`** to the dispatcher; it forwarded a fixed header list without it, so a `GET` asking for
+  vCard 4.0 got 3.0 through ASP.NET.
+- **The Identity principal asks whether the account may sign in**: `AddElarionIdentityAppPasswordPrincipals<TUser>()`
+  also refuses a user `SignInManager<TUser>.CanSignInAsync` refuses when a sign-in manager is registered (confirmed
+  e-mail or phone, `IUserConfirmation<TUser>`, the application's override), and takes an optional `canSignIn` delegate
+  for a rule of the application's own (deactivated, past an end date), so it need not replace the factory.
+- **`app_password.limit_reached` carries `AppPasswordLimitReachedData { MaxPerUser }`**, as the upload codes carry their
+  limits, so a message in the user's language needs no options. Elarion has no message-translation seam
+  (`IAppErrorTranslator<TError>` maps to a wire format); applications word messages from code and data.
+- **The user id is bounded** to 256 characters (`AppPasswordOptions.MaxUserIdLength`, the length Identity gives its
+  keys) in the service and the EF column, like every other column of the table.
+- **Kept as they are, and documented:** the list stays oldest first (creation order, stable; an application that shows
+  newest first reverses at most `MaxPerUser` rows), and the feed-token reader stays on by default: a feed-shaped URL
+  authenticates only an app password of scope `calendar-feed`, which only an application that issues feed tokens
+  creates, and turning it off by default would silently break the feeds of every CalDAV application. Applications that
+  serve no calendar feeds set `FeedTokenReader = null`, which the capability page now says prominently.

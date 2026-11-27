@@ -111,6 +111,23 @@ internal static class DavSources {
         if (!seen.Add(key))
             throw new InvalidOperationException($"The {kind.Noun} '{sourceName}' returned the key '{key}' twice.");
     }
+
+    /// <summary>
+    /// The URL segment of a collection a source returned: the explicit <paramref name="segment"/>, checked, or
+    /// <c>{source}.{key}</c>; unique among every collection of the protocol the user sees (<paramref name="seen"/>).
+    /// </summary>
+    public static string SegmentOf(string sourceName, string key, string? segment, HashSet<string> seen, DavSourceKind kind) {
+        if (segment is not null && !DavCollection.IsValidSegment(segment))
+            throw new InvalidOperationException(
+                $"The {kind.Noun} '{sourceName}' returned the URL segment '{segment}' for '{key}'; a segment must be 1 to "
+                + $"{DavCollection.MaxSegmentLength} ASCII letters, digits, '-', '_', '.', '~' or '@', and not '.' or '..'.");
+        var actual = segment ?? sourceName + "." + key;
+        if (!seen.Add(actual))
+            throw new InvalidOperationException(
+                $"Two collections of the {kind.Noun}s have the URL segment '{actual}' (the second from '{sourceName}', key '{key}'); "
+                + "segments must be unique within a home.");
+        return actual;
+    }
 }
 
 /// <summary>

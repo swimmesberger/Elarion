@@ -66,8 +66,24 @@ Sources behave as calendar sources do: every DAV request invokes them through th
 authenticated user, so `[RequirePermission]`, resource rules and `[FeatureGate]` apply; a source that answers
 not-found, forbidden or unauthorized shows no address books; an address book no source returns, and another user's
 home, answer `404`. Leave `[Handler]` off the handler. Names and keys are 1 to 64 ASCII letters, digits, `-` and `_`,
-the URL segment is `{source}.{key}`, and a source whose handler is not registered stops the host from starting. An
-address-book source and a calendar source may share a name; they share nothing else.
+and a source whose handler is not registered stops the host from starting. An address-book source and a calendar
+source may share a name; they share nothing else.
+
+### URL segments
+
+An address book is served at `/dav/addressbooks/{user}/{segment}/`, where the segment is `{source}.{key}` unless the
+source names one:
+
+```csharp
+new PublishedAddressBookInfo(Key: "all", DisplayName: "Contacts") { Segment = "default" }
+```
+
+The segment, the home segment `addressbooks` and the prefix are a **URL contract**: contacts apps store the URLs they
+discovered, and changing one makes every synced device download the address book anew (or lose it, on some clients).
+Set `Segment` to keep the URLs of a server you replace. It is 1 to 128 ASCII letters, digits, `-`, `_`, `.`, `~` or
+`@`, never `.` or `..`, matched exactly (case-sensitive), and unique among the address books a user sees; a duplicate
+or an invalid one throws as the application's mistake. It does not change the store address, so published contacts
+keep their sync token. The principal answers at `/dav/principals/{user}/` and also without the trailing slash.
 
 ### One address book per account on Apple devices
 
@@ -113,13 +129,71 @@ without `Uid`, or with nothing to show as its name (`DisplayName` empty: no form
 or phone), throws: Apple drops a card without `FN`. Keep photos under 224 KiB, the largest iCloud accepts; DAVx5 shrinks
 photos over 1 MB.
 
+## Live address books: contacts filtered per viewer
+
+A published address book holds the same contacts for everyone who sees it. When what a person sees depends on rules
+that change without any contact changing (restricted contacts, sharing groups, a permission, a role), publishing one
+address book per viewer would mean re-publishing every viewer's book on every such change. A **live address book**
+reads the contacts per request instead, as the current user, with the same rules the application's own list queries
+use:
+
+```csharp
+// the source's handler still decides which address books the user sees
+services.AddElarionCardDavLiveSource<MyContacts, VisibleContacts>();
+
+internal sealed class VisibleContacts(AppDbContext db) : ICardDavLiveAddressBooks {
+    // name and ETag of every contact the current user sees; no card is written for a listing
+    public IAsyncEnumerable<CardDavLiveMember> ListAsync(string key, CancellationToken ct) =>
+        db.Contacts.WhereAuthorized(Verbs.Read)
+            .Select(c => new CardDavLiveMember(c.Id + ".vcf", c.Version.ToString()))
+            .AsAsyncEnumerable();
+
+    // the named contacts the user sees (all of them for a query), as Contacts
+    public async IAsyncEnumerable<CardDavLiveContact> GetAsync(string key, IReadOnlyCollection<string>? names,
+        DavContentPurpose purpose, [EnumeratorCancellation] CancellationToken ct) {
+        var ids = names?.Select(n => Guid.Parse(n[..^4])).ToList();
+        await foreach (var c in db.Contacts.WhereAuthorized(Verbs.Read)
+                           .Where(c => ids == null || ids.Contains(c.Id)).AsAsyncEnumerable().WithCancellation(ct))
+            yield return new CardDavLiveContact(c.Id + ".vcf", c.Version.ToString(),
+                ToContact(c, withPhoto: purpose != DavContentPurpose.Query));
+    }
+}
+```
+
+`TAddressBooks` is resolved from the request's scope, so it takes the `DbContext` and `ICurrentUser`. The framework
+writes each `Contact` as vCard 3.0 with the rules of published contacts (a UID and a name to show), under the member
+name and ETag you give.
+
+- **Answered by a CTag, without sync tokens.** A live address book answers `getctag`, has no `sync-token`, and does not
+  offer `sync-collection` (a `sync-collection` answers `403` with `supported-report`). Every contacts app falls back to
+  the CTag: when it changed, the app lists the names and ETags (`PROPFIND Depth: 1`) and fetches the changed contacts
+  with `addressbook-multiget`. Removals and contacts the person no longer may see disappear at the next listing.
+- **The CTag** is by default a hash over the listing, so it changes exactly when the listing does, including when
+  visibility changes; override `GetCTagAsync` with something cheaper only if it changes at least as often.
+- **The ETag is yours to keep right**: the same in the listing and with the contact, changing exactly when the card
+  does. Derive it from a row version or a hash of the fields the card is written from (including a per-viewer photo
+  fallback, if the card differs by viewer). One that never changes keeps stale cards on devices; one that changes on
+  every request makes every poll a full download.
+- **The purpose** (`DavContentPurpose.Get`, `Multiget` or `Query`) says why the contacts are asked for. A query reads
+  every contact the user sees, so leave photos out of it; one `GetAsync` call answers one response, so a byte budget for
+  photos is kept inside it.
+- **Member names** are the last URL segment (1 to 128 ASCII letters, digits, `-`, `_`, `.`, `~`, `@`), a URL contract
+  like the address book's segment; `CardDavAddress.MemberNameOf(uid)` gives the name a published contact would have.
+  A listing does not know a card's length, so `getcontentlength` answers `404` for listed members.
+- **Nothing is published into a live source**: `ICardDavPublisher` throws for one. A source is either published or live;
+  an application can register both kinds.
+
+A change costs every client a listing (names and ETags) after the CTag changed, and the default CTag costs a listing
+per poll: one indexed query, fine for the few thousand contacts per book of the tier Elarion targets. Published
+address books stay the choice when the content is the same for every viewer.
+
 ## Address books as contacts apps see them
 
 - **Properties.** The principal answers `addressbook-home-set`; address books answer `resourcetype` with `addressbook`,
   `displayname`, `addressbook-description`, `supported-address-data` (vCard 3.0 and 4.0), `supported-collation-set`,
   `sync-token` and `getctag`. Properties Apple asks about and the server does not keep (`me-card`, `max-image-size`,
   `directory-gateway`) answer `404` inside the `multistatus`, which Apple tolerates.
-- **Reports.** `sync-collection`, `addressbook-multiget` and `addressbook-query`.
+- **Reports.** `sync-collection` (published address books), `addressbook-multiget` and `addressbook-query`.
 - **Versions.** `address-data` without a version answers the stored vCard 3.0; `version="4.0"` answers the same contact
   written as 4.0 (DAVx5 and Evolution prefer it), with the same ETag; another version or content type answers `403`
   with `supported-address-data`. `GET` answers 3.0 unless `Accept` ranks `text/vcard; version=4.0` higher.

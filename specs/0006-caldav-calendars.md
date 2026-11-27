@@ -168,8 +168,10 @@ Calendar sources and access
 The CalDAV server
 
 - FR-014: The host MUST serve, under a configurable prefix that defaults to `/dav`, the principal
-  `/dav/principals/{user}/`, the calendar home `/dav/calendars/{user}/`, each calendar at
-  `/dav/calendars/{user}/{source}.{key}/` and each object below it as `{name}.ics`.
+  `/dav/principals/{user}/` (also without its trailing slash), the calendar home `/dav/calendars/{user}/`, each
+  calendar at `/dav/calendars/{user}/{segment}/` and each object below it as `{name}.ics`. The segment MUST be
+  `{source}.{key}` unless the source names one (`PublishedCalendarInfo.Segment`), MUST be matched exactly, and two
+  calendars a user sees MUST NOT share one.
 - FR-015: `/.well-known/caldav` at the application root MUST redirect `PROPFIND`, `GET`, `HEAD` and `OPTIONS` with `301`
   to the prefix.
 - FR-016: `OPTIONS` on every DAV URL MUST answer `200` with `DAV: 1, 3, calendar-access` and an `Allow`
@@ -179,7 +181,8 @@ The CalDAV server
   `calendar-user-address-set`, `displayname`, `resourcetype`, `supported-calendar-component-set`, `supported-report-set`,
   `current-user-privilege-set`, `owner`, `sync-token`, `getetag`, `getcontenttype`, `calendar-timezone`), and
   `getctag` and `calendar-color`, and MUST answer an unknown property with `404` inside the `multistatus`.
-- FR-018: `PROPFIND` with depth `infinity` MUST answer `403` with the `propfind-finite-depth` precondition.
+- FR-018: `PROPFIND` with depth `infinity` MUST answer `403` with the `propfind-finite-depth` precondition;
+  `Depth: 0,noroot` and `1,noroot` MUST answer as depth 0 and 1 without the requested resource itself.
 - FR-019: `REPORT` MUST support `sync-collection` (RFC 6578), `calendar-multiget`, `calendar-query` with
   `comp-filter`, `prop-filter`, `param-filter`, `text-match`, `time-range`, `expand` and `limit-recurrence-set`, and
   `free-busy-query` (RFC 4791).
@@ -211,7 +214,7 @@ App passwords
 - FR-029: A secret MUST hold at least 256 bits from a cryptographically secure generator after a configurable prefix,
   and only a hash of it MUST be stored.
 - FR-030: Creating an app password beyond the configured maximum per user MUST fail with the code
-  `app_password.limit_reached`, and revoking an unknown or foreign one with `app_password.not_found`; both codes MUST
+  `app_password.limit_reached` whose data (`AppPasswordLimitReachedData`) names the maximum, and revoking an unknown or foreign one with `app_password.not_found`; both codes MUST
   be constants of `AppPasswordErrorCodes`.
 - FR-031: `Elarion.AppPasswords.AspNetCore` MUST provide an authentication scheme that accepts an app password with
   scope `dav` over HTTP Basic and a feed token in a feed URL, MUST build the principal on every request through the
@@ -246,6 +249,18 @@ The client
 - FR-042: `PutAsync` and `DeleteAsync` MUST send `If-Match` (or `If-None-Match: *` to create) and MUST report a failed
   precondition as the code `caldav.conflict`.
 - FR-043: The client MUST bound response sizes, objects per step and XML nesting by options.
+
+Changes of 2026-11-27 (an application adopting the packages)
+
+- FR-044: With `WebDavOptions.RefuseWhenNoCollections`, a user who sees no collection of any protocol MUST be answered
+  `403` on every DAV request but `OPTIONS`; without it, the homes MUST list no collection.
+- FR-045: `getcontentlength` MUST be answered only for a member whose length is known; a live collection's listing
+  (spec 0007 FR-035) MAY leave it unknown, and the property then answers `404` inside the `multistatus`.
+- FR-046: The ASP.NET Core Identity principal of `AddElarionIdentityAppPasswordPrincipals<TUser>()` MUST refuse a user
+  that `SignInManager<TUser>.CanSignInAsync` refuses when a sign-in manager is registered, and one the application's
+  optional `canSignIn` rule refuses, on every request.
+- FR-047: Creating an app password for a user id longer than `AppPasswordOptions.MaxUserIdLength` (256) MUST throw, and
+  the EF store's user-id column MUST be bounded to that length.
 
 ## Success criteria
 

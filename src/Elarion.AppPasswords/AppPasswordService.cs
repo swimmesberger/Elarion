@@ -13,6 +13,9 @@ internal sealed class AppPasswordService(
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(scope);
+        if (userId.Length > AppPasswordOptions.MaxUserIdLength)
+            throw new ArgumentException(
+                $"A user id must be at most {AppPasswordOptions.MaxUserIdLength} characters.", nameof(userId));
         if (name.Length > AppPasswordOptions.MaxNameLength)
             throw new ArgumentException(
                 $"An app password name must be at most {AppPasswordOptions.MaxNameLength} characters.", nameof(name));
@@ -31,7 +34,8 @@ internal sealed class AppPasswordService(
         if (!await store.TryAddAsync(record, settings.MaxPerUser, cancellationToken).ConfigureAwait(false))
             return AppError.Conflict(
                 $"The user already holds the maximum of {settings.MaxPerUser} app passwords; revoke one first.",
-                AppPasswordErrorCodes.LimitReached);
+                AppPasswordErrorCodes.LimitReached,
+                new AppPasswordLimitReachedData { MaxPerUser = settings.MaxPerUser });
 
         return new AppPasswordIssued { Password = record.ToInfo(), Secret = secret };
     }

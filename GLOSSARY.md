@@ -346,10 +346,17 @@ of the application's data, read-only to the apps; the application stays the sour
 _Avoid_: shared address book, contact export, CardDAV collection (in application code)
 
 **Address-book source**:
-A query request implementing `ICardDavSource<TSelf>` whose handler returns the published address books of that source
-the current user may see, deciding access per address book through the handler pipeline, as a calendar source does
+A query request implementing `ICardDavSource<TSelf>` whose handler returns the published (or, for a live source, live)
+address books of that source the current user may see, deciding access per address book through the handler pipeline, as a calendar source does
 for calendars.
 _Avoid_: contact provider, address-book backend
+
+**Live address book**:
+An address book whose contacts Elarion reads per request, as the current user, from the application's
+`ICardDavLiveAddressBooks` instead of from the store, so each viewer sees the contacts the application's row rules allow
+at that moment. It is answered by a CTag only, without sync tokens; its address-book source is registered with
+`AddElarionCardDavLiveSource`. In the WebDAV core, a collection read this way is a *live collection*.
+_Avoid_: dynamic address book, virtual address book, unpublished address book
 
 **App password**:
 A credential Elarion issues to a person for one device or client: a random secret returned once, stored as a hash,

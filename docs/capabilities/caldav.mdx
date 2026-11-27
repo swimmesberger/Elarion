@@ -71,6 +71,14 @@ application can add conventions such as a rate limiter:
   browser never attaches by itself.
 - **Well-known.** `/.well-known/caldav` at the application root answers every method with `301` to the prefix
   (`WebDavHostOptions.MapWellKnown`).
+- **The prefix is the group's.** It maps `{prefix}/{**path}` for every protocol. An endpoint the application maps
+  under the prefix with a more specific template wins by route precedence, and then runs outside the dispatcher, the
+  group's authentication schemes and its scope seeding; give it those conventions yourself, or serve it under another
+  prefix. A DAV protocol of your own is an `IDavProtocol`; a first path segment no protocol's home owns reaches
+  `IDavProtocol.HandleOtherAsync`.
+- **No collection, no DAV.** `WebDav:RefuseWhenNoCollections` answers `403` to every request but `OPTIONS` of a user who
+  sees no collection of any protocol, for an application whose DAV access used to be one permission. By default such a
+  user discovers empty homes.
 
 Serve CalDAV over HTTPS: Apple clients may send no credentials over plain HTTP. When the prefix is not `/dav`, set the
 scheme's `FeedTokenReader` to `AppPasswordFeedPaths.CreateReader(prefix)`.
@@ -108,7 +116,11 @@ unauthorized shows no calendars; any other failure answers `500`. A calendar no 
 of another user, answer `404`, never `403`. Leave `[Handler]` off a source's handler unless you also want it on JSON-RPC:
 it is invoked in process.
 
-A source name and a key are 1 to 64 ASCII letters, digits, `-` and `_`; a calendar's URL segment is `{source}.{key}`.
+A source name and a key are 1 to 64 ASCII letters, digits, `-` and `_`; a calendar's URL segment is `{source}.{key}`
+unless `PublishedCalendarInfo.Segment` names another (1 to 128 ASCII letters, digits, `-`, `_`, `.`, `~` or `@`, not
+`.` or `..`, unique among the calendars a user sees). Segments, the home segment `calendars` and the prefix are a URL
+contract: apps store the URLs they discovered, so set `Segment` to keep the URLs of a server you replace, and never
+change one once devices synced. A segment is matched exactly; it does not change the store address or the sync token.
 Two sources with one name fail when the second is registered; an invalid or repeated key fails when it is returned,
 naming the source. A source whose handler is not registered (the class is outside the module, or the module that holds
 it is not enabled) stops the host from starting, with a message naming the source.
@@ -295,15 +307,17 @@ Without a transaction, a write runs in a transaction of its own.
 
 `DavDispatcher.HandleAsync(DavRequest, IServiceProvider, CancellationToken)` answers a request without a wire, so it runs
 in tests without a server. It serves the current user's principal `{prefix}/principals/{user}/`, a home per protocol
-such as `{prefix}/calendars/{user}/`, each published collection `{prefix}/calendars/{user}/{source}.{key}/` and its
-objects; another user's principal or home answers `404`.
+such as `{prefix}/calendars/{user}/`, each collection `{prefix}/calendars/{user}/{segment}/` and its objects; another
+user's principal or home answers `404`. The principal also resolves without its trailing slash. A collection is
+published (its members in the store, with sync tokens) or live (its members read per request through
+`DavCollection.Live`, answered by a CTag only; see [live address books](/docs/capabilities/carddav#live-address-books-contacts-filtered-per-viewer)).
 
 | Request | Answer |
 | --- | --- |
 | `OPTIONS` | `200`, `DAV: 1, 3` and the protocols' classes (`calendar-access`), an `Allow` header without a write method. |
-| `PROPFIND` depth `0` or `1` | The live properties of RFC 4918, RFC 3744, RFC 5397 and RFC 6578 and the protocol's, an unknown one in a `404` propstat; `Prefer: return=minimal` leaves those out. A missing `Depth` is read as `1`. |
+| `PROPFIND` depth `0` or `1` | The live properties of RFC 4918, RFC 3744, RFC 5397 and RFC 6578 and the protocol's, an unknown one in a `404` propstat; `Prefer: return=minimal` leaves those out. A missing `Depth` is read as `1`; `0,noroot` and `1,noroot` answer without the requested resource itself. `getcontentlength` is answered where the length is known. |
 | `PROPFIND` depth `infinity` | `403` with `propfind-finite-depth`. |
-| `REPORT sync-collection` | Level `1`: the changed objects and the removed ones (as `404`) since the token, with a new token; a `limit` lower than the changes answers the first ones and a `507` on the collection, and the client continues from the token; an expired or foreign token `403` with `valid-sync-token`. |
+| `REPORT sync-collection` | On a published collection (a live one answers `403` with `supported-report`), level `1`: the changed objects and the removed ones (as `404`) since the token, with a new token; a `limit` lower than the changes answers the first ones and a `507` on the collection, and the client continues from the token; an expired or foreign token `403` with `valid-sync-token`. |
 | `GET`, `HEAD` on an object | Its bytes, `Content-Type` and `ETag`; `If-None-Match` answers `304`. |
 | `PUT`, `DELETE`, `PROPPATCH`, `MKCALENDAR`, `MOVE`, `COPY`, … | `403` with `need-privileges`, nothing changes. Every collection grants `read` and `read-current-user-privilege-set` only. |
 
@@ -326,3 +340,4 @@ Request bodies are read with DTDs and external entities refused and with `MaxBod
 | `WebDav:MaxMultigetHrefs` | `1000` | The most objects one multiget names. |
 | `WebDav:JournalRetention` | `90.00:00:00` | How long the journal keeps a change. |
 | `WebDav:MaxJournalRowsPerCollection` | `10000` | The most changes one collection's journal keeps. |
+| `WebDav:RefuseWhenNoCollections` | `false` | Whether a user who sees no collection gets `403` on the whole DAV surface. |

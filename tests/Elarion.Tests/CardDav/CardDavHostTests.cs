@@ -116,4 +116,20 @@ public sealed class CardDavHostTests {
         answer.Headers["ETag"].Should().StartWith("\"");
         answer.Dav.Body.Should().StartWith("BEGIN:VCARD\r\nVERSION:3.0\r\n");
     }
+
+    // Regression: the host passed only a fixed list of headers to the dispatcher and Accept was not among them, so a GET
+    // that asked for vCard 4.0 got 3.0 through ASP.NET although the dispatcher answered 4.0.
+    [Fact]
+    public async Task GetWithAnAcceptPreferringVCard40_AnswersVersion40ThroughTheHost() {
+        await using var host = await CardDavHost.StartAsync();
+        var password = await host.CreatePasswordAsync("alice");
+        await host.PublishContactAsync("customers", "all", CardDavTestData.Person("c-1", "Anna", "Berger"));
+
+        var answer = await host.SendAsync("GET", "/dav/addressbooks/alice/customers.all/c-1.vcf", user: "alice", password: password,
+            headers: new Dictionary<string, string> { ["Accept"] = "text/vcard;version=4.0" });
+
+        answer.Status.Should().Be(HttpStatusCode.OK);
+        answer.Headers["Content-Type"].Should().Contain("version=4.0");
+        answer.Dav.Body.Should().StartWith("BEGIN:VCARD\r\nVERSION:4.0\r\n");
+    }
 }

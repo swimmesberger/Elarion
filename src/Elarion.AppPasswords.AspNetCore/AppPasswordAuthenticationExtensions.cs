@@ -56,17 +56,31 @@ public static class AppPasswordAuthenticationExtensions {
     /// <summary>
     /// Creates the principal of an app-password request through ASP.NET Core Identity, when
     /// <see cref="AppPasswordAuthenticationEvents.OnCreatePrincipal"/> is not set: the user is found with
-    /// <c>UserManager&lt;TUser&gt;.FindByIdAsync</c>, refused when missing or locked out, and signed in with the claims of
-    /// <c>IUserClaimsPrincipalFactory&lt;TUser&gt;</c>, on every request, so a deleted or locked account stops syncing at
-    /// once. Requires the Identity services (<c>AddIdentityCore&lt;TUser&gt;()</c> or <c>AddElarionIdentity</c>).
+    /// <c>UserManager&lt;TUser&gt;.FindByIdAsync</c>; refused when missing, locked out, refused by
+    /// <c>SignInManager&lt;TUser&gt;.CanSignInAsync</c> (when a sign-in manager is registered: confirmed e-mail or phone,
+    /// <c>IUserConfirmation&lt;TUser&gt;</c>, or the application's override) or by <paramref name="canSignIn"/>; and signed
+    /// in with the claims of <c>IUserClaimsPrincipalFactory&lt;TUser&gt;</c>, on every request, so a deleted, locked or
+    /// deactivated account stops syncing at once. Requires the Identity services (<c>AddIdentityCore&lt;TUser&gt;()</c> or
+    /// <c>AddElarionIdentity</c>).
     /// </summary>
     /// <typeparam name="TUser">The Identity user type.</typeparam>
     /// <param name="services">The service collection.</param>
-    public static IServiceCollection AddElarionIdentityAppPasswordPrincipals<TUser>(this IServiceCollection services)
+    /// <param name="canSignIn">
+    /// The application's own rule whether the account may sign in now (deactivated, past its end date), or
+    /// <see langword="null"/>; <see langword="false"/> refuses the request. Its context gives the request's services.
+    /// </param>
+    /// <example>
+    /// <code>
+    /// builder.Services.AddElarionIdentityAppPasswordPrincipals&lt;AppUser&gt;(
+    ///     (user, context) =&gt; ValueTask.FromResult(user.IsActive));
+    /// </code>
+    /// </example>
+    public static IServiceCollection AddElarionIdentityAppPasswordPrincipals<TUser>(this IServiceCollection services,
+        Func<TUser, AppPasswordPrincipalContext, ValueTask<bool>>? canSignIn = null)
         where TUser : class {
         ArgumentNullException.ThrowIfNull(services);
         services.RemoveAll<IAppPasswordPrincipalFactory>();
-        services.AddSingleton<IAppPasswordPrincipalFactory, IdentityAppPasswordPrincipalFactory<TUser>>();
+        services.AddSingleton<IAppPasswordPrincipalFactory>(new IdentityAppPasswordPrincipalFactory<TUser>(canSignIn));
         return services;
     }
 }

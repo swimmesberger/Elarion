@@ -11,7 +11,10 @@ public interface IDavProtocol {
     /// <summary>The collection kind the protocol publishes into the store, such as <c>calendar</c>.</summary>
     string CollectionKind { get; }
 
-    /// <summary>The first URL segment of the protocol's homes, such as <c>calendars</c> for <c>/dav/calendars/{user}/</c>.</summary>
+    /// <summary>
+    /// The first URL segment of the protocol's homes, such as <c>calendars</c> for <c>/dav/calendars/{user}/</c>. It is a
+    /// URL contract: apps store the home and collection URLs, so it never changes once devices synced.
+    /// </summary>
     string HomeSegment { get; }
 
     /// <summary>The well-known name of RFC 6764, such as <c>caldav</c> for <c>/.well-known/caldav</c>.</summary>
@@ -68,26 +71,120 @@ public interface IDavProtocol {
 public sealed record DavRepresentation(ReadOnlyMemory<byte> Content, string ContentType);
 
 /// <summary>
-/// A published collection the current user may see, as a protocol resolved it. A protocol derives from it to carry its
-/// own metadata (CalDAV keeps the published calendar's color, time zone and component kinds).
+/// A collection the current user may see, as a protocol resolved it: a published one, whose members the store holds,
+/// or a live one, whose members <see cref="Live"/> reads per request (ADR-0113, amendment 2026-11-27). A protocol
+/// derives from it to carry its own metadata (CalDAV keeps the published calendar's color, time zone and component kinds).
 /// </summary>
 public class DavCollection {
+    /// <summary>The longest <see cref="Segment"/>: 128 characters.</summary>
+    public const int MaxSegmentLength = 128;
+
     /// <summary>Creates a collection.</summary>
     public DavCollection(DavCollectionAddress address, string displayName) {
         ArgumentNullException.ThrowIfNull(address);
         ArgumentNullException.ThrowIfNull(displayName);
         Address = address;
         DisplayName = displayName;
+        Segment = address.Segment;
     }
 
-    /// <summary>The collection's address in the store.</summary>
+    /// <summary>The collection's address in the store; for a live collection, only its identity.</summary>
     public DavCollectionAddress Address { get; }
 
     /// <summary>The name shown to the user.</summary>
     public string DisplayName { get; }
 
-    /// <summary>The URL segment, <c>{source}.{key}</c>.</summary>
-    public string Segment => Address.Segment;
+    /// <summary>
+    /// The URL segment of the collection in the user's home: <c>{source}.{key}</c> unless the protocol sets another. It
+    /// is a URL contract: apps store it, so changing it makes every synced device sync the collection anew. It is matched
+    /// exactly (ordinal) and never changes the store address or the sync token.
+    /// </summary>
+    /// <exception cref="ArgumentException">The value is not a valid segment (<see cref="IsValidSegment"/>).</exception>
+    public string Segment {
+        get;
+        init {
+            if (!IsValidSegment(value))
+                throw new ArgumentException(
+                    $"The collection segment '{value}' must be 1 to {MaxSegmentLength} ASCII letters, digits, '-', '_', '.', '~' or '@', "
+                    + "and not '.' or '..'.", nameof(value));
+            field = value;
+        }
+    }
+
+    /// <summary>
+    /// The live source of the collection's members, or <see langword="null"/> for a published collection, whose members
+    /// the store holds. A live collection is answered by its CTag: it has no sync token, and <c>sync-collection</c> is
+    /// neither listed nor answered on it.
+    /// </summary>
+    public IDavLiveCollection? Live { get; init; }
+
+    /// <summary>
+    /// Whether <paramref name="value"/> is a valid collection segment: 1 to 128 ASCII letters, digits, <c>-</c>, <c>_</c>,
+    /// <c>.</c>, <c>~</c> or <c>@</c>, and neither <c>.</c> nor <c>..</c>, so it is one path segment that needs no escaping.
+    /// </summary>
+    public static bool IsValidSegment(string? value) {
+        if (string.IsNullOrEmpty(value) || value.Length > MaxSegmentLength || value is "." or "..") return false;
+        foreach (var c in value)
+            if (!char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_' or '.' or '~' or '@'))
+                return false;
+        return true;
+    }
+}
+
+/// <summary>What a live collection is asked for members for, so it can leave heavy parts out where they are not shown.</summary>
+public enum DavContentPurpose {
+    /// <summary>
+    /// The member's name, entity tag and media type only (a <c>PROPFIND</c> of one member, a refused write, a report that
+    /// asks for no data): the content may be empty.
+    /// </summary>
+    Metadata,
+
+    /// <summary>A <c>GET</c> or <c>HEAD</c> of one member: the full content.</summary>
+    Get,
+
+    /// <summary>A multiget report: the full content of each named member.</summary>
+    Multiget,
+
+    /// <summary>
+    /// A query report: the content every member is matched against and answered with. People search with it; a source
+    /// may leave out what no filter reads, such as photos.
+    /// </summary>
+    Query,
+}
+
+/// <summary>
+/// The members of a live collection, read per request as the current user instead of from the store (ADR-0113,
+/// amendment 2026-11-27): for collections whose content differs per viewer by rules that change without the content
+/// changing (row-level visibility), which one published collection per viewer could follow only with a projection of
+/// its own.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A live collection is answered by its CTag: <c>getctag</c> carries it, <c>sync-token</c> is not defined, and
+/// <c>sync-collection</c> is neither in <c>supported-report-set</c> nor answered (<c>403</c> with
+/// <c>supported-report</c>), so clients compare the CTag and then the members' entity tags. The CTag must change
+/// whenever the listing would, including when the current user's visibility changes; a hash over the listing is always
+/// correct.
+/// </para>
+/// <para>
+/// A member's entity tag must be the same in the listing and with the content, and must change exactly when the content
+/// does, or clients fetch the member on every sync or keep a stale copy.
+/// </para>
+/// </remarks>
+public interface IDavLiveCollection {
+    /// <summary>The collection's CTag for the current user.</summary>
+    ValueTask<string> GetCTagAsync(DavContext context, CancellationToken cancellationToken);
+
+    /// <summary>Every member the current user sees, without content; <see cref="DavMember.Size"/> may be unknown.</summary>
+    IAsyncEnumerable<DavMember> ListMembersAsync(DavContext context, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The members named <paramref name="names"/> that exist and the current user sees, or all of them when
+    /// <paramref name="names"/> is <see langword="null"/>; with content unless <paramref name="purpose"/> is
+    /// <see cref="DavContentPurpose.Metadata"/>. A member that was not asked for is ignored.
+    /// </summary>
+    IAsyncEnumerable<DavStoredObject> GetMembersAsync(DavContext context, IReadOnlyCollection<string>? names, DavContentPurpose purpose,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>Writes the content of a property element for a resource.</summary>

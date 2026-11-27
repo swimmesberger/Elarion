@@ -38,12 +38,69 @@ public sealed class IdentityAppPasswordPrincipalTests {
         deletedResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    [Fact]
+    public async Task TheApplicationsCanSignInRule_RefusesADeactivatedAccountOnEveryRequest() {
+        var users = new TestUserStore();
+        var active = new TestUser { Id = "u-1", UserName = "one@example.com" };
+        users.Add(active);
+        await using var host = await AppPasswordTestHost.StartAsync(
+            services => {
+                services.AddElarionAppPasswords().AddElarionInMemoryAppPasswordStore();
+                services.AddIdentityCore<TestUser>();
+                services.AddSingleton<IUserStore<TestUser>>(users);
+                services.AddElarionIdentityAppPasswordPrincipals<TestUser>((user, context) => {
+                    context.Services.Should().NotBeNull();
+                    return ValueTask.FromResult(user.IsActive);
+                });
+            },
+            defaultPrincipals: false);
+        var password = await host.CreateAsync("u-1", AppPasswordScope.Dav);
+
+        var before = await host.GetAsync("/dav/whoami", "one@example.com", password.Secret);
+        active.IsActive = false;
+        var after = await host.GetAsync("/dav/whoami", "one@example.com", password.Secret);
+
+        before.StatusCode.Should().Be(HttpStatusCode.OK);
+        after.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task ARegisteredSignInManager_RefusesAnAccountItWouldNotSignIn() {
+        var users = new TestUserStore();
+        users.Add(new TestUser { Id = "u-1", UserName = "one@example.com" });
+        users.Add(new TestUser { Id = "u-2", UserName = "two@example.com", IsActive = false });
+        await using var host = await AppPasswordTestHost.StartAsync(
+            services => {
+                services.AddElarionAppPasswords().AddElarionInMemoryAppPasswordStore();
+                services.AddIdentityCore<TestUser>(o => o.SignIn.RequireConfirmedAccount = true).AddSignInManager();
+                services.AddSingleton<IUserStore<TestUser>>(users);
+                services.AddSingleton<IUserConfirmation<TestUser>, ActiveUserConfirmation>();
+                services.AddElarionIdentityAppPasswordPrincipals<TestUser>();
+            },
+            defaultPrincipals: false);
+        var confirmed = await host.CreateAsync("u-1", AppPasswordScope.Dav);
+        var unconfirmed = await host.CreateAsync("u-2", AppPasswordScope.Dav);
+
+        var confirmedResponse = await host.GetAsync("/dav/whoami", "one@example.com", confirmed.Secret);
+        var unconfirmedResponse = await host.GetAsync("/dav/whoami", "two@example.com", unconfirmed.Secret);
+
+        confirmedResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        unconfirmedResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    /// <summary>Identity's account-confirmation seam, as an application's "may sign in" rule plugs into it.</summary>
+    private sealed class ActiveUserConfirmation : IUserConfirmation<TestUser> {
+        public Task<bool> IsConfirmedAsync(UserManager<TestUser> manager, TestUser user) => Task.FromResult(user.IsActive);
+    }
+
     public sealed class TestUser {
         public required string Id { get; init; }
 
         public required string UserName { get; set; }
 
         public DateTimeOffset? LockoutEnd { get; set; }
+
+        public bool IsActive { get; set; } = true;
     }
 
     /// <summary>The smallest user store with lockout: enough for FindByIdAsync, IsLockedOutAsync and the claims factory.</summary>

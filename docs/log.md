@@ -2,6 +2,8 @@
 
 ## 2026-11-27
 
+* **Update**: [ADR-0111](decisions/0111-caldav.md) amended: Depth noroot, RefuseWhenNoCollections, the Accept header in the host, Identity's may-sign-in check, typed limit data and a bounded user id for app passwords
+* **Update**: [ADR-0113](decisions/0113-carddav-address-books.md) amended: live address books answered by a CTag, read per request for row-filtered per-viewer content, and explicit collection URL segments; specs 0006 and 0007 gain the matching requirements
 * **Update**: [ADR-0108](decisions/0108-spreadsheet-records.md) amended (2026-11-27): run-time worksheets, per-value cells and footer rows, per-call column filters, data-driven choices, a synchronous plain-row read of bytes in memory and the cell's number format; [VisibleWith] and a cell-value union rejected
 * **Update**: amended [ADR-0110](decisions/0110-vcard-contacts.md) (2026-11-27): a contact read result bounded by lines and errors with measured retention, vCard 2.1 escaping, byte-order marks before later cards, URI values, dropped control characters and an unfolded payload; [spec 0005](../specs/0005-vcard-contacts.md) gains FR-072–FR-089.
 * **Update**: amended [ADR-0109](decisions/0109-icalendar-model-reader-and-writer.md) with linear, bounded time-zone resolution, caches without untrusted ids, a work cap and skip-ahead for expansion, override versions, cancelled items, EXRULE and strict reads

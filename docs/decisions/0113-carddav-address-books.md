@@ -138,3 +138,72 @@ Rejected, as revisable:
 - **An index of searchable values**: section 3.
 - **Group cards, vCard feeds, a client, the directory gateway**: section 4.
 - **Scoped app passwords, a merged address book, group cards for Apple**: section 5.
+
+## Amendment (2026-11-27): live address books answered by a CTag, and explicit URL segments
+
+An application adopting the packages needed what section 5 and ADR-0111 section 3 do not serve: an address book whose
+contacts are filtered per viewer by row-level rules (restricted contacts, sharing groups, administrators) that change
+without any contact changing (group membership, a permission, a flag on the contact), with per-viewer content (a
+fallback photo only for viewers who may see companies), and at URLs every synced device already stored
+(`/addressbooks/{user}/default/`).
+
+Publishing one address book per viewer (ADR-0111 section 3) can follow those rules only with a projection the
+application would have to build: re-publish every viewer's book on every contact edit and on every visibility change,
+with photo bytes copied per viewer. Getting it wrong leaks contacts, and the copy is a viewer count times the contacts.
+At the tier of ADR-0025 the cheaper and safer answer is to read the rows per request, the way the application's own
+list queries do, and to give up exact sync for those books.
+
+**Decision.** `Elarion.WebDav` gains a second kind of collection: a **live collection**, whose members a protocol reads
+per request through `IDavLiveCollection` (`ListMembersAsync` → name and ETag, `GetMembersAsync(names, purpose)` → the
+content, `GetCTagAsync`), instead of from the store. `DavCollection.Live` marks it. A live collection is answered by
+its CTag only: `getctag` carries it, `sync-token` is not defined, `sync-collection` is neither in
+`supported-report-set` nor answered (`403` with `supported-report`), and the listing may leave `getcontentlength` out
+(`DavMember.Size` is now optional). Every surveyed client handles a CTag-only collection: it compares the CTag, then the
+ETags of a `Depth: 1` listing, and fetches what changed with a multiget. `DavContentPurpose` (`Metadata`, `Get`,
+`Multiget`, `Query`) tells the source why it is asked, so it can leave photos out of a query, which reads every contact.
+
+`Elarion.CardDav` exposes it as a **live address-book source**: `AddElarionCardDavLiveSource<TQuery, TAddressBooks>()`.
+The source's handler still decides, through the handler pipeline, which address books the user sees; the scoped
+`ICardDavLiveAddressBooks` decides which contacts each holds for that user, with the same resource rules
+(`WhereAuthorized`) the application's list handlers use, and returns `Contact`s that the framework writes as vCard 3.0
+with the application's member names and ETags. Its default CTag is a hash of the listing, which changes exactly when the
+listing does. Publishing into a live source throws.
+
+Both protocols' sources may also name a collection's **URL segment** (`PublishedAddressBookInfo.Segment`,
+`PublishedCalendarInfo.Segment`), default `{source}.{key}`: it is a URL contract, matched exactly, validated (one path
+segment of 1 to 128 safe characters, unique within the home), and it does not change the store address or the sync
+token.
+
+**What changes in earlier decisions.** ADR-0111 section 2 rejected *handler-backed serving* because every application
+would rebuild the change journal and token expiry. That rejection stands for sync tokens: a live collection has none,
+so nothing of the journal is rebuilt. ADR-0111's rejected alternative *CTag only* stands as the default: published
+collections keep exact sync, and live ones are the opt-in for content the store cannot follow. ADR-0111's other
+rejection, *a backend interface outside the handler pipeline*, is narrowed rather than reversed: which collections a user
+sees is still a handler; only the rows inside a live collection come from a scoped service, which reads them with the
+application's own authorization.
+
+**Trade-offs.**
+
+- A change to a live address book costs every client a full listing (names and ETags, no cards) on its next poll after
+  the CTag changed, and computing the default CTag costs a listing per poll. At a few thousand contacts per book and the
+  polling intervals of contacts apps this is one indexed query per poll.
+- Removals and visibility losses are exact without a journal: what the viewer no longer sees is missing from the
+  listing, and the client deletes it.
+- The application owns the ETag's correctness: one that does not change with the card keeps a stale copy on devices;
+  one that changes without the card makes clients refetch. The capability page says what to derive it from.
+- Two collection kinds in the dispatcher. They share every path but the member reads and the sync report, through
+  `DavContext.ListMembersAsync` and `GetMembersAsync`.
+
+Rejected, as revisable:
+
+- **A token for live collections** (answer `sync-collection` with no changes when the token equals the CTag, else
+  `valid-sync-token`): every sync then fails and falls back, and a client that prefers tokens re-lists in full anyway;
+  advertising nothing is simpler and every client handles it.
+- **Live sources through the handler pipeline** (one query request per call with names and purpose): the requests would
+  need the framework to construct application types with arguments, a generator or reflection, for calls that are
+  internal to one DAV request; the decision of who sees which book stays a handler.
+- **A projection helper that re-publishes per viewer**: the projection is the application's domain knowledge (which
+  change affects whom), and the copy is per viewer.
+- **Case-insensitive segment matching**: a collection would have several URLs, but multiget hrefs and sync answers
+  name one, so a client that used another spelling would see every contact as missing. Clients use the hrefs the home
+  listed.
