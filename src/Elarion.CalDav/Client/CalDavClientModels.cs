@@ -158,8 +158,14 @@ public sealed record CalDavAccount {
     /// <summary>The principal URL.</summary>
     public required Uri PrincipalUrl { get; init; }
 
-    /// <summary>The calendar home URL.</summary>
+    /// <summary>The calendar home URL: the first of <see cref="HomeUrls"/>.</summary>
     public required Uri HomeUrl { get; init; }
+
+    /// <summary>
+    /// Every calendar home of the principal (RFC 4791 §6.2.1 allows several); <see cref="Calendars"/> holds the calendars of
+    /// all of them. When the server names no home, the principal itself.
+    /// </summary>
+    public IReadOnlyList<Uri> HomeUrls { get; init; } = [];
 
     /// <summary>The principal's display name, when the server states one.</summary>
     public string? DisplayName { get; init; }
