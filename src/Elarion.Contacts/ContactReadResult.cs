@@ -27,12 +27,16 @@ public sealed class ContactReadResult {
     /// <param name="fileErrors">The errors about the file.</param>
     /// <param name="byteOrderMarkEncoding">The encoding a byte-order mark chose, or <see langword="null"/>.</param>
     /// <param name="usedFallbackEncoding">Whether the fallback encoding decoded any line.</param>
+    /// <param name="omittedErrorCount">The errors over <see cref="ContactReadOptions.MaxErrors"/>, counted and not listed.</param>
     public ContactReadResult(
         IReadOnlyList<ContactEntry> entries,
         IReadOnlyList<ContactError>? fileErrors = null,
         string? byteOrderMarkEncoding = null,
-        bool usedFallbackEncoding = false) {
+        bool usedFallbackEncoding = false,
+        int omittedErrorCount = 0) {
         ArgumentNullException.ThrowIfNull(entries);
+        ArgumentOutOfRangeException.ThrowIfNegative(omittedErrorCount);
+        OmittedErrorCount = omittedErrorCount;
         Entries = entries;
         FileErrors = fileErrors ?? [];
         ByteOrderMarkEncoding = byteOrderMarkEncoding;
@@ -42,7 +46,7 @@ public sealed class ContactReadResult {
     /// <summary>Every vCard read, with or without a contact (FR-019).</summary>
     public IReadOnlyList<ContactEntry> Entries { get; }
 
-    /// <summary>The errors about the file: unreadable, too large, too many contacts.</summary>
+    /// <summary>The errors about the file: unreadable, too large, too many contacts, properties or errors.</summary>
     public IReadOnlyList<ContactError> FileErrors { get; }
 
     /// <summary>Every error: the file errors, then each entry's in file order, including those the handler added.</summary>
@@ -62,6 +66,12 @@ public sealed class ContactReadResult {
 
     /// <summary>Whether <see cref="ContactReadOptions.FallbackEncoding"/> decoded any value (FR-015).</summary>
     public bool UsedFallbackEncoding { get; }
+
+    /// <summary>
+    /// The errors found past <see cref="ContactReadOptions.MaxErrors"/>: counted, not listed in <see cref="Errors"/>
+    /// (FR-074). A <see cref="ContactErrorCodes.TooManyErrors"/> file error names them when there are any.
+    /// </summary>
+    public int OmittedErrorCount { get; }
 
     /// <summary>
     /// Converts the errors to an <see cref="ErrorKind.Validation"/> <see cref="AppError"/> whose field errors are keyed by
@@ -89,7 +99,9 @@ public sealed class ContactReadResult {
             messages.Add(rest == 1 ? "1 more problem is not listed." : $"{rest.ToString(CultureInfo.InvariantCulture)} more problems are not listed.");
         }
 
-        var count = errors.Count == 1 ? "1 problem" : $"{errors.Count.ToString(CultureInfo.InvariantCulture)} problems";
+        // The errors past MaxErrors are problems of the file too; their TooManyErrors error already counts them.
+        var total = (long)errors.Count + OmittedErrorCount;
+        var count = total == 1 ? "1 problem" : $"{total.ToString(CultureInfo.InvariantCulture)} problems";
         return AppError.Validation(
             $"The contact file has {count}.",
             new Dictionary<string, string[]>(StringComparer.Ordinal) { [fieldPath ?? ""] = [.. messages] });

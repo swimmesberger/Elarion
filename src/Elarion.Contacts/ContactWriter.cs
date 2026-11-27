@@ -1,13 +1,15 @@
 using System.Globalization;
 using Elarion.Abstractions;
 using Elarion.Contacts.Reading;
+using Elarion.Contacts.Writing;
 using Elarion.ContentLines;
 
 namespace Elarion.Contacts;
 
 /// <summary>
 /// Writes contacts as a vCard file, forward-only to a stream (ADR-0110, decision 8): vCard 3.0 by default and 4.0 on
-/// request, UTF-8 without a byte-order mark, CRLF line ends, lines folded at 75 octets without splitting a character.
+/// request, UTF-8 without a byte-order mark, CRLF line ends, lines folded at 75 octets without splitting a character
+/// or an escape.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,6 +17,10 @@ namespace Elarion.Contacts;
 /// The same contacts give byte-identical files (FR-064). A contact the writer cannot represent fails with a
 /// <see cref="ContactWriteException"/> before any of it is written, and the writer takes further contacts. The
 /// destination stays open and need not be seekable. An instance is not thread-safe.
+/// </para>
+/// <para>
+/// Control characters other than the tab (U+0000–U+001F, U+007F–U+009F) are left out of every value and parameter value
+/// (FR-082): no vCard needs them, and one of them makes a card that a CardDAV server embeds in XML unserialisable.
 /// </para>
 /// <para>
 /// Outlook classic imports only the first card of a file: for it, write each contact to a file of its own.
@@ -39,7 +45,7 @@ public sealed class ContactWriter : IAsyncDisposable {
     private bool _disposed;
 
     private ContactWriter(Stream destination, ContactWriteOptions options) {
-        _lines = new ContentLineWriter(destination);
+        _lines = new ContentLineWriter(destination, options.FoldLines);
         _version = options.Version;
     }
 
@@ -64,6 +70,49 @@ public sealed class ContactWriter : IAsyncDisposable {
         await using (writer.ConfigureAwait(false)) {
             foreach (var contact in contacts) await writer.AddAsync(contact, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Writes <paramref name="contacts"/> to <paramref name="destination"/> synchronously (FR-083), for code that is not
+    /// asynchronous; prefer <see cref="WriteAsync(Stream, IEnumerable{Contact}, ContactWriteOptions?, CancellationToken)"/>
+    /// for a network stream.
+    /// </summary>
+    /// <param name="destination">A writable stream; it stays open.</param>
+    /// <param name="contacts">The contacts, one card each.</param>
+    /// <param name="options">The write options.</param>
+    /// <exception cref="ContactWriteException">A contact cannot be represented; the contacts before it were written.</exception>
+    public static void Write(Stream destination, IEnumerable<Contact> contacts, ContactWriteOptions? options = null) {
+        ArgumentNullException.ThrowIfNull(contacts);
+        var writer = Create(destination, options);
+        try {
+            foreach (var contact in contacts) {
+                writer.WriteCard(writer.PropertiesOf(contact), writer._count + 1, allowVersion: false);
+                writer._lines.Flush();
+            }
+        }
+        finally {
+            writer._disposed = true;
+            writer._lines.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The card of one contact as text (FR-083), for a payload built in synchronous code, such as a QR code; with
+    /// <see cref="ContactWriteOptions.FoldLines"/> off, each property is one line.
+    /// </summary>
+    /// <param name="contact">The contact.</param>
+    /// <param name="options">The write options.</param>
+    /// <exception cref="ContactWriteException">The contact cannot be represented.</exception>
+    /// <example>
+    /// <code>
+    /// var payload = ContactWriter.ToText(contact, new ContactWriteOptions { FoldLines = false });
+    /// </code>
+    /// </example>
+    public static string ToText(Contact contact, ContactWriteOptions? options = null) {
+        ArgumentNullException.ThrowIfNull(contact);
+        using var stream = new MemoryStream();
+        Write(stream, [contact], options);
+        return System.Text.Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
     }
 
     /// <summary>Writes <paramref name="contacts"/> to <paramref name="destination"/> as they are produced.</summary>
@@ -190,16 +239,7 @@ public sealed class ContactWriter : IAsyncDisposable {
     public ValueTask AddAsync(Contact contact, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(contact);
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var index = _count + 1;
-        IReadOnlyList<ContactProperty> properties;
-        try {
-            properties = contact.ToProperties(_version);
-        }
-        catch (ContactWriteException exception) {
-            throw new ContactWriteException($"Contact {index.ToString(CultureInfo.InvariantCulture)}: {exception.Message}", index, exception.Property);
-        }
-
-        return WriteCardAsync(properties, index, allowVersion: false, cancellationToken);
+        return WriteCardAsync(PropertiesOf(contact), _count + 1, allowVersion: false, cancellationToken);
     }
 
     /// <summary>
@@ -228,8 +268,23 @@ public sealed class ContactWriter : IAsyncDisposable {
         }
     }
 
+    private IReadOnlyList<ContactProperty> PropertiesOf(Contact contact) {
+        var index = _count + 1;
+        try {
+            return contact.ToProperties(_version);
+        }
+        catch (ContactWriteException exception) {
+            throw new ContactWriteException($"Contact {index.ToString(CultureInfo.InvariantCulture)}: {exception.Message}", index, exception.Property);
+        }
+    }
+
     private async ValueTask WriteCardAsync(IReadOnlyList<ContactProperty> properties, int index, bool allowVersion, CancellationToken cancellationToken) {
         cancellationToken.ThrowIfCancellationRequested();
+        WriteCard(properties, index, allowVersion);
+        await _lines.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private void WriteCard(IReadOnlyList<ContactProperty> properties, int index, bool allowVersion) {
         foreach (var property in properties) Validate(property, index, allowVersion);
 
         _lines.WriteLine("BEGIN:VCARD");
@@ -237,12 +292,14 @@ public sealed class ContactWriter : IAsyncDisposable {
         foreach (var property in properties) {
             if (string.Equals(property.Name, "VERSION", StringComparison.OrdinalIgnoreCase)) continue;
             var written = ContactMapper.Normalize(property);
-            _lines.WriteProperty(written.Group, written.Name, written.Parameters.Select(static p => (p.Name, p.Values)), written.Value);
+            _lines.WriteProperty(
+                written.Group, written.Name,
+                written.Parameters.Select(static p => (p.Name, ContactText.WithoutControls(p.Values))),
+                ContactText.WithoutControls(written.Value));
         }
 
         _lines.WriteLine("END:VCARD");
         _count = index;
-        await _lines.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static void Validate(ContactProperty property, int index, bool allowVersion) {

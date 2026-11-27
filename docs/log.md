@@ -2,6 +2,7 @@
 
 ## 2026-11-27
 
+* **Update**: amended [ADR-0110](decisions/0110-vcard-contacts.md) (2026-11-27): a contact read result bounded by lines and errors with measured retention, vCard 2.1 escaping, byte-order marks before later cards, URI values, dropped control characters and an unfolded payload; [spec 0005](../specs/0005-vcard-contacts.md) gains FR-072–FR-089.
 * **Update**: amended [ADR-0109](decisions/0109-icalendar-model-reader-and-writer.md) with linear, bounded time-zone resolution, caches without untrusted ids, a work cap and skip-ahead for expansion, override versions, cancelled items, EXRULE and strict reads
 * **Update**: [ADR-0093](decisions/0093-typst-pdf-rendering.md) amended: the targets check for an xz unpacker before downloading, `RequiredPackages` and `TypstPackageNotFoundException` tell a missing package from a template defect, and the asset and compiler conveniences from the first adoption
 * **Update**: contact groups built ([ADR-0114](decisions/0114-contact-groups.md)): the [contacts](capabilities/contacts.mdx) and [CardDAV](capabilities/carddav.mdx) pages describe them, the [glossary](../GLOSSARY.md) gains *contact group*, and the [DAV conformance](research/2026-11-27-dav-conformance-suites.md) note no longer lists group cards among the pinned differences.

@@ -147,6 +147,10 @@ CardDAV package is `Elarion.CardDav`, over this one, as `Elarion.CalDav` is over
    before it. Unfolding and decoding are linear in the input, and nothing recurses. The defaults are sized for the
    1–10 node tier and are options in the one options bag `AddElarionContacts` binds.
 
+   > **Amendment (2026-11-27):** "bounded by the limit" over-claimed. The bytes bounded the input, not the result: a
+   > line of four bytes became a property of about 130, so a 20 MB file of short lines held 600–950 MB after the read,
+   > 30 to 50 times its size. The result is now bounded on its own, by lines and errors; see the amendment below.
+
 Out of scope: writing 2.1; jCard and xCard; parsing `AGENT`, `MEMBER`/`KIND:group` group cards, `RELATED`, `IMPP`,
 `GEO`, `TZ`, `SOUND`, `LOGO` and `KEY` into the model (they stay additional properties); fetching photo URLs; resizing
 or re-encoding photos; detecting duplicates within a file or against stored contacts; merging contacts; CardDAV.
@@ -216,3 +220,84 @@ What an import does with a contact stays the application's.
   pipeline beyond the tier.
 - **The package named `Elarion.VCards`** after the format. Rejected for `Elarion.Contacts`, as `Elarion.Calendars` is
   named after what it holds, not after iCalendar; the protocol package over it is `Elarion.CardDav`.
+
+## Amendment (2026-11-27): a result bounded on its own, 2.1 escaping, URI values and payloads that are not files
+
+The first application to adopt the package found that a read holds many times the upload, that a byte-order mark before
+a later card loses that card, that vCard 2.1 values were unescaped with 3.0's rules, and that the writer escaped URLs as
+text and let control characters through. Each is decided here; [spec 0005](../../specs/0005-vcard-contacts.md),
+FR-072–FR-089, holds the requirements.
+
+1. **The result is bounded by lines and errors, not only by bytes.** Every property of every card is kept until the
+   read returns (decision 4), and a property costs its record, its name, its parameter array and its value: 60 to 150
+   bytes, whatever the line held. Measured on this framework's own build (net11.0, arm64, `GC.GetTotalMemory(true)`
+   around one read whose result is kept), 20 MB files:
+
+   | 20 MB of … | before | after |
+   | --- | --- | --- |
+   | `X:` lines | 601 MB | 70 MB (stops at 1,000,000 lines) |
+   | `X;a=;b=:` lines | 720 MB | 108 MB (stops at 1,000,000 lines) |
+   | `X;a=;b=;c=;d=;e=;f=;g=;h=:` lines (750,000) | 771 MB | 115 MB |
+   | malformed `x` lines (one error each) | 953 MB | 2 MB (10,000 errors listed, the rest counted) |
+   | `ANNIVERSARY:x` lines (one error each) | 512 MB | 64 MB |
+   | distinct 32-character parameter values and values | 118 MB | 92 MB |
+   | cards of 5,000 lines, over the per-card limit | 113 MB | 0.6 MB |
+   | 1 KB `NOTE` lines | 43 MB | 42 MB |
+
+   The read options gain a file-wide `MaxProperties` (1,000,000 lines; the read stops with
+   `contact.too_many_properties_in_file`, keeping the entries before the card being read) and `MaxErrors` (10,000; the
+   read goes on, further errors are counted in `OmittedErrorCount` and named by one `contact.too_many_errors` file
+   error). A card over `MaxPropertiesPerContact` keeps only its first `FN`, `N`, `ORG`, `EMAIL`, `TEL` and `UID`, to
+   name it in a preview. Names, parameters and values of up to 32 characters are shared within a read (at most 4,096
+   of them), and a property without parameters shares one empty array. So a result holds 60 to 150 bytes per line and
+   at most about five times the bytes of its values; at the defaults no read holds more than about 200 MB, whatever
+   the file says. The defaults still pass "ten nodes on one Postgres": a real 10,000-contact export has some 300,000
+   lines.
+
+   *Rejected:* the streaming `IAsyncEnumerable<ContactEntry>` overload the application proposed for a commit path
+   without a preview. With the result bounded at 200 MB it buys no tier this package targets, and it would split the
+   API in two shapes whose file errors (too many contacts, unreadable) arrive differently. The earlier rejection
+   ("Streaming contacts one at a time") stands, revisable for a bulk-import pipeline beyond the tier. *Rejected:* a
+   lower `MaxBytes` default, which would refuse real exports with photos to bound files without them.
+2. **A byte-order mark at the start of a line is nothing.** Files concatenated from several exports carry one before
+   each later `BEGIN:VCARD`, and the line did not parse, so the card's lines were dropped without an error. The shared
+   line reader skips U+FEFF at the start of a physical line under the vCard rule set (`SkipByteOrderMarks`), so UTF-8
+   files and, once transcoded, UTF-16 files keep every card. The iCalendar rule set does not turn it on; it can.
+3. **vCard 2.1 values are read with 2.1's escaping.** In 2.1 only `\;` is an escape, and Outlook writes Windows paths:
+   `N:C:\Daten` read as `C:Daten`. Instead of a version-aware mapper, a 2.1 value is put into 3.0's escaping when it
+   is read: its other backslashes doubled, and a quoted-printable line break as `\n`, which a literal `\n` in the
+   value (now `\\n`) can no longer be confused with. The mapper, `ContactProperty.GetText` and the writer then need
+   no version, and a 2.1 card written as 3.0 keeps its backslashes. Properties before a late `VERSION:2.1` are
+   converted when it arrives. *Rejected:* unescaping by the entry's version in the mapper, which leaves
+   `ContactProperty.Value` in two escapings and breaks a 2.1 card written back as 3.0.
+4. **URI values are written as they are.** `URL` is a URI in RFC 2426 and RFC 6350, so `;` and `,` stay as they are;
+   so does a photo URI and, in 4.0, a phone number given as a `tel:` URI, written with `VALUE=uri`. A URI holding a
+   line break fails the write. The reader still unescapes `URL`, because Google escapes colons in it.
+5. **Control characters are dropped, not rejected.** U+0000–U+001F other than tab, line feed and carriage return, and
+   U+007F–U+009F, are left out of every value and parameter value the writer writes. A CardDAV server embeds a card
+   in XML, where one NUL makes the whole multistatus unserialisable, and no vCard needs them. Dropping keeps an export
+   of stored data working where rejecting would fail it for a character nobody can see; a line break in a raw value
+   is still rejected, because it would end the line.
+6. **The writer has a payload mode and the forms producers write.** `ContactWriteOptions.FoldLines` (true by default)
+   writes each property on one line for a QR code or an NFC tag, whose readers do not unfold. `ContactTypes.Internet`
+   reads and writes `TYPE=INTERNET`, which 2.1 and 3.0 producers put on every e-mail address. An organization is
+   written `X-ABShowAs:COMPANY`, as Apple writes it. The folder never cuts right after an odd run of backslashes, so
+   no physical line ends inside an escape. `ContactWriter.Write` and `ContactWriter.ToText` write synchronously.
+   *Kept:* `TYPE=pref` in lower case, as RFC 2426 and Apple write it next to upper-case types. *Rejected:* a
+   `PropertyOrder` option; `Contact.ToProperties` and `AddAsync(IReadOnlyList<ContactProperty>)` already let an
+   application that pins a wire format order the properties itself. A changed form changes the bytes of a written
+   card, and with them the ETag a CardDAV address book derives from them, once.
+7. **More of a card is reachable without re-parsing.** `ContactProperty.GetText`/`GetTexts` unescape a property the
+   model does not map (a second `NOTE`, `X-SOCIALPROFILE`); `ContactPhoto.TryRead` reads a further `PHOTO` with the
+   error a read would give, and `ContactPhoto.TryFromData` does not throw. The contact's photo is the first `PHOTO`
+   that reads, not the first one. *Rejected:* `Notes` and `Photos` lists on the contact, which would make the model
+   two-shaped (one note to write, many read) for a rare case the property layer covers. Phone numbers, e-mail
+   addresses, postal and web addresses carry the line and group they were read from (`LineNumber`, `Group`), ignored
+   by equality and the writer.
+8. **Errors say more.** A partial date of 4.0 (`1985`, `1985-04`, `--04`, `---12`) is `contact.partial_date`, not
+   `contact.invalid_value`, since `ContactDate` holds a month and a day. A photo of another format is
+   `contact.invalid_value` with the expected kind `photo-format` and the new `ContactError.MediaType`, from its magic
+   number or else its declared type. `contact.unreadable` carries the media type when the file is not text (a PDF, an
+   archive, an image), so "a PDF" and "a text without a vCard" can be worded apart. *Rejected:* a `ContactDate` with
+   optional month and day, which every application would have to handle to read a birthday. Several values of one
+   `N` component stay joined with `", "`; the published page says so.

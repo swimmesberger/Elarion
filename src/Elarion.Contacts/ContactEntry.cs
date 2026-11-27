@@ -52,7 +52,8 @@ public sealed class ContactEntry {
     /// <summary>
     /// Every property of the vCard between its <c>BEGIN</c> and its <c>END</c>, in file order, with its group,
     /// parameters, value as written and line number, whether the contact maps it or not (FR-019); a line that could not
-    /// be kept (too long, malformed) is missing.
+    /// be kept (too long, malformed) is missing. A card over <see cref="ContactReadOptions.MaxPropertiesPerContact"/> keeps
+    /// only its first <c>FN</c>, <c>N</c>, <c>ORG</c>, <c>EMAIL</c>, <c>TEL</c> and <c>UID</c>, to name it in a preview.
     /// </summary>
     public IReadOnlyList<ContactProperty> Properties { get; }
 
