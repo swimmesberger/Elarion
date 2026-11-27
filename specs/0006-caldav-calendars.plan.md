@@ -230,6 +230,33 @@ Three tables, snake_case, mapped onto the application's context by the bundled g
   principal, and the dispatcher checks a feed's scope against the requested calendar. Challenge `401` with `Basic realm="{Realm}", charset="UTF-8"`; forbidden `403` without a challenge.
   Whether it compiles warning-free under `PublishAot` is checked in slice 1 (the research note could not verify it).
 
+As built in slice 1, where it settles or departs from the above:
+
+- **AOT**: `Elarion.AppPasswords` and `Elarion.AppPasswords.AspNetCore` are `IsAotCompatible` and build without
+  warnings; a minimal web host using the scheme, the Identity principal factory and the configuration binding published
+  with `PublishAot` on `net11.0` with no trimming or AOT warning and answered as expected.
+- **Feed scope without `CalDavAddress`**: `Elarion.CalDav` does not exist yet, so `AppPasswordScope.CalendarFeed(string
+  source, string key)` takes the two strings; `Elarion.CalDav` adds an overload or extension over `CalDavAddress`.
+  `AppPasswordScope` also has `Parse`/`TryParse`, `Value`, `Kind` (`Dav`, `CalendarFeed`, `Other` for a later version's
+  scope) and `CalendarSource`/`CalendarKey`.
+- **Feed verification by kind**: a feed URL holds only the token, so the scheme cannot know the calendar before the
+  token is checked. `IAppPasswords` has a second `VerifyAsync(secret, AppPasswordScopeKind)`; the default
+  `OnVerifyCredential` checks `Dav` for Basic and `CalendarFeed` for a feed, the scheme refuses a match of the other
+  kind whatever the verifier, and the dispatcher compares the claimed scope with the requested calendar (slice 5).
+- **Feed path**: `AppPasswordAuthenticationOptions.FeedTokenReader` (`Func<HttpRequest, string?>`), default
+  `AppPasswordFeedPaths.CreateReader("/dav")` for `{prefix}/feeds/{token}.ics`; the DAV host sets it to its prefix. A
+  challenge on a feed path answers `404` without `WWW-Authenticate` (FR-026).
+- **Principal default**: `IAppPasswordPrincipalFactory`, registered by `AddElarionIdentityAppPasswordPrincipals<TUser>()`,
+  is used when `OnCreatePrincipal` is not set; an options validator run on start fails the host when neither (nor an
+  `EventsType`) is there. `OnAuthenticated` returns `ValueTask` like the other events.
+- **Dependencies**: `Elarion.AppPasswords.AspNetCore` references `Elarion.AppPasswords` and the ASP.NET Core shared
+  framework only, not `Elarion.AspNetCore`, which it does not use; Identity's `UserManager` is in the shared framework.
+- **Store**: the EF store is a singleton that opens its own scope per call (the device-identity pattern), so creating a
+  password does not join or save the caller's unit of work; the cap is a count and an insert in one transaction under a
+  PostgreSQL advisory lock on the user. The generated set is `ElarionAppPasswords`, so an adopting application can keep
+  its own `AppPasswords` set during migration. No store is registered by `AddElarionAppPasswords`;
+  `AddElarionInMemoryAppPasswordStore()` exists for tests.
+
 ## Adopting existing app passwords
 
 An application that already issues its own Basic credentials for DAV clients (as the consuming application whose

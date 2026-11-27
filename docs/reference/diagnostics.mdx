@@ -459,6 +459,15 @@ Role-lease-table generation for `[GenerateElarionRoleLeases]` (ADR-0049). See
 | --- | --- | --- | --- |
 | ELROLE001 | Error | A context is annotated with `[GenerateElarionRoleLeases]` but not `[GenerateDbSets]`, so the role-lease `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionRoleLeases]`. |
 
+## ELAPW — App passwords (EF Core)
+
+App-password table generation for `[GenerateElarionAppPasswords]` (ADR-0111). See
+[App passwords](/docs/capabilities/app-passwords).
+
+| Id | Severity | Meaning | Fix |
+| --- | --- | --- | --- |
+| ELAPW001 | Error | A context is annotated with `[GenerateElarionAppPasswords]` but not `[GenerateDbSets]`, so the app-password `DbSet` and model-configuration seam are not generated. | Add `[GenerateDbSets]` to the context alongside `[GenerateElarionAppPasswords]`. |
+
 ## ELDEV — Device identity (EF Core)
 
 Device-identity-table generation for `[GenerateElarionDeviceIdentity]` (ADR-0054). See

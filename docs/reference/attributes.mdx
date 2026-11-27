@@ -889,6 +889,19 @@ See [Actor state and placement](/docs/concepts/actors/state-and-placement#durabl
 
 See [Actors — multiple instances and single-homing](/docs/concepts/actors/state-and-placement#multiple-instances-and-single-homing).
 
+### `[GenerateElarionAppPasswords]`
+
+- **Package:** `Elarion.AppPasswords.EntityFrameworkCore` · **Applies to:** class
+- **Triggers:** on a `[GenerateDbSets]` partial DbContext; the bundled generator emits `DbSet<AppPasswordEntity> ElarionAppPasswords` and applies the app-password model configuration through the EF generator's model-config seam — the table backing the EF `IAppPasswordStore` (ADR-0111). The hand-written equivalent is `modelBuilder.UseElarionAppPasswords()`. Mirrors `[GenerateElarionDeviceIdentity]`. Requires `[GenerateDbSets]` (else `ELAPW001`).
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `SnakeCase` | `bool` (init) | `true` | Whether table/column names use snake_case. |
+| `TableName` | `string?` (init) | `null` | The table name, or `null` for the default (`elarion_app_passwords` / `ElarionAppPasswords` depending on `SnakeCase`). |
+| `Schema` | `string?` (init) | `null` | The schema, or `null` for the provider's default schema. |
+
+See [App passwords](/docs/capabilities/app-passwords).
+
 ### `[GenerateElarionDeviceIdentity]`
 
 - **Package:** `Elarion.Devices.EntityFrameworkCore` · **Applies to:** class

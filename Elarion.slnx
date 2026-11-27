@@ -18,6 +18,11 @@
     <Project Path="src/Elarion.Actors/Elarion.Actors.csproj"/>
     <Project Path="src/Elarion.Actors.PostgreSql/Elarion.Actors.PostgreSql.csproj"/>
     <Project Path="src/Elarion.Actors.PostgreSql.Generators/Elarion.Actors.PostgreSql.Generators.csproj"/>
+    <Project Path="src/Elarion.AppPasswords/Elarion.AppPasswords.csproj"/>
+    <Project Path="src/Elarion.AppPasswords.AspNetCore/Elarion.AppPasswords.AspNetCore.csproj"/>
+    <Project Path="src/Elarion.AppPasswords.EntityFrameworkCore/Elarion.AppPasswords.EntityFrameworkCore.csproj"/>
+    <Project
+      Path="src/Elarion.AppPasswords.EntityFrameworkCore.Generators/Elarion.AppPasswords.EntityFrameworkCore.Generators.csproj"/>
     <Project Path="src/Elarion.Authorization.EntityFrameworkCore/Elarion.Authorization.EntityFrameworkCore.csproj"/>
     <Project
       Path="src/Elarion.Authorization.EntityFrameworkCore.Generators/Elarion.Authorization.EntityFrameworkCore.Generators.csproj"/>

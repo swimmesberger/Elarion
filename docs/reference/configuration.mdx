@@ -191,6 +191,22 @@ Write options (`SpreadsheetWriteOptions`) are passed per call, not configured. S
 Write options (`ContactWriteOptions`) are passed per call, not configured. See
 [Contacts](/docs/capabilities/contacts#limits-and-options).
 
+## App passwords
+
+`AddElarionAppPasswords(configuration)` (and `AddElarionAppPasswordsEntityFrameworkCore<TDbContext>(configuration)`)
+binds `AppPasswordOptions` (package `Elarion.AppPasswords`), conventionally from the `AppPasswords` section
+(`AppPasswordOptions.SectionName`), with the configuration-binding source generator. The values are validated when the
+host starts.
+
+| Key | Default |
+| --- | --- |
+| `AppPasswords:SecretPrefix` | `elap_` (up to 32 ASCII letters, digits, `-`, `_`; affects new secrets only) |
+| `AppPasswords:MaxPerUser` | `10` |
+| `AppPasswords:LastUseInterval` | `00:15:00` |
+
+The scheme's options (`AppPasswordAuthenticationOptions`: `Realm`, `FeedTokenReader`, `Events`) are set in code, not
+configuration. See [App passwords](/docs/capabilities/app-passwords).
+
 ## Proxy identity
 
 `AddElarionProxyIdentity(configuration, environment)` binds the `ProxyIdentity` section (package
