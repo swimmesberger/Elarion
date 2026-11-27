@@ -105,6 +105,8 @@ export interface RpcMethodSchema {
   presets?: Record<string, Record<string, unknown>>
   /** The keys of the sort map the handler declares, in declaration order; omitted when it declares none. */
   sortKeys?: RpcSortKeySchema[]
+  /** How many keys one sort may combine (the sort map's `MaxLevels`); exported with `sortKeys`. */
+  maxSortLevels?: number
 }
 
 /** One allowed sort key: a bare key sorts in `direction`; `+key`/`-key` force ascending/descending. */

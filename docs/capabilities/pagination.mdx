@@ -243,10 +243,15 @@ ascending, then `Name` descending. The keys apply from left to right (`OrderBy`,
 tiebreakers of the **last** key follow, so the order stays stable; the tiebreakers of the other keys are not applied.
 A single key keeps its own tiebreakers, as before. Spaces around a key are ignored.
 
-A sort combines at most `SortMap<T>.DefaultMaxLevels` (3) keys; `.MaxLevels(n)` on the builder changes the cap, and
-`.MaxLevels(1)` allows a single key only. A key named twice, an empty key (`"city,"`) and a sort above the cap are
-refused like an unknown key. The cap is checked before any key is looked up, so a sort parameter of thousands of keys
-costs one pass over the text. The schema exports the keys, not the cap; a client that combines more keys than the
+**Every `SortMap` accepts up to three keys by default**, without any change to the handler: a list that was
+written for one key now also sorts by two or three. The cap is `SortMap<T>.DefaultMaxLevels` (3); `.MaxLevels(n)` on
+the builder changes it, and `.MaxLevels(1)` keeps a list to a single key, as it was before multi-key sorts. A
+handler's description of its sort parameter ("sort: one of `createdAt`, `number`") should say that keys combine, or
+set `.MaxLevels(1)`. `SortMap<T>.MaxLevels` reads the cap of a map, for a description built from the map.
+
+A key named twice, an empty key (`"city,"`) and a sort above the cap are refused like an unknown key. The cap is
+checked before any key is looked up, so a sort parameter of thousands of keys costs one pass over the text. The
+schema exports the cap next to the keys (`maxSortLevels`, see below); a client that combines more keys than the
 handler allows gets the validation error below.
 
 ### Refusing a bad sort
@@ -284,8 +289,9 @@ if (Sort.Validate(query.Sort, message: refusal => refusal.Reason switch {
 what a client needs to build sort parameters (a column header toggling between `+key` and `-key`) without mirroring
 the declarations by hand. The [JSON-RPC schema](/docs/capabilities/transports/schema-generation) exports them under the
 method's `sortKeys` when the handler declares one static `SortMap` field (with several it exports none and the build
-warns, `ELRPC012`), and the generated TypeScript client gives them as `rpcSortKeys['{method}']`, so a frontend reads
-the allowed keys instead of copying them.
+warns, `ELRPC012`), together with the map's cap as `maxSortLevels`. The generated TypeScript client gives them as
+`rpcSortKeys['{method}']` and `rpcMaxSortLevels['{method}']`, so a frontend reads the allowed keys and how many it may
+combine instead of copying them.
 
 ### Mapping a page
 
