@@ -1,5 +1,9 @@
 # Update log
 
+## 2026-11-27
+
+* **Update**: [specs 0004 plan](../specs/0004-icalendar-files.plan.md) — Elarion.Calendars implemented; time zones convert to TimeZoneInfo with one rule per year, the shape its rule engine evaluates without seams
+
 ## 2026-11-26
 
 * **Creation**: proposed [ADR-0112](decisions/0112-elarion-ships-ui-components.md): Elarion ships a headless UI package (list and command state, the shell contract) and an opt-in styled package on React, Tailwind CSS v4 and Radix with shadcn/ui's token names, so lists and forms behave alike in every application while each keeps its look; it amends ADR-0032's UI-kit non-goal. [Packaged modules](packaged-modules.md) now builds on it instead of a design system per suite; the [glossary](../GLOSSARY.md) gained *bound component*, and *module suite* and *shell contract* follow.

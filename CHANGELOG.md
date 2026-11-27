@@ -9,6 +9,16 @@ minor releases may include breaking changes.
 ## [Unreleased]
 
 ### Added
+- **`Elarion.Calendars`: iCalendar files** (ADR-0109). `CalendarReader` (`AddElarionCalendars`) reads uploaded `.ics`
+  files leniently into events and to-dos, each with its typed value, its lossless component and every problem located
+  under a stable `calendar.*` code, with `AddError` for the application's own and `ToAppError`; files from Google,
+  Outlook, Apple and municipal feeds read without repairs (byte-order marks, UTF-16, unfolded lines, Windows and vendor
+  `TZID`s, truncated times, Exchange all-day flags), and a line that is not UTF-8 is decoded with a fallback encoding.
+  `TZID`s resolve through the system and then the file's `VTIMEZONE`; `CalendarRecurrence` expands rules, extra and
+  excluded dates and overrides within a window, bounded by caps; `CalendarWriter` writes calendars and feeds to a
+  stream, an `ElarionFile` or a streamed file, byte-identical for the same input, with a `VTIMEZONE` per zone used. No
+  reflection and no third-party library, so applications keep publishing with NativeAOT. See
+  [Calendars](https://elarion.wimmesberger.dev/docs/capabilities/calendars).
 - **`Elarion.Spreadsheets`: spreadsheet records** (ADR-0108). A `partial` class marked `[SpreadsheetRecord]` maps to
   the rows of a worksheet through a bundled generator, with no reflection, so the application still publishes with
   NativeAOT. `SpreadsheetWorkbook` writes records as an `.xlsx` workbook, forward-only to a stream, an `ElarionFile` or

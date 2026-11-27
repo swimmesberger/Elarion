@@ -137,6 +137,25 @@ Properties read by the `Elarion.Typst` build targets: `ElarionTypstBundle`, `Ela
 settings are `TypstOptions`, set through `AddElarionTypst(options => …)` (options, not config). Both tables, with
 defaults, are in [PDF documents](/docs/capabilities/pdf-documents#build-integration).
 
+## Calendars
+
+`AddElarionCalendars(configuration)` binds `CalendarOptions` (package `Elarion.Calendars`), conventionally from the
+`Calendars` section (`CalendarOptions.SectionName`). `ReadDefaults` holds the `CalendarReadOptions` a read uses when it
+passes none, bound by the configuration-binding source generator; `ExpandDefaults` holds the `CalendarExpandOptions`
+`CalendarReadResult.Expand` uses, its zone given by id.
+
+| Key | Default |
+| --- | --- |
+| `Calendars:ReadDefaults:MaxBytes` | `16777216` (16 MiB) |
+| `Calendars:ReadDefaults:MaxComponents` | `50000` |
+| `Calendars:ReadDefaults:MaxLineBytes` | `4194304` (4 MiB) |
+| `Calendars:ReadDefaults:MaxPropertiesPerComponent` | `1000` |
+| `Calendars:ReadDefaults:MaxDepth` | `8` |
+| `Calendars:ReadDefaults:FallbackEncoding` | `windows-1252` |
+| `Calendars:ExpandDefaults:MaxOccurrences` | `10000` |
+| `Calendars:ExpandDefaults:MaxIterations` | `100000` |
+| `Calendars:ExpandDefaults:FloatingTimeZone` | — (floating times stay unconverted) |
+
 ## Spreadsheets
 
 `AddElarionSpreadsheets(configuration)` binds `SpreadsheetOptions` (package `Elarion.Spreadsheets`), conventionally from
