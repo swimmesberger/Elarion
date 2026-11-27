@@ -2,6 +2,7 @@
 
 ## 2026-11-27
 
+* **Update**: [ADR-0002](decisions/0002-cross-module-communication.md) amended: a DependsOn cycle is ordered as one unit and reported (ELMOD009, Info), an unknown name is ELMOD010; [ADR-0085](decisions/0085-handler-declarations-are-projected-not-copied.md) amended: the timeout client tag is checked at build time (ELRPC013)
 * **Update**: [ADR-0098](decisions/0098-streamed-files-for-http-only-endpoints.md) notes that .NET 11 closed the ZipArchive synchronous-dispose gap (probed on 10.0.15 and 11.0.0); the holding body stays while net10.0 is targeted.
 * **Update**: [ADR-0080](decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md) gains an amendment (the generated client's isRetryable, mapError and timeouts; web-push answers get a specific code) and [ADR-0101](decisions/0101-a-decision-required-answer.md) one (withDecisions throws RpcDecisionCancelledError on a cancel and sends no empty decisions).
 * **Update**: [ADR-0084](decisions/0084-authenticating-proxy-identity.md) gains an amendment: an opt-in, single-flight, rate-limited and bounded wait for a token naming an unknown signing key (AwaitRefreshOnUnknownKey).

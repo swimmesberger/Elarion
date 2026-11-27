@@ -180,9 +180,11 @@ So a domain-blind mechanism is a *platform capability* (a port); domain-aware al
 
 ## Ordering with DependsOn
 
-`[AppModule]` accepts an optional comma-separated `DependsOn` list of module names. The generator
-topologically sorts modules so dependencies initialize first; within that order, core modules precede
-feature modules.
+`[AppModule]` accepts an optional comma-separated `DependsOn` list of module names. The generated bootstrapper
+calls the modules' `ConfigureServices` and maps their endpoints in one order: a module comes after every module it
+depends on, and among modules that are free to go next, Core modules come first, then the module names in ordinal
+order. Name a module's dependency when it injects that module's [contract](/docs/concepts/cross-module-communication#what-a-contracts-consumer-must-know)
+(`ELMOD008` asks for it) or relies on that module's registrations.
 
 ```csharp
 [AppModule("Billing", DependsOn = "Catalog,Pricing")]
@@ -195,6 +197,24 @@ public static partial class BillingModule {
   is implicit from the module kind. Use `DependsOn` only for explicit ordering between feature modules
   or between multiple core modules.
 </Callout>
+
+### Modules that depend on each other
+
+Two modules may each need the other, for example when each injects a contract of the other: then each names the
+other in `DependsOn`, and that is the honest declaration, which `ELMOD008` accepts. No dependency can order such a
+cycle, so the bootstrapper places its modules as one unit, after everything any of them depends on and before
+everything that depends on any of them, and orders them among themselves by the same rule (Core first, then by
+name). It reports the cycle as `ELMOD009` (Info), naming the modules and the order it chose.
+
+- **Allowed** when each module really needs the other. Neither module may rely on the other having initialized
+  first: contracts resolve lazily from the container, so injecting each other works, but a `ConfigureServices` that
+  reads or replaces the other module's registrations does not have a defined order.
+- **Better broken** when one direction only reacts to what the other did (publish an event instead of calling a
+  contract), or when both use one piece that can move into a third module, or into a Core module, that both name.
+- To keep cycles out of an application, raise the diagnostic in `.editorconfig`:
+  `dotnet_diagnostic.ELMOD009.severity = warning`.
+
+A `DependsOn` name that no module of the application carries orders nothing and is reported as `ELMOD010`.
 
 ## Endpoints in modules
 

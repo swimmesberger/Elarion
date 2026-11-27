@@ -57,6 +57,8 @@
  ELMOD006   | Elarion.Modules                    | Error    | Duplicate [AppModule] name
  ELMOD007   | Elarion.Modules                    | Warning  | Entity has more than one registered [ResourceFilter]
  ELMOD008   | Elarion.Modules                    | Warning  | A module injects another module's contract without declaring the dependency
+ ELMOD009   | Elarion.Modules                    | Info     | Modules depend on each other through DependsOn
+ ELMOD010   | Elarion.Modules                    | Warning  | DependsOn names an unknown module
  ELAPI001   | Elarion.Modules                    | Error    | Module API interface must be partial
  ELAPI002   | Elarion.Modules                    | Error    | Module API interface must be top-level
  ELAPI003   | Elarion.Modules                    | Warning  | Module API interface is not in any module
@@ -73,6 +75,7 @@
  ELRPC010   | Elarion.JsonRpc                    | Error    | Client constant cannot be exported
  ELRPC011   | Elarion.JsonRpc                    | Error    | Duplicate client constant name
  ELRPC012   | Elarion.JsonRpc                    | Warning  | Handler declares more than one sort map
+ ELRPC013   | Elarion.JsonRpc                    | Error    | Invalid timeout client tag
  ELERR001   | Elarion.Errors                     | Error    | Invalid error code
  ELERR002   | Elarion.Errors                     | Error    | Conflicting error declaration
  ELERR003   | Elarion.Errors                     | Error    | Decision options are not an enum

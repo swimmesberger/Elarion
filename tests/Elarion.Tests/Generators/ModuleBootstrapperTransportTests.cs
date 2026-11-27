@@ -1,3 +1,4 @@
+using System.Globalization;
 using AwesomeAssertions;
 using Elarion.Generators;
 using Microsoft.CodeAnalysis;
@@ -975,6 +976,73 @@ public sealed class ModuleBootstrapperTransportTests {
         var diagnostics = RunGeneratorDiagnostics(modulesSource);
 
         diagnostics.Should().Contain(d => d.Id == "ELMOD001" && d.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
+    public void Bootstrapper_PlacesADependsOnCycleAsOneUnitAndReportsIt() {
+        const string modulesSource =
+            """
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Users { [AppModule("Users")] public static class UsersModule { } }
+            namespace Sample.Documents { [AppModule("Documents", DependsOn = "Emails, Users")] public static class DocumentsModule { } }
+            namespace Sample.Emails { [AppModule("Emails", DependsOn = "Documents")] public static class EmailsModule { } }
+            namespace Sample.Archive { [AppModule("Archive", DependsOn = "Emails")] public static class ArchiveModule { } }
+            namespace Sample.Zeta { [AppModule("Zeta")] public static class ZetaModule { } }
+            namespace Sample.Solo { [AppModule("Solo", DependsOn = "Solo")] public static class SoloModule { } }
+            """;
+
+        var run = RunGeneratorRun(HostSource, modulesSource);
+        var generated = run.GeneratedTrees.Single(tree => tree.FilePath.EndsWith("ElarionBootstrapper.g.cs",
+            StringComparison.Ordinal)).GetText(TestContext.Current.CancellationToken).ToString();
+
+        // The cycle comes after what it depends on (Users) and before what depends on it (Archive); its members are
+        // ordered by name. Before, the cycle and everything after it were appended by name: Archive first.
+        generated.Should().Contain(
+            "return new string[] { \"Solo\", \"Users\", \"Documents\", \"Emails\", \"Archive\", \"Zeta\" };");
+        var cycles = run.Diagnostics.Where(d => d.Id == "ELMOD009").ToArray();
+        cycles.Should().HaveCount(2).And.OnlyContain(d => d.Severity == DiagnosticSeverity.Info);
+        cycles.Select(d => d.GetMessage(CultureInfo.InvariantCulture)).Should().Contain(m =>
+                m.Contains("'Documents', 'Emails'", StringComparison.Ordinal)
+                && m.Contains("Documents, Emails.", StringComparison.Ordinal))
+            .And.Contain(m => m.Contains("The modules 'Solo' ", StringComparison.Ordinal));
+        run.Diagnostics.Should().NotContain(d => d.Id == "ELMOD010");
+    }
+
+    [Fact]
+    public void Bootstrapper_IgnoresAndReportsAnUnknownDependsOnName() {
+        const string modulesSource =
+            """
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Accounts { [AppModule("Accounts", DependsOn = "Billing")] public static class AccountsModule { } }
+            namespace Sample.Billing { [AppModule("Billing", DependsOn = "Ledgr")] public static class BillingModule { } }
+            namespace Sample.Zeta { [AppModule("Zeta")] public static class ZetaModule { } }
+            """;
+
+        var run = RunGeneratorRun(HostSource, modulesSource);
+        var generated = run.GeneratedTrees.Single(tree => tree.FilePath.EndsWith("ElarionBootstrapper.g.cs",
+            StringComparison.Ordinal)).GetText(TestContext.Current.CancellationToken).ToString();
+
+        // The typo orders nothing, so Billing still precedes its dependent; before, both were appended by name.
+        generated.Should().Contain("return new string[] { \"Billing\", \"Accounts\", \"Zeta\" };");
+        var unknown = run.Diagnostics.Should().ContainSingle(d => d.Id == "ELMOD010").Subject;
+        unknown.Severity.Should().Be(DiagnosticSeverity.Warning);
+        unknown.GetMessage(CultureInfo.InvariantCulture).Should().Contain("'Billing'").And.Contain("'Ledgr'");
+        run.Diagnostics.Should().NotContain(d => d.Id == "ELMOD009");
+    }
+
+    [Fact]
+    public void Bootstrapper_AcyclicDependsOn_ReportsNothing() {
+        var diagnostics = RunGeneratorDiagnostics(
+            """
+            using Elarion.Abstractions.Modules;
+
+            namespace Sample.Catalog { [AppModule("Catalog")] public static class CatalogModule { } }
+            namespace Sample.Billing { [AppModule("Billing", DependsOn = "Catalog,Catalog")] public static class BillingModule { } }
+            """);
+
+        diagnostics.Should().NotContain(d => d.Id == "ELMOD009" || d.Id == "ELMOD010");
     }
 
     [Fact]

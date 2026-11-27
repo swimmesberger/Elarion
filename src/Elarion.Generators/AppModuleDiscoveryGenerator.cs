@@ -76,6 +76,25 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Warning,
         true);
 
+    private static readonly DiagnosticDescriptor DependsOnCycle = new(
+        "ELMOD009",
+        "Modules depend on each other through DependsOn",
+        "The modules {0} depend on each other through DependsOn, so no dependency orders them; they initialize "
+        + "together, Core modules first and then by name: {1}. A mutual dependency is allowed when each module needs "
+        + "the other; neither may rely on the other having initialized first.",
+        "Elarion.Modules",
+        DiagnosticSeverity.Info,
+        true);
+
+    private static readonly DiagnosticDescriptor UnknownDependsOnModule = new(
+        "ELMOD010",
+        "DependsOn names an unknown module",
+        "Module '{0}' names '{1}' in DependsOn, but no [AppModule] of the application is named '{1}'; the name "
+        + "orders nothing",
+        "Elarion.Modules",
+        DiagnosticSeverity.Warning,
+        true);
+
     private const string TryAddExtensions =
         "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions";
 
@@ -312,7 +331,7 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
         var manifest = ElarionManifest.Data.Combine(manifests.Select(static r => r.Data));
         var siblingSet = new HashSet<string>(referencedSiblings.AsImmutableArray, StringComparer.Ordinal);
         var entries = CollectModuleEntries(currentModules, manifest.Modules, siblingSet, diagnostics);
-        var sorted = TopologicalSort(entries);
+        var sorted = TopologicalSort(entries, diagnostics);
         ct.ThrowIfCancellationRequested();
 
         var transport = CollectTransportMaps(
@@ -716,87 +735,156 @@ public sealed class AppModuleDiscoveryGenerator : IIncrementalGenerator {
     }
 
     /// <summary>
-    /// Topologically sorts modules by their <c>DependsOn</c> declarations.
-    /// Falls back to alphabetical order for modules with no dependencies.
+    /// Orders modules by their <c>DependsOn</c> declarations, so a module's dependencies initialize before it. Among
+    /// modules that are ready at the same time, Core modules come first, then the module names in ordinal order.
     /// </summary>
-    private static List<ModuleEntry> TopologicalSort(List<ModuleEntry> entries) {
+    /// <remarks>
+    /// Modules that depend on each other (a cycle, found as a strongly connected component of the dependency graph) are
+    /// placed as one unit: after everything any of them depends on, before everything that depends on any of them, and
+    /// among themselves by the same rule (Core first, then by name), since no dependency orders them. Each cycle is
+    /// reported (ELMOD009, Info). A <c>DependsOn</c> name no module carries orders nothing and is reported
+    /// (ELMOD010). For an acyclic graph this is Kahn's algorithm with the same tie-break as before.
+    /// </remarks>
+    private static List<ModuleEntry> TopologicalSort(List<ModuleEntry> entries, List<DiagnosticInfo> diagnostics) {
         if (entries.Count == 0)
             return entries;
 
-        var byName = new Dictionary<string, ModuleEntry>();
-        var graph = new Dictionary<string, List<string>>();
-        var inDegree = new Dictionary<string, int>();
-
-        foreach (var entry in entries) {
+        var byName = new Dictionary<string, ModuleEntry>(StringComparer.Ordinal);
+        foreach (var entry in entries)
             byName[entry.ModuleName] = entry;
-            if (!graph.ContainsKey(entry.ModuleName))
-                graph[entry.ModuleName] = new List<string>();
-            if (!inDegree.ContainsKey(entry.ModuleName))
-                inDegree[entry.ModuleName] = 0;
-        }
 
+        // A module's known dependencies, without repeats; unknown names are reported and ignored.
+        var dependencies = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var entry in entries) {
+            var known = new List<string>();
+            dependencies[entry.ModuleName] = known;
             if (entry.DependsOn is null)
                 continue;
 
             foreach (var dep in entry.DependsOn.Split(',')) {
                 var trimmed = dep.Trim();
-                if (trimmed.Length == 0)
+                if (trimmed.Length == 0 || known.Contains(trimmed))
                     continue;
 
-                if (!graph.ContainsKey(trimmed))
-                    graph[trimmed] = new List<string>();
-
-                graph[trimmed].Add(entry.ModuleName);
-                inDegree[entry.ModuleName] = inDegree.TryGetValue(entry.ModuleName, out var d)
-                    ? d + 1
-                    : 1;
+                if (byName.ContainsKey(trimmed))
+                    known.Add(trimmed);
+                else
+                    diagnostics.Add(DiagnosticInfo.Create(
+                        UnknownDependsOnModule, (Location?)null, entry.ModuleName, trimmed));
             }
         }
 
-        // Kahn's algorithm. Core modules are prioritized when multiple modules are ready.
-        var ready = new List<string>();
-        foreach (var kv in inDegree)
-            if (kv.Value == 0)
-                InsertReadyModule(ready, kv.Key, byName);
+        var readyOrder = Comparer<string>.Create((left, right) => CompareReadyModules(left, right, byName));
+        var components = FindDependencyCycles(entries, dependencies);
+        foreach (var component in components) {
+            component.Sort(readyOrder);
+            var single = component[0];
+            if (component.Count > 1 || dependencies[single].Contains(single))
+                diagnostics.Add(DiagnosticInfo.Create(
+                    DependsOnCycle,
+                    (Location?)null,
+                    string.Join(", ", component.Select(static name => "'" + name + "'")),
+                    string.Join(", ", component)));
+        }
 
-        var sorted = new List<ModuleEntry>();
+        // Kahn's algorithm over the components; a component is keyed by its first member in ready order.
+        var componentOf = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = 0; i < components.Count; i++)
+            foreach (var name in components[i])
+                componentOf[name] = i;
+
+        var dependents = new List<SortedSet<int>>(components.Count);
+        var inDegree = new int[components.Count];
+        for (var i = 0; i < components.Count; i++)
+            dependents.Add(new SortedSet<int>());
+
+        foreach (var entry in entries) {
+            var to = componentOf[entry.ModuleName];
+            foreach (var dep in dependencies[entry.ModuleName]) {
+                var from = componentOf[dep];
+                if (from != to && dependents[from].Add(to))
+                    inDegree[to]++;
+            }
+        }
+
+        var readyComponents = Comparer<int>.Create((left, right) =>
+            readyOrder.Compare(components[left][0], components[right][0]));
+        var ready = new List<int>();
+        for (var i = 0; i < components.Count; i++)
+            if (inDegree[i] == 0)
+                InsertReady(ready, i, readyComponents);
+
+        var sorted = new List<ModuleEntry>(entries.Count);
         while (ready.Count > 0) {
             var current = ready[0];
             ready.RemoveAt(0);
-            if (byName.TryGetValue(current, out var entry))
-                sorted.Add(entry);
+            foreach (var name in components[current])
+                sorted.Add(byName[name]);
 
-            if (!graph.TryGetValue(current, out var neighbors))
-                continue;
-
-            foreach (var neighbor in neighbors) {
-                inDegree[neighbor]--;
-                if (inDegree[neighbor] == 0)
-                    InsertReadyModule(ready, neighbor, byName);
+            foreach (var dependent in dependents[current]) {
+                inDegree[dependent]--;
+                if (inDegree[dependent] == 0)
+                    InsertReady(ready, dependent, readyComponents);
             }
         }
-
-        // If some entries were not sorted (cycle or unknown deps), append them.
-        var sortedNames = new HashSet<string>(sorted.Select(e => e.ModuleName));
-        foreach (var entry in entries)
-            if (!sortedNames.Contains(entry.ModuleName))
-                sorted.Add(entry);
 
         return sorted;
     }
 
-    private static void InsertReadyModule(
-        List<string> ready,
-        string moduleName,
-        Dictionary<string, ModuleEntry> byName) {
-        var insertAt = ready.BinarySearch(
-            moduleName,
-            Comparer<string>.Create((left, right) => CompareReadyModules(left, right, byName)));
+    /// <summary>
+    /// The strongly connected components of the module dependency graph (Tarjan's algorithm): each module alone, or
+    /// the modules of one <c>DependsOn</c> cycle together.
+    /// </summary>
+    private static List<List<string>> FindDependencyCycles(
+        List<ModuleEntry> entries,
+        Dictionary<string, List<string>> dependencies) {
+        var index = new Dictionary<string, int>(StringComparer.Ordinal);
+        var lowLink = new Dictionary<string, int>(StringComparer.Ordinal);
+        var onStack = new HashSet<string>(StringComparer.Ordinal);
+        var stack = new Stack<string>();
+        var components = new List<List<string>>();
+
+        foreach (var entry in entries)
+            if (!index.ContainsKey(entry.ModuleName))
+                Visit(entry.ModuleName);
+
+        return components;
+
+        void Visit(string name) {
+            var order = index.Count;
+            index[name] = order;
+            lowLink[name] = order;
+            stack.Push(name);
+            onStack.Add(name);
+            foreach (var dep in dependencies[name])
+                if (!index.ContainsKey(dep)) {
+                    Visit(dep);
+                    lowLink[name] = Math.Min(lowLink[name], lowLink[dep]);
+                } else if (onStack.Contains(dep)) {
+                    lowLink[name] = Math.Min(lowLink[name], index[dep]);
+                }
+
+            if (lowLink[name] != index[name])
+                return;
+
+            var component = new List<string>();
+            string member;
+            do {
+                member = stack.Pop();
+                onStack.Remove(member);
+                component.Add(member);
+            } while (member != name);
+
+            components.Add(component);
+        }
+    }
+
+    private static void InsertReady<T>(List<T> ready, T item, IComparer<T> order) {
+        var insertAt = ready.BinarySearch(item, order);
         if (insertAt < 0)
             insertAt = ~insertAt;
 
-        ready.Insert(insertAt, moduleName);
+        ready.Insert(insertAt, item);
     }
 
     private static int CompareReadyModules(

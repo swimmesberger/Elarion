@@ -1,5 +1,5 @@
-import {describe, expect, it} from 'vitest'
-import {mkdtempSync, writeFileSync} from 'node:fs'
+import {describe, expect, it, vi} from 'vitest'
+import {mkdtempSync, readFileSync, writeFileSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {pathToFileURL} from 'node:url'
@@ -1273,6 +1273,47 @@ describe('JSON-RPC client generator', () => {
     expect(cancelError).not.toMatchObject({name: 'RpcTimeoutError'})
     expect(clientModule.isRetryable(cancelError)).toBe(false)
     expect(waited.length).toBe(4)
+  })
+
+  // The same cases drive the ELRPC013 analyzer (ClientTagAnalyzerTests), so the build refuses exactly the values this
+  // client would ignore.
+  it('reads exactly the timeout tags of the shared cases, and ignores the rest for the default', async () => {
+    const cases = JSON.parse(readFileSync(new URL('./timeout-tag-cases.json', import.meta.url), 'utf-8')) as {
+      valid: { value: string; milliseconds: number }[]
+      invalid: string[]
+    }
+    const defaultTimeout = 4321
+    const timerDelay = async (tag: string): Promise<number | undefined> => {
+      const schema = rpcClientTestSchema()
+      schema.methods['user.get'] = {...schema.methods['user.get'], tags: {timeout: tag}}
+      const clientModule = await loadGeneratedClient(generateRpcClientFiles(schema).clientSource) as unknown as {
+        createRpcClient(options: Record<string, unknown>): { call(method: string, params: unknown): Promise<unknown> }
+      }
+      const client = clientModule.createRpcClient({
+        url: 'https://example.test/rpc',
+        timeoutMs: defaultTimeout,
+        validateParams: false,
+        validateResults: false,
+        fetch: async (_input: RequestInfo | URL, init?: RequestInit) => {
+          const request = JSON.parse(String(init?.body)) as { id: string }
+          return jsonResponse({jsonrpc: '2.0', id: request.id, result: {id: '1', name: 'Ada'}})
+        },
+      })
+      const timers = vi.spyOn(globalThis, 'setTimeout')
+      try {
+        await client.call('user.get', {id: '1'})
+        return timers.mock.calls.at(-1)?.[1]
+      } finally {
+        timers.mockRestore()
+      }
+    }
+
+    for (const {value, milliseconds} of cases.valid) {
+      expect(await timerDelay(value), JSON.stringify(value)).toBe(milliseconds)
+    }
+    for (const value of cases.invalid) {
+      expect(await timerDelay(value), JSON.stringify(value)).toBe(defaultTimeout)
+    }
   })
 
   it('maps every thrown error through mapError, keeping the original reachable as the cause', async () => {

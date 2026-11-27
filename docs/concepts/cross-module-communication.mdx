@@ -134,7 +134,9 @@ whole module, so the forwarder never builds a handler's pipeline until you invok
   gone when that feature module is disabled, and a consumer that injects it fails when it is resolved. Name the
   owner in the consumer's `[AppModule(..., DependsOn = "Owner")]`; the analyzer reports an undeclared one as
   `ELMOD008` (a Core module's contract needs none, Core modules are never disabled). `DependsOn` orders the modules
-  and documents the dependency; it does not switch the consumer off with its owner.
+  and documents the dependency; it does not switch the consumer off with its owner. Two modules that inject each
+  other's contracts name each other, a cycle the generator accepts and reports as `ELMOD009` (Info); see
+  [Modules that depend on each other](/docs/concepts/modules#modules-that-depend-on-each-other).
 - **A contract that returns `IQueryable<T>` shares the caller's `DbContext`.** The query is composed by the caller
   and runs when the caller enumerates it, on the scoped `DbContext` the implementation was resolved with — the
   caller's request scope, its transaction and its change tracker. That is what lets the caller join, filter and

@@ -23,7 +23,7 @@ behavior behind each attribute see the linked capability or concept page.
 | --- | --- | --- | --- |
 | `name` | `string` (ctor) | required | Unique module name; used for the feature-flag key `Modules:{Name}:Enabled` and logging. |
 | `Kind` | `AppModuleKind` (init) | `Feature` | `Feature` (optional, can be disabled) or `Core` (always enabled, ignores feature flags). |
-| `DependsOn` | `string?` (init) | `null` | Comma-separated module names this module depends on; the generator topologically sorts so dependencies initialize first. |
+| `DependsOn` | `string?` (init) | `null` | Comma-separated module names this module depends on; the generator orders modules so dependencies initialize first. Modules that depend on each other initialize together (`ELMOD009`), an unknown name is `ELMOD010`. See [Ordering with DependsOn](/docs/concepts/modules#ordering-with-dependson). |
 
 The class may optionally implement convention-based statics: `ConfigureServices(IServiceCollection, IConfiguration)`, `MapEndpoints(IEndpointRouteBuilder)`, `GetJsonTypeInfoResolver()`, and `ConfigureEndpointGroup(IEndpointRouteBuilder)`.
 
