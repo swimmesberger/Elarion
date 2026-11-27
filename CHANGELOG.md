@@ -201,7 +201,11 @@ minor releases may include breaking changes.
   names, so plain Node (type stripping, `node --test`) loads them without a bundler. The default stays `.js`.
 - **TanStack Start adapter: the status of a failed SSR render.** `ssrStatusFor(error)` maps the server's unauthorized,
   forbidden and not-found answers to `401`, `403` and `404` and an unavailable service (a `503` from the server or the
-  platform in front of it) to `503`; `withResponseStatus(response, status)` rewrites a rendered response. See
+  platform in front of it) to `503`, after the application's own `classify(error)` option, which sees the error and
+  each `cause` first and maps the application's own error types. `withResponseStatus(result, status, headers?)`
+  rewrites what Start's handler callback returns, a `Response` or the `{ response, serverSsrCleanup, dispose }` stream
+  result, in the shape it came. The stream's cleanup stays attached, and the given headers (a `Retry-After`) are set
+  over the rendered ones. See
   [TypeScript client](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#the-status-of-a-failed-ssr-render).
 
 - **`ELMOD008`: a module that injects another module's contract declares the dependency.** A `[ModuleContract]`'s

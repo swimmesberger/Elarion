@@ -2,6 +2,7 @@
 
 ## 2026-11-27
 
+* **Update**: [ADR-0080](decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md) amended: the TanStack Start adapter's SSR status takes the application's own error types (`classify`) and Start's stream result, keeping its cleanup attached
 * **Update**: [ADR-0108](decisions/0108-spreadsheet-records.md) gained a second amendment of 2026-11-27: general columns, worksheet options for run-time worksheets and the one-line file, title rows, hidden worksheets and a synchronous write into memory.
 * **Update**: amended [ADR-0078](decisions/0078-settings-definitions-and-effective-value-resolver.md) (`IsStored` next to `IsSet`), [ADR-0093](decisions/0093-typst-pdf-rendering.md) (the compiler is not disposable) and [ADR-0120](decisions/0120-offset-pages-and-multi-key-sorts.md) (the schema exports the sort level cap), from the second adoption round
 * **Update**: ADR-0109 amended again: repeated `BY` values are accepted without a list bound, `LatestVersions` and `IsLimit` are public, and iCalendar skips mid-file byte-order marks; see [ADR-0109](decisions/0109-icalendar-model-reader-and-writer.md)

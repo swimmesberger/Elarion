@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest'
-import {mkdtempSync, writeFileSync} from 'node:fs'
+import {mkdirSync, mkdtempSync, writeFileSync} from 'node:fs'
 import {tmpdir} from 'node:os'
-import {join} from 'node:path'
+import {dirname, join} from 'node:path'
 import {pathToFileURL} from 'node:url'
 import ts from 'typescript'
 import {
@@ -1884,6 +1884,160 @@ describe('JSON-RPC client generator', () => {
     expect(await rewritten.text()).toBe('<html>maintenance</html>')
   })
 
+  it("consults the application's classify first, for the error and each cause", async () => {
+    const adapter = await loadGeneratedStartAdapter({})
+    const {RpcError, RpcTransportError} = (globalThis as unknown as Record<string, {
+      RpcError: new (rpcCode: number, message: string, data?: unknown) => Error
+      RpcTransportError: new (status: number, statusText: string, body: string) => Error
+    }>)[`${adapter.dir}:core`]
+    const {ssrStatusFor} = adapter.module
+    class AppForbiddenError extends Error {}
+    class AppUnavailableError extends Error {}
+    const seen: unknown[] = []
+    const classify = (error: unknown): number | undefined => {
+      seen.push(error)
+      if (error instanceof AppUnavailableError) return 503
+      if (error instanceof AppForbiddenError) return 403
+      return undefined
+    }
+
+    expect(ssrStatusFor(new AppForbiddenError('No.'), {classify})).toBe(403)
+    const wrapped = new Error('Render failed.', {cause: new AppUnavailableError('Later.')})
+    expect(ssrStatusFor(wrapped, {classify})).toBe(503)
+    // An application type it does not know falls through to the built-in mapping.
+    seen.length = 0
+    const notFound = new RpcError(-32001, 'Gone.', {code: 'not_found'})
+    expect(ssrStatusFor(new Error('Mapped.', {cause: notFound}), {classify})).toBe(404)
+    expect(seen).toHaveLength(2)
+    expect(ssrStatusFor(new TypeError('boom'), {classify})).toBeUndefined()
+    // classify wins over the built-in mapping.
+    const unavailable = new RpcTransportError(503, 'Service Unavailable', '')
+    expect(ssrStatusFor(unavailable, {classify: () => 502})).toBe(502)
+    expect(ssrStatusFor(unavailable, {})).toBe(503)
+    // A cyclic cause chain ends.
+    const cyclic = new Error('a') as Error & { cause?: unknown }
+    cyclic.cause = cyclic
+    expect(ssrStatusFor(cyclic, {classify: () => undefined})).toBeUndefined()
+  })
+
+  it("rewrites TanStack Start's stream result, keeping its cleanup attached, and sets extra headers", async () => {
+    const adapter = await loadGeneratedStartAdapter({})
+    const {withResponseStatus} = adapter.module
+    let cancelled: unknown = 'not cancelled'
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('<html>forbidden</html>'))
+      },
+      cancel(reason) {
+        cancelled = reason
+      },
+    })
+    // The stream result TanStack Start's handler callback returns (router-core's SsrResponse).
+    let disposed = false
+    const streamResult = {
+      response: new Response(body, {status: 500, headers: {'content-type': 'text/html'}}),
+      serverSsrCleanup: 'stream' as const,
+      dispose(reason?: unknown): undefined {
+        disposed = true
+        void body.cancel(reason).catch(() => {})
+        return undefined
+      },
+    }
+
+    const rewritten = withResponseStatus(streamResult, 403, {'x-reason': 'forbidden'})
+
+    expect(rewritten).not.toBe(streamResult)
+    expect(rewritten.serverSsrCleanup).toBe('stream')
+    expect(rewritten.dispose).toBe(streamResult.dispose)
+    expect(rewritten.response.status).toBe(403)
+    expect(rewritten.response.headers.get('content-type')).toBe('text/html')
+    expect(rewritten.response.headers.get('x-reason')).toBe('forbidden')
+    expect(rewritten.response.headers.get('cache-control')).toBeNull()
+    // The body is handed over, not copied: disposing the result cancels the stream the rewritten response carries.
+    rewritten.dispose('aborted')
+    expect(disposed).toBe(true)
+    expect(cancelled).toBe('aborted')
+
+    // Headers given win over the rendered ones, and a given Cache-Control replaces the 503 default.
+    const maintenance = withResponseStatus(
+      {response: new Response('<html>later</html>', {status: 500}), serverSsrCleanup: 'none' as const},
+      503,
+      new Headers({'retry-after': '30', 'cache-control': 'private, max-age=0'}),
+    )
+    expect(maintenance.serverSsrCleanup).toBe('none')
+    expect(maintenance.response.status).toBe(503)
+    expect(maintenance.response.headers.get('retry-after')).toBe('30')
+    expect(maintenance.response.headers.get('cache-control')).toBe('private, max-age=0')
+    expect(await maintenance.response.text()).toBe('<html>later</html>')
+
+    // Same status and no headers: the result comes back as it was; same status with headers still sets them.
+    const ok = new Response('ok', {status: 200})
+    expect(withResponseStatus(ok, 200)).toBe(ok)
+    const tagged = withResponseStatus(new Response('ok', {status: 200}), 200, [['x-tag', 'a']])
+    expect(tagged.status).toBe(200)
+    expect(tagged.headers.get('x-tag')).toBe('a')
+  })
+
+  it("type-checks the SSR helpers against TanStack Start's handler callback result under NodeNext", () => {
+    const generated = generateRpcClientFiles(rpcClientTestSchema(), {framework: 'tanstack-start'})
+    const schemasStub = [
+      'export const rpcParamsSchemas: Record<string, any> = {}',
+      'export const rpcResultSchemas: Record<string, any> = {}',
+      'export const rpcErrorDataSchemas: Record<string, Record<string, any>> = {}',
+      '',
+    ].join('\n')
+    // The handler callback types as @tanstack/router-core 1.171 declares them (ssr/handlerCallback.d.ts), which
+    // @tanstack/react-start/server re-exports as HandlerCallback.
+    const usage = [
+      "import { ssrStatusFor, withResponseStatus, type SsrRenderResult } from './start-adapter.js'",
+      '',
+      'type SsrResponse =',
+      "  | { response: Response; serverSsrCleanup: 'none' }",
+      "  | { response: Response; serverSsrCleanup: 'stream'; dispose: (reason?: unknown) => undefined }",
+      'type HandlerCallbackResult = Response | SsrResponse',
+      'type HandlerCallback = (ctx: { request: Request; router: unknown; responseHeaders: Headers }) =>',
+      '  HandlerCallbackResult | Promise<HandlerCallbackResult>',
+      '',
+      'class AppForbiddenError extends Error {}',
+      'declare const render: HandlerCallback',
+      'declare const failure: () => unknown',
+      '',
+      'export const handler: HandlerCallback = async (ctx) => {',
+      '  const result = await render(ctx)',
+      '  const status = ssrStatusFor(failure(), {',
+      '    classify: (error) => (error instanceof AppForbiddenError ? 403 : undefined),',
+      '  })',
+      "  return status === undefined ? result : withResponseStatus(result, status, { 'retry-after': '30' })",
+      '}',
+      'export const plain: Response = withResponseStatus(new Response(null), 503)',
+      "declare const streamed: Extract<SsrResponse, { serverSsrCleanup: 'stream' }>",
+      'export const keptDispose: (reason?: unknown) => undefined = withResponseStatus(streamed, 403).dispose',
+      'export const accepted: SsrRenderResult = streamed',
+      '',
+    ].join('\n')
+
+    expect(typeCheck({
+      'rpc-types.ts': generated.typesSource,
+      'rpc-client.ts': generated.clientSource,
+      'rpc-schemas.ts': schemasStub,
+      'start-adapter.ts': generated.frameworkAdapterSource as string,
+      'usage.ts': usage,
+      'node_modules/@tanstack/react-start/package.json': JSON.stringify({
+        name: '@tanstack/react-start',
+        type: 'module',
+        exports: {'.': {types: './index.d.ts'}, './server': {types: './server.d.ts'}},
+      }),
+      'node_modules/@tanstack/react-start/index.d.ts': [
+        'export declare function createIsomorphicFn(): {',
+        '  server<F extends (...args: any[]) => any>(fn: F): { client(fn: F): F }',
+        '}',
+        '',
+      ].join('\n'),
+      'node_modules/@tanstack/react-start/server.d.ts':
+        'export declare function getRequestHeader(name: string): string | undefined\n',
+    })).toEqual([])
+  })
+
   it('recognises an unavailable service in the core client, through a mapped error', async () => {
     const generated = generateRpcClientFiles(rpcClientTestSchema())
     const clientModule = await loadGeneratedClient(generated.clientSource) as unknown as {
@@ -2370,9 +2524,13 @@ interface StartAdapterModule {
 
   forwardRequestCookie(): HeadersInit
 
-  ssrStatusFor(error: unknown): number | undefined
+  ssrStatusFor(error: unknown, options?: { classify?: (error: unknown) => number | undefined }): number | undefined
 
-  withResponseStatus(response: Response, status: number): Response
+  withResponseStatus<TResult extends Response | { response: Response }>(
+    result: TResult,
+    status: number,
+    headers?: HeadersInit,
+  ): TResult
 }
 
 // Loads the generated start-adapter.ts against stand-ins for its imports: `@tanstack/react-start` runs the
@@ -2516,6 +2674,7 @@ function typeCheck(files: Record<string, string>): string[] {
   const dir = mkdtempSync(join(tmpdir(), 'elarion-rpc-typecheck-'))
   writeFileSync(join(dir, 'package.json'), JSON.stringify({type: 'module'}), 'utf-8')
   for (const [name, source] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, name)), {recursive: true})
     writeFileSync(join(dir, name), source, 'utf-8')
   }
 
@@ -2530,7 +2689,8 @@ function typeCheck(files: Record<string, string>): string[] {
     types: [],
   }, dir)
   expect(errors).toEqual([])
-  const program = ts.createProgram(Object.keys(files).map((name) => join(dir, name)), options)
+  const roots = Object.keys(files).filter((name) => name.endsWith('.ts') && !name.startsWith('node_modules/'))
+  const program = ts.createProgram(roots.map((name) => join(dir, name)), options)
   return ts.getPreEmitDiagnostics(program).map((diagnostic) => {
     const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
     if (diagnostic.file === undefined || diagnostic.start === undefined) return message
