@@ -49,7 +49,11 @@ public interface ICardDavPublisher {
 }
 
 /// <summary>The default <see cref="ICardDavPublisher"/> over the scoped <see cref="IDavCollectionStore"/>.</summary>
-internal sealed class CardDavPublisher(IDavCollectionStore store, DavSourceRegistry<CardDavSourceListing> sources, Microsoft.Extensions.Options.IOptions<CardDavOptions> options)
+internal sealed class CardDavPublisher(
+    IDavCollectionStore store,
+    DavSourceRegistry<CardDavSourceListing> sources,
+    Microsoft.Extensions.Options.IOptions<CardDavOptions> options,
+    IEnumerable<CardDavLiveSourceRegistration> liveSources)
     : ICardDavPublisher {
     public async ValueTask<bool> PublishAsync(CardDavAddress address, Contact contact, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(contact);
@@ -109,5 +113,9 @@ internal sealed class CardDavPublisher(IDavCollectionStore store, DavSourceRegis
         if (!sources.Contains(address.Source))
             throw new InvalidOperationException(
                 $"No address-book source named '{address.Source}' is registered; call AddElarionCardDavSource<TQuery>() in the module's ConfigureServices.");
+        // A live address book reads its contacts per request; a published copy would never be served.
+        if (liveSources.Any(live => live.Name == address.Source))
+            throw new InvalidOperationException(
+                $"The address-book source '{address.Source}' is live: its contacts are read from its ICardDavLiveAddressBooks, not published.");
     }
 }

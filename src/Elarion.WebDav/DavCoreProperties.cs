@@ -20,12 +20,14 @@ internal static class DavCoreProperties {
         new(DavNames.D.SyncToken, false, r => r.Kind == DavResourceKind.Collection && r.State is not null,
             (w, r, _, _) => Text(w, r.State!.SyncToken)),
         // Apple's CTag; its specification allows the sync token as its value, and the counter changes exactly when it must.
-        new(new DavName(DavNames.CalendarServer, "getctag"), false, r => r.Kind == DavResourceKind.Collection && r.State is not null,
-            (w, r, _, _) => Text(w, r.State!.SyncToken)),
+        // A live collection has only its source's CTag.
+        new(new DavName(DavNames.CalendarServer, "getctag"), false, r => r.Kind == DavResourceKind.Collection && r.CTag is not null,
+            (w, r, _, _) => Text(w, r.CTag!)),
         new(DavNames.D.GetETag, true, r => r.Kind == DavResourceKind.Member, (w, r, _, _) => Text(w, r.Member!.ETag)),
         new(DavNames.D.GetContentType, true, r => r.Kind == DavResourceKind.Member, (w, r, _, _) => Text(w, r.Member!.ContentType)),
-        new(DavNames.D.GetContentLength, true, r => r.Kind == DavResourceKind.Member,
-            (w, r, _, _) => Text(w, r.Member!.Size.ToString(CultureInfo.InvariantCulture))),
+        // A live listing may not know a member's length without rendering it; the property is then not defined (404).
+        new(DavNames.D.GetContentLength, true, r => r.Kind == DavResourceKind.Member && r.Member!.Size is not null,
+            (w, r, _, _) => Text(w, r.Member!.Size!.Value.ToString(CultureInfo.InvariantCulture))),
     ];
 
     /// <summary>Writes <c>&lt;D:href&gt;</c>.</summary>
@@ -72,7 +74,8 @@ internal static class DavCoreProperties {
     }
 
     private static ValueTask WriteSupportedReports(XmlWriter writer, DavResource resource, DavXmlElement? requested, CancellationToken cancellationToken) {
-        WriteReport(writer, DavNames.D.SyncCollection);
+        // A live collection has no sync token, so it does not offer sync-collection; clients fall back to the CTag.
+        if (resource.Collection?.Live is null) WriteReport(writer, DavNames.D.SyncCollection);
         if (resource.Protocol is { } protocol)
             foreach (var report in protocol.CollectionReports)
                 WriteReport(writer, report);

@@ -97,6 +97,7 @@ internal sealed partial class CalDavProtocol(DavSourceRegistry<CalDavSourceListi
 
     public async ValueTask<IReadOnlyList<DavCollection>> GetCollectionsAsync(DavContext context, CancellationToken cancellationToken) {
         var collections = new List<DavCollection>();
+        var segments = new HashSet<string>(StringComparer.Ordinal);
         foreach (var source in sources.Sources) {
             // A source the user may not use, behind a closed feature gate, or of a disabled module shows no calendars.
             var listing = await DavSources.InvokeAsync(source, CalDavSourceKind.Value, context.Services, cancellationToken).ConfigureAwait(false);
@@ -104,7 +105,8 @@ internal sealed partial class CalDavProtocol(DavSourceRegistry<CalDavSourceListi
             foreach (var info in listing?.Calendars ?? []) {
                 if (info is null) continue;
                 DavSources.CheckKey(source.Name, info.Key, keys, CalDavSourceKind.Value);
-                collections.Add(new CalDavCollection(new CalDavAddress(source.Name, info.Key), info));
+                var segment = DavSources.SegmentOf(source.Name, info.Key, info.Segment, segments, CalDavSourceKind.Value);
+                collections.Add(new CalDavCollection(new CalDavAddress(source.Name, info.Key), info) { Segment = segment });
             }
         }
 

@@ -88,6 +88,27 @@ minor releases may include breaking changes.
   form in vCard 3.0 and as `KIND:group` with `MEMBER` in 4.0. `Elarion.CardDav` publishes groups, converts them between
   the versions, and matches `KIND` and `MEMBER` filters against either form; publishing a contact with more properties
   than `CardDav:ContactRead:MaxPropertiesPerContact` throws.
+- **Live address books** (ADR-0113 amendment, spec 0007 FR-035–FR-041). `AddElarionCardDavLiveSource<TQuery,
+  TAddressBooks>()` registers an address-book source whose contacts are read per request, as the current user, from a
+  scoped `ICardDavLiveAddressBooks` (`ListAsync` → names and ETags, `GetAsync(names, DavContentPurpose)` → `Contact`s,
+  `GetCTagAsync`, by default a hash of the listing), for address books whose contacts are filtered per viewer by rules
+  that change without the contacts changing. They are answered by `getctag` only: no `sync-token`, no `sync-collection`
+  (`403 supported-report`), no `getcontentlength` in a listing; a query asks for `DavContentPurpose.Query`, so photos can
+  stay out. The WebDAV core carries it as `DavCollection.Live` (`IDavLiveCollection`) and
+  `DavContext.ListMembersAsync`/`GetMembersAsync`. See
+  [CardDAV](https://elarion.wimmesberger.dev/docs/capabilities/carddav#live-address-books-contacts-filtered-per-viewer).
+- **Explicit collection URL segments.** `PublishedAddressBookInfo.Segment` and `PublishedCalendarInfo.Segment` (and
+  `DavCollection.Segment`) serve a collection at a segment of the application's choice instead of `{source}.{key}`, so a
+  replaced DAV server keeps the URLs devices stored; validated, matched exactly, unique per home, and without effect on
+  the store address or the sync token. `CardDavAddress.MemberNameOf(uid)` gives a published contact's member name.
+- **`WebDav:RefuseWhenNoCollections`** answers `403` on the whole DAV surface (but `OPTIONS`) to a user who sees no
+  collection of any protocol. Default off.
+- **`AddElarionIdentityAppPasswordPrincipals<TUser>(canSignIn)`** also refuses a user a registered
+  `SignInManager<TUser>.CanSignInAsync` refuses (confirmed account, `IUserConfirmation<TUser>`), and takes an optional
+  rule of the application's own (deactivated, past an end date), so it need not replace the principal factory.
+- **`app_password.limit_reached` carries `AppPasswordLimitReachedData { MaxPerUser }`** as its data, so the message can
+  be worded in the user's language without reading the options. See
+  [App passwords](https://elarion.wimmesberger.dev/docs/capabilities/app-passwords#creating-listing-and-revoking).
 - **DAV conformance with other projects' suites.** About 420 cases from Apple's CalDAVTester, litmus, sabre/dav,
   Radicale, Xandikos, Cyrus, python-caldav, dav4jvm and vdirsyncer now run as Elarion's tests, and the faults they found
   are fixed. `CalDavClient` reads a propstat without status as 200, removes what a multiget leaves out, lets the last
@@ -139,11 +160,23 @@ minor releases may include breaking changes.
   [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation#validating-outside-a-handler-request).
 
 ### Changed
+- **BREAKING: `DavMember.Size` is `long?`** and no longer required, so a live collection's listing can leave the length
+  unknown; `getcontentlength` is then not answered. A custom `IDavCollectionStore` still sets it; code that reads it
+  handles `null`.
+- **BREAKING (schema): the app-password user id is bounded to 256 characters** (`AppPasswordOptions.MaxUserIdLength`, the
+  length Identity gives its keys), in `IAppPasswords.CreateAsync` (a longer id throws) and in the EF mapping of
+  `elarion_app_passwords.user_id` (`text` becomes `varchar(256)` on PostgreSQL). Add a migration; it fails only if a
+  stored user id is longer, which an Identity key never is.
+- **`PROPFIND` accepts `Depth: 1,noroot` and `0,noroot`** (some clients send it), answering without the requested
+  resource; before, it answered `400`. `Depth: infinity` stays `403 propfind-finite-depth`.
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
   type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
   member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
 
 ### Fixed
+- **A `GET` of a contact through the DAV host ignored `Accept`.** `MapElarionDav()` passed a fixed list of headers to
+  the dispatcher without `Accept`, so a client that asked for vCard 4.0 got 3.0 through ASP.NET Core although the
+  dispatcher converts; the host now passes it.
 - **A NativeAOT application with a body-bound `[HttpEndpoint]` published with trimming warnings.** The generated
   mapping resolved the request body's JSON metadata with a fallback to the reflection-based
   `JsonSerializerOptions.Default`, which made the publish report `IL2026` and `IL3050`. The fallback is gone; a missing

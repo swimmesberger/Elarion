@@ -44,8 +44,8 @@ internal sealed partial class CardDavProtocol {
 
         var found = new Dictionary<string, DavStoredObject>(StringComparer.Ordinal);
         if (names.Count > 0)
-            await foreach (var stored in context.Store.GetObjectsAsync(addressBook.Address.Id, names.Values.Distinct().ToList(), withContent, cancellationToken)
-                               .ConfigureAwait(false))
+            await foreach (var stored in context.GetMembersAsync(addressBook, names.Values.Distinct().ToList(),
+                               withContent ? DavContentPurpose.Multiget : DavContentPurpose.Metadata, cancellationToken).ConfigureAwait(false))
                 found[stored.Name] = stored;
 
         var minimal = DavDispatcher.IsMinimal(context.Request);
@@ -89,8 +89,8 @@ internal sealed partial class CardDavProtocol {
             var matched = 0;
             var truncated = false;
             var members = collection.Kind == DavResourceKind.Member
-                ? context.Store.GetObjectsAsync(addressBook.Address.Id, [collection.Member!.Name], true, ct)
-                : context.Store.GetCandidatesAsync(addressBook.Address.Id, null, null, ct);
+                ? context.GetMembersAsync(addressBook, [collection.Member!.Name], DavContentPurpose.Query, ct)
+                : context.GetMembersAsync(addressBook, null, DavContentPurpose.Query, ct);
             await foreach (var stored in members.ConfigureAwait(false)) {
                 if (filter is not null) {
                     using var stream = new MemoryStream(stored.Content.ToArray(), false);

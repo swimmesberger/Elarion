@@ -61,6 +61,13 @@ public sealed record PublishedCalendarInfo(string Key, string DisplayName) {
     /// for UTC.
     /// </summary>
     public TimeZoneInfo? TimeZone { get; init; }
+
+    /// <summary>
+    /// The calendar's URL segment in the user's home, or <see langword="null"/> for <c>{source}.{key}</c>: 1 to 128 ASCII
+    /// letters, digits, <c>-</c>, <c>_</c>, <c>.</c>, <c>~</c> or <c>@</c>, unique among the calendars the user sees. Set it
+    /// to keep URLs that devices already synced; changing it makes every device sync the calendar anew.
+    /// </summary>
+    public string? Segment { get; init; }
 }
 
 /// <summary>The address of a published calendar: the source that declares it and its key within the source.</summary>
