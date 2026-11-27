@@ -83,6 +83,17 @@ minor releases may include breaking changes.
   collation, `limit`); `address-data` and `Accept` convert a card to vCard 4.0 with the stored ETag. `MapElarionDav()`
   adds `/.well-known/carddav`, and `OPTIONS` names `addressbook`. `CardDavOptions` embeds `ContactReadOptions`. See
   [CardDAV](https://elarion.wimmesberger.dev/docs/capabilities/carddav).
+- **DAV conformance with other projects' suites.** About 420 cases from Apple's CalDAVTester, litmus, sabre/dav,
+  Radicale, Xandikos, Cyrus, python-caldav, dav4jvm and vdirsyncer now run as Elarion's tests, and the faults they found
+  are fixed. `CalDavClient` reads a propstat without status as 200, removes what a multiget leaves out, lets the last
+  entry of an href win, stops paging when a truncated answer's token does not move, refuses an https-to-http redirect,
+  fetches members by the server's href, discovers accounts without `current-user-principal` or `calendar-home-set` and
+  with several homes (`CalDavAccount.HomeUrls`), and reads bare ETags, 409 conflicts and failed 207s to writes. The host
+  passes the request path through undecoded; responses drop characters XML forbids; an invalid `sync-level` or
+  `propfind` body answers 400; `calendar-query` and `addressbook-query` work on an object's URL; recurring journals,
+  absolute alarm triggers, `novalue`, the request's `C:timezone` in `expand` and the `supported-collation` precondition
+  work; `expand` without a valid range answers 400. Recurrence keeps DTSTART before an earlier UNTIL and takes BYWEEKNO's
+  day from DTSTART. `DavContext.Items` holds per-request values for protocols.
 - **`Elarion.WebDav`: a protocol may answer another representation on `GET`.** `IDavProtocol.GetRepresentationAsync`
   (a default member answering the stored bytes) returns a `DavRepresentation`; CardDAV uses it for vCard 4.0.
 - **`Elarion.AspNetCore`: endpoints can opt out of cross-origin protection.**
