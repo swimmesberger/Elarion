@@ -20,7 +20,7 @@ public sealed class ContactImportTests {
         john.Organization.Should().Be("Example Inc.");
         john.Department.Should().Be("Sales");
         john.Title.Should().Be("Manager");
-        john.Emails.Should().Equal(new ContactEmail("john@example.com") { Types = ContactTypes.Work, Preferred = true });
+        john.Emails.Should().Equal(new ContactEmail("john@example.com") { Types = ContactTypes.Internet | ContactTypes.Work, Preferred = true });
         john.Phones.Should().Equal(
             new ContactPhone("+43 660 1234567") { Types = ContactTypes.Cell | ContactTypes.Voice, Preferred = true },
             new ContactPhone("+43 1 234567") { Types = ContactTypes.Work | ContactTypes.Voice });
@@ -113,7 +113,7 @@ public sealed class ContactImportTests {
             "item3.X-ABLabel:_$!<Sister>!$_"));
 
         contact.Phones.Should().Equal(new ContactPhone("+43 1") { Types = ContactTypes.Cell });
-        contact.Emails.Should().Equal(new ContactEmail("max@club.example") { Label = "Club" });
+        contact.Emails.Should().Equal(new ContactEmail("max@club.example") { Types = ContactTypes.Internet, Label = "Club" });
         contact.AdditionalProperties.Select(static p => $"{p.Group}.{p.Name}").Should().Equal("item3.X-ABRELATEDNAMES", "item3.X-ABLABEL");
     }
 

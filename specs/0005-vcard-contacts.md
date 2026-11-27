@@ -169,6 +169,24 @@ NativeAOT.
   the read finishes in time linear in the file's size and the value stays an additional property.
 - Given a file of 10 MiB made of one property folded into a million continuation lines, when it is read, then the read
   finishes in time linear in the file's size.
+- Given a 20 MB file of short lines (`X:`, `X;a=;b=:`, malformed `x`, `ANNIVERSARY:x`), when it is read with the
+  defaults, then reading stops at 1,000,000 lines with one `contact.too_many_properties_in_file` error, lists at most
+  10,000 errors and counts the rest, and the result holds less than about 120 MB.
+- Given cards of more lines than the per-card limit, when the file is read, then each entry keeps only the properties
+  that name it.
+
+### Concatenated files, vCard 2.1 backslashes and payloads that are not files (P2)
+
+- Given files concatenated with a byte-order mark before each card, in UTF-8 or UTF-16, when the file is read, then
+  every card is an entry.
+- Given the vCard 2.1 line `N:C:\Daten;Anna\;Maria`, when it is read, then the family name is `C:\Daten` and the given
+  name `Anna;Maria`; given a 2.1 quoted-printable note holding `C:\neu` and a line break, then the note keeps the
+  backslash and the line break apart.
+- Given a contact with the web address `https://example.com/a;b,c`, when it is written, then the `URL` line holds the
+  address as it is.
+- Given a contact whose note holds a NUL and a bell character, when it is written, then the card holds neither.
+- Given write options with folding off, when a contact with a 200-character note is written, then the note is one line.
+- Given a contact, when `ContactWriter.ToText` writes it, then the text equals what the asynchronous writer writes.
 
 ### Published with NativeAOT (P2)
 
@@ -193,8 +211,8 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
 - FR-007: Reading MUST read a group prefix (`item1.TEL`), quoted parameter values, bare 2.1 parameters, repeated and
   comma-joined parameter values, and a space after `;`.
 - FR-008: Reading MUST decode RFC 6868 caret escapes in parameter values.
-- FR-009: Reading MUST unescape `\n`, `\N`, `\,`, `\;`, `\:` and `\\` in text values, and MUST read any other
-  backslash sequence as the character after the backslash.
+- FR-009: Reading MUST unescape `\n`, `\N`, `\,`, `\;`, `\:` and `\\` in text values of vCard 3.0 and 4.0, and MUST
+  read any other backslash sequence as the character after the backslash. vCard 2.1 values follow FR-072.
 - FR-010: Reading MUST decode quoted-printable values, joining soft line breaks whether or not the next line starts
   with whitespace and whether or not the `=` is followed by spaces, including an escape or a multi-byte character
   split across a soft break.
@@ -224,13 +242,14 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
   locality, region, postal code, country) and web addresses, the birthday, the anniversary, the note, the categories,
   the photo, the UID, and every other property as an additional property with its group, parameters and value.
 - FR-021: Each phone number, e-mail address, postal address and web address MUST carry its types as flags (home, work,
-  cell, voice, fax, pager, text, video, main), whether it is preferred, and its custom label.
+  cell, voice, fax, pager, text, video, main, internet), whether it is preferred, and its custom label.
 - FR-022: `TYPE` values, bare 2.1 parameters, and the Apple labels `_$!<Mobile>!$_`, `_$!<iPhone>!$_`,
   `_$!<Main>!$_`, `_$!<Home>!$_`, `_$!<Work>!$_`, `_$!<HomeFAX>!$_`, `_$!<WorkFAX>!$_`, `_$!<Pager>!$_` and
   `_$!<HomePage>!$_` MUST map to the flags; `PREF`, `TYPE=pref` and `PREF=1` MUST mark a value preferred; any other
   `X-ABLabel` of the value's group, with `_$!<` and `>!$_` removed, MUST be its custom label.
 - FR-023: A birthday or anniversary MUST read from `YYYYMMDD`, `YYYY-MM-DD`, a date-time (dropping the time), `--MMDD`
-  and `--MM-DD`, and year 1604 MUST read as a date without a year, with or without `X-APPLE-OMIT-YEAR`.
+  and `--MM-DD`, and year 1604 MUST read as a date without a year, with or without `X-APPLE-OMIT-YEAR`. A partial
+  date of vCard 4.0 that names no month and day MUST be dropped as FR-087 says.
 - FR-024: The anniversary MUST read from `ANNIVERSARY`, `X-ANNIVERSARY`, `X-MS-ANNIVERSARY`, and an `X-ABDATE` whose
   group's `X-ABLabel` is `_$!<Anniversary>!$_`, in that order of precedence.
 - FR-025: `KIND:org` and `X-ABSHOWAS:COMPANY` MUST make the contact an organization; any other contact MUST be an
@@ -240,11 +259,13 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
   the first e-mail address, else the first phone number.
 - FR-028: An inline photo (Base64 or a `data:` URI) MUST read as its bytes with the media type its bytes show (JPEG,
   PNG, GIF, WebP or BMP), whatever the declared type.
-- FR-029: A photo whose bytes show none of those formats MUST be dropped with a `contact.invalid_value` error.
+- FR-029: A photo whose bytes show none of those formats MUST be dropped with a `contact.invalid_value` error whose
+  expected kind is `photo-format` (FR-076).
 - FR-030: A photo given as a URI MUST read as that URI when its scheme is `http` or `https`, and MUST otherwise be
   dropped with a `contact.invalid_value` error.
 - FR-031: Reading MUST NOT request any URI a file contains.
-- FR-032: Only the first `PHOTO` of a contact MUST be read into its photo; later ones MUST stay additional properties.
+- FR-032: Only the first `PHOTO` of a contact that reads MUST be read into its photo: one that does not read costs its
+  error and the next is tried (FR-088); later ones MUST stay additional properties.
 - FR-033: An `AGENT` value MUST NOT be parsed as a vCard.
 - FR-034: A property value that does not read as its kind MUST be dropped with a `contact.invalid_value` error that
   carries the property and the expected kind, and MUST NOT remove the contact.
@@ -255,16 +276,19 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
   `contact.unexpected_end` error.
 - FR-038: Reading MUST return the entries and the errors together, and MUST throw only on cancellation and on
   misconfiguration, never because of what the file contains.
-- FR-039: A file without a `BEGIN:VCARD` line MUST be exactly one `contact.unreadable` error and no entries.
+- FR-039: A file without a `BEGIN:VCARD` line MUST be exactly one `contact.unreadable` error and no entries
+  (FR-075 says what it carries for a file that is not text).
 - FR-040: Every error MUST carry a stable code, the data its wording needs, and an English default message.
 - FR-041: The codes MUST be `contact.unreadable`, `contact.too_large`, `contact.too_many_contacts`,
   `contact.too_many_properties`, `contact.line_too_long`, `contact.photo_too_large`, `contact.invalid_value`,
-  `contact.unknown_charset`, `contact.malformed_line`, `contact.empty` and `contact.unexpected_end`.
+  `contact.unknown_charset`, `contact.malformed_line`, `contact.empty`, `contact.unexpected_end`,
+  `contact.too_many_properties_in_file`, `contact.too_many_errors` and `contact.partial_date`.
 - FR-042: An error about a contact MUST carry the entry's index and the line of its `BEGIN`, the contact's display
   name when it has a contact, and, when it concerns a property, the property's name, its line and its value as
   written; an error about a value MUST carry the expected kind, an error about a limit the limit, and
-  `contact.unknown_charset` the charset. These are the location fields `Elarion.Calendars` errors carry too.
-- FR-043: Reading MUST report every error of every entry it reads.
+  `contact.unknown_charset` the charset, and an error about bytes of an unreadable format their media type. These are
+  the location fields `Elarion.Calendars` errors carry too.
+- FR-043: Reading MUST report every error of every entry it reads, up to the limit of FR-074.
 - FR-044: The application MUST be able to add its own errors to an entry with its own code, and optionally a property
   and a line (`AddError(code, message, property?, lineNumber?)`), located like the package's own, and they MUST
   appear in the result's errors and in its `AppError`.
@@ -276,24 +300,28 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
 - FR-047: Reading MUST stop with one `contact.too_many_contacts` error after the maximum number of entries of the read
   options, 10,000 by default, keeping the entries before it.
 - FR-048: A card with more properties than the read limit, 1,000 by default, MUST have no contact and a
-  `contact.too_many_properties` error, and reading MUST continue with the next card.
+  `contact.too_many_properties` error, and reading MUST continue with the next card. Its entry MUST keep only the
+  properties that name it (FR-089).
 - FR-049: An unfolded line longer than the read limit, 1 MiB by default, other than a photo, MUST be dropped with a
   `contact.line_too_long` error.
 - FR-050: A photo whose decoded size exceeds the read limit, 1 MiB by default, MUST be dropped with a
   `contact.photo_too_large` error, without decoding more than the limit.
-- FR-051: Reading MUST take time and memory linear in the size of the input.
+- FR-051: Reading MUST take time and memory linear in the size of the input, and the memory a result holds MUST be
+  bounded by the limits of FR-046, FR-073 and FR-074 whatever the file holds.
 - FR-052: Writing MUST produce vCard 3.0 by default and vCard 4.0 when the write options ask for it, and MUST NOT
   produce 2.1.
 - FR-053: Writing MUST produce UTF-8 without a byte-order mark, CRLF line ends, and lines of at most 75 octets folded
-  without splitting a UTF-8 sequence.
-- FR-054: Writing MUST escape text values so that reading the file back yields the written values.
+  without splitting a UTF-8 sequence or an escape (FR-085), unless the write options turn folding off (FR-081).
+- FR-054: Writing MUST escape text values so that reading the file back yields the written values; URI values follow
+  FR-080.
 - FR-055: Writing MUST write types as `TYPE=` parameters, a preferred value as `TYPE=pref` in 3.0 and `PREF=1` in 4.0,
   and a custom label as an `X-ABLabel` property of the value's group.
 - FR-056: Writing MUST write an inline photo as `ENCODING=b` with its type in 3.0 and as a `data:` URI in 4.0, and a
   photo URI as a URI value.
 - FR-057: Writing MUST write a date without a year as `X-APPLE-OMIT-YEAR=1604` with year 1604 in 3.0, and as `--MMDD`
   in 4.0.
-- FR-058: Writing MUST write an organization as `X-ABSHOWAS:COMPANY` in 3.0 and `KIND:org` in 4.0.
+- FR-058: Writing MUST write an organization as `X-ABShowAs:COMPANY` in 3.0, in the case Apple writes it, and
+  `KIND:org` in 4.0.
 - FR-059: Writing MUST write an `FN` for every contact, from the display name of FR-027 when the contact has no
   formatted name, and an `N` for every contact in 3.0.
 - FR-060: Writing MUST write additional properties as they were read.
@@ -322,6 +350,49 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
   member in 4.0, with neither version holding the other's group properties.
 - FR-071: Writing a contact that is not a group but has members MUST fail with a `ContactWriteException` naming
   `MEMBER`.
+- FR-072: A vCard 2.1 value MUST be read with 2.1's escaping, in which only `\;` is an escape: every other backslash is
+  a character, and a line break of a quoted-printable value is a line break. The entry's property MUST hold the value
+  in the escaping of 3.0, its other backslashes doubled and its line breaks as `\n`, so that `N:C:\Daten` reads the
+  family name `C:\Daten` and a 2.1 card written as 3.0 keeps its backslashes. Properties before the card's
+  `VERSION:2.1` MUST take its escaping too.
+- FR-073: Reading MUST stop with one `contact.too_many_properties_in_file` error once the lines of all cards of the file
+  together exceed the read limit (`MaxProperties`), 1,000,000 by default, keeping the entries before the card being
+  read.
+- FR-074: A result MUST list at most the read limit of errors (`MaxErrors`), 10,000 by default; the read MUST go on,
+  the further errors MUST be counted (`OmittedErrorCount`) and named by one `contact.too_many_errors` file error, and
+  `ToAppError` MUST count them in its total.
+- FR-075: A `contact.unreadable` error for a file that is not text MUST carry the media type its bytes show
+  (`application/pdf`, `application/zip`, an image type, else `application/octet-stream`); for a text without a vCard
+  it MUST carry none.
+- FR-076: A photo whose bytes are of no format FR-028 reads MUST be a `contact.invalid_value` error with the expected
+  kind `photo-format` and the media type its bytes show (such as `application/pdf` or `image/heic`), else the one the
+  file declared.
+- FR-077: Each phone number, e-mail address, postal address and web address read MUST carry the line and the group it
+  was read from; equality and writing MUST ignore both.
+- FR-078: A property MUST offer its value unescaped (`GetText`, `GetTexts`), and a `PHOTO` property MUST read on its own
+  by the rules of FR-028–FR-031 and FR-050 (`ContactPhoto.TryRead`), with the error a read would give.
+- FR-079: `ContactPhoto.TryFromData` MUST build a photo from bytes of a format FR-028 reads and report other bytes
+  without throwing.
+- FR-080: Writing MUST write a URI value as it is, not escaped as text: `URL` in both versions, a photo URI, and in 4.0
+  a phone number given as a `tel:` URI, with `VALUE=uri`. A URI value holding a line break MUST fail the write with a
+  `ContactWriteException`.
+- FR-081: The write options MUST let the caller turn folding off (`FoldLines`), for a payload that is not a file, such
+  as a QR code, whose readers do not unfold.
+- FR-082: Writing MUST leave the control characters U+0000–U+0008, U+000B, U+000C, U+000E–U+001F and U+007F–U+009F out
+  of every value and parameter value.
+- FR-083: Writing MUST be available synchronously: `ContactWriter.Write(stream, contacts, options)` and
+  `ContactWriter.ToText(contact, options)`, which write what the asynchronous writer writes.
+- FR-084: Reading MUST treat a byte-order mark at the start of a line as nothing, so a file concatenated from several
+  exports, with a mark before each card, in UTF-8 or UTF-16, keeps every card.
+- FR-085: Writing MUST NOT fold a line right after an odd run of backslashes, so no physical line ends inside an escape.
+- FR-086: `TYPE=INTERNET` MUST read as the internet flag, and the flag MUST be written as `TYPE=INTERNET` in 3.0 and
+  `TYPE=internet` in 4.0.
+- FR-087: A birthday or anniversary that is a partial date of vCard 4.0 — a year (`1985`), a year and a month
+  (`1985-04`), a month (`--04`) or a day (`---12`) — MUST be dropped with a `contact.partial_date` error, not
+  `contact.invalid_value`.
+- FR-088: A `PHOTO` that does not read MUST NOT keep a later one that reads from being the contact's photo.
+- FR-089: The entry of a card with more properties than the limit of FR-048 MUST keep only its first `FN`, `N`, `ORG`,
+  `EMAIL`, `TEL` and `UID`.
 
 ## Success criteria
 
@@ -356,7 +427,9 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
 
 - [ADR-0114](../docs/decisions/0114-contact-groups.md): group cards in the model (FR-068–FR-071).
 - [ADR-0110](../docs/decisions/0110-vcard-contacts.md): the fixed contact model over a lossless property list, the own
-  reader and writer, the per-line decoding ladder, the read result, photos, limits, the written versions.
+  reader and writer, the per-line decoding ladder, the read result, photos, limits, the written versions; its
+  amendment of 2026-11-27 decides the file-wide bounds, 2.1 escaping, URI values, control characters and the
+  unfolded payload (FR-072–FR-089).
 - [ADR-0109](../docs/decisions/0109-icalendar-model-reader-and-writer.md): the sibling format package whose entry,
   error, limit and writer shapes, decoding ladder and content-line layer this package shares.
 - [ADR-0108](../docs/decisions/0108-spreadsheet-records.md): the reference file-format package whose result, codes,

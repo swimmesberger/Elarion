@@ -17,7 +17,7 @@ internal static class ContactMapper {
         ContactName? name = null;
         var kind = ContactKind.Individual;
         bool sawFn = false, sawN = false, sawOrg = false, sawTitle = false, sawRole = false, sawNote = false, sawUid = false,
-            sawKind = false, sawBirthday = false, sawPhoto = false;
+            sawKind = false, sawBirthday = false;
         List<string>? nicknames = null, categories = null, members = null;
         List<ContactPhone>? phones = null;
         List<ContactEmail>? emails = null;
@@ -96,7 +96,9 @@ internal static class ContactMapper {
                     var number = ContactValueRules.CleanPhoneNumber(ContentText.Unescape(property.Value)).Trim();
                     if (number.Length == 0) break;
                     var (types, preferred, label) = Typed(properties, property, labels, ref usedGroups);
-                    (phones ??= []).Add(new ContactPhone(number) { Types = types, Preferred = preferred, Label = label });
+                    (phones ??= []).Add(new ContactPhone(number) {
+                        Types = types, Preferred = preferred, Label = label, LineNumber = property.LineNumber, Group = property.Group,
+                    });
                     break;
                 }
                 case "EMAIL": {
@@ -104,7 +106,9 @@ internal static class ContactMapper {
                     var address = ContentText.Unescape(property.Value).Trim();
                     if (address.Length == 0) break;
                     var (types, preferred, label) = Typed(properties, property, labels, ref usedGroups);
-                    (emails ??= []).Add(new ContactEmail(address) { Types = types, Preferred = preferred, Label = label });
+                    (emails ??= []).Add(new ContactEmail(address) {
+                        Types = types, Preferred = preferred, Label = label, LineNumber = property.LineNumber, Group = property.Group,
+                    });
                     break;
                 }
                 case "URL": {
@@ -112,7 +116,9 @@ internal static class ContactMapper {
                     var url = ContentText.Unescape(property.Value).Trim();
                     if (url.Length == 0) break;
                     var (types, preferred, label) = Typed(properties, property, labels, ref usedGroups);
-                    (urls ??= []).Add(new ContactUrl(url) { Types = types, Preferred = preferred, Label = label });
+                    (urls ??= []).Add(new ContactUrl(url) {
+                        Types = types, Preferred = preferred, Label = label, LineNumber = property.LineNumber, Group = property.Group,
+                    });
                     break;
                 }
                 case "ADR": {
@@ -123,7 +129,7 @@ internal static class ContactMapper {
                     (addresses ??= []).Add(new ContactAddress {
                         PostOfficeBox = parts[0], Extended = parts[1], Street = parts[2], Locality = parts[3],
                         Region = parts[4], PostalCode = parts[5], Country = parts[6],
-                        Types = types, Preferred = preferred, Label = label,
+                        Types = types, Preferred = preferred, Label = label, LineNumber = property.LineNumber, Group = property.Group,
                     });
                     break;
                 }
@@ -150,8 +156,9 @@ internal static class ContactMapper {
                     consumed[i] = true;
                     (categories ??= []).AddRange(SplitList(property.Value));
                     break;
-                case "PHOTO" when !sawPhoto:
-                    sawPhoto = consumed[i] = true;
+                // The first photo that reads (FR-032): one that does not costs its error, and the next one is tried.
+                case "PHOTO" when photo is null:
+                    consumed[i] = true;
                     photo = PhotoReader.Read(property, maxPhotoBytes, errors);
                     break;
                 case "UID" when !sawUid:
@@ -290,8 +297,11 @@ internal static class ContactMapper {
         ContentText.SplitUnescape(value, ',').Where(static item => !string.IsNullOrWhiteSpace(item));
 
     private static ContactError InvalidDate(ContactProperty property) =>
-        new(ContactErrorCodes.InvalidValue, $"The value of {property.Name} is not a date.",
-            lineNumber: property.LineNumber, property: property.Name, value: property.Value, expectedKind: "date");
+        ContactValueRules.IsPartialDate(property)
+            ? new(ContactErrorCodes.PartialDate, $"The value of {property.Name} names no full date with a month and a day.",
+                lineNumber: property.LineNumber, property: property.Name, value: property.Value, expectedKind: "date")
+            : new(ContactErrorCodes.InvalidValue, $"The value of {property.Name} is not a date.",
+                lineNumber: property.LineNumber, property: property.Name, value: property.Value, expectedKind: "date");
 
     private static string? NullIfEmpty(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }

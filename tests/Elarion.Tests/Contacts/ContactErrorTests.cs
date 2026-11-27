@@ -172,4 +172,20 @@ public sealed class ContactErrorTests {
 
     private static IReadOnlyDictionary<string, string[]> Fields(AppError error) =>
         error.Data.Should().BeOfType<ValidationErrorData>().Subject.FieldErrors!;
+
+    [Fact]
+    public async Task AnUploadThatIsNotText_SaysWhatItIs() {
+        var pdf = await ReadAsync("%PDF-1.7\n%âã\n1 0 obj"u8.ToArray());
+        var binary = await ReadAsync([1, 2, 0, 4, 5, 0, 0, 7, 8, 9]);
+        var text = await ReadAsync("Name;Phone\r\nAnna;123\r\n"u8.ToArray());
+        var utf16Text = await ReadAsync(Encoding.Unicode.GetBytes("Name;Phone\r\nAnna;123\r\n"));
+
+        Assert.Single(pdf.FileErrors).MediaType.Should().Be("application/pdf");
+        pdf.FileErrors[0].Code.Should().Be(ContactErrorCodes.Unreadable);
+        pdf.FileErrors[0].Message.Should().Be("The file is not text (application/pdf); it holds no vCard.");
+        Assert.Single(binary.FileErrors).MediaType.Should().Be("application/octet-stream");
+        Assert.Single(text.FileErrors).MediaType.Should().BeNull();
+        Assert.Single(utf16Text.FileErrors).MediaType.Should().BeNull();
+        text.FileErrors[0].Message.Should().Be("The file holds no vCard.");
+    }
 }
