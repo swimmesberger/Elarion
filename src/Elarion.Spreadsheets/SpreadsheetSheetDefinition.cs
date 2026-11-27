@@ -65,7 +65,8 @@ public sealed record SpreadsheetColumnDefinition {
 
     /// <summary>
     /// The kind of value the column holds, which decides its cell format: the text format for text and choice columns,
-    /// <see cref="Format"/> or the viewer's notation for number, date, date-and-time and time columns.
+    /// <see cref="Format"/> or the viewer's notation for number, date, date-and-time and time columns, and none for a
+    /// general column.
     /// </summary>
     public SpreadsheetValueKind Kind { get; }
 
@@ -89,6 +90,16 @@ public sealed record SpreadsheetColumnDefinition {
     /// <summary>A text column, with the text format, so a value typed below the data stays text.</summary>
     public static SpreadsheetColumnDefinition Text(string header) {
         return new SpreadsheetColumnDefinition(header, SpreadsheetValueKind.Text, null, []);
+    }
+
+    /// <summary>
+    /// A column of text, numbers or both, without a format of its own: each value is written as its type is, text as a
+    /// text cell and a number as a number cell in the default format, and a cell typed below the data takes the
+    /// spreadsheet's "General" format rather than text. Use it for a column whose values are not of one kind, such as
+    /// a reference that is a number in one row and a code in the next.
+    /// </summary>
+    public static SpreadsheetColumnDefinition General(string header) {
+        return new SpreadsheetColumnDefinition(header, SpreadsheetValueKind.General, null, []);
     }
 
     /// <summary>A number column.</summary>

@@ -201,6 +201,14 @@ public sealed class ExportContacts(CrmDbContext db) : IHandler<ExportContacts.Qu
 }
 ```
 
+The same one line takes [worksheet options](#columns-a-caller-may-not-see) after the file name, such as footer rows or
+a column filter: `ToFileAsync(contacts, "contacts.xlsx", new SpreadsheetWorksheetOptions { … }, cancellationToken: ct)`.
+
+`SpreadsheetWorkbook.ToBytes(records)` writes the same workbook synchronously and returns its bytes, for code without
+an asynchronous context such as a test. It writes into memory from an `IEnumerable`, so it never waits and never blocks
+on a task; it also takes worksheet options, and a [run-time worksheet](#columns-known-only-at-run-time) as
+`ToBytes(sheet, rows)`.
+
 ### A large file, streamed
 
 An `ElarionFile` is held in memory. For an export that can be large, an HTTP-only handler returns a
@@ -283,6 +291,26 @@ declares that. Any other value takes its own default, so `Total` is a text cell 
 written columns from the first, after any filter, and a shorter row ends with empty cells. The dropdown lists stop above
 the footer rows. A reader reads footer rows as data rows, so give a worksheet meant for importing again none.
 
+### A title above the header, and hidden worksheets
+
+`TitleRows` writes rows above the header row, typed as footer rows are, for a title, the period an export covers or the
+account it is for. The header row moves down by their number and still stays in place while scrolling, together with the
+title; the dropdown lists start below it:
+
+```csharp
+await workbook.AddWorksheetAsync(bookings, new SpreadsheetWorksheetOptions {
+    TitleRows = [["Booked hours, November 2026"], ["Employee", employee.Name], []]
+}, ct);
+```
+
+The reader takes the first non-empty row as the header row, so read such a worksheet back with
+`new SpreadsheetWorksheetSelection { HeaderRow = 4 }`, the row number the spreadsheet shows for the header.
+
+`Hidden = true` writes a worksheet that the spreadsheet application lists under "Unhide" instead of as a tab, such as
+lookup values another worksheet refers to. The workbook opens on its first visible worksheet, and a reader skips hidden
+worksheets. A workbook needs one visible worksheet: disposing one whose worksheets are all hidden throws an
+`InvalidOperationException`.
+
 ### Columns known only at run time
 
 When a worksheet's columns come from data, such as numbered slots (`E-mail 1` to `E-mail 4`) or columns that depend on a
@@ -300,13 +328,20 @@ var sheet = new SpreadsheetSheetDefinition("Contacts", [
 await workbook.AddWorksheetAsync(sheet, contacts.Select(contact => (IReadOnlyList<object?>)contact.ToRow()), ct);
 ```
 
-The factories are `Text`, `Number`, `Boolean`, `Date`, `DateTime`, `Time` and `Choice`. Each row is a list of values in
+The factories are `Text`, `Number`, `Boolean`, `Date`, `DateTime`, `Time`, `Choice` and `General`. A `General` column
+holds text, numbers or both, such as a reference that is a number in one row and a code in the next: each value is
+written as its own type, and the column has no format of its own, so neither text nor numbers are forced into the
+other's format and a cell typed below the data stays the spreadsheet's "General". Each row is a list of values in
 column order, typed as footer values are: text, a boolean, a number, a date or time (`DateTime`, `DateOnly`,
 `TimeOnly`), a `DateTimeOffset`, a `Guid`, an enum (written as its name), or `null` for an empty cell. A value of another
 type, or a row with more values than columns, fails with a `SpreadsheetWriteException` naming the row. Rows may be an
 `IEnumerable` or an `IAsyncEnumerable` and stream like records. Because each value carries its own type, a definition
 also serves a worksheet of several blocks. A definition only writes; read such a worksheet back as
 [plain rows](#plain-rows) and match the headers with the same column list.
+
+`AddWorksheetAsync(sheet, rows, options, ct)` takes the same `SpreadsheetWorksheetOptions` as a record's worksheet:
+another `Name`, `TitleRows`, `FooterRows`, so a total row gets no dropdown, and `Hidden`. A column filter is refused
+with an `ArgumentException`, because the definition already decides its columns per call.
 
 ### What a written file looks like
 

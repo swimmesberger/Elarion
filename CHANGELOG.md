@@ -166,6 +166,15 @@ minor releases may include breaking changes.
   memory synchronously, and `SpreadsheetCell.NumberFormat` carries a number or date cell's format code. The docs now say
   that a plain-rows read counts the header row against `MaxRows`, and that `too_many_rows` and `too_many_columns` keep
   the rows read before them.
+- **`Elarion.Spreadsheets`: general columns, title rows, hidden worksheets, synchronous writes** (ADR-0108, amendment
+  2026-11-27, second round). `SpreadsheetColumnDefinition.General(header)` (`SpreadsheetValueKind.General`) declares a
+  column of text, numbers or both without a format of its own. A run-time worksheet takes `SpreadsheetWorksheetOptions`
+  (`AddWorksheetAsync(sheet, rows, options, ct)`), so its total row is a footer row without dropdowns; a column filter
+  there is refused. `ToFileAsync(records, fileName, worksheetOptions, …)` gives the one-line file worksheet options.
+  `SpreadsheetWorksheetOptions` gains `TitleRows`, written above the header row, which moves down and stays frozen, and
+  `Hidden`; the workbook opens on its first visible worksheet. `SpreadsheetWorkbook.ToBytes(records)` and
+  `ToBytes(sheet, rows)` write a workbook into memory synchronously, without blocking on a task. A call that passes a
+  literal `null` as the third argument of `ToFileAsync(records, fileName, …)` is now ambiguous; name the parameter.
 - **`[ValidationRoot]`: validate a type outside a handler request** (ADR-0108). A marked type gets the same generated,
   constant-constructed validation metadata as a handler request, in the module whose namespace contains it, and is
   validated through `IRequestValidator.ValidateAsync`. A marked type with validation attributes outside every module is

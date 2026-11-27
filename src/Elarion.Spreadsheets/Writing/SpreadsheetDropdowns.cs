@@ -19,19 +19,21 @@ internal sealed class SpreadsheetDropdowns {
     public string? ListsWorksheetName { get; private set; }
 
     /// <summary>
-    /// Appends the <c>&lt;dataValidations&gt;</c> of a worksheet, after its <c>&lt;sheetData&gt;</c>, over rows 2 to
-    /// <paramref name="lastRow"/>; appends nothing when no column offers a list or the range is empty.
+    /// Appends the <c>&lt;dataValidations&gt;</c> of a worksheet, after its <c>&lt;sheetData&gt;</c>, over rows
+    /// <paramref name="firstRow"/> to <paramref name="lastRow"/>; appends nothing when no column offers a list or the
+    /// range is empty.
     /// </summary>
     /// <param name="xml">The worksheet's buffer.</param>
     /// <param name="columns">The worksheet's columns.</param>
+    /// <param name="firstRow">The first row the lists cover: the one below the header row.</param>
     /// <param name="lastRow">The last row the lists cover.</param>
     /// <param name="worksheetNames">
     /// The names of the workbook's worksheets so far; the hidden worksheet's name is chosen to differ from them and is
     /// added to them, so a later worksheet cannot take it.
     /// </param>
     public void AppendDataValidations(
-        Utf8XmlBuffer xml, IReadOnlyList<WorksheetColumn> columns, int lastRow, HashSet<string> worksheetNames) {
-        if (lastRow < 2) return;
+        Utf8XmlBuffer xml, IReadOnlyList<WorksheetColumn> columns, int firstRow, int lastRow, HashSet<string> worksheetNames) {
+        if (lastRow < firstRow) return;
 
         var count = 0;
         foreach (var column in columns)
@@ -51,7 +53,8 @@ internal sealed class SpreadsheetDropdowns {
             // A blank cell stays allowed: whether a value is required is the reader's to say, with the row's number.
             xml.Append("<dataValidation type=\"list\" allowBlank=\"1\" showErrorMessage=\"1\" sqref=\""u8);
             xml.AppendRaw(letters);
-            xml.Append("2:"u8);
+            xml.AppendFormatted(firstRow);
+            xml.Append((byte)':');
             xml.AppendRaw(letters);
             xml.AppendFormatted(lastRow);
             xml.Append("\"><formula1>"u8);
