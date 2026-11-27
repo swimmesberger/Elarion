@@ -163,4 +163,116 @@ public sealed class SortMapTests {
         data.FieldErrors!["orderBy"].Should().ContainSingle()
             .Which.Should().Be("Unknown sort key 'unknown'. Allowed keys: id, name.");
     }
+
+    private sealed record Contact(int Id, string City, string Name);
+
+    private static readonly Contact[] Contacts = [
+        new(1, "Linz", "Bauer"),
+        new(2, "Graz", "Huber"),
+        new(3, "Linz", "Auer"),
+        new(4, "Graz", "Huber"),
+        new(5, "Wien", "Auer")
+    ];
+
+    private static readonly SortMap<Contact> ContactSort = SortMap<Contact>
+        .CreateBuilder("id", c => c.Id)
+        .Add("city", c => c.City)
+        .ThenBy(c => c.Id, SortDirection.Descending)
+        .Add("name", c => c.Name, SortDirection.Descending)
+        .ThenBy(c => c.Id)
+        .Build();
+
+    [Fact]
+    public void Apply_SeveralKeys_OrderLeftToRight_ThenTheLastKeysTiebreakers() {
+        var ids = ContactSort.Apply(Contacts.AsQueryable(), "+city,-name").Select(c => c.Id).ToArray();
+
+        // Graz (Huber 2, Huber 4: tie broken by name's tiebreaker, Id ascending), Linz (Bauer, Auer), Wien.
+        ids.Should().Equal(2, 4, 1, 3, 5);
+    }
+
+    [Fact]
+    public void Apply_SeveralKeys_BareKeyKeepsItsDeclaredDirection_AndSpacesAreIgnored() {
+        // A bare "name" is descending (its declaration); "+name" is ascending.
+        ContactSort.Apply(Contacts.AsQueryable(), " city , name ").Select(c => c.Id).ToArray()
+            .Should().Equal(2, 4, 1, 3, 5);
+        ContactSort.Apply(Contacts.AsQueryable(), "-city,+name").Select(c => c.Id).ToArray()
+            .Should().Equal(5, 3, 1, 2, 4);
+    }
+
+    [Fact]
+    public void Apply_SingleKey_KeepsItsOwnTiebreakers() {
+        // city's own tiebreaker is Id descending: Graz 4, 2; Linz 3, 1; Wien 5.
+        ContactSort.Apply(Contacts.AsQueryable(), "city").Select(c => c.Id).ToArray().Should().Equal(4, 2, 3, 1, 5);
+    }
+
+    [Theory]
+    [InlineData("city,city")]
+    [InlineData("city,-CITY")]
+    [InlineData("city,unknown")]
+    [InlineData("city,")]
+    [InlineData("city,name,id,city")]
+    public void Apply_RefusedSort_FallsBackToTheDefault(string sort) {
+        ContactSort.Apply(Contacts.AsQueryable(), sort).Select(c => c.Id).ToArray().Should().Equal(1, 2, 3, 4, 5);
+    }
+
+    [Fact]
+    public void Validate_SeveralKnownKeys_Pass() {
+        ContactSort.Validate("+city,-name").Should().BeNull();
+        ContactSort.Validate("city,name,id").Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("city,-City", "Sort key 'City' is repeated. Allowed keys: id, city, name.")]
+    [InlineData("city,zip", "Unknown sort key 'zip'. Allowed keys: id, city, name.")]
+    [InlineData("city,", "Unknown sort key ''. Allowed keys: id, city, name.")]
+    [InlineData("city,name,id,city", "A sort combines at most 3 keys. Allowed keys: id, city, name.")]
+    public void Validate_RefusedSort_FailsWithTheSortCode(string sort, string expected) {
+        var error = ContactSort.Validate(sort);
+
+        error!.Code.Should().Be(PagingErrorCodes.SortKeyUnknown);
+        error.Message.Should().Be(expected);
+        error.Data.Should().BeOfType<ValidationErrorData>().Subject.FieldErrors!["sort"].Should().Equal(expected);
+    }
+
+    [Fact]
+    public void Validate_MessageHook_FormatsTheRefusal() {
+        var error = ContactSort.Validate("plz", "orderBy", refusal =>
+            $"Unbekannter Sortierschlüssel „{refusal.Key}“ ({refusal.Reason}, {refusal.AllowedKeys.Count} erlaubt).");
+
+        const string expected = "Unbekannter Sortierschlüssel „plz“ (UnknownKey, 3 erlaubt).";
+        error!.Message.Should().Be(expected);
+        error.Data.Should().BeOfType<ValidationErrorData>().Subject.FieldErrors!["orderBy"].Should().Equal(expected);
+    }
+
+    [Fact]
+    public void MaxLevels_One_AllowsASingleKeyOnly() {
+        var map = SortMap<Contact>.CreateBuilder("id", c => c.Id).Add("city", c => c.City).MaxLevels(1).Build();
+
+        map.MaxLevels.Should().Be(1);
+        map.Validate("city").Should().BeNull();
+        map.Validate("city,id")!.Code.Should().Be(PagingErrorCodes.SortKeyUnknown);
+        ContactSort.MaxLevels.Should().Be(SortMap<Contact>.DefaultMaxLevels);
+    }
+
+    [Fact]
+    public void MaxLevels_BelowOne_Throws() {
+        var act = () => SortMap<Contact>.CreateBuilder("id", c => c.Id).MaxLevels(0);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void Validate_HostileSortOfManyKeys_IsRefusedWithoutLookingUpEveryKey() {
+        // 200,000 keys in one parameter: refused on the level count, in one pass over the text.
+        var hostile = string.Join(',', Enumerable.Repeat("city", 200_000));
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var error = ContactSort.Validate(hostile);
+        var ids = ContactSort.Apply(Contacts.AsQueryable(), hostile).Select(c => c.Id).ToArray();
+        watch.Stop();
+
+        error!.Message.Should().StartWith("A sort combines at most 3 keys.");
+        ids.Should().Equal(1, 2, 3, 4, 5);
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
+    }
 }

@@ -58,4 +58,44 @@ public sealed class PageMapTests {
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*returned 2 items for a page of 3*");
     }
+
+    private static readonly OffsetPage<int> Offset = new() { Items = [4, 5], Total = 12, HasNext = true };
+
+    [Fact]
+    public void OffsetPage_Map_ProjectsEveryItemAndKeepsTotalAndFlags() {
+        var mapped = Offset.Map(i => $"#{i}");
+
+        mapped.Should().BeEquivalentTo(new OffsetPage<string> {
+            Items = ["#4", "#5"], Total = 12, HasNext = true, HasPrevious = false
+        });
+    }
+
+    [Fact]
+    public async Task OffsetPage_MapAsync_ProjectsTheListAtOnce_AndRefusesAMismatchedCount() {
+        var mapped = await Offset.MapAsync<string>(
+            (items, _) => ValueTask.FromResult<IReadOnlyList<string>>(items.Select(i => $"#{i}").ToArray()),
+            TestContext.Current.CancellationToken);
+
+        mapped.Items.Should().Equal("#4", "#5");
+        mapped.Total.Should().Be(12);
+
+        var act = async () => await Offset.MapAsync<string>(
+            (_, _) => ValueTask.FromResult<IReadOnlyList<string>>(["one"]), TestContext.Current.CancellationToken);
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*returned 1 items for a page of 2*");
+    }
+
+    [Fact]
+    public void OffsetPage_Empty_HasATotalOfZero() {
+        OffsetPage<int>.Empty.Items.Should().BeEmpty();
+        OffsetPage<int>.Empty.Total.Should().Be(0);
+        OffsetPage<int>.Empty.HasNext.Should().BeFalse();
+    }
+
+    [Fact]
+    public void OffsetPage_ToPage_KeepsTotalAndFlagsWithoutCursors() {
+        var page = Offset.ToPage();
+
+        page.Should().BeEquivalentTo(new Page<int> { Items = [4, 5], Total = 12, HasNext = true });
+        page.StartCursor.Should().BeNull();
+    }
 }

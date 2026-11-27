@@ -137,8 +137,21 @@ minor releases may include breaking changes.
   validated through `IRequestValidator.ValidateAsync`. A marked type with validation attributes outside every module is
   the build error `ELVAL004`; `ELVAL002` now also covers such a type in a compilation without `Elarion.Validation`. See
   [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation#validating-outside-a-handler-request).
+- **`SortMap`: sort by several keys** (ADR-0120). `sort=+city,-name` orders by `City`, then `Name` descending, then
+  the last key's declared tiebreakers; a single key keeps its meaning. A sort combines at most three keys unless the
+  builder sets `MaxLevels(n)`; a repeated or empty key, or a sort above the cap, is refused like an unknown key (`Apply`
+  falls back to the default, `Validate` answers `paging.sort_key_unknown`). `Validate` takes an optional `message`
+  function that words a refusal (`SortRefusal`: reason, key, allowed keys, cap), for an application that does not show
+  English. A sort parameter of 200,000 keys is refused in 0.09 ms and 1.5 KB instead of 0.37 ms and 4 MB. See
+  [Pagination](https://elarion.wimmesberger.dev/docs/capabilities/pagination#sorting-by-several-keys).
 
 ### Changed
+- **BREAKING: `ToOffsetPageAsync` returns `OffsetPage<T>`** (ADR-0120). Offset lists get their own envelope: `Items`,
+  a required `Total`, `HasNext` and `HasPrevious`, with `Map`, `MapAsync`, `Empty` (total `0`) and `ToPage()`. The
+  generated TypeScript type of an offset list is `{ items, total: number, hasNext, hasPrevious }` instead of carrying a
+  nullable total and two cursors that were always `null`. Change a handler's result from `Result<Page<T>>` to
+  `Result<OffsetPage<T>>`, or call `.ToPage()` to keep the `Page<T>` wire contract. `Page<T>` stays the keyset
+  envelope. See [Pagination](https://elarion.wimmesberger.dev/docs/capabilities/pagination).
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
   type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
   member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.

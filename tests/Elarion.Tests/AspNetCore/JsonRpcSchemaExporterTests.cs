@@ -197,6 +197,26 @@ public sealed class JsonRpcSchemaExporterTests {
     }
 
     [Fact]
+    public void Generate_OffsetPageResult_RequiresTheTotal_AndHasNoCursors() {
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var dispatcher = new JsonRpcDispatcher(options)
+            .MapDelegate<PingRequest, Elarion.Abstractions.Paging.OffsetPage<PingResponse>>(
+                "sample.list",
+                (_, _, _) => ValueTask.FromResult<Result<Elarion.Abstractions.Paging.OffsetPage<PingResponse>>>(
+                    Elarion.Abstractions.Paging.OffsetPage<PingResponse>.Empty))
+            .Freeze();
+
+        using var doc = JsonDocument.Parse(JsonRpcSchemaExporter.Generate(dispatcher, options));
+        var result = doc.RootElement.GetProperty("methods").GetProperty("sample.list").GetProperty("result");
+
+        // What the generated client types as `total: number`: required, and not nullable.
+        result.GetProperty("required").EnumerateArray().Select(static name => name.GetString())
+            .Should().Contain(["items", "total"]);
+        result.GetProperty("properties").GetProperty("total").GetProperty("type").GetString().Should().Be("integer");
+        result.GetProperty("properties").TryGetProperty("startCursor", out _).Should().BeFalse();
+    }
+
+    [Fact]
     public void Generate_AllowedValuesOnANullableMember_ListsNullInTheEnum() {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         var dispatcher = new JsonRpcDispatcher(options)

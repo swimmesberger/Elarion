@@ -2,6 +2,7 @@
 
 ## 2026-11-27
 
+* **Creation**: [ADR-0120](decisions/0120-offset-pages-and-multi-key-sorts.md): offset lists return `OffsetPage<T>` with a required total, and a `SortMap` sort may combine several keys
 * **Update**: [ADR-0027](decisions/0027-declarative-request-validation.md) amended: `[AllowedValues]` on a nullable member lets `null` pass and exports it in the `enum`
 * **Update**: contact groups built ([ADR-0114](decisions/0114-contact-groups.md)): the [contacts](capabilities/contacts.mdx) and [CardDAV](capabilities/carddav.mdx) pages describe them, the [glossary](../GLOSSARY.md) gains *contact group*, and the [DAV conformance](research/2026-11-27-dav-conformance-suites.md) note no longer lists group cards among the pinned differences.
 * **Update**: [ADR-0114](decisions/0114-contact-groups.md) accepted and specs [0005](../specs/0005-vcard-contacts.md) and [0007](../specs/0007-carddav-address-books.md) approved again with the contact-group requirements; implementation follows plan 0005.
