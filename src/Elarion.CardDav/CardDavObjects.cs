@@ -17,7 +17,7 @@ internal static class CardDavObjects {
     /// </summary>
     /// <exception cref="ArgumentException">The contact has no UID, or nothing to show as its <c>FN</c> (FR-010, FR-031).</exception>
     /// <exception cref="ContactWriteException">The writer cannot represent the contact.</exception>
-    public static async ValueTask<DavObjectContent> ToContentAsync(Contact contact, CancellationToken cancellationToken) {
+    public static async ValueTask<DavObjectContent> ToContentAsync(Contact contact, ContactReadOptions readOptions, CancellationToken cancellationToken) {
         if (string.IsNullOrEmpty(contact.Uid))
             throw new ArgumentException("A published contact needs a UID: it names the contact's URL and keeps it stable.", nameof(contact));
         // The 3.0 writer writes FN from the display name; an empty FN makes Apple drop the card silently.
@@ -25,6 +25,13 @@ internal static class CardDavObjects {
             throw new ArgumentException(
                 $"The contact '{contact.Uid}' has nothing to show as its name (no formatted name, name, organization, e-mail or phone); "
                 + "contacts apps would drop it.", nameof(contact));
+
+        // Every stored card must read back to be converted or queried (FR-034); a large group is the usual way past the limit.
+        var count = contact.ToProperties(ContactFormatVersion.V3_0).Count + 1;
+        if (count > readOptions.MaxPropertiesPerContact)
+            throw new ArgumentException(
+                $"The contact '{contact.Uid}' has {count} properties, more than ContactReadOptions.MaxPropertiesPerContact "
+                + $"({readOptions.MaxPropertiesPerContact}); raise CardDav:ContactRead:MaxPropertiesPerContact for larger groups.", nameof(contact));
 
         var bytes = await WriteAsync(contact, ContactFormatVersion.V3_0, cancellationToken).ConfigureAwait(false);
         return new DavObjectContent {

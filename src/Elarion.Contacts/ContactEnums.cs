@@ -1,12 +1,28 @@
 namespace Elarion.Contacts;
 
-/// <summary>Whether a contact is a person or an organization (FR-025).</summary>
+/// <summary>Whether a contact is a person, an organization or a group (FR-025, FR-068).</summary>
 public enum ContactKind {
-    /// <summary>A person; every contact that is not marked as an organization.</summary>
+    /// <summary>A person; every contact that is not marked as an organization or a group.</summary>
     Individual,
 
     /// <summary>An organization: <c>KIND:org</c> (vCard 4.0) or Apple's <c>X-ABSHOWAS:COMPANY</c> (vCard 3.0).</summary>
     Organization,
+
+    /// <summary>
+    /// A group of contacts, whose references are <see cref="Contact.Members"/>: <c>KIND:group</c> (vCard 4.0) or Apple's
+    /// <c>X-ADDRESSBOOKSERVER-KIND:group</c> (vCard 3.0), ADR-0114.
+    /// </summary>
+    Group,
+}
+
+/// <summary>References to the members of a group contact (FR-069).</summary>
+public static class ContactMember {
+    /// <summary>The reference to the contact whose UID is <paramref name="uid"/>: <c>urn:uuid:{uid}</c>, as Apple and RFC 6350 write it.</summary>
+    /// <exception cref="ArgumentException"><paramref name="uid"/> is empty.</exception>
+    public static string FromUid(string uid) {
+        ArgumentException.ThrowIfNullOrEmpty(uid);
+        return "urn:uuid:" + uid;
+    }
 }
 
 /// <summary>

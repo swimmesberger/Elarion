@@ -88,6 +88,13 @@ public sealed class Contact : IEquatable<Contact> {
     public string? Uid { get; init; }
 
     /// <summary>
+    /// The member references of a group (<see cref="ContactKind.Group"/>), in order: URIs such as
+    /// <c>urn:uuid:{uid}</c> (<see cref="ContactMember.FromUid"/>) or <c>mailto:</c> addresses (<c>MEMBER</c> in vCard 4.0,
+    /// <c>X-ADDRESSBOOKSERVER-MEMBER</c> in 3.0; FR-069). Empty for every other contact.
+    /// </summary>
+    public IReadOnlyList<string> Members { get; init; } = [];
+
+    /// <summary>
     /// The properties the model does not map (<c>IMPP</c>, <c>X-SOCIALPROFILE</c>, <c>AGENT</c>, a second <c>PHOTO</c>,
     /// …), with their group, parameters and still-escaped value, written back as they were read (FR-060). The
     /// <c>CHARSET</c> and quoted-printable <c>ENCODING</c> parameters are left out, because the value is decoded.
@@ -160,6 +167,7 @@ public sealed class Contact : IEquatable<Contact> {
             && Categories.SequenceEqual(other.Categories)
             && Equals(Photo, other.Photo)
             && Uid == other.Uid
+            && Members.SequenceEqual(other.Members)
             && AdditionalProperties.SequenceEqual(other.AdditionalProperties);
     }
 

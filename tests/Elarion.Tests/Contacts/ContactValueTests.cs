@@ -180,13 +180,15 @@ public sealed class ContactValueTests {
     [Fact]
     public void Equality_CoversEveryMemberOfTheModel() {
         // A new member must join Contact.Equals; this count fails until the test below lists it too.
-        typeof(Contact).GetProperties().Select(static p => p.Name).Should().HaveCount(20);
+        typeof(Contact).GetProperties().Select(static p => p.Name).Should().HaveCount(21);
         var baseline = new Contact { FormattedName = "A" };
         Contact[] variants = [
             new() { FormattedName = "B" },
             new() { FormattedName = "A", Name = new ContactName("x", null, null, null, null) },
             new() { FormattedName = "A", Nicknames = ["n"] },
             new() { FormattedName = "A", Kind = ContactKind.Organization },
+            new() { FormattedName = "A", Kind = ContactKind.Group },
+            new() { FormattedName = "A", Kind = ContactKind.Group, Members = ["urn:uuid:a"] },
             new() { FormattedName = "A", Organization = "o" },
             new() { FormattedName = "A", Department = "d" },
             new() { FormattedName = "A", Title = "t" },

@@ -328,7 +328,7 @@ Address books work the same way — `Elarion.CardDav` (ADR-0113): `AddElarionCar
 `MapElarionDav()`; an `ICardDavSource<TSelf>` query handler registered with `AddElarionCardDavSource<TQuery>()` decides
 who sees which address book, and the handler that changes the data calls
 `ICardDavPublisher.PublishAsync(new CardDavAddress(source, key), contact, ct)` (the `Contact` needs `Uid` and a name).
-Apple clients use one address book per account: publish one per user for them. No groups, feeds or client.
+Apple clients use one address book per account: publish one per user for them, with groups (`ContactKind.Group`, `Members = [ContactMember.FromUid(uid)]`) for subsets. No feeds or client.
 
 Don't hand-roll Web Push either — `Elarion.WebPush` owns notifying users whose app is **closed** (ADR-0076):
 `AddElarionWebPushEntityFrameworkCore<TDbContext>(o => o.Subject = "mailto:…")` + `[GenerateElarionWebPush]`

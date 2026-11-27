@@ -389,6 +389,12 @@ line), never as an exception; an error does not take the contact away. The appli
 code.
 _Avoid_: vCard contact, vCard record, contact DTO, card (for the model)
 
+**Contact group**:
+A contact of kind group (`ContactKind.Group`) whose members are references to other contacts, usually
+`urn:uuid:{uid}`; written as Apple's `X-ADDRESSBOOKSERVER-KIND:group` in vCard 3.0 and as `KIND:group` with `MEMBER` in
+4.0, and published over CardDAV like any contact.
+_Avoid_: distribution list, contact list, mailing list (for the card)
+
 **Migration plan**:
 The one ordered sequence in which SQL scripts, C# code steps and EF migrations run, with one version
 sequence, one history and one lock; roll-forward only.

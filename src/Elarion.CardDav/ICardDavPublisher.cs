@@ -49,11 +49,12 @@ public interface ICardDavPublisher {
 }
 
 /// <summary>The default <see cref="ICardDavPublisher"/> over the scoped <see cref="IDavCollectionStore"/>.</summary>
-internal sealed class CardDavPublisher(IDavCollectionStore store, DavSourceRegistry<CardDavSourceListing> sources) : ICardDavPublisher {
+internal sealed class CardDavPublisher(IDavCollectionStore store, DavSourceRegistry<CardDavSourceListing> sources, Microsoft.Extensions.Options.IOptions<CardDavOptions> options)
+    : ICardDavPublisher {
     public async ValueTask<bool> PublishAsync(CardDavAddress address, Contact contact, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(contact);
         Guard(address);
-        var content = await CardDavObjects.ToContentAsync(contact, cancellationToken).ConfigureAwait(false);
+        var content = await CardDavObjects.ToContentAsync(contact, options.Value.ContactRead, cancellationToken).ConfigureAwait(false);
         return await store.PublishAsync(address.ToCollectionAddress(), content, cancellationToken).ConfigureAwait(false) != DavPublishOutcome.Unchanged;
     }
 
@@ -84,7 +85,7 @@ internal sealed class CardDavPublisher(IDavCollectionStore store, DavSourceRegis
         var uids = new HashSet<string>(StringComparer.Ordinal);
         await foreach (var contact in contacts.WithCancellation(cancellationToken).ConfigureAwait(false)) {
             ArgumentNullException.ThrowIfNull(contact);
-            var content = await CardDavObjects.ToContentAsync(contact, cancellationToken).ConfigureAwait(false);
+            var content = await CardDavObjects.ToContentAsync(contact, options.Value.ContactRead, cancellationToken).ConfigureAwait(false);
             if (!uids.Add(content.Uid))
                 throw new ArgumentException($"Two contacts of the set have the UID '{content.Uid}'; a UID is unique within an address book.", nameof(contacts));
             contents.Add(content);

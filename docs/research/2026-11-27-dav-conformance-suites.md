@@ -90,7 +90,6 @@ Faults, each fixed with its test:
 | RANGE=THISANDFUTURE override | replaces its own instance only | Apple: shifts later ones |
 | An expand over the occurrence cap | the first instances, 207 | sabre throws, Radicale 400, Cyrus 422 |
 | A 500 to a stored sync token (client) | an error, the caller keeps its state | CCS answers stale tokens with 500 |
-| Apple group cards as vCard 4.0 | kept as X-ADDRESSBOOKSERVER properties | sabre, Cyrus: `KIND:group`, `MEMBER` |
 | A missing component set (client) | events and to-dos | RFC 4791 §5.2.3: all |
 
 ## Deliberately not ported

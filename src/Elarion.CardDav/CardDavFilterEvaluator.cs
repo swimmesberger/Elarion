@@ -67,7 +67,14 @@ internal static class CardDavFilterEvaluator {
     // RFC 6352 §10.5.1: the prop-filter matches when a property of its name passes its tests; is-not-defined when none is there.
     private static bool MatchPropFilter(IReadOnlyList<ContactProperty> properties, DavXmlElement filter) {
         var name = filter.Attribute("name")!.Trim();
-        var named = properties.Where(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)).ToList();
+        // Groups are stored as vCard 3.0 in Apple's form (ADR-0114); a 4.0 client searches them by KIND and MEMBER.
+        var alias = name.ToUpperInvariant() switch {
+            "KIND" => "X-ADDRESSBOOKSERVER-KIND",
+            "MEMBER" => "X-ADDRESSBOOKSERVER-MEMBER",
+            _ => null,
+        };
+        var named = properties.Where(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)
+                                          || (alias is not null && string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase))).ToList();
         if (filter.Child(DavNames.Card.IsNotDefined) is not null) return named.Count == 0;
         if (named.Count == 0) return false;
         var tests = filter.Children.Where(static c => c.Is(DavNames.Card.TextMatch) || c.Is(DavNames.Card.ParamFilter)).ToList();

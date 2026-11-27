@@ -411,13 +411,12 @@ public sealed class CardDavConformanceTests {
     }
 
     /// <summary>
-    /// sabre/vobject VCardConverterTest testConvertGroupCard (V05) and Cyrus convert Apple's group card
-    /// (<c>X-ADDRESSBOOKSERVER-KIND:group</c>, <c>X-ADDRESSBOOKSERVER-MEMBER</c>) to <c>KIND:group</c> and <c>MEMBER</c> in
-    /// vCard 4.0. Elarion's choice, pinned: contact groups are out of scope (ADR-0113 section 4), so the 4.0 card keeps
-    /// Apple's properties as the 3.0 card had them, losslessly, and no group is invented.
+    /// sabre/vobject VCardConverterTest testConvertGroupCard (V05): Apple's group card
+    /// (<c>X-ADDRESSBOOKSERVER-KIND:group</c> and <c>X-ADDRESSBOOKSERVER-MEMBER</c>) read as vCard 4.0 is a
+    /// <c>KIND:group</c> card with <c>MEMBER</c> properties and none of Apple's (ADR-0114, spec 0007 FR-032).
     /// </summary>
     [Fact]
-    public async Task AnAppleGroupCard_ReadAsVCard40_KeepsApplesPropertiesAsTheyAre() {
+    public async Task AnAppleGroupCard_ReadAsVCard40_IsAKindGroupCardWithMembers() {
         await using var harness = CardDavTestHarness.Create();
         await harness.PublishAsync("customers", "all", await ReadContactAsync(Card("VERSION:3.0", "UID:group-1", "FN:Team",
             "X-ADDRESSBOOKSERVER-KIND:group", "X-ADDRESSBOOKSERVER-MEMBER:urn:uuid:a", "X-ADDRESSBOOKSERVER-MEMBER:urn:uuid:b")));
@@ -427,8 +426,8 @@ public sealed class CardDavConformanceTests {
         var text = answer.Prop(BookHref + "group-1.vcf", DavNames.Card.AddressData)!.Text;
         var card = (await ReadEntryAsync(text)).Properties;
 
-        card.Should().NotContain(static p => p.Name == "KIND" || p.Name == "MEMBER", text);
-        card.Where(static p => p.Name == "X-ADDRESSBOOKSERVER-KIND").Select(static p => p.Value).Should().Equal("group");
-        card.Where(static p => p.Name == "X-ADDRESSBOOKSERVER-MEMBER").Select(static p => p.Value).Should().Equal("urn:uuid:a", "urn:uuid:b");
+        card.Where(static p => p.Name == "KIND").Select(static p => p.Value.ToUpperInvariant()).Should().Equal(["GROUP"], text);
+        card.Where(static p => p.Name == "MEMBER").Select(static p => p.Value).Should().Equal("urn:uuid:a", "urn:uuid:b");
+        card.Should().NotContain(static p => p.Name.StartsWith("X-ADDRESSBOOKSERVER-", StringComparison.OrdinalIgnoreCase));
     }
 }

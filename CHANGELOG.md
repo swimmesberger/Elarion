@@ -83,6 +83,11 @@ minor releases may include breaking changes.
   collation, `limit`); `address-data` and `Accept` convert a card to vCard 4.0 with the stored ETag. `MapElarionDav()`
   adds `/.well-known/carddav`, and `OPTIONS` names `addressbook`. `CardDavOptions` embeds `ContactReadOptions`. See
   [CardDAV](https://elarion.wimmesberger.dev/docs/capabilities/carddav).
+- **Contact groups** (ADR-0114). `ContactKind.Group` and `Contact.Members` (built with `ContactMember.FromUid`) read
+  from `KIND:group`/`MEMBER` and Apple's `X-ADDRESSBOOKSERVER-KIND`/`X-ADDRESSBOOKSERVER-MEMBER`, and are written in Apple's
+  form in vCard 3.0 and as `KIND:group` with `MEMBER` in 4.0. `Elarion.CardDav` publishes groups, converts them between
+  the versions, and matches `KIND` and `MEMBER` filters against either form; publishing a contact with more properties
+  than `CardDav:ContactRead:MaxPropertiesPerContact` throws.
 - **DAV conformance with other projects' suites.** About 420 cases from Apple's CalDAVTester, litmus, sabre/dav,
   Radicale, Xandikos, Cyrus, python-caldav, dav4jvm and vdirsyncer now run as Elarion's tests, and the faults they found
   are fixed. `CalDavClient` reads a propstat without status as 200, removes what a multiget leaves out, lets the last

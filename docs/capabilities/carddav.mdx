@@ -136,12 +136,33 @@ photos over 1 MB.
   alert or copy it into the default account, and an account whose address books are all read-only cannot be iOS's
   default contacts account.
 
+## Groups
+
+A group is a contact of kind `ContactKind.Group` whose `Members` reference the contacts in it, published like any
+contact, usually into the same address book:
+
+```csharp
+await addressBooks.PublishAsync(new CardDavAddress("customers", "all"), new Contact {
+    Uid = $"team-{team.Id}",
+    FormattedName = team.Name,
+    Kind = ContactKind.Group,
+    Members = [.. team.MemberIds.Select(id => ContactMember.FromUid(id.ToString()))],
+}, ct);
+```
+
+The stored card is Apple's form (`X-ADDRESSBOOKSERVER-KIND:group`, `X-ADDRESSBOOKSERVER-MEMBER`); a client asking for
+vCard 4.0 gets `KIND:group` with `MEMBER`, under the same ETag, and an `addressbook-query` on `KIND` or `MEMBER` finds
+either form. Apple's Contacts shows groups as groups, which is the only way to show subsets within the one address book
+it reads per account; DAVx5 does when the account uses "groups are separate vCards", and in its "categories" mode
+groups by `Categories`, which the application sets on the members if it wants both; Thunderbird shows a group as a
+plain card. Members are not checked against the address book. A group counts one property per member against
+`CardDav:ContactRead:MaxPropertiesPerContact` (1,000 by default): publishing a larger one throws until the limit is
+raised.
+
 ## What is not there
 
-Contact groups as cards (`KIND:group`, Apple's `X-ADDRESSBOOKSERVER-KIND`), two-way editing, a CardDAV client, vCard
-feed URLs (no contacts app subscribes to a URL; Outlook and Google Contacts import a `.vcf` file, which
-`ContactWriter.ToStreamedFile` produces) and Apple's directory gateway. Group contacts by address book, or by
-`Categories`, which the published card carries.
+Two-way editing, a CardDAV client, vCard feed URLs (no contacts app subscribes to a URL; Outlook and Google Contacts
+import a `.vcf` file, which `ContactWriter.ToStreamedFile` produces) and Apple's directory gateway.
 
 ## Configuration
 
@@ -151,5 +172,6 @@ feed URLs (no contacts app subscribes to a URL; Outlook and Google Contacts impo
 | Key | Default |
 | --- | --- |
 | `CardDav:ContactRead:MaxBytes` (and the other `ContactReadOptions` keys) | `33554432` |
+| `CardDav:ContactRead:MaxPropertiesPerContact` (also the largest card, so the largest group, that can be published) | `1000` |
 
 The store, journal and request limits are `WebDav`'s; see [CalDAV](/docs/capabilities/caldav#configuration).
