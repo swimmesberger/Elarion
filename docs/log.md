@@ -2,6 +2,7 @@
 
 ## 2026-11-27
 
+* **Update**: ADR-0078 amended — a declared `FallbackConfigurationKey` layer below the store, and read-your-writes through the manager rather than a per-request projection ([ADR-0078](decisions/0078-settings-definitions-and-effective-value-resolver.md))
 * **Update**: ADR-0095 amended — `HoldersOf`/`MembersOf` over the principal directory and the `RequireUserId` building block ([ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md))
 * **Update**: ADR-0073 amended — the claim returns its candidate and given-up counts, and a logger helper states the lost-claim line ([ADR-0073](decisions/0073-leased-work-rows.md))
 * **Update**: ADR-0003 amended — `[NoTransaction]` and `IUnitOfWorkFailureTranslator` on the transaction decorator, and why queries get no read-only transaction ([ADR-0003](decisions/0003-decorator-attachment-predicates.md))

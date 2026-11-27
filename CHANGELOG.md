@@ -166,6 +166,14 @@ minor releases may include breaking changes.
   `UseElarionCurrentUser()` does, for an endpoint whose route group authenticates with its own scheme after the
   middleware ran. See
   [Current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user#endpoints-that-authenticate-later).
+- **Settings: deployment configuration under the stored value** (ADR-0078 amendment).
+  `[Setting(FallbackConfigurationKey = "Email:Smtp:Host")]` makes the effective value the stored one, else the
+  non-blank deployment value at that key, else the default, in the global scope; unlike `Pinnable` it never refuses a
+  write, and a reset brings the deployment value back. The resolver reports it as
+  `SettingSource.ConfigurationFallback`, `Watch` fires on configuration reloads, and the projection carries it at the
+  setting's key. `ELSDEF008` reports a blank or malformed key, or one on a setting without the global scope. The
+  settings page now says how to read your own write (through `ISettingsManager`; the projection follows after the
+  commit). See [Settings](https://elarion.wimmesberger.dev/docs/concepts/settings#the-effective-value-resolver).
 
 ### Changed
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a

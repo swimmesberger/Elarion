@@ -9,7 +9,13 @@ public enum SettingSource {
     Store,
 
     /// <summary>A deployment-configuration value that pins the definition (<c>IConfiguration</c>).</summary>
-    Configuration
+    Configuration,
+
+    /// <summary>
+    /// The deployment-configuration value at the definition's fallback key, used because nothing is stored. It does
+    /// not pin: a stored value replaces it.
+    /// </summary>
+    ConfigurationFallback
 }
 
 /// <summary>
@@ -20,8 +26,9 @@ public enum SettingSource {
 /// <param name="Source">The layer the value came from.</param>
 /// <param name="IsPinned">Whether deployment configuration pins the definition, so runtime writes are refused.</param>
 /// <param name="ValueJson">
-/// The effective value as canonical JSON text for <see cref="SettingSource.Store"/> and
-/// <see cref="SettingSource.Configuration"/> (decrypted for secrets — handle accordingly), or
+/// The effective value as canonical JSON text for <see cref="SettingSource.Store"/>,
+/// <see cref="SettingSource.Configuration"/> and <see cref="SettingSource.ConfigurationFallback"/> (decrypted for
+/// secrets — handle accordingly), or
 /// <see langword="null"/> for <see cref="SettingSource.Default"/>: the default is read from the definition.
 /// </param>
 /// <param name="Version">The store entry's version when the value came from the store, otherwise <see langword="null"/>.</param>
@@ -129,7 +136,7 @@ public sealed record SettingWriteFailure(string Key);
 /// <param name="Version">The store entry's version when <paramref name="Source"/> is <see cref="SettingSource.Store"/>.</param>
 /// <param name="IsPinned">Whether deployment configuration pins the definition.</param>
 public readonly record struct SettingValue<T>(T Value, SettingSource Source, int? Version, bool IsPinned) {
-    /// <summary>Whether the value was set explicitly (stored or pinned) rather than defaulted.</summary>
+    /// <summary>Whether the value was set (stored, pinned, or configured at the fallback key) rather than defaulted.</summary>
     public bool IsSet => Source != SettingSource.Default;
 }
 
