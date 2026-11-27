@@ -140,7 +140,7 @@ public sealed class TypstCompilerTests : IDisposable {
     public async Task Compiler_factory_compiles_without_a_service_provider() {
         var options = new TypstOptions { WorkingDirectory = _workingDirectory };
         Assert.SkipUnless(new TypstToolchain(options).ExecutableExists, "Typst is not available.");
-        using var compiler = TypstCompiler.Create(options, NullLoggerFactory.Instance);
+        var compiler = TypstCompiler.Create(options, NullLoggerFactory.Instance);
 
         await using var pdf = await compiler.CompilePdfAsync(InvoiceRequest(), TestContext.Current.CancellationToken);
 

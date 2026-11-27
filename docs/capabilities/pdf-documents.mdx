@@ -531,14 +531,25 @@ Assert.SkipUnless(toolchain.ExecutableExists, $"Typst is not available at '{tool
 
 - **A compiler without a host.** `TypstCompiler.Create(options, loggerFactory)` builds the compiler that
   `AddElarionTypst` registers, without a service collection. Use it when a test needs its own executable (a stand-in
-  script), package directory, or working directory. The logger factory is optional:
+  script), package directory, or working directory. The logger factory is optional. The compiler is not disposable:
+  it holds no process, file, or handle between compilations, so a test kit can create one per test and drop it. Dispose
+  each `TypstPdf` it returns, which deletes the output file.
 
 ```csharp
 var options = new TypstOptions { WorkingDirectory = workspace, PackagePath = emptyPackages };
-using var compiler = TypstCompiler.Create(options);
+var compiler = TypstCompiler.Create(options);
 
 var act = () => compiler.CompilePdfAsync(request, cancellationToken);
 await act.Should().ThrowAsync<TypstPackageNotFoundException>();   // the "templates not installed" path
+```
+
+- **A missing package without the binary.** `Create` runs no startup check, so `RequiredPackages` is not checked and
+  a missing package shows only as `TypstPackageNotFoundException` from a compilation, which needs the Typst executable.
+  To test the "templates not installed" path on a machine without Typst, ask the toolchain: `HasPackage` only looks
+  for the package's `typst.toml` and runs nothing.
+
+```csharp
+new TypstToolchain(options).HasPackage("@local/acme-documents:1.0.0").Should().BeFalse();
 ```
 
 ## Telemetry
