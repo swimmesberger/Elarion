@@ -249,8 +249,11 @@ minor releases may include breaking changes.
   settings page now says how to read your own write (through `ISettingsManager`; the projection follows after the
   commit). See [Settings](https://elarion.wimmesberger.dev/docs/concepts/settings#the-effective-value-resolver).
 - **`SortMap`: sort by several keys** (ADR-0120). `sort=+city,-name` orders by `City`, then `Name` descending, then
-  the last key's declared tiebreakers; a single key keeps its meaning. A sort combines at most three keys unless the
-  builder sets `MaxLevels(n)`; a repeated or empty key, or a sort above the cap, is refused like an unknown key (`Apply`
+  the last key's declared tiebreakers; a single key keeps its meaning. **Every existing `SortMap` now accepts up to
+  three keys by default**, with no change to the handler: set `.MaxLevels(1)` on the builder to keep a list to one key,
+  and update a handler description that names one sort key. The schema exports the cap as `maxSortLevels` next to
+  `sortKeys`, and the generated client as `rpcMaxSortLevels['{method}']`, so a client reads how many keys it may
+  combine instead of copying it. A sort combines at most three keys unless the builder sets `MaxLevels(n)`; a repeated or empty key, or a sort above the cap, is refused like an unknown key (`Apply`
   falls back to the default, `Validate` answers `paging.sort_key_unknown`). `Validate` takes an optional `message`
   function that words a refusal (`SortRefusal`: reason, key, allowed keys, cap), for an application that does not show
   English. A sort parameter of 200,000 keys is refused in 0.09 ms and 1.5 KB instead of 0.37 ms and 4 MB. See
@@ -262,6 +265,10 @@ minor releases may include breaking changes.
   whose import names a package Typst cannot find throws `TypstPackageNotFoundException` (with `Package`, telemetry
   outcome `package_not_found`) instead of `TypstCompilationException`, so a missing package is no longer reported as a
   template defect. See [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#startup-check).
+- **Settings: `SettingValue<T>.IsStored`** (ADR-0078 amendment) is `true` only while the effective value is the
+  stored one (`Source == SettingSource.Store`). `IsSet` stays `Source != SettingSource.Default`, so it is also `true`
+  for a pin and for a value from the `FallbackConfigurationKey`; use `IsStored` to ask whether someone saved a value.
+  See [Settings](https://elarion.wimmesberger.dev/docs/concepts/settings).
 - **`Elarion.Typst`: asset and compiler conveniences.** `TypstAsset.IsValidName` and `TypstAsset.TryCreate` expose the
   asset-name rule, so a user-supplied name can be rejected with the application's own error; `TypstAsset.FromJson`
   serializes a second model into an asset the template reads with `json(assets.at("letterhead.json"))`;
@@ -274,6 +281,12 @@ minor releases may include breaking changes.
   caller could not tell a declined question from a failed call. The new error carries the `question` and the decision
   error as `cause`; code that recognised a cancel by `error.isDecisionRequired` checks for `RpcDecisionCancelledError`
   instead. Its first call also no longer adds an empty `decisions: []` to the params.
+- **BREAKING: `TypstCompiler` is no longer `IDisposable`** (ADR-0093 amendment). Its `Dispose` only disposed a
+  semaphore that holds no handle, so a test kit that creates a compiler per test with `TypstCompiler.Create` had
+  nothing to release. Remove `using` from `using var compiler = TypstCompiler.Create(...)`; keep disposing each
+  `TypstPdf`. `Create` runs no startup check, so `RequiredPackages` is not checked there: a test that needs the
+  missing-package answer without the Typst binary asks `new TypstToolchain(options).HasPackage(...)`. See
+  [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#testing).
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
   type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
   member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
@@ -335,14 +348,24 @@ minor releases may include breaking changes.
   `CalendarExpandOptions.ResolveOverrideVersions = false` keeps them all. `SkipCancelled` (off by default) leaves out
   `STATUS:CANCELLED` items, a cancelled override removing its instance. `EXRULE` is read into
   `CalendarItem.ExceptionRules`, applied in expansion (never to `DTSTART`) and written back in the item's fixed property
-  order, where it used to be an unmapped property written at the end. Repeated `BY` values count once, and a `BY` list
-  longer than its part has values no longer parses. New read options `MaxLines` (1,000,000), `MaxItems` (50,000, events
+  order, where it used to be an unmapped property written at the end. Repeated `BY` values count once, however many
+  there are (`BYMONTH=1,1,1` is January). `CalendarRecurrence.LatestVersions(items)` returns the items without the
+  override versions expansion drops, so an application that stores items keeps the version expansion keeps. New read options `MaxLines` (1,000,000), `MaxItems` (50,000, events
   and to-dos only) and `Strict` (refuses `COUNT` with `UNTIL`, skips values with control characters as
-  `calendar.control_character`); `CalendarErrorCodes.IsStructural(code)` names the errors about a file's form.
+  `calendar.control_character`); `CalendarErrorCodes.IsStructural(code)` names the errors about a file's form and
+  `IsLimit(code)` the ones that report a configured limit rather than a broken file.
   `CalendarRecurrence.Expand` and `CalendarReadResult.Expand` take a `CancellationToken`, and `ReadAsync` checks its token
   per item while mapping. See [Calendars](https://elarion.wimmesberger.dev/docs/capabilities/calendars#recurrences).
 
 ### Fixed
+- **`Elarion.Calendars`: a rule that repeats a `BY` value more often than the part has values parses again.** The
+  0.4.7 previews refused `RRULE:FREQ=DAILY;BYMONTH=1,1,…` with 101 items as `calendar.invalid_value`, although RFC 5545
+  allows repeats and the rule means January, so an importer that refuses broken rules refused the whole file. Repeats
+  are kept once whatever the list's length; the list is walked without an allocation per item (two million items parse
+  in about 20 ms), and the reader's line limit bounds its length as `calendar.line_too_long`.
+- **`Elarion.Calendars`: a file concatenated from several exports no longer loses calendars.** A byte-order mark before
+  a later `BEGIN:VCALENDAR` made the line malformed and the calendar after it vanished; a mark at the start of a line is
+  now nothing, as in `Elarion.Contacts`.
 - **`[AllowedValues]` on a nullable member refused a request that left the member out, and listing `null` broke the
   build.** The BCL attribute looks `null` up as one more value, so `[AllowedValues(30, 90, 365)] int? Days` answered a
   request without `days` with a validation error. Like `[Range]`, the rule now applies to a present value only: the

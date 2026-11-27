@@ -127,6 +127,22 @@ public sealed class CalendarReadingTests {
     }
 
     [Fact]
+    public async Task AFileConcatenatedWithAByteOrderMarkBeforeEachCalendar_KeepsEveryEvent() {
+        byte[] bom = [0xEF, 0xBB, 0xBF];
+        byte[] file = [
+            .. bom, .. Encoding.UTF8.GetBytes(Calendar(Event("UID:a", "DTSTART:20260101T090000Z", "SUMMARY:One"))),
+            .. bom, .. Encoding.UTF8.GetBytes(Calendar(Event("UID:b", "DTSTART:20260102T090000Z", "SUMMARY:Two"))),
+            .. bom, .. bom, .. Encoding.UTF8.GetBytes(Calendar(Event("UID:c", "DTSTART:20260103T090000Z", "SUMMARY:Three"))),
+        ];
+
+        var result = await ReadAsync(file);
+
+        result.Errors.Should().BeEmpty();
+        result.Events.Select(static e => e.Value!.Summary).Should().Equal("One", "Two", "Three");
+        result.ByteOrderMarkEncoding.Should().Be("utf-8");
+    }
+
+    [Fact]
     public async Task Windows1252File_ReadsWithTheFallback_AndSaysSo() {
         var text = Calendar(Event("UID:a", "DTSTART:20260101T090000Z", "SUMMARY:Müll"));
         var bytes = System.Text.CodePagesEncodingProvider.Instance.GetEncoding(1252)!.GetBytes(text);

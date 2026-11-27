@@ -3331,6 +3331,7 @@ describe('client exports (ADR-0100)', () => {
             {key: 'createdAt', direction: 'descending', default: true},
             {key: 'number', direction: 'ascending'},
           ],
+          maxSortLevels: 3,
         },
         'documents.upload': {
           params: {
@@ -3465,6 +3466,11 @@ describe('client exports (ADR-0100)', () => {
       '} as const',
     ].join('\n'))
     expect(generated.schemasSource).toContain([
+      'export const rpcMaxSortLevels = {',
+      '  "invoices.list": 3,',
+      '} as const',
+    ].join('\n'))
+    expect(generated.schemasSource).toContain([
       'export const rpcConstants = {',
       '  archive: {',
       '    enabled: true,',
@@ -3559,6 +3565,7 @@ describe('client exports (ADR-0100)', () => {
     for (const method of Object.values(plain.methods)) {
       delete method.presets
       delete method.sortKeys
+      delete method.maxSortLevels
     }
     delete plain.constants
     const statement = plain.methods['documents.upload'].params.properties?.statement as JsonSchema
@@ -3570,6 +3577,7 @@ describe('client exports (ADR-0100)', () => {
     expect(declared.clientSource).toBe(undeclared.clientSource)
     expect(undeclared.schemasSource).not.toContain('rpcPresets')
     expect(undeclared.schemasSource).not.toContain('rpcSortKeys')
+    expect(undeclared.schemasSource).not.toContain('rpcMaxSortLevels')
     expect(undeclared.schemasSource).not.toContain('rpcConstants')
     expect(undeclared.schemasSource).not.toContain('import type')
     expect(undeclared.schemasSource).toContain('statement: z.union([z.instanceof(Blob), z.string()]),')

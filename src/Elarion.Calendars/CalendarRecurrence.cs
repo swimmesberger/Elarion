@@ -12,7 +12,8 @@ namespace Elarion.Calendars;
 /// An override replaces the instance whose recurrence id it carries, even when it moves the instance into or out of
 /// the window; an override whose recurrence id is no instance is an extra occurrence, as the major clients treat it.
 /// The match is exact: an override of the right day at another time is an extra occurrence too. Of several overrides of
-/// one instance the latest counts (<see cref="CalendarExpandOptions.ResolveOverrideVersions"/>).
+/// one instance the latest counts (<see cref="CalendarExpandOptions.ResolveOverrideVersions"/>); <see cref="LatestVersions"/>
+/// returns the items with the same versions dropped.
 /// <c>RANGE=THISANDFUTURE</c> is read as an override of its one instance. A <c>DURATION</c>'s whole days count in
 /// wall-clock time, its remainder in elapsed time. Expansion is CPU-bound and synchronous: an application expanding
 /// uploaded files passes a token with a time budget and runs it off the request thread when that matters.
@@ -73,6 +74,74 @@ public static class CalendarRecurrence {
         return context.Result();
     }
 
+    /// <summary>
+    /// The items without the override versions that <see cref="CalendarExpandOptions.ResolveOverrideVersions"/> drops:
+    /// of several overrides with one <c>UID</c> and <c>RECURRENCE-ID</c>, only the one that wins (the highest
+    /// <c>SEQUENCE</c>, then the latest <c>DTSTAMP</c>, then the later in <paramref name="items"/>), in their order. The
+    /// rule is the one <see cref="Expand"/> applies, so an application that stores or shows the items rather than the
+    /// occurrences keeps the same version the expansion keeps.
+    /// </summary>
+    /// <param name="items">The items of one series or of a whole calendar.</param>
+    /// <param name="floatingTimeZone">
+    /// The zone a floating recurrence id is placed in to compare it with a zoned one, as
+    /// <see cref="CalendarExpandOptions.FloatingTimeZone"/>; <see langword="null"/> compares wall-clock times.
+    /// </param>
+    /// <example>
+    /// <code>
+    /// foreach (var item in CalendarRecurrence.LatestVersions(result.Items)) await store.SaveAsync(item, ct);
+    /// </code>
+    /// </example>
+    public static IReadOnlyList<CalendarItem> LatestVersions(IEnumerable<CalendarItem> items, TimeZoneInfo? floatingTimeZone = null) {
+        ArgumentNullException.ThrowIfNull(items);
+        var list = items as IReadOnlyList<CalendarItem> ?? items.ToList();
+        var overridesByUid = new Dictionary<string, List<CalendarItem>>(StringComparer.Ordinal);
+        foreach (var item in list) {
+            if (item.Uid is null || item.RecurrenceId is null) continue;
+            if (!overridesByUid.TryGetValue(item.Uid, out var overrides)) overridesByUid[item.Uid] = overrides = [];
+            overrides.Add(item);
+        }
+
+        var dropped = new HashSet<CalendarItem>(ReferenceEqualityComparer.Instance);
+        foreach (var overrides in overridesByUid.Values) {
+            if (overrides.Count < 2) continue;
+            var kept = new HashSet<CalendarItem>(LatestOf(overrides, floatingTimeZone), ReferenceEqualityComparer.Instance);
+            foreach (var item in overrides)
+                if (!kept.Contains(item)) dropped.Add(item);
+        }
+
+        return dropped.Count == 0 ? list : list.Where(item => !dropped.Contains(item)).ToList();
+    }
+
+    // The latest of each recurrence id (the highest SEQUENCE, then the latest DTSTAMP, then the later one), in their order.
+    private static List<CalendarItem> LatestOf(List<CalendarItem> overrides, TimeZoneInfo? floatingTimeZone) {
+        if (overrides.Count < 2) return overrides;
+        var latest = new Dictionary<(bool, long), int>();
+        for (var i = 0; i < overrides.Count; i++) {
+            var id = overrides[i].RecurrenceId;
+            if (id is null) continue;
+            var key = (id.Value.IsDate, KeyOf(id.Value, floatingTimeZone));
+            if (!latest.TryGetValue(key, out var best) || !IsNewer(overrides[best], overrides[i])) latest[key] = i;
+        }
+
+        var kept = new List<CalendarItem>(latest.Count);
+        for (var i = 0; i < overrides.Count; i++) {
+            var id = overrides[i].RecurrenceId;
+            if (id is null || latest[(id.Value.IsDate, KeyOf(id.Value, floatingTimeZone))] == i) kept.Add(overrides[i]);
+        }
+
+        return kept;
+
+        // Whether the earlier override a is newer than the later b; on a tie the later one counts.
+        static bool IsNewer(CalendarItem a, CalendarItem b) {
+            var sequence = (a.Sequence ?? 0).CompareTo(b.Sequence ?? 0);
+            if (sequence != 0) return sequence > 0;
+            return (a.Timestamp ?? DateTimeOffset.MinValue) > (b.Timestamp ?? DateTimeOffset.MinValue);
+        }
+    }
+
+    private static long KeyOf(CalendarDateTime value, TimeZoneInfo? floatingTimeZone) =>
+        value.IsDate ? value.Value.Ticks : value.ToUtc(floatingTimeZone)?.UtcTicks ?? value.Value.Ticks;
+
     private sealed class ExpandContext(DateTime fromUtc, DateTime toUtc, CalendarExpandOptions options, CancellationToken cancellationToken) {
         private readonly List<(DateTime Sort, CalendarOccurrence Occurrence)> _occurrences = [];
         private readonly List<CalendarError> _errors = [];
@@ -91,33 +160,9 @@ public static class CalendarRecurrence {
             return new CalendarOccurrences(list, _errors);
         }
 
-        // The overrides that count: with ResolveOverrideVersions, the latest of each recurrence id (the highest SEQUENCE,
-        // then the latest DTSTAMP, then the later one), in their order.
-        public List<CalendarItem> Latest(List<CalendarItem> overrides) {
-            if (!options.ResolveOverrideVersions || overrides.Count < 2) return overrides;
-            var latest = new Dictionary<(bool, long), int>();
-            for (var i = 0; i < overrides.Count; i++) {
-                var id = overrides[i].RecurrenceId;
-                if (id is null) continue;
-                var key = (id.Value.IsDate, Key(id.Value));
-                if (!latest.TryGetValue(key, out var best) || !IsNewer(overrides[best], overrides[i])) latest[key] = i;
-            }
-
-            var kept = new List<CalendarItem>(latest.Count);
-            for (var i = 0; i < overrides.Count; i++) {
-                var id = overrides[i].RecurrenceId;
-                if (id is null || latest[(id.Value.IsDate, Key(id.Value))] == i) kept.Add(overrides[i]);
-            }
-
-            return kept;
-
-            // Whether the earlier override a is newer than the later b; on a tie the later one counts.
-            static bool IsNewer(CalendarItem a, CalendarItem b) {
-                var sequence = (a.Sequence ?? 0).CompareTo(b.Sequence ?? 0);
-                if (sequence != 0) return sequence > 0;
-                return (a.Timestamp ?? DateTimeOffset.MinValue) > (b.Timestamp ?? DateTimeOffset.MinValue);
-            }
-        }
+        // The overrides that count: with ResolveOverrideVersions, the latest of each recurrence id.
+        public List<CalendarItem> Latest(List<CalendarItem> overrides) =>
+            options.ResolveOverrideVersions ? LatestOf(overrides, options.FloatingTimeZone) : overrides;
 
         // An item outside a series: an override without its master, or an item without a UID.
         public void AddSingle(CalendarItem item, CalendarItem? master) {
@@ -298,8 +343,7 @@ public static class CalendarRecurrence {
             };
         }
 
-        private long Key(CalendarDateTime value) =>
-            value.IsDate ? value.Value.Ticks : value.ToUtc(options.FloatingTimeZone)?.UtcTicks ?? value.Value.Ticks;
+        private long Key(CalendarDateTime value) => KeyOf(value, options.FloatingTimeZone);
 
         private static DateTime ToWall(DateTime utc, TimeZoneInfo? zone) =>
             zone is null ? DateTime.SpecifyKind(utc, DateTimeKind.Unspecified) : ZoneMath.ToLocal(new DateTimeOffset(utc, TimeSpan.Zero), zone);
