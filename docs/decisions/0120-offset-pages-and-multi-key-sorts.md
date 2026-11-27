@@ -68,3 +68,15 @@ Without it the message stays English.
   order before the later keys the client asked for.
 - **Exporting the level cap in the schema.** Rejected for now (revisable): the keys are what a client builds sort parameters
   from, and the default cap covers the multi-column grids seen so far.
+
+## Amendment (2026-11-27): the schema exports the level cap
+
+The rejected alternative "exporting the level cap in the schema" is reversed. The first adoption showed that a
+handler's own description of its sort parameter, written for one key, became incomplete the day every `SortMap`
+started to accept three keys, and a client had to copy the cap to know when to stop adding sort levels. The cap is one
+integer the server already holds, so the schema now carries it as `methods.{method}.maxSortLevels` next to
+`sortKeys` (only where `sortKeys` is exported, from the same map), and the generated client exports
+`rpcMaxSortLevels['{method}']`. It is a separate export rather than a field inside `rpcSortKeys`, so existing code
+that reads `rpcSortKeys['{method}']` as an array keeps compiling. The default cap of three stays: a list written for
+one key gains multi-key sorting without a change, and `.MaxLevels(1)` restores the single-key behaviour where a
+handler wants it. The release notes and the pagination page say so in those words.
