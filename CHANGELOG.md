@@ -339,14 +339,24 @@ minor releases may include breaking changes.
   `CalendarExpandOptions.ResolveOverrideVersions = false` keeps them all. `SkipCancelled` (off by default) leaves out
   `STATUS:CANCELLED` items, a cancelled override removing its instance. `EXRULE` is read into
   `CalendarItem.ExceptionRules`, applied in expansion (never to `DTSTART`) and written back in the item's fixed property
-  order, where it used to be an unmapped property written at the end. Repeated `BY` values count once, and a `BY` list
-  longer than its part has values no longer parses. New read options `MaxLines` (1,000,000), `MaxItems` (50,000, events
+  order, where it used to be an unmapped property written at the end. Repeated `BY` values count once, however many
+  there are (`BYMONTH=1,1,1` is January). `CalendarRecurrence.LatestVersions(items)` returns the items without the
+  override versions expansion drops, so an application that stores items keeps the version expansion keeps. New read options `MaxLines` (1,000,000), `MaxItems` (50,000, events
   and to-dos only) and `Strict` (refuses `COUNT` with `UNTIL`, skips values with control characters as
-  `calendar.control_character`); `CalendarErrorCodes.IsStructural(code)` names the errors about a file's form.
+  `calendar.control_character`); `CalendarErrorCodes.IsStructural(code)` names the errors about a file's form and
+  `IsLimit(code)` the ones that report a configured limit rather than a broken file.
   `CalendarRecurrence.Expand` and `CalendarReadResult.Expand` take a `CancellationToken`, and `ReadAsync` checks its token
   per item while mapping. See [Calendars](https://elarion.wimmesberger.dev/docs/capabilities/calendars#recurrences).
 
 ### Fixed
+- **`Elarion.Calendars`: a rule that repeats a `BY` value more often than the part has values parses again.** The
+  0.4.7 previews refused `RRULE:FREQ=DAILY;BYMONTH=1,1,…` with 101 items as `calendar.invalid_value`, although RFC 5545
+  allows repeats and the rule means January, so an importer that refuses broken rules refused the whole file. Repeats
+  are kept once whatever the list's length; the list is walked without an allocation per item (two million items parse
+  in about 20 ms), and the reader's line limit bounds its length as `calendar.line_too_long`.
+- **`Elarion.Calendars`: a file concatenated from several exports no longer loses calendars.** A byte-order mark before
+  a later `BEGIN:VCALENDAR` made the line malformed and the calendar after it vanished; a mark at the start of a line is
+  now nothing, as in `Elarion.Contacts`.
 - **`[AllowedValues]` on a nullable member refused a request that left the member out, and listing `null` broke the
   build.** The BCL attribute looks `null` up as one more value, so `[AllowedValues(30, 90, 365)] int? Days` answered a
   request without `days` with a validation error. Like `[Range]`, the rule now applies to a present value only: the
