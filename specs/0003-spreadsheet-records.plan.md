@@ -303,6 +303,16 @@ Tasks 2–5, 6–7 and 8 are independent streams after task 1 (8 does not need i
 14. **Reads from memory and number formats** — FR-079, FR-080: `SpreadsheetReader.Open`/`ReadRows` over
     `ReadOnlyMemory<byte>`, the inspector reading a visible buffer at its offset, `SpreadsheetCell.NumberFormat`.
 
+### Follow-up (2026-11-27, second round): layout options and synchronous writes
+
+15. **Worksheet layout** — FR-081 to FR-086: `SpreadsheetValueKind.General` and its column factory (the cell writer
+    keeps text in a general column in the default style); a `WorksheetLayout` of title rows, footer rows and visibility
+    that both record and run-time worksheets pass to the engine; the header row, the frozen pane, the sampled row
+    numbers and the dropdown range offset by the title rows; `state="hidden"` and `bookViews` for a hidden first
+    worksheet; the run-time `AddWorksheetAsync` and record `ToFileAsync` overloads with a required options parameter;
+    `ToBytes` over the asynchronous path, which refuses a write that does not complete synchronously. Tests in
+    `SpreadsheetWorksheetLayoutTests`, read back through the Open XML SDK and the package's reader.
+
 ## Reader go/no-go (task 1)
 
 Keep Sylvan.Data.Excel when all four hold:
