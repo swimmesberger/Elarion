@@ -161,6 +161,14 @@ minor releases may include breaking changes.
   platform in front of it) to `503`; `withResponseStatus(response, status)` rewrites a rendered response. See
   [TypeScript client](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#the-status-of-a-failed-ssr-render).
 
+- **`ELMOD008`: a module that injects another module's contract declares the dependency.** A `[ModuleContract]`'s
+  implementation is registered with the module that owns it, so it is gone when that feature module is disabled. The
+  analyzer now warns when a type injects a contract of another feature module that its module's `DependsOn` does
+  not name (a Core module's contract needs none). Module contracts also document that a contract returning
+  `IQueryable<T>` runs on the caller's scoped `DbContext`, that handlers may be `internal`, and how shared-kernel JSON
+  types are contributed once. See
+  [Cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication#what-a-contracts-consumer-must-know).
+
 ### Changed
 - **BREAKING: `withDecisions` throws `RpcDecisionCancelledError` when `ask` cancels.** It threw the decision error, so a
   caller could not tell a declined question from a failed call. The new error carries the `question` and the decision

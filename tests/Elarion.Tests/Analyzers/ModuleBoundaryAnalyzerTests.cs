@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Elarion.Generators;
@@ -286,6 +287,44 @@ public sealed class ModuleBoundaryAnalyzerTests {
         var diagnostics = await AnalyzeAsync(source);
 
         diagnostics.Should().NotContain(d => d.Id == "ELMOD002");
+    }
+
+    [Theory]
+    [InlineData("[Elarion.Abstractions.Modules.AppModule(\"Orders\")]", "Billing", true)]
+    [InlineData("[Elarion.Abstractions.Modules.AppModule(\"Orders\", DependsOn = \"Catalog, Billing\")]", "Billing", false)]
+    [InlineData("[Elarion.Abstractions.Modules.AppModule(\"Orders\")]", "Core", false)]
+    public async Task InjectingAnotherModulesContract_RequiresItsDependsOn_UnlessTheOwnerIsCore(
+        string ordersModule, string owner, bool reported) {
+        var kind = owner == "Core" ? ", Kind = Elarion.Abstractions.Modules.AppModuleKind.Core" : "";
+        var source =
+            $$"""
+            namespace App.{{owner}} {
+                [Elarion.Abstractions.Modules.AppModule("{{owner}}"{{kind}})]
+                public static class OwnerModule { }
+
+                [Elarion.Abstractions.Modules.ModuleContract]
+                public interface IOwnerApi { }
+            }
+
+            namespace App.Orders {
+                {{ordersModule}}
+                public static class OrdersModule { }
+
+                [Elarion.Abstractions.Service]
+                internal sealed class OrdersService(App.{{owner}}.IOwnerApi api) {
+                    public App.{{owner}}.IOwnerApi Api { get; } = api;
+                }
+            }
+            """;
+
+        var diagnostics = await AnalyzeAsync(source);
+
+        // One report for the injected parameter, none for the property that exposes it.
+        diagnostics.Count(d => d.Id == "ELMOD008").Should().Be(reported ? 1 : 0);
+        diagnostics.Should().NotContain(d => d.Id == "ELMOD002");
+        if (reported)
+            diagnostics.Single(d => d.Id == "ELMOD008").GetMessage(CultureInfo.InvariantCulture)
+                .Should().Contain("DependsOn = \"Billing\"");
     }
 
     private static async Task<ImmutableArray<Diagnostic>> AnalyzeAsync(string source) {
