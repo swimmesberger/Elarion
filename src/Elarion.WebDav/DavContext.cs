@@ -37,6 +37,12 @@ public sealed class DavContext {
     /// <summary>The registered protocols.</summary>
     public IReadOnlyList<IDavProtocol> Protocols { get; }
 
+    /// <summary>
+    /// Values a protocol keeps for the rest of the request, such as the time zone a report named, which its property
+    /// writers read when they render the members.
+    /// </summary>
+    public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
+
     /// <summary>The store, resolved on first use.</summary>
     public IDavCollectionStore Store => _store ??= Services.GetService<IDavCollectionStore>() ?? throw new InvalidOperationException(
         "No IDavCollectionStore is registered. Call AddElarionWebDavEntityFrameworkCore<TDbContext>() "

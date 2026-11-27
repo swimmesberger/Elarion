@@ -100,11 +100,14 @@ internal static class CalDavCalendarData {
     // RFC 4791 §9.6.1: keep the named properties and sub-components, recursively.
     private static void Prune(CalendarComponent component, DavXmlElement spec) {
         if (spec.Child(DavNames.C.AllProp) is null) {
-            var keep = spec.ChildrenNamed(DavNames.C.Prop).Select(static p => p.Attribute("name") ?? "")
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            for (var i = component.Properties.Count - 1; i >= 0; i--)
-                if (!keep.Contains(component.Properties[i].Name))
-                    component.Properties.RemoveAt(i);
+            // RFC 4791 §9.6.4: novalue="yes" keeps the property and its parameters, without its value.
+            var keep = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            foreach (var prop in spec.ChildrenNamed(DavNames.C.Prop))
+                keep[prop.Attribute("name") ?? ""] = string.Equals(prop.Attribute("novalue"), "yes", StringComparison.OrdinalIgnoreCase);
+            for (var i = component.Properties.Count - 1; i >= 0; i--) {
+                if (!keep.TryGetValue(component.Properties[i].Name, out var noValue)) component.Properties.RemoveAt(i);
+                else if (noValue) component.Properties[i].RawValue = "";
+            }
         }
 
         if (spec.Child(DavNames.C.AllComp) is not null) return;

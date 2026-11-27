@@ -19,6 +19,7 @@ internal sealed partial class CalDavProtocol {
             return DavResponse.Text(413, $"A calendar-multiget may name at most {context.Options.MaxMultigetHrefs} objects.");
 
         var selection = SelectionOf(report);
+        if (InvalidCalendarDataRange(selection) is { } invalid) return DavResponse.Text(400, invalid);
         var withContent = selection.Names(DavNames.C.CalendarData);
         var calendar = Calendar(collection);
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -51,28 +52,36 @@ internal sealed partial class CalDavProtocol {
     private async ValueTask<DavResponse?> QueryAsync(DavContext context, DavResource collection, DavXmlElement report,
         CancellationToken cancellationToken) {
         var filter = report.Child(DavNames.C.Filter);
-        if (CalDavFilterEvaluator.Validate(filter) is not null) return DavResponse.Error(403, DavNames.C.ValidFilter);
+        if (CalDavFilterEvaluator.Check(filter, out var condition) is not null) return DavResponse.Error(403, condition);
         var calendar = Calendar(collection);
         var zone = calendar.TimeZone;
         if (report.Child(DavNames.C.Timezone)?.Text is { Length: > 0 } timezoneText) {
             var parsed = await ReadZoneAsync(timezoneText, cancellationToken).ConfigureAwait(false);
             if (parsed is null) return DavResponse.Error(403, new DavName(DavNames.CalDav, "valid-calendar-data"));
             zone = parsed;
+            // RFC 4791 §7.3: the request's zone also places the floating times of expanded calendar-data (Apple E-08).
+            context.Items[RequestTimeZoneKey] = parsed;
         }
 
         var selection = SelectionOf(report);
+        if (InvalidCalendarDataRange(selection) is { } invalid) return DavResponse.Text(400, invalid);
         var minimal = DavDispatcher.IsMinimal(context.Request);
         var settings = options.Value;
         var caps = settings.CalendarExpand;
         // A calendar-query asks about the members (Depth 1, as every surveyed client sends); Depth 0 addresses only the
         // collection, which is no calendar object.
-        var depthZero = context.Request.Header("Depth")?.Trim() == "0";
+        // A query sent to an object's URL is scoped to that object, whatever its Depth (RFC 4791 §7.8; Radicale, sabre/dav).
+        var onObject = collection.Kind == DavResourceKind.Member;
+        var depthZero = !onObject && context.Request.Header("Depth")?.Trim() == "0";
         var (start, end) = CandidateRange(filter!);
 
         return DavResponse.Xml(207, async (output, ct) => {
             DavMultistatus.Start(output);
             if (!depthZero) {
-                await foreach (var stored in context.Store.GetCandidatesAsync(calendar.Address.Id, start, end, ct).ConfigureAwait(false)) {
+                var candidates = onObject
+                    ? context.Store.GetObjectsAsync(calendar.Address.Id, [collection.Member!.Name], true, ct)
+                    : context.Store.GetCandidatesAsync(calendar.Address.Id, start, end, ct);
+                await foreach (var stored in candidates.ConfigureAwait(false)) {
                     using var stream = new MemoryStream(stored.Content.ToArray(), false);
                     var read = await reader.ReadAsync(stream, settings.CalendarRead, ct).ConfigureAwait(false);
                     if (!CalDavFilterEvaluator.Matches(read, filter!, zone, caps)) continue;
@@ -82,6 +91,21 @@ internal sealed partial class CalDavProtocol {
 
             DavMultistatus.End(output);
         });
+    }
+
+    /// <summary>The key of the zone a calendar-query's <c>C:timezone</c> named, in <see cref="DavContext.Items"/>.</summary>
+    internal const string RequestTimeZoneKey = "caldav.request-time-zone";
+
+    // RFC 4791 §9.6.5/§9.6.6: expand and limit-recurrence-set need a start and an end, the end after the start. Without
+    // them an expand would run to the engine's horizon, so the request is refused before anything is written.
+    private static string? InvalidCalendarDataRange(DavPropertySelection selection) {
+        foreach (var data in selection.Requested.Where(static e => e.Is(DavNames.C.CalendarData)))
+        foreach (var range in data.Children.Where(static c => c.Is(DavNames.C.Expand) || c.Is(DavNames.C.LimitRecurrenceSet))) {
+            if (range.Attribute("start") is null || range.Attribute("end") is null || !CalDavFilterEvaluator.TryParseRange(range, out _, out _))
+                return $"CALDAV:{range.Name.LocalName} needs a start and an end in UTC, the end after the start.";
+        }
+
+        return null;
     }
 
     // RFC 4791 §7.10: the busy time of the calendar's events within the range, as one VFREEBUSY.

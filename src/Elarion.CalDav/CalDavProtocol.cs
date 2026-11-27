@@ -112,6 +112,7 @@ internal sealed partial class CalDavProtocol(DavSourceRegistry<CalDavSourceListi
     }
 
     public ValueTask<DavResponse?> ReportAsync(DavContext context, DavResource collection, DavXmlElement report, CancellationToken cancellationToken) {
+        if (collection.Kind == DavResourceKind.Member && report.Is(DavNames.C.CalendarQuery)) return QueryAsync(context, collection, report, cancellationToken);
         if (collection.Kind != DavResourceKind.Collection) return ValueTask.FromResult<DavResponse?>(null);
         if (report.Is(DavNames.C.CalendarMultiget)) return MultigetAsync(context, collection, report, cancellationToken);
         if (report.Is(DavNames.C.CalendarQuery)) return QueryAsync(context, collection, report, cancellationToken);
@@ -156,8 +157,11 @@ internal sealed partial class CalDavProtocol(DavSourceRegistry<CalDavSourceListi
 
     private async ValueTask WriteCalendarDataAsync(XmlWriter writer, DavResource resource, DavXmlElement? requested, CancellationToken cancellationToken) {
         var includeTimeZones = !string.Equals(resource.Context.Request.Header("CalDAV-Timezones")?.Trim(), "F", StringComparison.OrdinalIgnoreCase);
+        var zone = resource.Context.Items.TryGetValue(RequestTimeZoneKey, out var named) && named is TimeZoneInfo requestZone
+            ? requestZone
+            : Calendar(resource).TimeZone;
         var text = await CalDavCalendarData.RenderAsync(resource.Content!.Value, requested, includeTimeZones, reader, options.Value,
-            Calendar(resource).TimeZone, cancellationToken).ConfigureAwait(false);
+            zone, cancellationToken).ConfigureAwait(false);
         writer.WriteString(text);
     }
 }
