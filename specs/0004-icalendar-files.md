@@ -266,7 +266,7 @@ NativeAOT uses all of it without warnings.
 - FR-031: Expansion MUST implement RFC 5545 recurrence for the Gregorian calendar: every `FREQ`, every `BY` part,
   `BYSETPOS`, `WKST`, `COUNT`, `UNTIL`, `INTERVAL`, `RDATE` values of every type, `EXDATE`, and overrides matched by
   `UID` and `RECURRENCE-ID`, and the RFC 2445 `EXRULE`, whose instances other than `DTSTART` are excluded. Repeated
-  values of a `BY` list MUST count once, and a list with more items than the part has distinct values MUST NOT parse.
+  values of a `BY` list MUST count once, whatever the list's length, which only the line limit bounds.
 - FR-032: A recurrence MUST move a local time that does not exist forward by the length of the gap, and MUST place an
   ambiguous local time at its first offset.
 - FR-033: Expansion MUST stop at the maximum number of occurrences of the expand options, 10,000 by default, with a

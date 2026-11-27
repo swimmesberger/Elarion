@@ -153,3 +153,15 @@ already covers it. `TypstCompiler` is public with `TypstCompiler.Create(options,
 build the compiler `AddElarionTypst` registers without a service collection; its constructor stays internal.
 "Code defaults, then configuration" is documented as two `AddElarionTypst` calls rather than a `defaults:` delegate,
 because the calls already compose onto one options instance in order.
+
+## Amendment (2026-11-27): the compiler is not disposable
+
+`TypstCompiler` implemented `IDisposable` to dispose its concurrency limiter, a `SemaphoreSlim` whose wait handle the
+compiler never creates; disposing it released nothing. A test kit that built one compiler per test with
+`TypstCompiler.Create` was left holding an undisposed disposable for no reason, and analyzers flagged it. Decision:
+`TypstCompiler` no longer implements `IDisposable`. Everything that does hold a resource is released per compilation:
+the process and the workspace before `CompilePdfAsync` returns, the output file when the caller disposes the
+`TypstPdf`. Rejected: keeping a no-op `Dispose` for source compatibility, because it keeps telling callers there is
+something to release. `TypstCompiler.Create` runs no startup check, so `RequiredPackages` is not checked there; a test
+that wants the missing-package answer without the Typst binary asks `new TypstToolchain(options).HasPackage(...)`,
+which only looks for the package's `typst.toml`. The PDF documents page says so.

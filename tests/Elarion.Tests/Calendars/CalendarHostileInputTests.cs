@@ -152,13 +152,51 @@ public sealed class CalendarHostileInputTests {
     }
 
     [Fact]
-    public void RepeatedByValues_AreKeptOnce_AndALongerListThanThePartsValuesDoesNotParse() {
+    public void RepeatedByValues_AreKeptOnce() {
         CalendarRecurrenceRule.TryParse("FREQ=DAILY;BYMONTH=1,1,2,1;BYDAY=MO,MO,1MO", out var rule).Should().BeTrue();
         rule!.ByMonth.Should().Equal(1, 2);
         rule.ByDay.Should().Equal(new CalendarWeekday(DayOfWeek.Monday), new CalendarWeekday(DayOfWeek.Monday, 1));
 
-        CalendarRecurrenceRule.TryParse("FREQ=DAILY;BYMONTH=" + string.Join(',', Enumerable.Repeat("1", 13)), out _).Should().BeFalse();
         CalendarRecurrenceRule.TryParse("FREQ=DAILY;BYHOUR=" + string.Join(',', Enumerable.Range(0, 24)), out _).Should().BeTrue();
+        CalendarRecurrenceRule.TryParse("FREQ=DAILY;BYMONTH=1,13", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AByListLongerThanThePartsValues_ParsesToItsDistinctValues_AndReadsAsAValidRule() {
+        // Regression: a list with more items than the part has values was refused as calendar.invalid_value, although
+        // RFC 5545 allows repeats and the rule means January.
+        var rrule = "FREQ=DAILY;BYMONTH=" + string.Join(',', Enumerable.Repeat("1", 101)) + ";BYDAY=" + string.Join(',', Enumerable.Repeat("MO", 800));
+
+        CalendarRecurrenceRule.TryParse(rrule, out var rule).Should().BeTrue();
+        rule!.ByMonth.Should().Equal(1);
+        rule.ByDay.Should().Equal(new CalendarWeekday(DayOfWeek.Monday));
+
+        var result = await ReadAsync(Calendar(Event("UID:a", "DTSTART:20260105T090000Z", "RRULE:" + rrule)));
+        result.Errors.Should().BeEmpty();
+        var occurrences = result.Expand(NewYear, Utc(2027, 1, 1), cancellationToken: Ct).Occurrences;
+        occurrences.Select(static o => o.StartUtc!.Value.Day).Should().Equal(5, 12, 19, 26);
+    }
+
+    [Fact]
+    public async Task AByListOfTwoMillionRepeats_ParsesInLinearTime_AndALongerLineIsTooLong() {
+        // About 4 MB of repeats, just under the default line limit: 2 million items, kept once.
+        var list = string.Join(',', Enumerable.Repeat("1", 2_000_000));
+        var rrule = "FREQ=DAILY;BYMONTH=" + list;
+        CalendarRecurrenceRule.TryParse(rrule, out _).Should().BeTrue(); // warm up
+
+        var stopwatch = Stopwatch.StartNew();
+        CalendarRecurrenceRule.TryParse(rrule, out var rule).Should().BeTrue();
+        stopwatch.Stop();
+
+        rule!.ByMonth.Should().Equal(1);
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
+
+        // The reader bounds the list by its line limit, under a code of its own, not as a broken rule.
+        var result = await ReadAsync(Calendar(Event("UID:a", "DTSTART:20260105T090000Z", "RRULE:" + rrule + ",1")),
+            new CalendarReadOptions { MaxLineBytes = 1024 });
+        result.Events[0].Errors.Should().ContainSingle().Which.Should().Match<CalendarError>(e =>
+            e.Code == CalendarErrorCodes.LineTooLong && e.Property == "RRULE" && e.Limit == 1024);
+        CalendarErrorCodes.IsLimit(CalendarErrorCodes.LineTooLong).Should().BeTrue();
     }
 
     // ---- file limits --------------------------------------------------------------------------------------------
@@ -208,6 +246,28 @@ public sealed class CalendarHostileInputTests {
         occurrences.Select(o => o.Item.Summary).Should().Equal("Master", "v2", "Master");
         result.Expand(NewYear, Utc(2026, 2, 1), new CalendarExpandOptions { ResolveOverrideVersions = false }, Ct).Occurrences
             .Should().HaveCount(4);
+    }
+
+    [Fact]
+    public async Task LatestVersions_DropsTheOverridesTheExpansionDrops_KeepingTheOrder() {
+        var result = await ReadAsync(Calendar([
+            .. WeeklySeries(Override("v2", 2, "20260101T000000Z"), Override("v1", 1, "20260102T000000Z"), Override("v2b", 2, "20251231T000000Z")),
+            .. Event("UID:other", "DTSTART:20260107T090000Z", "SUMMARY:Other"),
+        ]));
+
+        var items = CalendarRecurrence.LatestVersions(result.Items);
+
+        items.Select(static i => i.Summary).Should().Equal("Master", "v2", "Other");
+        result.Expand(NewYear, Utc(2026, 2, 1), cancellationToken: Ct).Occurrences.Select(static o => o.Item.Summary)
+            .Should().Equal("Master", "Other", "v2", "Master");
+    }
+
+    [Fact]
+    public async Task LatestVersions_KeepsEveryItem_WhenNoInstanceHasTwoOverrides() {
+        var result = await ReadAsync(Calendar(WeeklySeries(Override("only", 1, "20260101T000000Z"))));
+        var items = result.Items.ToList();
+
+        CalendarRecurrence.LatestVersions(items).Should().Equal(items);
     }
 
     [Fact]
@@ -297,5 +357,27 @@ public sealed class CalendarHostileInputTests {
         error.Should().Match<CalendarError>(e => e.Code == CalendarErrorCodes.ControlCharacter && e.Property == "SUMMARY");
         CalendarErrorCodes.IsStructural(error.Code).Should().BeTrue();
         CalendarErrorCodes.IsStructural(CalendarErrorCodes.UnknownTimeZone).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task APerItemLimit_IsStructuralAndALimit_AndLandsOnTheItemAlone() {
+        var text = Calendar([
+            .. Event("UID:a", "DTSTART:20260105T090000Z", "SUMMARY:a", "DESCRIPTION:b", "LOCATION:c"),
+            .. Event("UID:b", "DTSTART:20260106T090000Z"),
+        ]);
+
+        var result = await ReadAsync(text, new CalendarReadOptions { MaxPropertiesPerComponent = 3 });
+
+        result.FileErrors.Should().BeEmpty();
+        result.Events[0].HasValue.Should().BeFalse();
+        var error = result.Events[0].Errors.Should().ContainSingle().Subject;
+        error.Code.Should().Be(CalendarErrorCodes.TooManyProperties);
+        CalendarErrorCodes.IsStructural(error.Code).Should().BeTrue();
+        CalendarErrorCodes.IsLimit(error.Code).Should().BeTrue();
+        result.Events[1].Value!.Uid.Should().Be("b");
+
+        CalendarErrorCodes.IsLimit(CalendarErrorCodes.RecurrenceLimit).Should().BeTrue();
+        CalendarErrorCodes.IsLimit(CalendarErrorCodes.MalformedLine).Should().BeFalse();
+        CalendarErrorCodes.IsLimit(CalendarErrorCodes.InvalidValue).Should().BeFalse();
     }
 }

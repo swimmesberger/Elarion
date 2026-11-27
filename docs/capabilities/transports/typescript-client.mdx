@@ -367,17 +367,38 @@ A page rendered on the server answers `200` unless something sets another status
 refusal would answer `200` with the error view. The adapter exports what a server entry needs to answer the right
 status: `ssrStatusFor(error)` maps an error to `401`, `403` or `404` for the server's unauthorized, forbidden and
 not-found answers, to `503` when the service (or the platform or proxy in front of it) answered `503 Service
-Unavailable` — maintenance, a stopped installation — and to `undefined` otherwise; `withResponseStatus(response,
-status)` returns the rendered response with that status (the body streams unchanged, and a `503` gets
-`Cache-Control: no-store` unless it states one). Record the error a loader or error boundary met in a place your
-server entry can read for the request, then rewrite:
+Unavailable` — maintenance, a stopped installation — and to `undefined` otherwise. `withResponseStatus(result,
+status, headers?)` returns the rendered result with that status and the given headers set over the rendered ones (the
+body streams unchanged, and a `503` gets `Cache-Control: no-store` unless a header states one).
+
+Your API wrapper may throw its own error types, which the built-in mapping cannot know. Pass `classify` to map them:
+it is consulted first, for the error and each `cause` (outermost first). The first status it returns wins, and
+`undefined` leaves the error to the built-in mapping.
+
+`withResponseStatus` takes what TanStack Start's handler callback returns: a `Response`, or the stream result
+`{ response, serverSsrCleanup, dispose }`. It returns the same shape. For the stream result only `response` is
+replaced, so `dispose` stays attached and still cancels the stream and cleans up the render when the request is
+aborted. Never unwrap the stream result and return a bare `Response`: that drops the cleanup.
+
+Record the error a loader or error boundary met in a place your server entry can read for the request, then rewrite:
 
 ```ts
+import { createStartHandler, defaultStreamHandler } from '@tanstack/react-start/server'
+import { createServerEntry } from '@tanstack/react-start/server-entry'
 import { ssrStatusFor, withResponseStatus } from './generated/start-adapter'
+import { AppUnavailableError, ForbiddenError } from './lib/errors'
 
-const response = await render(request)
-const status = ssrStatusFor(renderError(request)) // the error your loader or boundary recorded for this request
-return status === undefined ? response : withResponseStatus(response, status)
+const classify = (error: unknown) =>
+  error instanceof AppUnavailableError ? 503 : error instanceof ForbiddenError ? 403 : undefined
+
+export default createServerEntry({
+  fetch: createStartHandler(async (ctx) => {
+    const result = await defaultStreamHandler(ctx)
+    const status = ssrStatusFor(renderError(ctx), { classify }) // the error your loader or boundary recorded
+    if (status === undefined) return result
+    return withResponseStatus(result, status, status === 503 ? { 'retry-after': '30' } : undefined)
+  }),
+})
 ```
 
 In the page itself, `isServiceUnavailable(error)` (from the core client, also through a mapped error's `cause`) tells
@@ -622,10 +643,11 @@ instead of copying them. Each is emitted only when the schema has an entry for i
 | `rpcLimits` | Every params member's limits by method and member path, as literal types: `minLength`, `maxLength`, `minimum`, `exclusiveMinimum`, `maximum`, `exclusiveMaximum`, `minItems`, `maxItems`, and an upload member's `maxBytes`, `contentTypes` and `fileExtensions`. A nested member is reached through its parent, a list's elements through `items`. | The DataAnnotations the schema already exports, and [`[UploadLimits]`](/docs/capabilities/blob-uploads#declaring-the-limits-on-the-member) |
 | `rpcPresets` | Named request values per method, each typed as the method's params. | [`[RequestPreset]`](/docs/reference/attributes#requestpreset) on the handler |
 | `rpcSortKeys` | The keys the handler's sort map allows, in declaration order, with the direction a bare key applies and which one is the default. | The handler's [`SortMap`](/docs/capabilities/pagination#offset-pagination) |
+| `rpcMaxSortLevels` | How many of those keys one sort may combine (`+city,-name`), per method in `rpcSortKeys`. | The same `SortMap` (`MaxLevels`) |
 | `rpcConstants` | Each module's exported constants, as literal types. | [`[ClientConstants]`](/docs/reference/attributes#clientconstants) |
 
 ```ts
-import { rpcConstants, rpcLimits, rpcPresets, rpcSortKeys } from './generated/rpc-schemas'
+import { rpcConstants, rpcLimits, rpcMaxSortLevels, rpcPresets, rpcSortKeys } from './generated/rpc-schemas'
 
 // "up to 10 receipts" and the disabled button read the server's [MaxLength(10)], typed as 10.
 const maxReceipts = rpcLimits['documents.upload'].receipts.maxItems
@@ -636,6 +658,8 @@ const page = await rpc.invoices.list({ ...rpcPresets['invoices.list'].toTransfer
 
 // A column header toggles between +key and -key for the keys the handler allows.
 const sortable = rpcSortKeys['invoices.list'].map((sortKey) => sortKey.key)
+// Shift-click adds a sort level until the handler's cap (3 unless its SortMap sets MaxLevels).
+const maxSortLevels = rpcMaxSortLevels['invoices.list']
 
 const currencies = rpcConstants.billing.currencies   // readonly ["EUR", "CHF"]
 ```
