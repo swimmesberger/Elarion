@@ -319,15 +319,16 @@ public sealed class CalDavExpandConformanceTests {
     }
 
     /// <summary>
-    /// Radicale E05 (event_weekly_rrule, with the file's US/Eastern VTIMEZONE whose DST starts on the first Sunday of April
-    /// in 2006): each instance takes its own offset.
+    /// Radicale E05 (event_weekly_rrule, US/Eastern, whose DST started on the first Sunday of April in 2006): each instance
+    /// takes its own offset. The canonical America/New_York is used, because the publisher writes the zone from the system's
+    /// time-zone database, and Linux images without tzdata's backward links do not know the US/* aliases.
     /// </summary>
     [Fact]
     public async Task ExpandAcrossADaylightSavingChange_GivesEachInstanceItsOffset() {
         await using var harness = await CalDavConformance.CalendarAsync(null, """
             BEGIN:VEVENT
             UID:weekly
-            DTSTART;TZID=US/Eastern:20060321T150000
+            DTSTART;TZID=America/New_York:20060321T150000
             DURATION:PT1H
             RRULE:FREQ=WEEKLY;COUNT=5
             END:VEVENT
