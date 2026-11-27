@@ -102,6 +102,7 @@ public static class DavXml {
     internal const string CalDavPrefix = "C";
     internal const string CalendarServerPrefix = "CS";
     internal const string AppleIcalPrefix = "ICAL";
+    internal const string CardDavPrefix = "CARD";
 
     /// <summary>
     /// Parses <paramref name="body"/>. Never throws for what the body holds: a malformed, oversized or too deep
@@ -206,6 +207,7 @@ public static class DavXml {
         writer.WriteAttributeString("xmlns", CalDavPrefix, null, DavNames.CalDav);
         writer.WriteAttributeString("xmlns", CalendarServerPrefix, null, DavNames.CalendarServer);
         writer.WriteAttributeString("xmlns", AppleIcalPrefix, null, DavNames.AppleIcal);
+        writer.WriteAttributeString("xmlns", CardDavPrefix, null, DavNames.CardDav);
     }
 
     /// <summary>Starts <paramref name="name"/> with the fixed prefix of its namespace, or a generated one.</summary>
@@ -215,6 +217,7 @@ public static class DavXml {
             DavNames.CalDav => CalDavPrefix,
             DavNames.CalendarServer => CalendarServerPrefix,
             DavNames.AppleIcal => AppleIcalPrefix,
+            DavNames.CardDav => CardDavPrefix,
             _ => null,
         };
         if (prefix is not null) writer.WriteStartElement(prefix, name.LocalName, name.Namespace);

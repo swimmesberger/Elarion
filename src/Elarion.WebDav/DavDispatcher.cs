@@ -63,7 +63,7 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
         return method switch {
             "PROPFIND" => await PropFindAsync(context, resource, cancellationToken).ConfigureAwait(false),
             "REPORT" => await ReportAsync(context, resource, cancellationToken).ConfigureAwait(false),
-            _ => Get(context, resource),
+            _ => await GetAsync(context, resource, cancellationToken).ConfigureAwait(false),
         };
     }
 
@@ -180,7 +180,7 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
         }));
     }
 
-    private static DavResponse Get(DavContext context, DavResource resource) {
+    private static async ValueTask<DavResponse> GetAsync(DavContext context, DavResource resource, CancellationToken cancellationToken) {
         if (resource.Kind != DavResourceKind.Member || resource.Member is not DavStoredObject stored) return WithAllow(DavResponse.Status(405));
         if (DavETag.Matches(context.Request.Header("If-None-Match"), stored.ETag)) {
             var notModified = DavResponse.Status(304);
@@ -188,7 +188,14 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
             return notModified;
         }
 
-        var response = DavResponse.Bytes(200, stored.Content, stored.ContentType);
+        // A protocol may answer another representation the client asked for (CardDAV: vCard 4.0 by Accept); the ETag is
+        // the stored object's either way.
+        var representation = resource.Protocol is { } protocol
+            ? await protocol.GetRepresentationAsync(context, stored, cancellationToken).ConfigureAwait(false)
+            : null;
+        var response = representation is null
+            ? DavResponse.Bytes(200, stored.Content, stored.ContentType)
+            : DavResponse.Bytes(200, representation.Content, representation.ContentType);
         response.Headers["ETag"] = stored.ETag;
         return response;
     }
