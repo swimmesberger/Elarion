@@ -91,8 +91,14 @@ internal sealed class ContentLineWriter : IDisposable {
                 break;
             }
 
+            // Never inside a UTF-8 sequence, and not before a space or a tab: a vCard reader removes every leading
+            // whitespace of a continuation line, so a continuation starting with one would lose it.
             var cut = room;
-            while (cut > 0 && (bytes[cut] & 0xC0) == 0x80) cut--;
+            while (cut > 0 && ((bytes[cut] & 0xC0) == 0x80 || bytes[cut] is (byte)' ' or (byte)'\t')) cut--;
+            if (cut == 0) {
+                cut = room;
+                while (cut > 0 && (bytes[cut] & 0xC0) == 0x80) cut--;
+            }
             bytes[..cut].CopyTo(_buffer.AsSpan(_length));
             _length += cut;
             _buffer[_length++] = (byte)'\r';

@@ -56,7 +56,7 @@ internal sealed class ContentLineReader : IDisposable {
             var header = Header(line);
             var quotedPrintable = _rules.QuotedPrintableSoftBreaks && ContainsIgnoreCase(header, "QUOTED-PRINTABLE"u8);
             var base64 = _rules.Base64UntilBlankLine && IsBase64Header(header);
-            ContinueLine(quotedPrintable, base64);
+            ContinueLine(quotedPrintable, base64, start, length);
             return true;
         }
     }
@@ -66,14 +66,16 @@ internal sealed class ContentLineReader : IDisposable {
         if (buffer.Length > 0) ArrayPool<byte>.Shared.Return(buffer);
     }
 
-    private void ContinueLine(bool quotedPrintable, bool base64) {
+    // The soft break is decided on the physical line last appended, not on the logical line: a line already over its
+    // limit no longer holds its end, and its quoted-printable continuation must still be consumed, not read as lines.
+    private void ContinueLine(bool quotedPrintable, bool base64, int lastStart, int lastLength) {
         while (true) {
-            if (quotedPrintable && EndsWithSoftBreak(out var keep)) {
+            if (quotedPrintable && EndsWithSoftBreak(_data.Span.Slice(lastStart, lastLength))) {
                 if (!PeekPhysical(out var softStart, out var softLength)) return;
-                _length = keep;
+                if (!IsTooLong) _length = Current.TrimEnd(" \t"u8).Length - 1;
                 ConsumePeek();
-                var next = _data.Span.Slice(softStart, softLength);
-                Append(next.TrimStart(" \t"u8));
+                Append(_data.Span.Slice(softStart, softLength).TrimStart(" \t"u8));
+                (lastStart, lastLength) = (softStart, softLength);
                 continue;
             }
 
@@ -82,6 +84,7 @@ internal sealed class ContentLineReader : IDisposable {
             if (line.Length > 0 && line[0] is (byte)' ' or (byte)'\t') {
                 ConsumePeek();
                 Append(_rules.UnfoldAllWhitespace ? line.TrimStart(" \t"u8) : line[1..]);
+                (lastStart, lastLength) = (start, length);
                 continue;
             }
 
@@ -94,6 +97,7 @@ internal sealed class ContentLineReader : IDisposable {
                 if (IsBase64Text(line)) {
                     ConsumePeek();
                     Append(line.Trim(" \t"u8));
+                    (lastStart, lastLength) = (start, length);
                     continue;
                 }
             }
@@ -102,10 +106,9 @@ internal sealed class ContentLineReader : IDisposable {
         }
     }
 
-    private bool EndsWithSoftBreak(out int keep) {
-        var span = Current.TrimEnd(" \t"u8);
-        keep = span.Length - 1;
-        return !IsTooLong && span.Length > 0 && span[^1] == (byte)'=';
+    private static bool EndsWithSoftBreak(ReadOnlySpan<byte> physicalLine) {
+        var span = physicalLine.TrimEnd(" \t"u8);
+        return span.Length > 0 && span[^1] == (byte)'=';
     }
 
     private void Append(ReadOnlySpan<byte> segment) {

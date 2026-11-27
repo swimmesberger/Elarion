@@ -76,12 +76,13 @@ internal sealed class ContentTextDecoder(Encoding fallback, bool fileTranscoded,
         var lineEnd = firstLine.IndexOfAny((byte)'\n', (byte)'\r');
         if (lineEnd >= 0 && lineEnd + 1 < firstLine.Length && firstLine[lineEnd + 1] == 0) lineEnd++;
         if (lineEnd >= 0) firstLine = firstLine[..lineEnd];
-        if (firstLine.IndexOf("B\0E\0G\0"u8) >= 0) {
+        // Only a match on a code-unit boundary counts: "\0B\0E\0G\0" of big-endian text holds "B\0E\0G\0" at an odd offset.
+        if (IndexOfAligned(firstLine, "B\0E\0G\0"u8) >= 0) {
             transcoded = Transcode(data, Encoding.Unicode);
             return new FileEncoding(null, true, 0);
         }
 
-        if (firstLine.IndexOf("\0B\0E\0G"u8) >= 0) {
+        if (IndexOfAligned(firstLine, "\0B\0E\0G"u8) >= 0) {
             transcoded = Transcode(data, Encoding.BigEndianUnicode);
             return new FileEncoding(null, true, 0);
         }
@@ -109,6 +110,17 @@ internal sealed class ContentTextDecoder(Encoding fallback, bool fileTranscoded,
 
     /// <summary>Decodes bytes without a <c>CHARSET</c>.</summary>
     public string Decode(ReadOnlySpan<byte> bytes) => Decode(bytes, null, out _);
+
+    private static int IndexOfAligned(ReadOnlySpan<byte> data, ReadOnlySpan<byte> value) {
+        for (var offset = 0; offset < data.Length;) {
+            var at = data[offset..].IndexOf(value);
+            if (at < 0) return -1;
+            if ((offset + at) % 2 == 0) return offset + at;
+            offset += at + 1;
+        }
+
+        return -1;
+    }
 
     private static byte[] Transcode(ReadOnlySpan<byte> data, Encoding encoding) {
         var text = encoding.GetString(data[..(data.Length & ~1)]);
