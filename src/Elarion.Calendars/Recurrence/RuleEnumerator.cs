@@ -62,6 +62,11 @@ internal sealed class RuleEnumerator {
                     break;
             }
         }
+        else if (rule.ByWeekNo.Count > 0 && rule.ByDay.Count == 0 && rule.ByYearDay.Count == 0 && rule.ByMonthDay.Count == 0) {
+            // A week number names seven days; the day within it comes from DTSTART, as RFC 5545 §3.3.10 derives what a
+            // rule leaves open (sabre/vobject; python-dateutil expands the whole week instead).
+            _byDay = [new CalendarWeekday(start.DayOfWeek)];
+        }
     }
 
     /// <summary>Whether the enumeration stopped because no period produced an instance within the iteration cap.</summary>
@@ -82,9 +87,10 @@ internal sealed class RuleEnumerator {
     public IEnumerable<RecurrenceInstance> Enumerate() {
         var count = 0;
         var first = new RecurrenceInstance(_start, _zone is null ? null : ZoneMath.ToUtc(_start, _zone));
-        if (_beyondUntil(first)) yield break;
+        // RFC 5545 §3.8.5.3: DTSTART is always the first instance, even past an UNTIL that precedes it (sabre/vobject).
         yield return first;
         count++;
+        if (_beyondUntil(first)) yield break;
         if (_rule.Count is { } maxCount && count >= maxCount) yield break;
 
         var subDaily = _rule.Frequency is CalendarFrequency.Hourly or CalendarFrequency.Minutely or CalendarFrequency.Secondly;
