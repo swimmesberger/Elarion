@@ -49,6 +49,16 @@ minor releases may include breaking changes.
   time-range table over recurrences, floating times in the calendar's zone), `free-busy-query`, `expand`,
   `limit-recurrence-set` and partial `calendar-data`. `CalDavOptions` embeds `CalendarReadOptions` and
   `CalendarExpandOptions`. See [CalDAV](https://elarion.wimmesberger.dev/docs/capabilities/caldav).
+- **CalDAV host: `Elarion.WebDav.AspNetCore`** (ADR-0111, spec 0006). `app.MapElarionDav()` maps the DAV route group
+  under `WebDav:Prefix` with the WebDAV methods, requiring only the schemes of `WebDavHostOptions.AuthenticationSchemes`
+  (the app-password scheme by default, so a browser session never drives DAV and an app password reaches no other
+  endpoint), seeds the dispatch scope with the DAV principal after authentication, and redirects
+  `/.well-known/caldav` with `301` to the prefix. iOS, macOS, Thunderbird, DAVx5 and Evolution add an account from the
+  host name, an e-mail and an app password.
+- **`Elarion.AspNetCore`: endpoints can opt out of cross-origin protection.**
+  `.DisableElarionCrossOriginProtection(pathPrefix)` adds `CrossOriginProtectionExemptMetadata`, which
+  `UseElarionCrossOriginProtection` honours for the selected endpoint and, through the metadata's path prefix, before
+  routing; the DAV routes use it.
 - **App passwords: `Elarion.AppPasswords`, `Elarion.AppPasswords.EntityFrameworkCore`, `Elarion.AppPasswords.AspNetCore`**
   (ADR-0111, spec 0006). Calendar apps and calendar subscriptions authenticate without a browser sign-in.
   `IAppPasswords` creates a named app password for a user with a scope (`AppPasswordScope.Dav`, or

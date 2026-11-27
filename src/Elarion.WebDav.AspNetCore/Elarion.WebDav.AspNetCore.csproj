@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The ASP.NET Core host of Elarion's WebDAV core (ADR-0111): MapElarionDav() maps one route group under the DAV prefix for every registered protocol (CalDAV, feeds) with the WebDAV methods, requires the app-password scheme (or the schemes the host names) so a browser session never drives DAV and an app password reaches no other endpoint, seeds the dispatch scope with the DAV principal after authentication, exempts the routes from cross-origin protection, and redirects /.well-known/caldav to the prefix. Plain request delegates, no reflection.</Description>
+    <PackageTags>elarion;webdav;caldav;aspnetcore;well-known;dotnet</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Elarion.WebDav\Elarion.WebDav.csproj"/>
+    <ProjectReference Include="..\Elarion.AspNetCore\Elarion.AspNetCore.csproj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+  </ItemGroup>
+
+</Project>

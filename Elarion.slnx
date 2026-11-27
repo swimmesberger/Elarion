@@ -98,6 +98,7 @@
     <Project Path="src/Elarion.Typst/Elarion.Typst.csproj"/>
     <Project Path="src/Elarion.CalDav/Elarion.CalDav.csproj"/>
     <Project Path="src/Elarion.WebDav/Elarion.WebDav.csproj"/>
+    <Project Path="src/Elarion.WebDav.AspNetCore/Elarion.WebDav.AspNetCore.csproj"/>
     <Project Path="src/Elarion.WebDav.EntityFrameworkCore/Elarion.WebDav.EntityFrameworkCore.csproj"/>
     <Project
       Path="src/Elarion.WebDav.EntityFrameworkCore.Generators/Elarion.WebDav.EntityFrameworkCore.Generators.csproj"/>

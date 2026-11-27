@@ -299,6 +299,23 @@ As built in slice 3 (`Elarion.CalDav` server):
   tentative events.
 - **Options**: `CalDavOptions` also has `ProductId` (the `PRODID` of published objects).
 
+As built in slice 4 (`Elarion.WebDav.AspNetCore`):
+
+- **Cross-origin exemption**: `UseElarionCrossOriginProtection` had no endpoint-skip mechanism, only path prefixes set
+  where it is installed. `Elarion.AspNetCore` gains `CrossOriginProtectionExemptMetadata` and
+  `.DisableElarionCrossOriginProtection(pathPrefix)`: the middleware honours the selected endpoint's metadata when routing
+  ran first, and otherwise exempts the path prefixes it reads once from the endpoint data source, so it still works
+  placed before routing as documented.
+- **No reference to the app-password package**: the default scheme name is the constant
+  `WebDavHostOptions.AppPasswordScheme` (`ElarionAppPassword`), checked equal to the scheme's by a test, so the host
+  depends on `Elarion.WebDav` and `Elarion.AspNetCore` only, as ADR-0111 states. The feed-token reader of the scheme is
+  not changed by the host; an application with another prefix sets it.
+- **Routing**: one catch-all `MapMethods` with a plain `RequestDelegate` (no request-delegate generator), and
+  `MapElarionDav` returns the `RouteGroupBuilder`. The well-known redirect's `Location` is relative to the request, so it
+  keeps the scheme the client used, and it carries `Cache-Control: no-cache`.
+- **Replays**: the iOS, macOS, Thunderbird, DAVx5 and Evolution sequences run against a Kestrel host in
+  `CalDavClientReplayTests`; the Apple CalDAVTester job and the NativeAOT sample are not part of this slice.
+
 ## Adopting existing app passwords
 
 An application that already issues its own Basic credentials for DAV clients (as the consuming application whose

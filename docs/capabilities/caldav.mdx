@@ -13,6 +13,8 @@ answers the calendar apps' WebDAV requests from it, so sync is exact on every no
 | `Elarion.WebDav` | The WebDAV core without a wire: the hardened XML reader, the `DavDispatcher`, `sync-collection`, the store seam `IDavCollectionStore`. NativeAOT-safe. |
 | `Elarion.WebDav.EntityFrameworkCore` | The store and its journal on the application's `DbContext`: `[GenerateElarionDavStore]`. PostgreSQL. |
 | `Elarion.CalDav` | Calendar sources, `ICalDavPublisher`, the calendar properties and reports. NativeAOT-safe. |
+| `Elarion.WebDav.AspNetCore` | The host: `MapElarionDav()`, `/.well-known/caldav`, the app-password scheme on the DAV routes only. |
+| `Elarion.AppPasswords` (+ `.EntityFrameworkCore`, `.AspNetCore`) | The credential calendar apps send: see [App passwords](/docs/capabilities/app-passwords). |
 
 Why it is shaped this way, and what was rejected, is in
 [ADR-0111](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0111-caldav.md).
@@ -24,10 +26,52 @@ dotnet add package Elarion.CalDav
 dotnet add package Elarion.WebDav.EntityFrameworkCore
 ```
 
+```bash
+dotnet add package Elarion.WebDav.AspNetCore
+dotnet add package Elarion.AppPasswords.EntityFrameworkCore
+dotnet add package Elarion.AppPasswords.AspNetCore
+```
+
 ```csharp
 builder.Services.AddElarionWebDavEntityFrameworkCore<AppDbContext>(builder.Configuration.GetSection("WebDav"));
 builder.Services.AddElarionCalDav(builder.Configuration.GetSection("CalDav"));
+builder.Services.AddElarionAppPasswordsEntityFrameworkCore<AppDbContext>(builder.Configuration.GetSection("AppPasswords"));
+builder.Services.AddAuthentication()
+    .AddElarionAppPasswordAuthentication();          // plus AddElarionIdentityAppPasswordPrincipals<TUser>() or OnCreatePrincipal
+
+var app = builder.Build();
+app.UseElarionCrossOriginProtection();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapElarionDav();                                  // /dav, /.well-known/caldav, feeds
 ```
+
+A person creates an app password in the application (the application's own-account handler calls `IAppPasswords`),
+then adds a CalDAV account on iOS, macOS, Thunderbird, DAVx5 or Evolution with the host name, their e-mail and that
+password. The calendars of their home appear, read-only.
+
+## The host
+
+`MapElarionDav()` maps one route group under `WebDav:Prefix` for every registered DAV protocol and returns it, so the
+application can add conventions such as a rate limiter:
+
+- **Methods.** `OPTIONS`, `GET`, `HEAD`, `PROPFIND`, `REPORT`, and the write methods, which the dispatcher answers `403`.
+- **Authentication.** The group requires an authenticated user of the schemes in
+  `WebDavHostOptions.AuthenticationSchemes`, by default only the app-password scheme (`ElarionAppPassword`): the
+  application's browser credential (a cookie, a proxy token) never authenticates a DAV request, and an app password no
+  other endpoint. A request without a credential answers `401` with `WWW-Authenticate: Basic realm="DAV",
+  charset="UTF-8"` (iOS sends anonymous requests during discovery and gives up on a `403`); a forbidden one `403`
+  without a challenge.
+- **The dispatch scope** is seeded with the DAV principal after authentication, so `ICurrentUser` in the calendar
+  sources is the calendar app's user, whatever ran before.
+- **Cross-origin protection.** The group carries `CrossOriginProtectionExemptMetadata` with its prefix, so
+  `UseElarionCrossOriginProtection` leaves it alone, before routing as well as after: its only credential is one a
+  browser never attaches by itself.
+- **Well-known.** `/.well-known/caldav` at the application root answers every method with `301` to the prefix
+  (`WebDavHostOptions.MapWellKnown`).
+
+Serve CalDAV over HTTPS: Apple clients may send no credentials over plain HTTP. When the prefix is not `/dav`, set the
+scheme's `FeedTokenReader` to `AppPasswordFeedPaths.CreateReader(prefix)`.
 
 ## Calendar sources: who sees which calendar
 
