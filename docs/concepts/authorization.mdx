@@ -232,11 +232,55 @@ Rules always run **behind the authentication gate**: a handler that declares any
 unauthenticated caller with `Unauthorized` before rules are reached, so a rule never has to defend against a
 missing principal. `[AllowAnonymous]` handlers opt out of authorization entirely, global rules included — that
 attribute means "this operation is outside authorization", and a rule must not resurrect a gate the handler
-declined. A check that must also cover anonymous traffic belongs in the handler or in host middleware.
+declined. A check that must also cover anonymous traffic belongs in an application decorator
+([below](#a-rule-that-sees-the-outcome-or-anonymous-handlers-too-a-decorator)), the handler or host middleware.
 
 Client-event **subscriptions** are covered: any topic declaring a requirement is decided by the same `IAuthorizer`,
 so a rule that denies a request also denies the corresponding subscribe.
 </Callout>
+
+### A rule that sees the outcome, or anonymous handlers too: a decorator
+
+A global rule decides *before* the declared requirements are checked and never runs for an `[AllowAnonymous]`
+handler. A condition that has to come **after** them (a refusal that must not hide the permission denial the caller
+would otherwise get), cover **anonymous** operations as well, or **observe the outcome** (an audit record of what was
+done, including a failure or a throw) is an application decorator in your `[DecoratorList]`. That position already
+has all three properties — there is no separate seam for it:
+
+- it runs **after** authorization, the feature gate and validation (the [decorator order](/docs/concepts/decorator-pipelines#order-matters)),
+  so a caller who may not call the handler gets the declared denial, never your refusal;
+- it runs for **every** handler in the pipeline's scope, `[AllowAnonymous]` ones included;
+- it wraps the call, so it sees the result and any exception, and, listed outside your transaction decorator, it
+  sees whether the transaction committed.
+
+Read the handler's markers from the `HandlerMetadata` constructor parameter, never from `inner.GetType()`:
+
+```csharp
+public sealed class ViewAsDecorator<TRequest, TResponse>(
+    IHandler<TRequest, TResponse> inner, HandlerMetadata handler, IViewAsSession session, IViewAsAudit audit)
+    : IHandler<TRequest, TResponse> where TResponse : IResultFailureFactory<TResponse>, IResultLike {
+    public async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken ct) {
+        if (!session.IsActive || request is not ICommand) return await inner.HandleAsync(request, ct);
+        if (handler.GetAttribute<AllowedDuringViewAsAttribute>() is null)
+            return TResponse.Failure(AppError.Forbidden("Not available while viewing as another user.", "view_as.refused"));
+
+        try {
+            var response = await inner.HandleAsync(request, ct);
+            await audit.RecordAsync(handler.HandlerType, succeeded: response.IsSuccess, ct);
+            return response;
+        }
+        catch {
+            await audit.RecordAsync(handler.HandlerType, succeeded: false, CancellationToken.None);
+            throw;
+        }
+    }
+}
+```
+
+Declare the code it adds once on the decorator with `[ProducesError]`
+([Declaring the errors a decorator adds](/docs/concepts/decorator-pipelines#declaring-the-errors-a-decorator-adds)).
+Reach for a global rule when the condition is a plain decision that may run first; reach for a decorator when it
+must come after the declared requirements, include anonymous handlers or see the outcome.
 
 ### Replacing or decorating the authorizer
 

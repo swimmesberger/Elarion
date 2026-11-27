@@ -130,6 +130,15 @@ a proxy) differ, and a short body that completes looks like a complete file; **r
 length** — a range needs to skip, which a forward-only stream can do only by reading, so it stays a seekable stream's
 feature.
 
+## Note (2026-11-27): .NET 11 closed the `ZipArchive` gap
+
+Probed on this repository's toolchain: an archive written with `ZipArchive.CreateAsync`, `ZipArchiveEntry.OpenAsync`
+and `await using` into a stream that refuses synchronous writes fails on .NET 10.0.15 (the entry stream's
+`Dispose` writes the deflate trailer and the data descriptor synchronously, with `Fastest` and `NoCompression`
+alike) and completes with only asynchronous writes on .NET 11.0.0. The body that holds synchronous writes stays: the
+packages still target `net10.0`, and on `net11.0` it costs nothing when nothing is held. Revisit it when `net10.0`
+is dropped.
+
 ## Rejected alternatives
 
 - **A stream on `ElarionFile`.** Rejected again, for ADR-0039's reasons: the type crosses every surface, and a stream

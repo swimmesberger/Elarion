@@ -464,7 +464,9 @@ What happens around the bytes:
   async API: an entry stream from `OpenAsync` flushes its compressed trailer and data descriptor in the synchronous
   `Dispose` that `await using` falls back to. The body a writer receives holds such writes (up to 1 MiB at a time) and
   sends them with the next asynchronous write, so the code above needs no `AllowSynchronousIO`. Write the bulk of the
-  content asynchronously; a writer that writes everything synchronously fails at that limit.
+  content asynchronously; a writer that writes everything synchronously fails at that limit. On .NET 11 the entry
+  stream disposes asynchronously and `ZipArchive` writes nothing synchronously; the holding is what keeps the same
+  code working on .NET 10.
 - **Inline disposition.** Show in place only content types the browser renders safely (PDF, raster images). A
   user-supplied `text/html` or `image/svg+xml` served inline from your origin runs as part of it; `nosniff` does not
   change that.
