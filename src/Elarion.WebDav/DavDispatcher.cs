@@ -53,6 +53,8 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
         if (!TryParsePath(request.Path, out var segments)) return DavResponse.Status(404);
 
         var context = new DavContext(request, services, user, options.Value, _protocols);
+        if (context.Options.RefuseWhenNoCollections && !await SeesAnyCollectionAsync(context, cancellationToken).ConfigureAwait(false))
+            return DavResponse.Status(403);
         if (WriteMethods.Contains(method)) return await RefuseWriteAsync(context, segments, method, cancellationToken).ConfigureAwait(false);
         if (method is not ("PROPFIND" or "REPORT" or "GET" or "HEAD")) return WithAllow(DavResponse.Status(405));
 
@@ -65,6 +67,15 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
             "REPORT" => await ReportAsync(context, resource, cancellationToken).ConfigureAwait(false),
             _ => await GetAsync(context, resource, cancellationToken).ConfigureAwait(false),
         };
+    }
+
+    // WebDavOptions.RefuseWhenNoCollections: the collections are resolved through the request's cache, so the request
+    // that follows reuses them.
+    private static async ValueTask<bool> SeesAnyCollectionAsync(DavContext context, CancellationToken cancellationToken) {
+        foreach (var protocol in context.Protocols)
+            if ((await context.GetCollectionsAsync(protocol, cancellationToken).ConfigureAwait(false)).Count > 0)
+                return true;
+        return false;
     }
 
     private DavResponse Options() {
@@ -126,17 +137,13 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
         var collections = await context.GetCollectionsAsync(protocol, cancellationToken).ConfigureAwait(false);
         var collection = collections.FirstOrDefault(c => string.Equals(c.Segment, segments[2], StringComparison.Ordinal));
         if (collection is null) return (null, null);
-        if (segments.Count == 3) {
-            var states = await context.Store.GetStatesAsync([collection.Address], cancellationToken).ConfigureAwait(false);
-            return (new DavResource(context, DavResourceKind.Collection, context.CollectionHref(protocol, collection)) {
-                Protocol = protocol, Collection = collection, State = states[0],
-            }, null);
-        }
+        if (segments.Count == 3) return (await CollectionResourceAsync(context, protocol, collection, cancellationToken).ConfigureAwait(false), null);
 
         DavStoredObject? member = null;
-        await foreach (var stored in context.Store.GetObjectsAsync(collection.Address.Id, [segments[3]], withContent, cancellationToken)
-                           .ConfigureAwait(false))
-            member = stored;
+        var purpose = withContent ? DavContentPurpose.Get : DavContentPurpose.Metadata;
+        await foreach (var stored in context.GetMembersAsync(collection, [segments[3]], purpose, cancellationToken).ConfigureAwait(false))
+            if (string.Equals(stored.Name, segments[3], StringComparison.Ordinal))
+                member = stored;
         if (member is null) return (null, null);
         return (new DavResource(context, DavResourceKind.Member, context.MemberHref(protocol, collection, member.Name)) {
             Protocol = protocol, Collection = collection, Member = member,
@@ -203,13 +210,14 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
     private async ValueTask<DavResponse> PropFindAsync(DavContext context, DavResource resource, CancellationToken cancellationToken) {
         // RFC 4918 reads a missing Depth as infinity; sabre/dav and the clients surveyed send it, and a missing one is read
         // as 1, which answers every client that omits it without walking a tree.
-        var depthHeader = context.Request.Header("Depth")?.Trim();
+        // Some clients send "1,noroot" (Microsoft's extension): the depth before the comma, without the resource itself.
+        var (depthHeader, noRoot) = ParseDepth(context.Request.Header("Depth"));
         int depth;
         if (depthHeader is null) depth = 1;
         else if (depthHeader == "0") depth = 0;
         else if (depthHeader == "1") depth = 1;
         else if (string.Equals(depthHeader, "infinity", StringComparison.OrdinalIgnoreCase)) return DavResponse.Error(403, DavNames.D.PropFindFiniteDepth);
-        else return DavResponse.Text(400, "The Depth header must be 0, 1 or infinity.");
+        else return DavResponse.Text(400, "The Depth header must be 0, 1 or infinity, optionally followed by ',noroot'.");
 
         var (body, refusal) = await ReadBodyAsync(context, cancellationToken).ConfigureAwait(false);
         if (refusal is not null) return refusal;
@@ -243,13 +251,13 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
 
         var response = DavResponse.Xml(207, async (output, ct) => {
             DavMultistatus.Start(output);
-            await DavMultistatus.WriteResourceAsync(output, resource, selection, minimal, ct).ConfigureAwait(false);
+            if (!noRoot) await DavMultistatus.WriteResourceAsync(output, resource, selection, minimal, ct).ConfigureAwait(false);
             if (children is not null)
                 foreach (var child in children)
                     await DavMultistatus.WriteResourceAsync(output, child, selection, minimal, ct).ConfigureAwait(false);
             if (depth == 1 && resource.Kind == DavResourceKind.Collection) {
-                await foreach (var member in context.Store.ListMembersAsync(resource.Collection!.Address.Id, ct).ConfigureAwait(false)) {
-                    var child = new DavResource(context, DavResourceKind.Member, context.MemberHref(resource.Protocol!, resource.Collection, member.Name)) {
+                await foreach (var member in context.ListMembersAsync(resource.Collection!, ct).ConfigureAwait(false)) {
+                    var child = new DavResource(context, DavResourceKind.Member, context.MemberHref(resource.Protocol!, resource.Collection!, member.Name)) {
                         Protocol = resource.Protocol, Collection = resource.Collection, Member = member,
                     };
                     await DavMultistatus.WriteResourceAsync(output, child, selection, minimal, ct).ConfigureAwait(false);
@@ -266,13 +274,54 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
     private static async ValueTask<List<DavResource>> ListHomeAsync(DavContext context, IDavProtocol protocol, CancellationToken cancellationToken) {
         var collections = await context.GetCollectionsAsync(protocol, cancellationToken).ConfigureAwait(false);
         if (collections.Count == 0) return [];
-        var states = await context.Store.GetStatesAsync([.. collections.Select(static c => c.Address)], cancellationToken).ConfigureAwait(false);
-        return [
-            .. collections.Select((collection, index) =>
-                new DavResource(context, DavResourceKind.Collection, context.CollectionHref(protocol, collection)) {
-                    Protocol = protocol, Collection = collection, State = states[index],
-                }),
-        ];
+        // One read of the store for every published collection; each live one answers its own CTag.
+        var published = collections.Where(static c => c.Live is null).ToList();
+        IReadOnlyList<DavCollectionState> states = published.Count == 0
+            ? []
+            : await context.Store.GetStatesAsync([.. published.Select(static c => c.Address)], cancellationToken).ConfigureAwait(false);
+        var stateOf = new Dictionary<DavCollection, DavCollectionState>(ReferenceEqualityComparer.Instance);
+        for (var i = 0; i < published.Count; i++) stateOf[published[i]] = states[i];
+
+        var resources = new List<DavResource>(collections.Count);
+        foreach (var collection in collections) {
+            var href = context.CollectionHref(protocol, collection);
+            resources.Add(collection.Live is { } live
+                ? new DavResource(context, DavResourceKind.Collection, href) {
+                    Protocol = protocol, Collection = collection,
+                    CTag = await live.GetCTagAsync(context, cancellationToken).ConfigureAwait(false),
+                }
+                : new DavResource(context, DavResourceKind.Collection, href) {
+                    Protocol = protocol, Collection = collection, State = stateOf[collection],
+                });
+        }
+
+        return resources;
+    }
+
+    private static async ValueTask<DavResource> CollectionResourceAsync(DavContext context, IDavProtocol protocol, DavCollection collection,
+        CancellationToken cancellationToken) {
+        var href = context.CollectionHref(protocol, collection);
+        if (collection.Live is { } live) {
+            return new DavResource(context, DavResourceKind.Collection, href) {
+                Protocol = protocol, Collection = collection, CTag = await live.GetCTagAsync(context, cancellationToken).ConfigureAwait(false),
+            };
+        }
+
+        var states = await context.Store.GetStatesAsync([collection.Address], cancellationToken).ConfigureAwait(false);
+        return new DavResource(context, DavResourceKind.Collection, href) { Protocol = protocol, Collection = collection, State = states[0] };
+    }
+
+    /// <summary>
+    /// Splits a <c>Depth</c> header into its depth and whether <c>noroot</c> follows it (<c>1,noroot</c>, <c>0, noroot</c>);
+    /// <see langword="null"/> for a missing header.
+    /// </summary>
+    internal static (string? Depth, bool NoRoot) ParseDepth(string? header) {
+        if (header is null) return (null, false);
+        var comma = header.IndexOf(',');
+        if (comma < 0) return (header.Trim(), false);
+        var suffix = header[(comma + 1)..].Trim();
+        // An unknown suffix keeps the whole value, which then answers 400.
+        return string.Equals(suffix, "noroot", StringComparison.OrdinalIgnoreCase) ? (header[..comma].Trim(), true) : (header.Trim(), false);
     }
 
     /// <summary>Whether the client asked for a minimal answer (RFC 7240 <c>return=minimal</c>, or <c>Brief: t</c>).</summary>
@@ -322,7 +371,8 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
         if (refusal is not null) return refusal;
         if (body is null) return DavResponse.Text(400, "A REPORT needs a body.");
         if (body.Is(DavNames.D.SyncCollection)) {
-            return resource.Kind == DavResourceKind.Collection
+            // A live collection has no journal and offers no sync-collection (supported-report-set); clients use its CTag.
+            return resource.Kind == DavResourceKind.Collection && resource.Collection!.Live is null
                 ? await SyncCollectionAsync(context, resource, body, cancellationToken).ConfigureAwait(false)
                 : DavResponse.Error(403, DavNames.D.SupportedReport);
         }

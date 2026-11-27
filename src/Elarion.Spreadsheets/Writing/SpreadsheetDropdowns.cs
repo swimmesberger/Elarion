@@ -29,14 +29,13 @@ internal sealed class SpreadsheetDropdowns {
     /// The names of the workbook's worksheets so far; the hidden worksheet's name is chosen to differ from them and is
     /// added to them, so a later worksheet cannot take it.
     /// </param>
-    public void AppendDataValidations<T>(
-        Utf8XmlBuffer xml, IReadOnlyList<SpreadsheetColumn<T>> columns, int lastRow, HashSet<string> worksheetNames)
-        where T : class {
+    public void AppendDataValidations(
+        Utf8XmlBuffer xml, IReadOnlyList<WorksheetColumn> columns, int lastRow, HashSet<string> worksheetNames) {
         if (lastRow < 2) return;
 
         var count = 0;
         foreach (var column in columns)
-            if (IsDropdown(column))
+            if (column.IsDropdown)
                 count++;
 
         if (count == 0) return;
@@ -44,10 +43,11 @@ internal sealed class SpreadsheetDropdowns {
         xml.Append("<dataValidations count=\""u8);
         xml.AppendFormatted(count);
         xml.Append("\">"u8);
-        foreach (var column in columns) {
-            if (!IsDropdown(column)) continue;
+        for (var index = 0; index < columns.Count; index++) {
+            var column = columns[index];
+            if (!column.IsDropdown) continue;
 
-            var letters = SpreadsheetCells.ColumnLetters(column.Index);
+            var letters = SpreadsheetCells.ColumnLetters(index);
             // A blank cell stays allowed: whether a value is required is the reader's to say, with the row's number.
             xml.Append("<dataValidation type=\"list\" allowBlank=\"1\" showErrorMessage=\"1\" sqref=\""u8);
             xml.AppendRaw(letters);
@@ -103,10 +103,6 @@ internal sealed class SpreadsheetDropdowns {
         }
 
         xml.Append("</sheetData></worksheet>"u8);
-    }
-
-    private static bool IsDropdown<T>(SpreadsheetColumn<T> column) where T : class {
-        return column.Kind == SpreadsheetValueKind.Choice && column.Choices.Count > 0;
     }
 
     // An inline list has no escape for its separator or its quotes, and its formula text is read without the cell

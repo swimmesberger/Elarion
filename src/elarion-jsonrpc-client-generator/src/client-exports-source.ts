@@ -105,6 +105,7 @@ export function generateClientExportsLines(schema: RpcSchema, methods: readonly 
       '/**',
       ' * The sort keys each method\'s handler allows (its sort map), in declaration order. A bare key sorts in the key\'s',
       ' * `direction`; `+key` forces ascending and `-key` descending. `default` marks the key used when none is sent.',
+      ' * Several keys combine comma-separated, left to right (`+city,-name`), up to the sort map\'s level cap.',
       ' */',
       `export const rpcSortKeys = ${literal(values, 0)} as const`,
       '',

@@ -563,6 +563,8 @@ describe('JSON-RPC client generator', () => {
               },
               mode: {type: 'string', enum: ['fast', 'slow'], 'x-elarion-error-messages': {enum: 'Pick fast or slow.'}},
               level: {type: 'integer', enum: [1, 2], 'x-elarion-error-messages': {enum: 'Pick 1 or 2.'}},
+              // [AllowedValues] on a nullable member: the exporter lists null in the enum, because the server lets it pass.
+              days: {type: ['integer', 'null'], enum: [30, 90, 365, null]},
               note: {
                 type: ['string', 'null'],
                 maxLength: 5,
@@ -591,6 +593,8 @@ describe('JSON-RPC client generator', () => {
     expect(generated.schemasSource).toContain(
       'level: z.union([z.literal(1), z.literal(2)], { message: "Pick 1 or 2." }),')
     expect(generated.schemasSource).toContain('note: z.string().max(5, "Too long.").nullish().optional(),')
+    expect(generated.schemasSource).toContain(
+      'days: z.union([z.literal(30), z.literal(90), z.literal(365)]).nullish().optional(),')
   })
 
   it('resolves local JSON pointer references inside a method schema', () => {

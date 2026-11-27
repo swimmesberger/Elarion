@@ -60,6 +60,12 @@ public enum ContactTypes {
 
     /// <summary><c>MAIN</c>: the main number, as Apple labels it.</summary>
     Main = 256,
+
+    /// <summary>
+    /// <c>INTERNET</c>: an Internet e-mail address, the type vCard 2.1 and 3.0 producers (Apple, Android, Outlook) put on
+    /// every <c>EMAIL</c>; read and written like the other types.
+    /// </summary>
+    Internet = 512,
 }
 
 /// <summary>The vCard version a <see cref="ContactWriter"/> writes (FR-052). vCard 2.1 is read, never written.</summary>

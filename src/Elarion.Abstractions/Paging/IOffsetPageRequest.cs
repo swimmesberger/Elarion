@@ -14,9 +14,10 @@ public interface IOffsetPageRequest {
     int Size { get; }
 
     /// <summary>
-    /// Optional sort key. Resolved against a handler-supplied whitelist (see <c>SortMap</c>);
-    /// a leading <c>-</c> requests descending order (e.g. <c>"-createdAt"</c>). Unknown or blank
-    /// keys fall back to the whitelist's default sort.
+    /// Optional sort: one key or a comma-separated list of keys, resolved against a handler-supplied
+    /// whitelist (see <c>SortMap</c>); a leading <c>-</c> requests descending and <c>+</c> ascending order
+    /// (e.g. <c>"-createdAt"</c>, <c>"+city,-name"</c>), a bare key the key's declared direction. A blank
+    /// or refused sort falls back to the whitelist's default sort.
     /// </summary>
     string? Sort { get; }
 }

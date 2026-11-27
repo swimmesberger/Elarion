@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Elarion.Contacts;
 using Elarion.WebDav;
 using Microsoft.Extensions.Configuration;
@@ -57,6 +58,33 @@ public static class CardDavServiceCollectionExtensions {
     public static IServiceCollection AddElarionCardDavSource<TQuery>(this IServiceCollection services) where TQuery : ICardDavSource<TQuery>, new() {
         ArgumentNullException.ThrowIfNull(services);
         DavSources.Register<TQuery, CardDavSourceListing, CardDavOptions>(services, TQuery.SourceName, CardDavSourceKind.Value);
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the live address-book source <typeparamref name="TQuery"/> (ADR-0113, amendment 2026-11-27): its handler
+    /// decides which address books the current user sees, as for <see cref="AddElarionCardDavSource{TQuery}"/>, and
+    /// <typeparamref name="TAddressBooks"/> (scoped) reads their contacts per request as that user, so a contact's
+    /// visibility follows the application's rules without publishing one address book per viewer. Its address books have
+    /// a CTag and no sync token; nothing is published into them.
+    /// </summary>
+    /// <typeparam name="TQuery">The source's query request.</typeparam>
+    /// <typeparam name="TAddressBooks">Reads the contacts of the source's address books.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <exception cref="InvalidOperationException">The source name is invalid, or another address-book source has the same name.</exception>
+    /// <example>
+    /// <code>
+    /// services.AddElarionCardDavLiveSource&lt;MyContacts, VisibleContacts&gt;();
+    /// </code>
+    /// </example>
+    public static IServiceCollection AddElarionCardDavLiveSource<TQuery,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TAddressBooks>(this IServiceCollection services)
+        where TQuery : ICardDavSource<TQuery>, new()
+        where TAddressBooks : class, ICardDavLiveAddressBooks {
+        ArgumentNullException.ThrowIfNull(services);
+        DavSources.Register<TQuery, CardDavSourceListing, CardDavOptions>(services, TQuery.SourceName, CardDavSourceKind.Value);
+        services.TryAddScoped<TAddressBooks>();
+        services.AddSingleton(new CardDavLiveSourceRegistration(TQuery.SourceName, static provider => provider.GetRequiredService<TAddressBooks>()));
         return services;
     }
 }

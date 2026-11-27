@@ -29,6 +29,7 @@ namespace Elarion.Generators;
 internal static class ValidatableTypeWalker {
     private const string ValidatableObjectDisplay = "System.ComponentModel.DataAnnotations.IValidatableObject";
     private const string DisplayAttributeDisplay = "System.ComponentModel.DataAnnotations.DisplayAttribute";
+    private const string AllowedValuesAttributeDisplay = "System.ComponentModel.DataAnnotations.AllowedValuesAttribute";
 
     // .NET 11 asynchronous validation. Absent from older reference sets, so nothing matches there.
     // C# 15 unions (.NET 11). Recognized by IUnion — what every compiler-declared union implements (its [Union]
@@ -240,7 +241,7 @@ internal static class ValidatableTypeWalker {
         var typeDisplay = type.WithNullableAnnotation(NullableAnnotation.None)
             .ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
         var typeAttributeData = type.GetAttributes();
-        node.TypeAttributes.AddRange(RenderValidationAttributes(typeAttributeData, context));
+        node.TypeAttributes.AddRange(RenderValidationAttributes(typeAttributeData, context, nullableMember: false));
         var annotated = node.TypeAttributes.Count > 0 ||
                         HandlerShape.Implements(type, ValidatableObjectDisplay);
 
@@ -250,7 +251,8 @@ internal static class ValidatableTypeWalker {
 
         foreach (var property in CollectProperties(type)) {
             var attributeData = CollectPropertyAttributeData(property);
-            var attributes = RenderValidationAttributes(attributeData, context).ToImmutableArray();
+            var attributes = RenderValidationAttributes(attributeData, context, IsNullableMember(property))
+                .ToImmutableArray();
             if (!attributes.IsEmpty)
                 annotated = true;
 
@@ -465,7 +467,13 @@ internal static class ValidatableTypeWalker {
     /// represented as compile-time constants, or whose type is not accessible from the generated code, are
     /// skipped (attribute arguments are constants by construction, so this is a guard, not a policy).
     /// </summary>
-    private static List<string> RenderValidationAttributes(IEnumerable<AttributeData> attributes, Context context) {
+    /// <remarks>
+    /// On a nullable member (<c>T?</c>), <c>[AllowedValues]</c> is rendered with <c>null</c> added to its values: like
+    /// <c>[Range]</c>, a single-value rule applies to a present value only, while the BCL attribute would treat
+    /// <c>null</c> as one more value to look up and refuse a request that leaves the member out.
+    /// </remarks>
+    private static List<string> RenderValidationAttributes(
+        IEnumerable<AttributeData> attributes, Context context, bool nullableMember) {
         var result = new List<string>();
         foreach (var attribute in attributes) {
             if (attribute.AttributeClass is not { TypeKind: not TypeKind.Error } attributeClass)
@@ -474,17 +482,25 @@ internal static class ValidatableTypeWalker {
             if (!AttributeArgumentRendering.DerivesFromValidationAttribute(attributeClass))
                 continue;
 
-            if (TryRenderAttribute(attribute, attributeClass, context, out var rendered))
+            if (TryRenderAttribute(attribute, attributeClass, context, nullableMember, out var rendered))
                 result.Add(rendered);
         }
 
         return result;
     }
 
+    // Nullable<T>, or a reference type annotated '?' (in a nullable-oblivious context a reference member is not
+    // treated as nullable: there is no declaration that says so).
+    private static bool IsNullableMember(IPropertySymbol property) {
+        return property.Type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T }
+               || (property.Type.IsReferenceType && property.NullableAnnotation == NullableAnnotation.Annotated);
+    }
+
     private static bool TryRenderAttribute(
         AttributeData attribute,
         INamedTypeSymbol attributeClass,
         Context context,
+        bool nullableMember,
         out string rendered) {
         rendered = string.Empty;
         if (!IsAccessibleFromGeneratedCode(attributeClass, context.CurrentAssembly))
@@ -496,6 +512,23 @@ internal static class ValidatableTypeWalker {
                 return false;
 
             arguments.Add(value);
+        }
+
+        // Only the BCL attribute itself: a subclass may override IsValid or take other constructor arguments.
+        if (nullableMember &&
+            attributeClass.ToDisplayString() == AllowedValuesAttributeDisplay &&
+            attribute.ConstructorArguments.Length == 1 &&
+            attribute.ConstructorArguments[0] is { Kind: TypedConstantKind.Array } values &&
+            !values.Values.Any(static value => value.IsNull)) {
+            var elements = new List<string>(values.Values.Length + 1) { "null" };
+            foreach (var value in values.Values) {
+                if (!TryRenderTypedConstant(value, context, out var element))
+                    return false;
+
+                elements.Add(element);
+            }
+
+            arguments[0] = $"new object?[] {{ {string.Join(", ", elements)} }}";
         }
 
         var initializers = new List<string>(attribute.NamedArguments.Length);

@@ -99,10 +99,88 @@ public sealed class ContactEncodingTests {
 
     [Fact]
     public async Task LineBreaks_ReadAsNewlinesOnEveryPlatform() {
-        var contact = await ReadOneAsync(Lines(
-            "BEGIN:VCARD", "VERSION:2.1", "FN:A", "NOTE;ENCODING=QUOTED-PRINTABLE:a=0D=0Ab=0Dc=0Ad", "TITLE:x\\ny\\Nz", "END:VCARD"));
+        var version21 = await ReadOneAsync(Lines(
+            "BEGIN:VCARD", "VERSION:2.1", "FN:A", "NOTE;ENCODING=QUOTED-PRINTABLE:a=0D=0Ab=0Dc=0Ad", "END:VCARD"));
+        var version30 = await ReadOneAsync(Card("FN:A", "TITLE:x\\ny\\Nz"));
 
-        contact.Note.Should().Be("a\nb\nc\nd");
-        contact.Title.Should().Be("x\ny\nz");
+        version21.Note.Should().Be("a\nb\nc\nd");
+        version30.Title.Should().Be("x\ny\nz");
+    }
+
+    [Fact]
+    public async Task AFileConcatenatedWithAByteOrderMarkBeforeEachCard_KeepsEveryCard() {
+        byte[] bom = [0xEF, 0xBB, 0xBF];
+        byte[] file = [
+            .. bom, .. Encoding.UTF8.GetBytes(Card("FN:One")),
+            .. bom, .. Encoding.UTF8.GetBytes(Card("FN:Two")),
+            .. bom, .. bom, .. Encoding.UTF8.GetBytes(Card("FN:Three")),
+        ];
+
+        var result = await ReadAsync(file);
+
+        result.Errors.Should().BeEmpty();
+        result.Contacts.Select(static c => c.FormattedName).Should().Equal("One", "Two", "Three");
+        result.ByteOrderMarkEncoding.Should().Be("utf-8");
+    }
+
+    [Fact]
+    public async Task AUtf16FileConcatenatedWithAByteOrderMarkBeforeEachCard_KeepsEveryCard() {
+        byte[] bom = [0xFF, 0xFE];
+        byte[] file = [
+            .. bom, .. Encoding.Unicode.GetBytes(Card("FN:Één")),
+            .. bom, .. Encoding.Unicode.GetBytes(Card("FN:Twee")),
+        ];
+
+        var result = await ReadAsync(file);
+
+        result.Errors.Should().BeEmpty();
+        result.Contacts.Select(static c => c.FormattedName).Should().Equal("Één", "Twee");
+        result.ByteOrderMarkEncoding.Should().Be("utf-16le");
+    }
+
+    [Fact]
+    public async Task AByteOrderMarkInsideAValue_IsKept() {
+        var contact = await ReadOneAsync(Card("FN:A", "NOTE:x\uFEFFy"));
+
+        contact.Note.Should().Be("x\uFEFFy");
+    }
+
+    [Fact]
+    public async Task Version21Backslashes_AreCharactersExceptBeforeASemicolon() {
+        var entry = Assert.Single((await ReadAsync(Lines(
+            "BEGIN:VCARD", "VERSION:2.1", @"N:C:\Daten;Anna\;Maria", @"NOTE:Pfad C:\neu\temp", @"TITLE:a\,b", "END:VCARD"))).Entries);
+
+        entry.Value!.Name!.Family.Should().Be(@"C:\Daten");
+        entry.Value.Name.Given.Should().Be("Anna;Maria");
+        entry.Value.Note.Should().Be(@"Pfad C:\neu\temp");
+        entry.Value.Title.Should().Be(@"a\,b");
+        entry.Properties.Single(static p => p.Name == "N").Value.Should().Be(@"C:\\Daten;Anna\;Maria");
+    }
+
+    [Fact]
+    public async Task AVersion21QuotedPrintableLineBreak_IsALineBreakAndALiteralBackslashNIsNot() {
+        var contact = await ReadOneAsync(Lines(
+            "BEGIN:VCARD", "VERSION:2.1", "FN:A", @"NOTE;ENCODING=QUOTED-PRINTABLE:C:\neu=0D=0Azweite Zeile", "END:VCARD"));
+
+        contact.Note.Should().Be("C:\\neu\nzweite Zeile");
+    }
+
+    [Fact]
+    public async Task PropertiesBeforeAVersion21Line_TakeItsEscaping() {
+        var contact = await ReadOneAsync(Lines("BEGIN:VCARD", @"N:C:\Daten;Anna", "VERSION:2.1", "FN:A", "END:VCARD"));
+
+        contact.Name!.Family.Should().Be(@"C:\Daten");
+    }
+
+    [Fact]
+    public async Task AVersion21CardWrittenAs30_KeepsItsBackslashes() {
+        var source = await ReadAsync(Lines("BEGIN:VCARD", "VERSION:2.1", @"FN:C:\Daten", @"X-PATH:\\server\share", "END:VCARD"));
+
+        var text = ContactWriter.ToText(source.Contacts.Single());
+        var back = (await ReadAsync(text)).Contacts.Single();
+
+        text.Should().Contain(@"FN:C:\\Daten" + "\r\n");
+        back.FormattedName.Should().Be(@"C:\Daten");
+        back.AdditionalProperties.Single().GetText().Should().Be(@"\\server\share");
     }
 }

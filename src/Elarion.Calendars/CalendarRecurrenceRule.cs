@@ -91,8 +91,9 @@ public sealed record CalendarRecurrenceRule {
     public DayOfWeek WeekStart { get; init; } = DayOfWeek.Monday;
 
     /// <summary>
-    /// Parses a rule. An <c>RSCALE</c> other than <c>GREGORIAN</c> (FR-037), an unknown <c>FREQ</c>, or a part out of
-    /// range does not parse. Unknown parts such as <c>SKIP</c> are ignored.
+    /// Parses a rule. An <c>RSCALE</c> other than <c>GREGORIAN</c> (FR-037), an unknown <c>FREQ</c>, a part out of
+    /// range, or a <c>BY</c> list with more items than the part has distinct values does not parse. Repeated values of a
+    /// <c>BY</c> list are kept once. Unknown parts such as <c>SKIP</c> are ignored.
     /// </summary>
     public static bool TryParse(string? text, out CalendarRecurrenceRule? rule) => TryParse(text, null, out rule);
 
@@ -147,12 +148,16 @@ public sealed record CalendarRecurrenceRule {
                 case "BYSETPOS" when TryList(value, 1, 366, true, out var list): bySetPos = list; break;
                 case "BYDAY":
                     var days = new List<CalendarWeekday>();
-                    foreach (var item in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) {
+                    var distinctDays = new HashSet<CalendarWeekday>();
+                    var dayItems = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    // Seven weekdays, each alone or at one of 2 × 53 positions.
+                    if (dayItems.Length > 7 * (1 + 2 * 53)) return false;
+                    foreach (var item in dayItems) {
                         if (item.Length < 2 || !TryDay(item[^2..], out var day)) return false;
                         var offset = 0;
                         if (item.Length > 2 && (!int.TryParse(item[..^2], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out offset)
                                                 || offset == 0 || Math.Abs(offset) > 53)) return false;
-                        days.Add(new CalendarWeekday(day, offset));
+                        if (distinctDays.Add(new CalendarWeekday(day, offset))) days.Add(new CalendarWeekday(day, offset));
                     }
 
                     byDay = days;
@@ -251,15 +256,20 @@ public sealed record CalendarRecurrenceRule {
         return found is not null;
     }
 
+    // A BY list, without repeated values; a list with more items than the part has distinct values does not parse, so a
+    // rule's lists are bounded by the RFC, not by the line length.
     private static bool TryList(string text, int min, int max, bool allowNegative, out IReadOnlyList<int> values) {
         var list = new List<int>();
         values = list;
-        foreach (var item in text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) {
+        var items = text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (items.Length > (max - min + 1) * (allowNegative ? 2 : 1)) return false;
+        var distinct = new HashSet<int>();
+        foreach (var item in items) {
             if (!int.TryParse(item, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value)) return false;
             var magnitude = Math.Abs(value);
             if (value < 0 && !allowNegative) return false;
             if (magnitude < min || magnitude > max || (value == 0 && min > 0)) return false;
-            list.Add(value);
+            if (distinct.Add(value)) list.Add(value);
         }
 
         return list.Count > 0;

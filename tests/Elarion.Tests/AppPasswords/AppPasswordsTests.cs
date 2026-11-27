@@ -109,6 +109,7 @@ public sealed class AppPasswordsTests {
         third.IsSuccess.Should().BeFalse();
         third.Error.Code.Should().Be(AppPasswordErrorCodes.LimitReached);
         third.Error.Kind.Should().Be(ErrorKind.Conflict);
+        third.Error.Data.Should().Be(new AppPasswordLimitReachedData { MaxPerUser = 2 }, "an application words the message from it");
         otherUser.IsSuccess.Should().BeTrue();
         (await appPasswords.ListAsync("user-1", Ct)).Should().HaveCount(2);
     }
@@ -196,6 +197,19 @@ public sealed class AppPasswordsTests {
 
         await empty.Should().ThrowAsync<ArgumentException>();
         await overlong.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task Create_RefusesAUserIdLongerThanTheStoredColumn() {
+        var (services, _, _) = Create();
+        var appPasswords = services.GetRequiredService<IAppPasswords>();
+
+        var overlong = async () => await appPasswords.CreateAsync(
+            new string('u', AppPasswordOptions.MaxUserIdLength + 1), "a", AppPasswordScope.Dav, Ct);
+        var longest = await appPasswords.CreateAsync(new string('u', AppPasswordOptions.MaxUserIdLength), "a", AppPasswordScope.Dav, Ct);
+
+        await overlong.Should().ThrowAsync<ArgumentException>();
+        longest.IsSuccess.Should().BeTrue();
     }
 
     [Fact]

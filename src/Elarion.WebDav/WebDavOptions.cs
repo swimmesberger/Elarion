@@ -63,6 +63,13 @@ public sealed class WebDavOptions {
     /// </summary>
     public int MaxJournalRowsPerCollection { get; set; } = DefaultMaxJournalRowsPerCollection;
 
+    /// <summary>
+    /// Whether a user who sees no collection of any protocol is refused the whole DAV surface with <c>403</c> (every
+    /// method but <c>OPTIONS</c>), instead of seeing empty homes. For an application whose DAV access was one permission
+    /// before its sources decided per collection. Default false: discovery succeeds and the homes list nothing.
+    /// </summary>
+    public bool RefuseWhenNoCollections { get; set; }
+
     /// <summary>The problems of the current values; empty when they are valid.</summary>
     internal IEnumerable<string> Validate() {
         if (string.IsNullOrEmpty(Prefix) || Prefix[0] != '/' || Prefix.EndsWith('/') || Prefix.Contains("//", StringComparison.Ordinal)

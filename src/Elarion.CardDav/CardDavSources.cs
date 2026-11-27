@@ -43,14 +43,23 @@ public sealed record CardDavSourceListing(IReadOnlyList<PublishedAddressBookInfo
 }
 
 /// <summary>
-/// A published address book as a source describes it to the user who may see it: its key within the source, its name
-/// and, optionally, its description.
+/// An address book as a source describes it to the user who may see it: its key within the source, its name and,
+/// optionally, its description and URL segment. A source registered with <c>AddElarionCardDavLiveSource</c> describes
+/// live address books with it too; their contacts come from its <see cref="ICardDavLiveAddressBooks"/>.
 /// </summary>
 /// <param name="Key">The key within the source: 1 to 64 ASCII letters, digits, <c>-</c> and <c>_</c>.</param>
 /// <param name="DisplayName">The name contacts apps show.</param>
 public sealed record PublishedAddressBookInfo(string Key, string DisplayName) {
     /// <summary>The description (<c>addressbook-description</c>), or <see langword="null"/>.</summary>
     public string? Description { get; init; }
+
+    /// <summary>
+    /// The address book's URL segment in the user's home, or <see langword="null"/> for <c>{source}.{key}</c>: 1 to 128
+    /// ASCII letters, digits, <c>-</c>, <c>_</c>, <c>.</c>, <c>~</c> or <c>@</c>, unique among the address books the user
+    /// sees. Set it to keep URLs that devices already synced (<c>default</c>); changing it makes every device sync the
+    /// address book anew. It does not change the store address, so published contacts keep their sync token.
+    /// </summary>
+    public string? Segment { get; init; }
 }
 
 /// <summary>The address of a published address book: the source that declares it and its key within the source.</summary>
@@ -81,6 +90,12 @@ public sealed record CardDavAddress {
 
     /// <summary>Whether <paramref name="value"/> is 1 to 64 ASCII letters, digits, <c>-</c> or <c>_</c>.</summary>
     public static bool IsValidSegment(string? value) => DavSources.IsValidSegment(value);
+
+    /// <summary>
+    /// The member name a published contact of <paramref name="uid"/> has: the UID with <c>.vcf</c> when it is 1 to 200 of
+    /// <c>A–Z a–z 0–9 . _ @ -</c>, else a hash of it. A live address book may name its contacts the same way.
+    /// </summary>
+    public static string MemberNameOf(string uid) => CardDavObjects.NameOf(uid);
 }
 
 /// <summary>What the shared source machinery calls an address-book source in its messages.</summary>
