@@ -413,7 +413,7 @@ public sealed class CalendarRecurrenceConformanceTests {
         TimeZones.Get("Europe/Berlin");
         var read = await ReadAsync(Calendar(Event("UID:a", "DTSTART;TZID=Europe/Berlin:20140801T120000", "RDATE:20140901T120000")));
 
-        var occurrences = read.Expand(Utc(2014, 1, 1), Utc(2015, 1, 1), new CalendarExpandOptions { FloatingTimeZone = TimeZoneInfo.Utc }).Occurrences;
+        var occurrences = read.Expand(Utc(2014, 1, 1), Utc(2015, 1, 1), new CalendarExpandOptions { FloatingTimeZone = TimeZoneInfo.Utc }, cancellationToken: TestContext.Current.CancellationToken).Occurrences;
 
         occurrences.Should().HaveCount(2);
         occurrences[1].Start.Value.Should().Be(new DateTime(2014, 9, 1, 12, 0, 0));

@@ -16,17 +16,37 @@ namespace Elarion.Calendars;
 public static class CalendarTimeZones {
     private const int FirstYear = 1970;
     private const int LastYear = 2100;
-    private static readonly ConcurrentDictionary<string, TimeZoneInfo?> SystemCache = new(StringComparer.Ordinal);
+    // The trailing segments of a vendor-prefixed id tried as an id: an IANA id has at most three.
+    private const int MaxSuffixSegments = 4;
+
+    // The longest id the system can know: .NET refuses longer ones without a lookup.
+    private const int MaxSystemIdLength = 255;
+
+    // The most entries of each process-wide cache. Only zones the system knows are cached, so real ids never reach the
+    // bound; it stops case variants of known ids from growing a cache without end.
+    private const int MaxCacheEntries = 1_024;
+
+    // Zones the system resolved, keyed by the candidate that resolved. Misses are never cached, so an id from an
+    // untrusted file leaves nothing behind (ADR-0109, amendment 2026-11-27).
+    private static readonly ConcurrentDictionary<string, TimeZoneInfo> SystemCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, CalendarComponent> ComponentCache = new(StringComparer.Ordinal);
+
+    /// <summary>The entries of both process-wide caches, for the tests that pin their bound.</summary>
+    internal static int CachedEntryCount => SystemCache.Count + ComponentCache.Count;
 
     /// <summary>
     /// Resolves <paramref name="tzid"/> through the system's zones, as an IANA or a Windows id, after normalizing it:
     /// surrounding quotes and spaces, a vendor prefix ending in an IANA id (<c>/mozilla.org/20070129_1/Europe/Berlin</c>)
     /// and a <c>(UTC+01:00) </c> display prefix are removed; <c>UTC</c>, <c>GMT</c>, <c>Etc/UTC</c> and <c>Z</c> are UTC.
     /// </summary>
+    /// <remarks>
+    /// The work is linear in the id's length, and only zones the system knows are cached, so an id from an untrusted
+    /// file costs neither quadratic time nor memory that outlives the call. A read refuses longer ids before they get
+    /// here (<see cref="CalendarReadOptions.MaxTimeZoneIdLength"/>).
+    /// </remarks>
     public static bool TryResolve(string tzid, out TimeZoneInfo zone) {
         ArgumentNullException.ThrowIfNull(tzid);
-        var found = SystemCache.GetOrAdd(tzid, static id => ResolveSystem(id));
+        var found = ResolveSystem(tzid);
         zone = found!;
         return found is not null;
     }
@@ -35,7 +55,7 @@ public static class CalendarTimeZones {
     public static string Normalize(string tzid) {
         ArgumentNullException.ThrowIfNull(tzid);
         foreach (var candidate in Candidates(tzid))
-            if (TimeZoneInfo.TryFindSystemTimeZoneById(candidate, out _)) return candidate;
+            if (FindSystem(candidate) is not null) return candidate;
 
         return StripDisplayPrefix(tzid.Trim().Trim('"').Trim());
     }
@@ -68,8 +88,14 @@ public static class CalendarTimeZones {
     public static CalendarComponent ToComponent(TimeZoneInfo zone) {
         ArgumentNullException.ThrowIfNull(zone);
         var id = GetWrittenId(zone);
-        return ComponentCache.GetOrAdd(id + "\n" + zone.BaseUtcOffset.Ticks.ToString(CultureInfo.InvariantCulture),
-            _ => BuildComponent(zone, id));
+        var key = id + "\n" + zone.BaseUtcOffset.Ticks.ToString(CultureInfo.InvariantCulture);
+        if (ComponentCache.TryGetValue(key, out var cached)) return cached;
+        var component = BuildComponent(zone, id);
+        // Only zones the system knows are cached: a zone built from an uploaded file's VTIMEZONE carries an id the file
+        // chose, and caching it would keep every upload's ids for the life of the process.
+        if (ComponentCache.Count < MaxCacheEntries && FindSystem(zone.Id) is { } system && system.HasSameRules(zone))
+            component = ComponentCache.GetOrAdd(key, component);
+        return component;
     }
 
     /// <summary>
@@ -113,21 +139,42 @@ public static class CalendarTimeZones {
             if (candidate is "UTC" or "GMT" or "Etc/UTC" or "Etc/GMT" or "Z" or "Etc/Zulu" or "Zulu" or "UCT"
                 || candidate.Equals("utc", StringComparison.OrdinalIgnoreCase))
                 return TimeZoneInfo.Utc;
-            if (TimeZoneInfo.TryFindSystemTimeZoneById(candidate, out var zone)) return zone;
+            if (FindSystem(candidate) is { } zone) return zone;
         }
 
         return null;
     }
 
-    private static IEnumerable<string> Candidates(string tzid) {
+    private static TimeZoneInfo? FindSystem(string candidate) {
+        if (candidate.Length is 0 or > MaxSystemIdLength) return null;
+        if (SystemCache.TryGetValue(candidate, out var cached)) return cached;
+        if (!TimeZoneInfo.TryFindSystemTimeZoneById(candidate, out var zone)) return null;
+        if (SystemCache.Count < MaxCacheEntries) SystemCache.TryAdd(candidate, zone);
+        return zone;
+    }
+
+    // The ids tried for a TZID, in order: as written, without a display prefix, and for a vendor-prefixed id
+    // (/mozilla.org/20070129_1/Europe/Berlin) its last few trailing segments, longest first. The suffixes are sliced
+    // while scanning backwards, so the work is linear in the id's length however many segments it has.
+    private static List<string> Candidates(string tzid) {
         var trimmed = tzid.Trim().Trim('"').Trim();
-        yield return trimmed;
+        var candidates = new List<string>(2 + MaxSuffixSegments) { trimmed };
         var stripped = StripDisplayPrefix(trimmed);
-        if (stripped != trimmed) yield return stripped;
-        if (trimmed.StartsWith('/')) {
-            var segments = trimmed.Split('/', StringSplitOptions.RemoveEmptyEntries);
-            for (var i = 1; i < segments.Length; i++) yield return string.Join('/', segments[i..]);
+        if (stripped != trimmed) candidates.Add(stripped);
+        if (!trimmed.StartsWith('/')) return candidates;
+
+        var suffixes = candidates.Count;
+        var end = trimmed.Length;
+        while (candidates.Count - suffixes < MaxSuffixSegments && end > 0) {
+            var slash = trimmed.LastIndexOf('/', end - 1);
+            // The first segment is no candidate of its own: the id without its leading slash is what was tried already.
+            if (slash <= 0) break;
+            if (slash + 1 < end) candidates.Add(trimmed[(slash + 1)..]);
+            end = slash;
         }
+
+        candidates.Reverse(suffixes, candidates.Count - suffixes);
+        return candidates;
     }
 
     private static string StripDisplayPrefix(string tzid) {
@@ -158,7 +205,7 @@ public static class CalendarTimeZones {
             var until = rule!.Until;
             var enumerator = new RuleEnumerator(rule, local, isDate: false, zone: null,
                 instance => until is { } u && (u.Kind == CalendarDateTimeKind.Utc ? instance.Local - from > u.Value : instance.Local > u.Value),
-                stop, null, maxIterations: 1_000);
+                stop, null, maxIterations: 1_000, maxCandidates: 100_000);
             var count = 0;
             foreach (var instance in enumerator.Enumerate()) {
                 onsets.Add(instance.Local);

@@ -4,15 +4,18 @@ using Elarion.Calendars.TimeZones;
 namespace Elarion.Calendars;
 
 /// <summary>
-/// Expands items into their occurrences within a window (spec 0004 FR-030–FR-037): every rule, <c>RDATE</c> and
-/// <c>EXDATE</c>, overrides matched by <c>UID</c> and <c>RECURRENCE-ID</c>, bounded by the caps of
-/// <see cref="CalendarExpandOptions"/>.
+/// Expands items into their occurrences within a window (spec 0004 FR-030–FR-037): every rule, <c>RDATE</c>,
+/// <c>EXDATE</c> and <c>EXRULE</c>, overrides matched by <c>UID</c> and <c>RECURRENCE-ID</c>, bounded by the caps of
+/// <see cref="CalendarExpandOptions"/> and the caller's cancellation token.
 /// </summary>
 /// <remarks>
 /// An override replaces the instance whose recurrence id it carries, even when it moves the instance into or out of
 /// the window; an override whose recurrence id is no instance is an extra occurrence, as the major clients treat it.
+/// The match is exact: an override of the right day at another time is an extra occurrence too. Of several overrides of
+/// one instance the latest counts (<see cref="CalendarExpandOptions.ResolveOverrideVersions"/>).
 /// <c>RANGE=THISANDFUTURE</c> is read as an override of its one instance. A <c>DURATION</c>'s whole days count in
-/// wall-clock time, its remainder in elapsed time.
+/// wall-clock time, its remainder in elapsed time. Expansion is CPU-bound and synchronous: an application expanding
+/// uploaded files passes a token with a time budget and runs it off the request thread when that matters.
 /// </remarks>
 /// <example>
 /// <code>
@@ -22,21 +25,21 @@ namespace Elarion.Calendars;
 /// </code>
 /// </example>
 public static class CalendarRecurrence {
-    // Instances enumerated per series before the expansion gives up; far above any real calendar's need.
-    private const int MaxEnumeratedPerSeries = 1_000_000;
-
     /// <summary>The occurrences of <paramref name="items"/> that overlap <c>[<paramref name="from"/>, <paramref name="to"/>)</c>.</summary>
     /// <param name="items">The items of one series or of a whole calendar; series are grouped by <c>UID</c>.</param>
     /// <param name="from">The window's start, inclusive.</param>
     /// <param name="to">The window's end, exclusive.</param>
     /// <param name="options">The caps and the floating zone; <see langword="null"/> uses the defaults.</param>
-    public static CalendarOccurrences Expand(IEnumerable<CalendarItem> items, DateTimeOffset from, DateTimeOffset to, CalendarExpandOptions? options = null) {
+    /// <param name="cancellationToken">Cancels the expansion; checked per series and per period of a rule.</param>
+    /// <exception cref="OperationCanceledException">The token was cancelled.</exception>
+    public static CalendarOccurrences Expand(IEnumerable<CalendarItem> items, DateTimeOffset from, DateTimeOffset to, CalendarExpandOptions? options = null,
+        CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(items);
         options ??= new CalendarExpandOptions();
         options.Validate();
         if (to <= from) return new CalendarOccurrences([]);
 
-        var context = new ExpandContext(from.UtcDateTime, to.UtcDateTime, options);
+        var context = new ExpandContext(from.UtcDateTime, to.UtcDateTime, options, cancellationToken);
         var groups = new List<(CalendarItem? Master, List<CalendarItem> Overrides)>();
         var byUid = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var item in items) {
@@ -58,18 +61,19 @@ public static class CalendarRecurrence {
         }
 
         foreach (var (master, overrides) in groups) {
+            cancellationToken.ThrowIfCancellationRequested();
             if (master is null) {
-                foreach (var single in overrides) context.AddSingle(single, null);
+                foreach (var single in context.Latest(overrides)) context.AddSingle(single, null);
                 continue;
             }
 
-            context.AddSeries(master, overrides);
+            context.AddSeries(master, context.Latest(overrides));
         }
 
         return context.Result();
     }
 
-    private sealed class ExpandContext(DateTime fromUtc, DateTime toUtc, CalendarExpandOptions options) {
+    private sealed class ExpandContext(DateTime fromUtc, DateTime toUtc, CalendarExpandOptions options, CancellationToken cancellationToken) {
         private readonly List<(DateTime Sort, CalendarOccurrence Occurrence)> _occurrences = [];
         private readonly List<CalendarError> _errors = [];
 
@@ -87,8 +91,37 @@ public static class CalendarRecurrence {
             return new CalendarOccurrences(list, _errors);
         }
 
+        // The overrides that count: with ResolveOverrideVersions, the latest of each recurrence id (the highest SEQUENCE,
+        // then the latest DTSTAMP, then the later one), in their order.
+        public List<CalendarItem> Latest(List<CalendarItem> overrides) {
+            if (!options.ResolveOverrideVersions || overrides.Count < 2) return overrides;
+            var latest = new Dictionary<(bool, long), int>();
+            for (var i = 0; i < overrides.Count; i++) {
+                var id = overrides[i].RecurrenceId;
+                if (id is null) continue;
+                var key = (id.Value.IsDate, Key(id.Value));
+                if (!latest.TryGetValue(key, out var best) || !IsNewer(overrides[best], overrides[i])) latest[key] = i;
+            }
+
+            var kept = new List<CalendarItem>(latest.Count);
+            for (var i = 0; i < overrides.Count; i++) {
+                var id = overrides[i].RecurrenceId;
+                if (id is null || latest[(id.Value.IsDate, Key(id.Value))] == i) kept.Add(overrides[i]);
+            }
+
+            return kept;
+
+            // Whether the earlier override a is newer than the later b; on a tie the later one counts.
+            static bool IsNewer(CalendarItem a, CalendarItem b) {
+                var sequence = (a.Sequence ?? 0).CompareTo(b.Sequence ?? 0);
+                if (sequence != 0) return sequence > 0;
+                return (a.Timestamp ?? DateTimeOffset.MinValue) > (b.Timestamp ?? DateTimeOffset.MinValue);
+            }
+        }
+
         // An item outside a series: an override without its master, or an item without a UID.
         public void AddSingle(CalendarItem item, CalendarItem? master) {
+            if (Skipped(item)) return;
             var start = item.Start ?? item.RecurrenceId ?? (item as CalendarTodo)?.Due;
             if (start is null) return;
             var (end, kind) = EndOf(item, start.Value, null);
@@ -96,6 +129,7 @@ public static class CalendarRecurrence {
         }
 
         public void AddSeries(CalendarItem master, List<CalendarItem> overrides) {
+            if (Skipped(master)) return;
             if (master.Start is not { } start) {
                 AddSingle(master, null);
                 foreach (var single in overrides) AddSingle(single, master);
@@ -126,23 +160,16 @@ public static class CalendarRecurrence {
             }
             else {
                 foreach (var rule in master.RecurrenceRules) {
-                    var enumerator = new RuleEnumerator(rule, start.Value, start.IsDate, zone, BeyondUntil(rule), stopLocal, skipLocal,
-                        options.MaxIterations);
-                    var enumerated = 0;
+                    var enumerator = Enumerator(rule, start, zone, stopLocal, skipLocal);
                     var inWindow = 0;
                     foreach (var instance in enumerator.Enumerate()) {
-                        if (++enumerated > MaxEnumeratedPerSeries) {
-                            _errors.Add(LimitError(master));
-                            break;
-                        }
-
                         if (instance.Local < skipLocal) continue;
                         instances.Add((start.WithValue(instance.Local), null));
                         // The stream is ordered: past the cap within the window, later instances cannot be kept.
                         if (instance.Local >= fromLocal && ++inWindow > options.MaxOccurrences) break;
                     }
 
-                    if (enumerator.HitIterationLimit) _errors.Add(LimitError(master));
+                    if (enumerator.HitIterationLimit || enumerator.HitCandidateLimit) _errors.Add(LimitError(master));
                 }
             }
 
@@ -154,6 +181,18 @@ public static class CalendarRecurrence {
             foreach (var exception in master.ExceptionDates) {
                 if (exception.IsDate && !start.IsDate) excludedDates.Add(exception.Date.DayNumber);
                 else excluded.Add(Key(exception));
+            }
+
+            // RFC 2445 EXRULE: the rule's instances are excluded; DTSTART, which every rule yields first, is not.
+            foreach (var rule in master.ExceptionRules) {
+                if (RuleEnumerator.IsImpossible(rule)) continue; // excludes nothing
+                var enumerator = Enumerator(rule, start, zone, stopLocal, skipLocal);
+                foreach (var instance in enumerator.Enumerate().Skip(1)) {
+                    if (instance.Local < skipLocal) continue;
+                    excluded.Add(Key(start.WithValue(instance.Local)));
+                }
+
+                if (enumerator.HitIterationLimit || enumerator.HitCandidateLimit) _errors.Add(LimitError(master, "EXRULE"));
             }
 
             var overridden = new HashSet<long>();
@@ -176,6 +215,13 @@ public static class CalendarRecurrence {
 
             foreach (var item in overrides) AddSingle(item, master);
         }
+
+        private RuleEnumerator Enumerator(CalendarRecurrenceRule rule, CalendarDateTime start, TimeZoneInfo? zone, DateTime stopLocal, DateTime skipLocal) =>
+            new(rule, start.Value, start.IsDate, zone, BeyondUntil(rule), stopLocal, skipLocal, options.MaxIterations, options.MaxCandidates,
+                cancellationToken);
+
+        private bool Skipped(CalendarItem item) =>
+            options.SkipCancelled && string.Equals(item.Status, "CANCELLED", StringComparison.OrdinalIgnoreCase);
 
         private void Add(CalendarItem item, CalendarItem? master, CalendarDateTime recurrenceId, CalendarDateTime start, CalendarDateTime end,
             CalendarEndKind kind) {
@@ -258,11 +304,11 @@ public static class CalendarRecurrence {
         private static DateTime ToWall(DateTime utc, TimeZoneInfo? zone) =>
             zone is null ? DateTime.SpecifyKind(utc, DateTimeKind.Unspecified) : ZoneMath.ToLocal(new DateTimeOffset(utc, TimeSpan.Zero), zone);
 
-        private static CalendarError LimitError(CalendarItem item) =>
-            new(CalendarErrorCodes.RecurrenceLimit, "The recurrence examined too many candidates without an occurrence; its expansion stopped.") {
+        private static CalendarError LimitError(CalendarItem item, string property = "RRULE") =>
+            new(CalendarErrorCodes.RecurrenceLimit, "The recurrence examined too many candidates; its expansion stopped.") {
                 Uid = item.Uid,
                 Component = item.ComponentName,
-                Property = "RRULE",
+                Property = property,
             };
     }
 }

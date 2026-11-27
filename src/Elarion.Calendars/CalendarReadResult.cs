@@ -92,8 +92,13 @@ public sealed class CalendarReadResult {
     /// The occurrences of every item that overlap <c>[<paramref name="from"/>, <paramref name="to"/>)</c>
     /// (FR-030), with the expand defaults of the options the reader was configured with when none are passed.
     /// </summary>
-    public CalendarOccurrences Expand(DateTimeOffset from, DateTimeOffset to, CalendarExpandOptions? options = null) =>
-        CalendarRecurrence.Expand(Items, from, to, options ?? _expandDefaults);
+    /// <param name="from">The window's start, inclusive.</param>
+    /// <param name="to">The window's end, exclusive.</param>
+    /// <param name="options">The caps and the floating zone; <see langword="null"/> uses the configured defaults.</param>
+    /// <param name="cancellationToken">Cancels the expansion; checked per series and per period of a rule.</param>
+    public CalendarOccurrences Expand(DateTimeOffset from, DateTimeOffset to, CalendarExpandOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        CalendarRecurrence.Expand(Items, from, to, options ?? _expandDefaults, cancellationToken);
 
     /// <summary>
     /// Converts the errors to an <see cref="ErrorKind.Validation"/> <see cref="AppError"/> whose field errors are keyed by

@@ -76,7 +76,7 @@ public sealed class CalendarTimeZoneAndRecurrenceTests {
         var start = result.Events[0].Value!.Start!.Value;
         start.Kind.Should().Be(CalendarDateTimeKind.Floating);
         start.ToUtc().Should().BeNull();
-        var occurrence = result.Expand(Utc(2026, 12, 1), Utc(2026, 12, 2), new CalendarExpandOptions { FloatingTimeZone = vienna }).Occurrences.Single();
+        var occurrence = result.Expand(Utc(2026, 12, 1), Utc(2026, 12, 2), new CalendarExpandOptions { FloatingTimeZone = vienna }, cancellationToken: TestContext.Current.CancellationToken).Occurrences.Single();
         occurrence.StartUtc.Should().Be(new DateTimeOffset(2026, 12, 1, 8, 0, 0, TimeSpan.Zero));
         result.Calendar.SuggestedTimeZone.Should().NotBeNull();
     }
@@ -130,7 +130,7 @@ public sealed class CalendarTimeZoneAndRecurrenceTests {
             Start = CalendarDateTime.Zoned(start.AddDays(28).AddHours(2), vienna), Duration = TimeSpan.FromMinutes(30),
         };
 
-        var occurrences = CalendarRecurrence.Expand([master, moved], Utc(2026, 1, 6), Utc(2027, 1, 6)).Occurrences;
+        var occurrences = CalendarRecurrence.Expand([master, moved], Utc(2026, 1, 6), Utc(2027, 1, 6), cancellationToken: TestContext.Current.CancellationToken).Occurrences;
 
         occurrences.Should().HaveCount(9);
         occurrences[3].Item.Summary.Should().Be("Standup (moved)");
@@ -152,9 +152,9 @@ public sealed class CalendarTimeZoneAndRecurrenceTests {
             Uid = "d", Start = CalendarDateTime.Zoned(new DateTime(2026, 3, 28, 2, 30, 0), vienna), RecurrenceRules = { Rule("FREQ=DAILY") },
         };
 
-        var spring = CalendarRecurrence.Expand([item], Utc(2026, 3, 29), Utc(2026, 3, 30)).Occurrences.Single();
+        var spring = CalendarRecurrence.Expand([item], Utc(2026, 3, 29), Utc(2026, 3, 30), cancellationToken: TestContext.Current.CancellationToken).Occurrences.Single();
         spring.StartUtc.Should().Be(new DateTimeOffset(2026, 3, 29, 1, 30, 0, TimeSpan.Zero)); // 03:30 CEST
-        var autumn = CalendarRecurrence.Expand([item], Utc(2026, 10, 25), Utc(2026, 10, 26)).Occurrences.Single();
+        var autumn = CalendarRecurrence.Expand([item], Utc(2026, 10, 25), Utc(2026, 10, 26), cancellationToken: TestContext.Current.CancellationToken).Occurrences.Single();
         autumn.StartUtc.Should().Be(new DateTimeOffset(2026, 10, 25, 0, 30, 0, TimeSpan.Zero)); // 02:30 CEST, the first offset
     }
 
@@ -165,7 +165,7 @@ public sealed class CalendarTimeZoneAndRecurrenceTests {
             Uid = "h", Start = CalendarDateTime.Zoned(new DateTime(2026, 3, 29, 0, 0, 0), vienna), RecurrenceRules = { Rule("FREQ=HOURLY;COUNT=5") },
         };
 
-        var occurrences = CalendarRecurrence.Expand([item], Utc(2026, 3, 28), Utc(2026, 3, 30)).Occurrences;
+        var occurrences = CalendarRecurrence.Expand([item], Utc(2026, 3, 28), Utc(2026, 3, 30), cancellationToken: TestContext.Current.CancellationToken).Occurrences;
 
         occurrences.Select(o => o.StartUtc!.Value.Hour).Should().Equal(23, 0, 1, 2, 3);
     }
@@ -177,7 +177,7 @@ public sealed class CalendarTimeZoneAndRecurrenceTests {
         };
         var watch = Stopwatch.StartNew();
 
-        var result = CalendarRecurrence.Expand([item], Utc(2026, 1, 1), Utc(2036, 1, 1));
+        var result = CalendarRecurrence.Expand([item], Utc(2026, 1, 1), Utc(2036, 1, 1), cancellationToken: TestContext.Current.CancellationToken);
 
         result.Occurrences.Should().HaveCount(10_000);
         result.Errors.Should().ContainSingle().Which.Code.Should().Be(CalendarErrorCodes.TooManyOccurrences);
@@ -190,7 +190,7 @@ public sealed class CalendarTimeZoneAndRecurrenceTests {
             Uid = "f", Start = CalendarDateTime.FromDate(new DateOnly(2026, 1, 30)), RecurrenceRules = { Rule("FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30") },
         };
 
-        var result = CalendarRecurrence.Expand([item], Utc(2026, 1, 1), Utc(2126, 1, 1));
+        var result = CalendarRecurrence.Expand([item], Utc(2026, 1, 1), Utc(2126, 1, 1), cancellationToken: TestContext.Current.CancellationToken);
 
         result.Occurrences.Should().BeEmpty();
         result.Errors.Should().ContainSingle().Which.Code.Should().Be(CalendarErrorCodes.RecurrenceLimit);
@@ -203,7 +203,7 @@ public sealed class CalendarTimeZoneAndRecurrenceTests {
             RecurrenceRules = { Rule("FREQ=SECONDLY;BYMONTH=12;BYMONTHDAY=31;BYHOUR=23;BYMINUTE=59;BYSECOND=59") },
         };
 
-        var result = CalendarRecurrence.Expand([item], Utc(2026, 1, 1), Utc(2030, 1, 1), new CalendarExpandOptions { MaxIterations = 1000 });
+        var result = CalendarRecurrence.Expand([item], Utc(2026, 1, 1), Utc(2030, 1, 1), new CalendarExpandOptions { MaxIterations = 1000 }, cancellationToken: TestContext.Current.CancellationToken);
 
         result.Errors.Should().Contain(e => e.Code == CalendarErrorCodes.RecurrenceLimit);
     }
@@ -215,7 +215,7 @@ public sealed class CalendarTimeZoneAndRecurrenceTests {
             RecurrenceRules = { Rule("FREQ=WEEKLY;COUNT=3") },
         };
 
-        var occurrences = CalendarRecurrence.Expand([todo], Utc(2026, 1, 1), Utc(2026, 2, 1)).Occurrences;
+        var occurrences = CalendarRecurrence.Expand([todo], Utc(2026, 1, 1), Utc(2026, 2, 1), cancellationToken: TestContext.Current.CancellationToken).Occurrences;
 
         occurrences.Select(o => o.EndUtc).Should().Equal(Utc(2026, 1, 3), Utc(2026, 1, 10), Utc(2026, 1, 17));
         occurrences.Should().OnlyContain(o => o.EndKind == CalendarEndKind.Stated);
@@ -229,7 +229,7 @@ public sealed class CalendarTimeZoneAndRecurrenceTests {
             new() { Uid = "a", Start = CalendarDateTime.FromDate(new DateOnly(2026, 1, 1)) },
         ];
 
-        var occurrences = CalendarRecurrence.Expand(items, Utc(2025, 12, 31), Utc(2026, 1, 3)).Occurrences;
+        var occurrences = CalendarRecurrence.Expand(items, Utc(2025, 12, 31), Utc(2026, 1, 3), cancellationToken: TestContext.Current.CancellationToken).Occurrences;
 
         occurrences.ToDictionary(o => o.Item.Uid!, o => o.EndKind).Should().BeEquivalentTo(new Dictionary<string, CalendarEndKind> {
             ["d"] = CalendarEndKind.Duration, ["z"] = CalendarEndKind.DefaultZero, ["a"] = CalendarEndKind.DefaultDay,
