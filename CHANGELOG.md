@@ -171,6 +171,43 @@ minor releases may include breaking changes.
   validated through `IRequestValidator.ValidateAsync`. A marked type with validation attributes outside every module is
   the build error `ELVAL004`; `ELVAL002` now also covers such a type in a compilation without `Elarion.Validation`. See
   [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation#validating-outside-a-handler-request).
+- **Constraint violations as results: `IUnitOfWorkFailureTranslator`** (ADR-0003 amendment). `TransactionDecorator`
+  offers an exception that ends its unit of work — from the handler, or from the commit, where PostgreSQL checks a
+  `DEFERRABLE INITIALLY DEFERRED` constraint outside every `SaveChangesInterceptor` — to the registered translators;
+  the first `AppError` one returns becomes the command's failed `Result` after the rollback, instead of an unexpected
+  error. Without a translator nothing changes. `ResultInspection.TryCreateFailure<T>` builds a failed `Result`/`Result<T>`
+  from generic code with an unconstrained response type. See
+  [Persistence & transactions](https://elarion.wimmesberger.dev/docs/concepts/persistence-and-transactions#constraint-violations-as-results).
+- **`[NoTransaction]`: a command without the framework's transaction.** `TransactionDecorator` stays off a handler
+  marked with it, so a command whose work is outside the database (a test mail, a slow external call) no longer holds
+  a pooled connection and a transaction for the whole call; the request stays an `ICommand`. See
+  [Persistence & transactions](https://elarion.wimmesberger.dev/docs/concepts/persistence-and-transactions#commands-without-a-transaction).
+- **Leased work: what a claim saw, and the lost-claim log line** (ADR-0073 amendment). `ClaimPendingAsync` returns
+  `LeasedWorkClaimed<T>`, an `IReadOnlyList<T>` of the won rows with `Candidates` (how many rows the select found;
+  zero means the queue is drained) and `GivenUp` (how many it gave up as exhausted, with or without `OnGivenUp`), so a
+  pass loops `while (claimed.Candidates > 0)` without counting in a callback. `ILogger.LogFinalizeOutcome(outcome,
+  queue, id)` writes the warning for a lost claim and the information line for an `Ineligible` row. See
+  [Coordination](https://elarion.wimmesberger.dev/docs/capabilities/coordination#giving-up-guarding-the-outcome-and-shutting-down).
+- **Who holds a permission: `HoldersOf` and `MembersOf` on the principal directory** (ADR-0095 amendment).
+  `directory.HoldersOf("requests.handle")` lists the principals holding a permission through their own claims or a
+  role's, each once, and `directory.MembersOf("Admin")` the members of a role — composable queries derived the same
+  way as `WhereAuthorizedFor`'s, so an application's "who may be assigned" agrees with the principal. See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#who-holds-a-permission).
+- **`QueryAuthorizers.RequireUserId<TEntity, TKey>()`**: every row, for an authenticated caller whose id parses as
+  `TKey` — the precondition `AllOf(RequireUserId<Contact, Guid>(), AnyOf(…))` that keeps an unrestricted alternative
+  from admitting a caller every `ForUser` alternative would deny. It inverts like `ForUser`.
+- **`HttpContext.SeedElarionCurrentUser()`** seeds the request scope with `HttpContext.User`, as
+  `UseElarionCurrentUser()` does, for an endpoint whose route group authenticates with its own scheme after the
+  middleware ran. See
+  [Current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user#endpoints-that-authenticate-later).
+- **Settings: deployment configuration under the stored value** (ADR-0078 amendment).
+  `[Setting(FallbackConfigurationKey = "Email:Smtp:Host")]` makes the effective value the stored one, else the
+  non-blank deployment value at that key, else the default, in the global scope; unlike `Pinnable` it never refuses a
+  write, and a reset brings the deployment value back. The resolver reports it as
+  `SettingSource.ConfigurationFallback`, `Watch` fires on configuration reloads, and the projection carries it at the
+  setting's key. `ELSDEF008` reports a blank or malformed key, or one on a setting without the global scope. The
+  settings page now says how to read your own write (through `ISettingsManager`; the projection follows after the
+  commit). See [Settings](https://elarion.wimmesberger.dev/docs/concepts/settings#the-effective-value-resolver).
 - **`SortMap`: sort by several keys** (ADR-0120). `sort=+city,-name` orders by `City`, then `Name` descending, then
   the last key's declared tiebreakers; a single key keeps its meaning. A sort combines at most three keys unless the
   builder sets `MaxLevels(n)`; a repeated or empty key, or a sort above the cap, is refused like an unknown key (`Apply`
@@ -229,6 +266,12 @@ minor releases may include breaking changes.
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
   type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
   member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
+- **BREAKING: `TransactionDecorator` takes the failure translators.** Its constructor gained an
+  `IEnumerable<IUnitOfWorkFailureTranslator>` parameter. The generated pipeline supplies it; code that constructs the
+  decorator by hand (a test) passes `[]`.
+- **BREAKING: `ClaimPendingAsync` returns `Task<LeasedWorkClaimed<T>>`** instead of `Task<IReadOnlyList<T>>`. The new
+  type implements `IReadOnlyList<T>`, so `foreach`, `Count`, indexing and assignments to `IReadOnlyList<T>` compile
+  unchanged; only code that names the old task type (a method group, an explicit `Task<IReadOnlyList<T>>`) changes.
 - **`Elarion.Calendars`: overrides, `EXRULE`, strict reads and more limits** (ADR-0109, amendment 2026-11-27). Of
   several overrides of one instance, expansion now keeps only the latest (highest `SEQUENCE`, then latest `DTSTAMP`);
   `CalendarExpandOptions.ResolveOverrideVersions = false` keeps them all. `SkipCancelled` (off by default) leaves out
@@ -283,6 +326,11 @@ minor releases may include breaking changes.
   went out with an earlier row's values, so distinct rows were dropped (or, with `ON CONFLICT DO NOTHING`, silently
   skipped and missing from the written count). Each row now runs its own command on the same prepared statement. See
   [SQL mapping](https://elarion.wimmesberger.dev/docs/capabilities/sql-mapping#reads-and-writes).
+- **A registered `[ResourceFilter]` in a module assembly had to be public.** The host bootstrapper named the filter
+  class and its entity, so an `internal` one failed to compile in the host. The module's manifest generator now emits a
+  public `{Filter}ElarionRegistration` for a non-public filter, and the bootstrapper registers the filter through it;
+  public filters are registered as before. See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization).
 
 ## [0.4.6] - 2026-11-24
 

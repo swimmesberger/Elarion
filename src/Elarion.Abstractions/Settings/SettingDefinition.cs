@@ -15,6 +15,9 @@ public sealed class SettingDefinitionOptions {
 
     /// <summary>A human-readable description for admin tooling.</summary>
     public string? Description { get; init; }
+
+    /// <summary>The deployment-configuration key consulted below the stored value, if any.</summary>
+    public string? FallbackConfigurationKey { get; init; }
 }
 
 /// <summary>
@@ -36,6 +39,9 @@ public abstract class SettingDefinition {
         IsSecret = options.IsSecret;
         IsPinnable = options.IsPinnable;
         Description = options.Description;
+        FallbackConfigurationKey = string.IsNullOrWhiteSpace(options.FallbackConfigurationKey)
+            ? null
+            : options.FallbackConfigurationKey;
     }
 
     /// <summary>The hierarchical key.</summary>
@@ -55,6 +61,15 @@ public abstract class SettingDefinition {
 
     /// <summary>A human-readable description, if declared.</summary>
     public string? Description { get; }
+
+    /// <summary>
+    /// The deployment-configuration key consulted below the stored value in the global scope, or
+    /// <see langword="null"/>. See <see cref="SettingAttribute.FallbackConfigurationKey"/>.
+    /// </summary>
+    public string? FallbackConfigurationKey { get; }
+
+    /// <summary>Whether deployment configuration can change the effective value (a pin or a fallback).</summary>
+    public bool ReadsDeploymentConfiguration => IsPinnable || FallbackConfigurationKey is not null;
 
     /// <summary>Whether the definition declares a default (otherwise the default is <c>default(T)</c>).</summary>
     public abstract bool HasDefault { get; }

@@ -81,12 +81,15 @@ internal static class ElarionManifest {
     // A generated [ResourceFilter] data-level authorizer that the host bootstrapper registers as
     // IQueryAuthorizer<TEntity>. The emitted-member contract: a non-shared spec exposes a static
     // `Specification` singleton (registered AddSingleton); a shared spec is a scoped service with a
-    // grant-source constructor (registered AddScoped). See ADR-0014.
+    // grant-source constructor (registered AddScoped). See ADR-0014. A spec or entity that is not public cannot be
+    // named by another assembly's bootstrapper, so its own assembly emits a public registrar (RegistrarFqn, with a
+    // static Register(IServiceCollection)) and the bootstrapper calls that instead.
     public sealed record ResourceFilter(
         string SpecFqn,
         string EntityFqn,
         string Namespace,
-        bool IsShared
+        bool IsShared,
+        string? RegistrarFqn = null
     );
 
     public sealed record Module(
@@ -302,23 +305,31 @@ internal static class ElarionManifest {
     }
 
     public static string EncodeResourceFilter(ResourceFilter filter) {
-        return ElarionManifestCodec.EncodeFields(
-            filter.SpecFqn,
-            filter.EntityFqn,
-            filter.Namespace,
-            EncodeBool(filter.IsShared));
+        return filter.RegistrarFqn is null
+            ? ElarionManifestCodec.EncodeFields(
+                filter.SpecFqn,
+                filter.EntityFqn,
+                filter.Namespace,
+                EncodeBool(filter.IsShared))
+            // Appended (not inserted) so a public filter keeps the four-field form older readers decode.
+            : ElarionManifestCodec.EncodeFields(
+                filter.SpecFqn,
+                filter.EntityFqn,
+                filter.Namespace,
+                EncodeBool(filter.IsShared),
+                filter.RegistrarFqn);
     }
 
     public static bool TryDecodeResourceFilter(string value, out ResourceFilter? filter) {
         filter = null;
-        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count != 4)
+        if (!ElarionManifestCodec.TryDecodeFields(value, out var fields) || fields.Count is not (4 or 5))
             return false;
         if (fields[0] is null || fields[1] is null || fields[2] is null)
             return false;
         if (!TryDecodeBool(fields[3], out var isShared))
             return false;
 
-        filter = new ResourceFilter(fields[0]!, fields[1]!, fields[2]!, isShared);
+        filter = new ResourceFilter(fields[0]!, fields[1]!, fields[2]!, isShared, fields.Count == 5 ? fields[4] : null);
         return true;
     }
 

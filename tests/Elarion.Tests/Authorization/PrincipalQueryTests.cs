@@ -282,6 +282,28 @@ public sealed class PrincipalQueryTests {
     }
 
     /// <summary>The directory a principal's own roles and claims imply — agreement with the live principal by construction.</summary>
+    [Fact]
+    public void HoldersOf_ListsEachHolderOfAPermissionOnce() {
+        Directory.HoldersOf("docs.read").Should().BeEquivalentTo([Bob, Carol]);
+        Directory.HoldersOf("docs.write").Should().BeEquivalentTo([Carol]);
+        Directory.HoldersOf("docs.read", claimType: "scope").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void MembersOf_ListsTheMembersOfARole() {
+        Directory.MembersOf("Admin").Should().Equal(Dave);
+        Directory.MembersOf("admin").Should().BeEmpty("role names compare ordinally");
+    }
+
+    [Fact]
+    public void RequireUserId_AdmitsEveryPrincipalOfTheDirectory_AndPreconditionsAnUnrestrictedAlternative() {
+        var rule = QueryAuthorizers.AllOf(
+            QueryAuthorizers.RequireUserId<Doc, Guid>(),
+            QueryAuthorizers.AnyOf(QueryAuthorizers.WhenRole("Admin", QueryAuthorizers.Unrestricted<Doc>()), Owner));
+
+        Readers(rule, Docs[2]).Should().BeEquivalentTo([Bob, Dave]);
+    }
+
     private sealed class UserDirectory(IReadOnlyList<FakeCurrentUser> users) : IPrincipalDirectory<Guid> {
         public IQueryable<PrincipalRole<Guid>> Roles => users
             .SelectMany(user => user.Roles.Select(role =>

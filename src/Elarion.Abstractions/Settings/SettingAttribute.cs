@@ -38,6 +38,15 @@ public sealed class SettingAttribute(string key) : Attribute {
     public string? Description { get; init; }
 
     /// <summary>
+    /// A deployment-configuration key consulted <b>below</b> the stored value: the effective value is the stored one,
+    /// else the non-blank value configured at this key, else the default — "the administrator's value, else the
+    /// deployment's, else the built-in one". Unlike <see cref="Pinnable"/>, the configured value never refuses a write.
+    /// Applies in the global scope only, so the setting must allow it. The configuration text is read as a pin's is:
+    /// the text itself for a string, the JSON form for other types.
+    /// </summary>
+    public string? FallbackConfigurationKey { get; init; }
+
+    /// <summary>
     /// A constant default (string, bool, number, or enum value) for scalar settings. Mutually exclusive with
     /// <see cref="DefaultFactory"/>.
     /// </summary>

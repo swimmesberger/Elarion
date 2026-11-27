@@ -139,3 +139,4 @@
  ELSDEF005  | Elarion.Abstractions.Settings      | Error    | Secret setting declares a default
  ELSDEF006  | Elarion.Abstractions.Settings      | Error    | Pinnable setting must allow the global scope
  ELSDEF007  | Elarion.Abstractions.Settings      | Error    | Invalid setting default
+ ELSDEF008  | Elarion.Abstractions.Settings      | Error    | Invalid fallback configuration key

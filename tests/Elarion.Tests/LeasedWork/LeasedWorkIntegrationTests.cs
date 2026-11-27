@@ -90,6 +90,8 @@ public sealed class LeasedWorkIntegrationTests(PostgreSqlLeasedWorkFixture fixtu
         first.Select(delivery => delivery.Id).Should().Equal(ids[0], ids[1]);
         second.Select(delivery => delivery.Id).Should().Equal(ids[2]);
         third.Should().BeEmpty();
+        (first.Candidates, second.Candidates, third.Candidates).Should().Be((2, 1, 0));
+        (first.GivenUp, second.GivenUp, third.GivenUp).Should().Be((0, 0, 0));
     }
 
     [Fact]
@@ -307,12 +309,30 @@ public sealed class LeasedWorkIntegrationTests(PostgreSqlLeasedWorkFixture fixtu
         var claimed = await context.Deliveries.ClaimPendingAsync(claim, Ct);
 
         claimed.Select(delivery => delivery.Id).Should().Equal(ids[1]);
+        claimed.Candidates.Should().Be(2);
+        claimed.GivenUp.Should().Be(1);
         reported.Should().ContainSingle().Which.Attempts.Should().Be(MaxAttempts + 1);
         var givenUp = await ReadAsync(ids[0]);
         givenUp.State.Should().Be(TestDeliveryStates.Withdrawn);
         givenUp.Error.Should().Be("attempts exhausted");
         givenUp.LockId.Should().BeNull();
         givenUp.LockedUntilUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AClaimWhoseEveryCandidateIsGivenUp_IsEmpty_ButReportsTheCandidates() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var (source, ids) = await SeedAsync(2);
+        await SetAttemptsAsync(ids[0], MaxAttempts);
+        await SetAttemptsAsync(ids[1], MaxAttempts);
+        await using var context = fixture.CreateContext();
+
+        var claimed = await context.Deliveries.ClaimPendingAsync(ExhaustingClaim(source, onGivenUp: null), Ct);
+        var next = await context.Deliveries.ClaimPendingAsync(ExhaustingClaim(source, onGivenUp: null), Ct);
+
+        claimed.Should().BeEmpty();
+        (claimed.Candidates, claimed.GivenUp).Should().Be((2, 2), "an empty claim is not a drained queue");
+        (next.Candidates, next.GivenUp).Should().Be((0, 0));
     }
 
     [Fact]
@@ -409,6 +429,7 @@ public sealed class LeasedWorkIntegrationTests(PostgreSqlLeasedWorkFixture fixtu
         var claimed = await context.Deliveries.ClaimPendingAsync(ExhaustingClaim(source, onGivenUp: null), Ct);
 
         claimed.Select(delivery => delivery.Id).Should().Equal(ids[1]);
+        claimed.GivenUp.Should().Be(1, "the count does not depend on OnGivenUp");
         var givenUp = await ReadAsync(ids[0]);
         givenUp.State.Should().Be(TestDeliveryStates.Withdrawn);
         givenUp.LockId.Should().BeNull();

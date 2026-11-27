@@ -505,6 +505,15 @@ See [Idempotency](/docs/concepts/idempotency).
 
 See [Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
 
+## Transactions
+
+### `[NoTransaction]`
+
+- **Package:** `Elarion.Abstractions` (Pipeline) · **Applies to:** class (single, not inherited)
+- **Triggers:** keeps `TransactionDecorator` off a command handler, so the handler runs without a framework-owned unit of work and nothing holds a connection or a transaction for the whole call — for a command whose work is mostly outside the database (a test mail, a slow external call). The request stays an `ICommand`. Each `SaveChanges` commits on its own; the handler opens a transaction itself around writes that must commit together. No effect on `[Idempotent]` commands or inboxed integration-event consumers, which own their transaction.
+
+See [Persistence & transactions](/docs/concepts/persistence-and-transactions#commands-without-a-transaction).
+
 ## Auditing
 
 ### `[Auditable]`
@@ -1174,7 +1183,7 @@ See [Feature flags](/docs/concepts/feature-flags).
 ### `[SettingDefinitions]` and `[Setting]`
 
 - **Package:** `Elarion.Abstractions` · **Applies to:** `[SettingDefinitions]` on a top-level `static partial` class; `[Setting("key")]` on a `static partial` get-only property of type `SettingDefinition<T>` inside it
-- **Triggers:** the settings-definition generator implements each property as a `SettingDefinition<T>` built from the attribute and adds a per-class `All` list; the container is published in the Elarion manifest. Diagnostics `ELSDEF001`–`ELSDEF007` (invalid container or member, invalid key, duplicate key, secret with a default, pinnable without the global scope, invalid default).
+- **Triggers:** the settings-definition generator implements each property as a `SettingDefinition<T>` built from the attribute and adds a per-class `All` list; the container is published in the Elarion manifest. Diagnostics `ELSDEF001`–`ELSDEF008` (invalid container or member, invalid key, duplicate key, secret with a default, pinnable without the global scope, invalid default, invalid fallback configuration key).
 
 | `[Setting]` parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -1182,6 +1191,7 @@ See [Feature flags](/docs/concepts/feature-flags).
 | `Scopes` | `string[]` (init) | `["global"]` | Scope kinds the setting may be accessed in. |
 | `Secret` | `bool` (init) | `false` | Protected at rest, never described, never projected into `IConfiguration`. Cannot declare a default. |
 | `Pinnable` | `bool` (init) | `false` | Deployment configuration may pin the value. Requires the global scope. |
+| `FallbackConfigurationKey` | `string?` (init) | `null` | A deployment-configuration key read below the stored value: stored, else configured there, else the default. Never refuses a write. Requires the global scope. |
 | `Description` | `string?` (init) | `null` | Text for admin tooling. |
 | `Default` | `object?` (init) | none | A constant default for scalar settings. |
 | `DefaultFactory` | `string?` (init) | none | `nameof` a static parameterless method returning the value type (lazy, once). Exclusive with `Default`. |

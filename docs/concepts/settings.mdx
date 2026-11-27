@@ -1,6 +1,6 @@
 ---
 title: Settings
-description: Declared, typed runtime settings resolved through one layered resolver (default, store, configuration pin), with secrets protected at rest and an IConfiguration projection.
+description: Declared, typed runtime settings resolved through one layered resolver (default, configuration fallback, store, configuration pin), with secrets protected at rest and an IConfiguration projection.
 ---
 
 Elarion's settings subsystem gives applications **runtime-changeable configuration**. Settings are **declared
@@ -49,12 +49,14 @@ public static partial class AppSettings {
 | `Scopes` | Scope kinds the setting may be used in. Default: global only. |
 | `Secret` | Protected at rest, never described, never projected into `IConfiguration`. No default allowed. |
 | `Pinnable` | Deployment configuration may pin the value (global scope only). |
+| `FallbackConfigurationKey` | A deployment-configuration key read **below** the stored value (global scope only): stored, else configured there, else the default. Never refuses a write. |
 | `Default` / `DefaultFactory` | A constant for scalars, or a static factory (lazy, once) for records. |
 | `Description` | Text for admin tooling. |
 
 Build-time diagnostics: `ELSDEF001` invalid container (must be a top-level `static partial` class), `ELSDEF002`
 invalid member, `ELSDEF003` invalid key, `ELSDEF004` duplicate key, `ELSDEF005` secret with a default,
-`ELSDEF006` pinnable without the global scope, `ELSDEF007` invalid default.
+`ELSDEF006` pinnable without the global scope, `ELSDEF007` invalid default, `ELSDEF008` blank or malformed
+`FallbackConfigurationKey`, or one on a setting without the global scope.
 
 Register the definitions on the host. `[assembly: UseElarion]` (or `[assembly: GenerateSettingDefinitionCatalog]`)
 emits `ElarionSettingDefinitions.All`, aggregating this assembly and the public containers of referenced module
@@ -117,9 +119,23 @@ last-write-wins; pass `expectedVersion` for optimistic concurrency.
 `ISettingResolver` layers, lowest to highest:
 
 1. the definition's **default** (`default(T)` when it declares none),
-2. the **store** value,
-3. a **configuration** value — only for `Pinnable` definitions in the global scope. A configuration value *pins*
+2. a **configuration fallback** — only for a definition that declares a `FallbackConfigurationKey`, in the global
+   scope: the deployment's value at that key, used while nothing is stored (`SettingSource.ConfigurationFallback`),
+3. the **store** value,
+4. a **configuration** value — only for `Pinnable` definitions in the global scope. A configuration value *pins*
    the definition: it wins, and writes are refused.
+
+The fallback answers "the administrator's value, else the deployment's, else the built-in one" — an SMTP host an
+administrator may change, which a deployment presets in `Email:Smtp:Host`:
+
+```csharp
+[Setting("app:smtp:host", Default = "localhost", FallbackConfigurationKey = "Email:Smtp:Host")]
+public static partial SettingDefinition<string> SmtpHost { get; }
+```
+
+`GetAsync` then returns the stored host, else the configured one, else `localhost`; a stored value replaces the
+configured one, and resetting it brings the configured one back. Its configuration text is read as a pin's is, and a
+blank value means "not set". `Watch` fires when the deployment configuration reloads, as for a pinnable definition.
 
 A configuration value pins only when it is present and neither empty nor whitespace, so a blank environment
 variable or an unfilled template placeholder does not freeze a setting. Set
@@ -236,6 +252,20 @@ configured or default value. Read the options through `IOptionsMonitor<T>` or `I
 loads at host start, after which an `IOptions<T>` value built earlier would stay stale. A non-secret definition is
 rejected — it is already in `IConfiguration`.
 
+## Reading your own write
+
+`ISettingsManager` reads through the resolver on the request's own scope, so a handler that writes a setting reads the
+new value back at once — inside its transaction, before the commit, with the EF Core store. Read settings that a
+request may have just changed through the manager (with a `FallbackConfigurationKey` for the deployment's preset),
+not through options bound from the [`IConfiguration` projection](#iconfiguration-projection).
+
+The projection follows the store **after** the commit, on the refresher's background loop, so `IOptionsSnapshot<T>`
+and `IOptionsMonitor<T>` see a change a moment later — a request that runs right after the saving one can still bind
+the old value. Code that must not continue before the projection has caught up awaits
+`SettingsConfigurationRefresher.RefreshAsync(ct)` after the commit (it reprojects on a fresh scope, so it cannot see
+uncommitted writes). There is no per-request overlay of the projection: `IConfiguration` is shared by the whole
+process, and the manager already is the per-request read.
+
 ## Describing settings for an admin UI
 
 ```csharp
@@ -243,7 +273,7 @@ IReadOnlyList<SettingDescription> all = await settings.DescribeAsync(cancellatio
 ```
 
 Each entry has `Key`, `ValueType`, `Scope`, `AllowedScopes`, `IsSecret`, `IsPinnable`, `IsPinned`, `HasValue`,
-`Source` (`Default`, `Store` or `Configuration`), `ValueJson` (never for secrets), `Version` (usable as
+`Source` (`Default`, `ConfigurationFallback`, `Store` or `Configuration`), `ValueJson` (never for secrets), `Version` (usable as
 `expectedVersion`), `IsUnreadable` / `UnreadableReason` (a stored entry that cannot be decrypted or is not a valid
 value of its type) and `Description`. Elarion ships
 no handlers for it; map it to whatever your host exposes.

@@ -43,6 +43,20 @@ public sealed class CurrentUserTransportTests {
     }
 
     [Fact]
+    public async Task ALateAuthenticatingEndpoint_SeedsItsOwnPrincipal_OverTheOneTheMiddlewareSaw() {
+        await using var provider = BuildProvider();
+        using var requestScope = provider.CreateScope();
+        var context = CreateContext(requestScope.ServiceProvider, "", "browser-user");
+        await SeedRequestScopeAsync(context);
+
+        // The group's own scheme authenticates in the authorization middleware, after UseElarionCurrentUser ran.
+        context.User = Authenticated("app-password-user");
+        context.SeedElarionCurrentUser();
+
+        requestScope.ServiceProvider.GetRequiredService<ICurrentUser>().UserId.Should().Be("app-password-user");
+    }
+
+    [Fact]
     public async Task JsonRpc_Single_HandlerReadsAuthenticatedCurrentUser() {
         await using var provider = BuildProvider();
         // The endpoint captures ctx.User into the dispatch context, so no middleware is required here.

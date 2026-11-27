@@ -28,6 +28,13 @@ public interface ISettingPins {
 
     /// <summary>A token that fires when the deployment configuration reloads, or <see langword="null"/> without one.</summary>
     IChangeToken? GetConfigurationChangeToken();
+
+    /// <summary>
+    /// Reads the non-blank raw configuration text at <paramref name="definition"/>'s
+    /// <see cref="SettingDefinition.FallbackConfigurationKey"/>, or <see langword="null"/> when it declares none or
+    /// nothing is configured there. The resolver uses it in the global scope when nothing is stored.
+    /// </summary>
+    string? GetFallbackText(SettingDefinition definition) => null;
 }
 
 /// <summary>Default <see cref="ISettingPins"/>.</summary>
@@ -45,6 +52,14 @@ internal sealed class SettingPins(
         if (configuration is null || !definition.IsPinnable) return null;
 
         return DeploymentConfiguration.ReadValue(configuration, definition.Key, options.EmptyConfigurationValuesPin);
+    }
+
+    /// <inheritdoc />
+    public string? GetFallbackText(SettingDefinition definition) {
+        ArgumentNullException.ThrowIfNull(definition);
+        if (configuration is null || definition.FallbackConfigurationKey is not { } key) return null;
+
+        return DeploymentConfiguration.ReadValue(configuration, key, emptyValuesCount: false);
     }
 
     /// <inheritdoc />

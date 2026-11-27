@@ -106,6 +106,8 @@ public sealed class SettingDefinitionGenerator : IIncrementalGenerator {
             if (setting.IsSecret) sb.Append(", IsSecret = true");
             if (setting.IsPinnable) sb.Append(", IsPinnable = true");
             if (setting.Description is not null) sb.Append($", Description = {Literal(setting.Description)}");
+            if (setting.FallbackConfigurationKey is not null)
+                sb.Append($", FallbackConfigurationKey = {Literal(setting.FallbackConfigurationKey)}");
             sb.Append(" }");
             if (setting.DefaultExpression is not null) sb.Append($", {setting.DefaultExpression}");
             else if (setting.DefaultFactory is not null) sb.Append($", static () => {setting.DefaultFactory}()");

@@ -123,6 +123,29 @@ public static class QueryAuthorizers {
     }
 
     /// <summary>
+    /// Every row, for an authenticated caller whose <see cref="ICurrentUser.UserId"/> parses as
+    /// <typeparamref name="TKey"/>; nothing for anyone else. The precondition of a rule whose alternatives assume the
+    /// caller has an id of the rows' key type: <c>AllOf(RequireUserId&lt;Contact, Guid&gt;(), AnyOf(…))</c> keeps an
+    /// unrestricted alternative (an administrator role) from admitting a caller every <see cref="ForUser{TEntity,TKey}"/>
+    /// alternative would deny.
+    /// </summary>
+    /// <remarks>
+    /// Unrestricted for the callers it admits, so it adds nothing to an <see cref="AllOf{TEntity}"/> beyond the check and,
+    /// inverted, admits every principal a directory of the same key type lists.
+    /// </remarks>
+    /// <typeparam name="TEntity">The entity type being authorized.</typeparam>
+    /// <typeparam name="TKey">The user id type the rows store (<see cref="Guid"/>, <see cref="int"/>, …).</typeparam>
+    public static IQueryAuthorizer<TEntity> RequireUserId<TEntity, TKey>()
+        where TEntity : class
+        where TKey : IParsable<TKey> {
+        return new InvertibleAuthorizer<TEntity>(
+            (user, _) => user.IsAuthenticated && TKey.TryParse(user.UserId, CultureInfo.InvariantCulture, out TKey? _)
+                ? null
+                : Deny<TEntity>.Filter,
+            new UserRelation<TEntity, TKey>(static (_, _) => true));
+    }
+
+    /// <summary>
     /// <paramref name="then"/> for an authenticated caller satisfying <paramref name="condition"/>; nothing for anyone
     /// else. The general gate, for a condition <see cref="WhenPermission{TEntity}(string, IQueryAuthorizer{TEntity}, string)"/>
     /// and <see cref="WhenRole{TEntity}"/> cannot state.

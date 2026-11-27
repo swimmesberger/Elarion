@@ -138,3 +138,24 @@ value that takes effect.
 - **Projecting secrets into `IConfiguration` for convenience.** Rejected: it defeats protection at rest for the
   most commonly logged object in a host.
 - **An `AllowUnprotectedSecrets` option.** Rejected: a switch that exists will be set in production.
+
+## Amendment (2026-11-27): a declared configuration fallback below the store
+
+An application needed seven SMTP settings to read "the stored value, else the deployment's configuration, else the
+default", with the deployment's keys (`Email:Smtp:Host`) named differently from the settings. The resolver offered
+configuration only as a pin above the store, so the application merged the store and `IOptionsSnapshot<T>` by hand,
+and the IConfiguration projection — the only place where deployment values sat under stored ones — is refreshed after
+the commit, so a request right after a save could read the old options.
+
+- **`[Setting(FallbackConfigurationKey = "…")]`** adds a layer between the default and the store, in the global scope:
+  the non-blank deployment value at that key, read through the same `ISettingPins` (`GetFallbackText`, a default
+  interface member so a replacement keeps compiling) and the same text conversion as a pin, reported as
+  `SettingSource.ConfigurationFallback`. It is declared per definition, like `Pinnable`, so it is not the rejected
+  `StoreWins`/`ConfigurationWins` switch: no reader can see a different precedence than the one declared, and the
+  projection still derives from the resolver (it projects the fallback value at the setting's key). Blank or
+  malformed keys and a fallback on a setting without the global scope are build errors (`ELSDEF008`).
+- **Read-your-writes** is the manager's: it reads through the resolver on the request's scope, so a handler sees its
+  own write, uncommitted, with the EF Core store. The projection stays eventually consistent;
+  `SettingsConfigurationRefresher.RefreshAsync` was already public for code that must wait for it after the commit.
+  A per-request overlay of the projection was rejected: `IConfiguration` and the options cache are process-wide, so
+  it would need a second configuration per scope — the second source of truth this ADR removed.

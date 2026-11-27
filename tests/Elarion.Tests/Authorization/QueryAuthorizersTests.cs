@@ -49,6 +49,21 @@ public sealed class QueryAuthorizersTests {
     }
 
     [Fact]
+    public void RequireUserId_IsUnrestricted_ForAnAuthenticatedCallerWhoseIdParses_AndDeniesEveryoneElse() {
+        var admins = QueryAuthorizers.AllOf(
+            QueryAuthorizers.RequireUserId<Doc, Guid>(),
+            QueryAuthorizers.WhenRole("Admin", QueryAuthorizers.Unrestricted<Doc>()));
+        var adminServiceAccount = new FakeCurrentUser { IsAuthenticated = true, UserId = "service", Roles = ["Admin"] };
+        var signedOut = new FakeCurrentUser { IsAuthenticated = false, UserId = Alice.ToString() };
+
+        QueryAuthorizers.RequireUserId<Doc, Guid>().GetFilter(User(Alice), ResourceOperation.Read).Should().BeNull();
+        Visible(admins, User(Alice, ["Admin"])).Should().Equal(1, 2, 3, 4);
+        Visible(admins, adminServiceAccount).Should().BeEmpty("an id that does not parse is denied before the role");
+        Visible(QueryAuthorizers.RequireUserId<Doc, Guid>(), signedOut).Should().BeEmpty();
+        Visible(QueryAuthorizers.RequireUserId<Doc, int>(), User(Alice)).Should().BeEmpty();
+    }
+
+    [Fact]
     public void ForUser_RelatesRowsToTheCallersTypedId() {
         var owned = QueryAuthorizers.ForUser<Doc, Guid>((doc, userId) => doc.Owner == userId);
 

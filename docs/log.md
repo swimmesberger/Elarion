@@ -2,6 +2,12 @@
 
 ## 2026-11-27
 
+* **Update**: ADR-0095 amendment extended — a registered `[ResourceFilter]` in a module assembly may be internal, registered through a generated public registrar ([ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md))
+* **Update**: ADR-0090 amended — the exclusive-arc helper is still not shipped (relational dependency, application vocabulary); the [polymorphic references](concepts/polymorphic-references.mdx) guide shows the arc configured from one owner list with partial indexes ([ADR-0090](decisions/0090-references-between-records-stay-in-the-database.md))
+* **Update**: ADR-0078 amended — a declared `FallbackConfigurationKey` layer below the store, and read-your-writes through the manager rather than a per-request projection ([ADR-0078](decisions/0078-settings-definitions-and-effective-value-resolver.md))
+* **Update**: ADR-0095 amended — `HoldersOf`/`MembersOf` over the principal directory and the `RequireUserId` building block ([ADR-0095](decisions/0095-one-resource-rule-for-list-point-check-and-complement.md))
+* **Update**: ADR-0073 amended — the claim returns its candidate and given-up counts, and a logger helper states the lost-claim line ([ADR-0073](decisions/0073-leased-work-rows.md))
+* **Update**: ADR-0003 amended — `[NoTransaction]` and `IUnitOfWorkFailureTranslator` on the transaction decorator, and why queries get no read-only transaction ([ADR-0003](decisions/0003-decorator-attachment-predicates.md))
 * **Creation**: [ADR-0120](decisions/0120-offset-pages-and-multi-key-sorts.md): offset lists return `OffsetPage<T>` with a required total, and a `SortMap` sort may combine several keys
 * **Update**: [ADR-0027](decisions/0027-declarative-request-validation.md) amended: `[AllowedValues]` on a nullable member lets `null` pass and exports it in the `enum`
 * **Update**: [ADR-0111](decisions/0111-caldav.md) amended: Depth noroot, RefuseWhenNoCollections, the Accept header in the host, Identity's may-sign-in check, typed limit data and a bounded user id for app passwords

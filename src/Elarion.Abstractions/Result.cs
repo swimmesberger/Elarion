@@ -14,7 +14,7 @@ namespace Elarion.Abstractions;
 /// return AppError.NotFound($"Project {query.Id} not found");
 /// </code>
 /// </example>
-public readonly struct Result<T> : IResultLike, IResultError, IResultFailureFactory<Result<T>> {
+public readonly struct Result<T> : IResultLike, IResultError, IResultFailureFactory<Result<T>>, IResultFailureSource<Result<T>> {
     /// <inheritdoc />
     public bool IsSuccess { get; }
 
@@ -53,6 +53,10 @@ public readonly struct Result<T> : IResultLike, IResultError, IResultFailureFact
     /// <summary>Creates a failed result wrapping <paramref name="error"/>.</summary>
     public static Result<T> Failure(AppError error) {
         return new Result<T>(error);
+    }
+
+    Result<T> IResultFailureSource<Result<T>>.CreateFailure(AppError error) {
+        return Failure(error);
     }
 
     /// <summary>Implicit conversion from <typeparamref name="T"/> to a success result.</summary>
