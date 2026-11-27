@@ -94,6 +94,9 @@ internal sealed partial class CardDavProtocol(DavSourceRegistry<CardDavSourceLis
     }
 
     public ValueTask<DavResponse?> ReportAsync(DavContext context, DavResource collection, DavXmlElement report, CancellationToken cancellationToken) {
+        // RFC 6352 §8.6: a query sent to a card's URL is scoped to that card (Apple, sabre/dav and Radicale test it).
+        if (collection.Kind == DavResourceKind.Member && report.Is(DavNames.Card.AddressBookQuery))
+            return QueryAsync(context, collection, report, cancellationToken);
         if (collection.Kind != DavResourceKind.Collection) return ValueTask.FromResult<DavResponse?>(null);
         if (report.Is(DavNames.Card.AddressBookMultiget)) return MultigetAsync(context, collection, report, cancellationToken);
         if (report.Is(DavNames.Card.AddressBookQuery)) return QueryAsync(context, collection, report, cancellationToken);

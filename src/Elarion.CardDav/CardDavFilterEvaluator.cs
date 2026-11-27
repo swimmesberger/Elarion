@@ -76,7 +76,39 @@ internal static class CardDavFilterEvaluator {
         return named.Any(property => all ? tests.All(t => Passes(property, t)) : tests.Any(t => Passes(property, t)));
 
         static bool Passes(ContactProperty property, DavXmlElement test) =>
-            test.Is(DavNames.Card.TextMatch) ? TextMatches(Unescape(property.Value), test) : MatchParamFilter(property, test);
+            test.Is(DavNames.Card.TextMatch) ? ValueMatches(property, test) : MatchParamFilter(property, test);
+    }
+
+    // Properties whose value is a comma-separated list (RFC 6350: NICKNAME, CATEGORIES): each value is matched on its own,
+    // as Cyrus does, so "equals eric" finds "foo,eric"; the whole value is matched too, so a search for "foo,eric" still
+    // finds it. A negated match holds only when no value matches.
+    private static bool ValueMatches(ContactProperty property, DavXmlElement textMatch) {
+        var text = Unescape(property.Value);
+        if (!property.Name.Equals("NICKNAME", StringComparison.OrdinalIgnoreCase) && !property.Name.Equals("CATEGORIES", StringComparison.OrdinalIgnoreCase))
+            return TextMatches(text, textMatch);
+        var negate = string.Equals(textMatch.Attribute("negate-condition"), "yes", StringComparison.OrdinalIgnoreCase);
+        var found = Matched(text, textMatch) || SplitList(property.Value).Any(value => Matched(value, textMatch));
+        return found != negate;
+
+        static bool Matched(string value, DavXmlElement match) => DavTextMatch.Matches(value, match.Text,
+            match.Attribute("collation") ?? DavTextMatch.UnicodeCasemap, DavTextMatch.ParseMatchType(match.Attribute("match-type")) ?? DavMatchType.Contains);
+    }
+
+    // Splits a still-escaped list value at unescaped commas and unescapes each value.
+    private static IEnumerable<string> SplitList(string value) {
+        var start = 0;
+        for (var i = 0; i < value.Length; i++) {
+            if (value[i] == '\\') {
+                i++;
+                continue;
+            }
+
+            if (value[i] != ',') continue;
+            yield return Unescape(value[start..i]);
+            start = i + 1;
+        }
+
+        yield return Unescape(value[start..]);
     }
 
     // RFC 6352 §10.5.2: a parameter of the name, any of whose values passes the text-match; is-not-defined when absent.

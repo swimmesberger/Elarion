@@ -88,7 +88,10 @@ internal sealed partial class CardDavProtocol {
             DavMultistatus.Start(output);
             var matched = 0;
             var truncated = false;
-            await foreach (var stored in context.Store.GetCandidatesAsync(addressBook.Address.Id, null, null, ct).ConfigureAwait(false)) {
+            var members = collection.Kind == DavResourceKind.Member
+                ? context.Store.GetObjectsAsync(addressBook.Address.Id, [collection.Member!.Name], true, ct)
+                : context.Store.GetCandidatesAsync(addressBook.Address.Id, null, null, ct);
+            await foreach (var stored in members.ConfigureAwait(false)) {
                 if (filter is not null) {
                     using var stream = new MemoryStream(stored.Content.ToArray(), false);
                     var read = await reader.ReadAsync(stream, readOptions, ct).ConfigureAwait(false);
