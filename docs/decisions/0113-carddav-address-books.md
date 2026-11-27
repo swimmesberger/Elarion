@@ -207,3 +207,40 @@ Rejected, as revisable:
 - **Case-insensitive segment matching**: a collection would have several URLs, but multiget hrefs and sync answers
   name one, so a client that used another spelling would see every contact as missing. Clients use the hrefs the home
   listed.
+
+## Amendment (2026-11-27, second): live-only applications, cards in a PROPFIND, the application's own card bytes
+
+The application that adopted live address books found that it still had to carry the DAV store, that a listing naming
+`address-data` answered it empty, and that its own card bytes could not reach devices. Spec 0007, FR-043–FR-046, holds
+the requirements.
+
+1. **An application whose address books are all live registers no store.** `AddElarionCardDav` registers
+   `ICardDavPublisher` unconditionally, and its default took `IDavCollectionStore` in its constructor, so dependency
+   validation failed without `AddElarionWebDavEntityFrameworkCore` and its three tables, which such an application
+   migrated empty. The publisher now resolves the store on first use from the request's scope, as `DavContext.Store`
+   already does, and says which store to register when there is none. *Rejected:* registering the publisher only when
+   a published source or a store is registered, which depends on registration order (a store is often added after
+   CardDAV) and would make a handler that injects the publisher fail validation in one configuration and not another.
+2. **A `PROPFIND` that names a member's data property carries the data.** `DavResource.Content` read a missing content
+   as an empty one (a `null` in a conditional converted to `ReadOnlyMemory<byte>` through its implicit conversion from
+   an array), so `address-data` and `calendar-data` were "defined" for every listed member and answered empty in a `200`
+   propstat. Fixed, and beyond answering `404`: when the selection names one of the protocol's member properties, the
+   dispatcher loads the members with their content, as `sync-collection` already does — at depth 1 every member, from a
+   live source with `DavContentPurpose.Multiget`, at depth 0 the one member with `Get`. RFC 6352 §10.4 and RFC 4791 §9.6
+   allow the properties in a `PROPFIND`, and sabre/dav answers them. *Multiget, not Query*, for the live source: a
+   client keeps a card it was given under the member's ETag, and a query may leave the photo out, so a card from a
+   listing must be the one a `GET` answers. *Rejected:* answering `404` only, which is correct but leaves a client that
+   fetches cards this way with none.
+3. **A live source may give the card's property list** (`CardDavLiveContact(name, etag, properties)`), written as
+   vCard 3.0 by `ContactWriter.AddAsync(IReadOnlyList<ContactProperty>)` in its order and spelling, with the checks a
+   contact gets (a `UID`, an `FN`, the per-card property limit). An application that pinned its wire format before
+   adopting live books keeps its bytes, so its devices see no change. `CardDavLiveContact` becomes a record with two
+   constructors and nullable `Contact` and `Card`. *Rejected:* raw card text, which would skip the writer's checks and
+   control-character removal and would have to be parsed to find its `UID`; an application with text reads it into a
+   property list with `ContactReader`. Published sources keep taking `Contact`s: their bytes are hashed into the ETag
+   by the framework, and no application asked for more.
+4. **A `PROPFIND` without `Depth` stays depth 1.** RFC 4918 §9.1 reads a missing header as `infinity`, which this server
+   refuses with `403 propfind-finite-depth` (ADR-0111). Reading it as infinity would turn a request every client means
+   as a listing into a refusal; sabre/dav, the server most clients are tested against, reads it as 1, and the plan of
+   spec 0006 already chose that. The choice is now in spec 0007 (FR-046), on the CardDAV page, and tested on a live
+   address book as well as a published collection.

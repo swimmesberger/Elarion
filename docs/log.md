@@ -2,6 +2,7 @@
 
 ## 2026-11-27
 
+* **Update**: [ADR-0113](decisions/0113-carddav-address-books.md) gains a second amendment of 2026-11-27: live-only applications need no store, a PROPFIND naming address-data carries the cards, live sources may give a property list, and a missing Depth stays depth 1; spec 0007 gains FR-043–FR-046
 * **Update**: [ADR-0110](decisions/0110-vcard-contacts.md) gains a second amendment of 2026-11-27: parameters per line bounded and counted against the file budget, `ContactErrorCodes.IsStructural`, synchronous property-list writing, `PREF` in upper case and URI line breaks dropped; spec 0005 gains FR-090–FR-094
 * **Update**: [ADR-0002](decisions/0002-cross-module-communication.md) amended: a DependsOn cycle is ordered as one unit and reported (ELMOD009, Info), an unknown name is ELMOD010; [ADR-0085](decisions/0085-handler-declarations-are-projected-not-copied.md) amended: the timeout client tag is checked at build time (ELRPC013)
 * **Update**: [ADR-0080](decisions/0080-errors-are-a-declared-contract-with-a-stable-code.md) amended: the TanStack Start adapter's SSR status takes the application's own error types (`classify`) and Start's stream result, keeping its cleanup attached

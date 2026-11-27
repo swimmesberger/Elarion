@@ -79,6 +79,24 @@ public sealed class DavConformanceTests {
     }
 
     /// <summary>
+    /// A member's data property named in a PROPFIND carries the content (RFC 6352 §10.4, RFC 4791 §9.6; sabre/dav answers
+    /// it): at depth 1 for every member, at depth 0 for one. It used to answer empty in a 200 propstat, because a listed
+    /// member's missing content read as an empty one.
+    /// </summary>
+    [Fact]
+    public async Task PropFindNamingADataProperty_CarriesEachMembersContent() {
+        await using var harness = await WithMembersAsync("a", "b");
+
+        var listing = await harness.SendAsync("PROPFIND", Collection, DavTestHarness.PropFind("D:getetag", "T:data"), headers: Depth("1"));
+        var member = await harness.SendAsync("PROPFIND", Collection + "b.txt", DavTestHarness.PropFind("T:data"), headers: Depth("0"));
+
+        listing.Prop(CollectionHref + "a.txt", Data)!.Text.Should().Be("A");
+        listing.Prop(CollectionHref + "b.txt", Data)!.Text.Should().Be("B");
+        listing.IsMissing(CollectionHref, Data).Should().BeTrue();
+        member.Prop(CollectionHref + "b.txt", Data)!.Text.Should().Be("B");
+    }
+
+    /// <summary>
     /// sabre/dav Server::getHTTPDepth (W10) falls back to the default for a garbage Depth; Elarion refuses it with 400
     /// (DavDispatcher.PropFindAsync). Pinned.
     /// </summary>

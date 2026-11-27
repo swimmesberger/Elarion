@@ -331,8 +331,8 @@ who sees which address book, and the handler that changes the data calls
 Apple clients use one address book per account: publish one per user for them, with groups (`ContactKind.Group`, `Members = [ContactMember.FromUid(uid)]`) for subsets. No feeds or client.
 When which contacts a person sees depends on row rules that change without the contacts changing, don't publish one
 book per viewer: register a live source, `AddElarionCardDavLiveSource<TQuery, TBooks>()`, whose scoped
-`ICardDavLiveAddressBooks` lists (name, ETag) and returns `Contact`s per request with `WhereAuthorized` (CTag only, no
-sync token). Keep URLs of a replaced server with `PublishedAddressBookInfo.Segment` / `PublishedCalendarInfo.Segment`.
+`ICardDavLiveAddressBooks` lists (name, ETag) and returns `Contact`s (or the card's own property list) per request with
+`WhereAuthorized` (CTag only, no sync token); an application with only live books registers no DAV store. Keep URLs of a replaced server with `PublishedAddressBookInfo.Segment` / `PublishedCalendarInfo.Segment`.
 
 Don't hand-roll Web Push either — `Elarion.WebPush` owns notifying users whose app is **closed** (ADR-0076):
 `AddElarionWebPushEntityFrameworkCore<TDbContext>(o => o.Subject = "mailto:…")` + `[GenerateElarionWebPush]`

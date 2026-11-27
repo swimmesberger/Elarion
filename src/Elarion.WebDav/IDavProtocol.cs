@@ -142,7 +142,11 @@ public enum DavContentPurpose {
     /// <summary>A <c>GET</c> or <c>HEAD</c> of one member: the full content.</summary>
     Get,
 
-    /// <summary>A multiget report: the full content of each named member.</summary>
+    /// <summary>
+    /// A multiget report, or a <c>PROPFIND</c> that names a member's data property (<c>address-data</c>,
+    /// <c>calendar-data</c>): the full content of each member asked for, as a <c>GET</c> answers it, since a client keeps
+    /// it under the member's entity tag.
+    /// </summary>
     Multiget,
 
     /// <summary>
