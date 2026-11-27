@@ -60,6 +60,26 @@ per request.
 Application handlers then read the snapshot, so they never touch `HttpContext` and stay testable —
 in a unit test you simply register a fake `ICurrentUser`.
 
+### Endpoints that authenticate later
+
+`UseElarionCurrentUser()` sees the principal of the default scheme. A route group that names its own scheme —
+`RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = "Basic" })`, as for
+[app passwords](/docs/capabilities/app-passwords) — is authenticated by the authorization middleware, after the
+request scope was seeded, so `ICurrentUser` would still be the earlier principal. Seed the scope again at the start of
+such an endpoint:
+
+```csharp
+app.MapGroup("/sync")
+    .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = "Basic" })
+    .MapGet("/{id}", async (HttpContext context, Guid id, IHandlerSender sender, CancellationToken ct) => {
+        context.SeedElarionCurrentUser();   // ICurrentUser is now the Basic-authenticated caller
+        …
+    });
+```
+
+`SeedElarionCurrentUser()` runs the same dispatch-scope initializers the middleware runs, with `HttpContext.User`; the
+DAV host of the CalDAV and CardDAV packages does this for its group.
+
 ## Works across every transport
 
 `ICurrentUser` resolves identically under plain HTTP endpoints, JSON-RPC (single and batch), and MCP —

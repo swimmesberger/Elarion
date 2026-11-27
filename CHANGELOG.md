@@ -154,6 +154,18 @@ minor releases may include breaking changes.
   pass loops `while (claimed.Candidates > 0)` without counting in a callback. `ILogger.LogFinalizeOutcome(outcome,
   queue, id)` writes the warning for a lost claim and the information line for an `Ineligible` row. See
   [Coordination](https://elarion.wimmesberger.dev/docs/capabilities/coordination#giving-up-guarding-the-outcome-and-shutting-down).
+- **Who holds a permission: `HoldersOf` and `MembersOf` on the principal directory** (ADR-0095 amendment).
+  `directory.HoldersOf("requests.handle")` lists the principals holding a permission through their own claims or a
+  role's, each once, and `directory.MembersOf("Admin")` the members of a role — composable queries derived the same
+  way as `WhereAuthorizedFor`'s, so an application's "who may be assigned" agrees with the principal. See
+  [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization#who-holds-a-permission).
+- **`QueryAuthorizers.RequireUserId<TEntity, TKey>()`**: every row, for an authenticated caller whose id parses as
+  `TKey` — the precondition `AllOf(RequireUserId<Contact, Guid>(), AnyOf(…))` that keeps an unrestricted alternative
+  from admitting a caller every `ForUser` alternative would deny. It inverts like `ForUser`.
+- **`HttpContext.SeedElarionCurrentUser()`** seeds the request scope with `HttpContext.User`, as
+  `UseElarionCurrentUser()` does, for an endpoint whose route group authenticates with its own scheme after the
+  middleware ran. See
+  [Current user](https://elarion.wimmesberger.dev/docs/capabilities/current-user#endpoints-that-authenticate-later).
 
 ### Changed
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a

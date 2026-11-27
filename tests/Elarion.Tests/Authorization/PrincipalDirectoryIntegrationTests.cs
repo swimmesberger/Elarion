@@ -157,6 +157,32 @@ public sealed class PrincipalDirectoryIntegrationTests(PrincipalDirectoryFixture
     }
 
     [Fact]
+    public async Task HoldersOf_ReadsUserClaimsAndRoleClaims_EachHolderOnce_InOneStatement() {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
+        var ct = TestContext.Current.CancellationToken;
+        await using var provider = BuildProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ReadersDbContext>();
+        var directory = scope.ServiceProvider.GetRequiredService<IPrincipalDirectory<Guid>>();
+        var cast = new Cast(db)
+            .Add("clerk", permissions: ["requests.handle"])
+            .Add("lead", roles: ["Leads"], permissions: ["requests.handle"])
+            .Add("deputy", roles: ["Leads"])
+            .Add("writer", permissions: ["requests.write"])
+            .RoleHolds("Leads", "requests.handle");
+        await db.SaveChangesAsync(ct);
+
+        var holders = cast.Everyone.Where(id => directory.HoldersOf("requests.handle", Permission).Contains(id));
+        var leads = cast.Everyone.Where(id => directory.MembersOf(cast.Role("Leads")).Contains(id));
+
+        holders.ToQueryString().Should().Contain("UNION ALL");
+        cast.Named(await holders.ToListAsync(ct)).Should().Equal("clerk", "deputy", "lead");
+        cast.Named(await leads.ToListAsync(ct)).Should().Equal("deputy", "lead");
+        (await directory.HoldersOf("requests.handle", Permission)
+            .Where(id => cast.Everyone.Contains(id)).CountAsync(ct)).Should().Be(3, "a holder through two paths counts once");
+    }
+
+    [Fact]
     public async Task Readers_OfAGeneratedShapeSharedFilter_IncludeUserAndRoleGrants_ForTheOperationAsked() {
         Assert.SkipUnless(fixture.IsAvailable, fixture.SkipReason);
         var ct = TestContext.Current.CancellationToken;

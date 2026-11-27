@@ -203,6 +203,7 @@ services.AddSingleton(ContactVisibility.Authorizer);
 | `Rows(predicate)` | the rows matching the predicate |
 | `Unrestricted()` | every row (a `null` filter) |
 | `ForUser<TEntity, TKey>((row, userId) => …)` | the rows related to the caller's id — ownership, membership, an assignment |
+| `RequireUserId<TEntity, TKey>()` | every row, to a caller whose id parses as `TKey` — the precondition `AllOf(RequireUserId<…>(), AnyOf(…))` |
 | `When(condition, then)` / `WhenPermission(permission, then)` / `WhenRole(role, then)` | `then`, to callers passing the gate |
 | `UnlessClaim(claimType, then)` / `UnlessClaim(claimType, value, then)` | `then`, to callers **without** the claim ([withdrawing an alternative](#withdrawing-an-alternative-for-a-session)) |
 | `ForOperations(authorizer, operations…)` | `authorizer`, for the listed operations only |
@@ -217,7 +218,14 @@ alternative (`WhenRole("Admin", …)`), so the gate, the filter and the inverse 
 [one place for "administrators hold everything"](/docs/concepts/authorization#one-place-for-administrators-hold-everything).
 
 **They fail closed.** Every building block denies a caller who is not authenticated before the rule is consulted,
-and `ForUser` also denies a caller whose id does not parse as `TKey`, so no alternative repeats that preamble.
+and `ForUser` also denies a caller whose id does not parse as `TKey`, so no alternative repeats that preamble. An
+unrestricted alternative (`WhenRole("Admin", Unrestricted<Contact>())`) does not parse the id, so a service account
+whose id is not a `Guid` passes it; when every caller of the rule must have an id of the rows' key type, put
+`RequireUserId<Contact, Guid>()` in front: `AllOf(RequireUserId<Contact, Guid>(), AnyOf(…))`.
+
+**Test doubles must be authenticated.** The generated `[ResourceFilter]` and every building block check
+`ICurrentUser.IsAuthenticated` before anything else, so a test `ICurrentUser` stub that sets a `UserId` but leaves
+`IsAuthenticated` `false` sees no rows at all — set both.
 `From` is the exception: its delegate is the whole rule, including the authentication check. `ForUser` takes the
 rule as one expression over the row and the caller's id; the id reaches the database as a parameter.
 
@@ -528,6 +536,21 @@ services.AddElarionIdentityPrincipalDirectory<AppDbContext, ApplicationRole, Gui
   the directory. The forward filter stays the authority: a principal the inverse lists is still checked when it reads
   the record.
 </Callout>
+
+### Who holds a permission
+
+Mention candidates, assignees and the readers of a notification often need no record at all, only the accounts that
+hold a permission or a role. Ask the directory, so the answer is derived the same way as the principal:
+
+```csharp
+var handlers = await users.ActiveStaff(now)
+    .Where(u => directory.HoldersOf("requests.handle").Contains(u.Id))   // user claims and role claims, each once
+    .ToListAsync(ct);
+var admins = directory.MembersOf("Admin");
+```
+
+`HoldersOf(permission, claimType?)` and `MembersOf(role)` return composable queries of principal ids; pass the host's
+permission claim type when it is not `permission`.
 
 For shares alone, `IResourceGrantStore.GetGrantsAsync(resourceType, resourceId)` still lists the users and roles a
 record is shared with.

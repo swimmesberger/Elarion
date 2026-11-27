@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Elarion.Abstractions.Dispatch;
 using Microsoft.AspNetCore.Http;
 
@@ -16,9 +15,7 @@ namespace Elarion.AspNetCore.Identity;
 public sealed class CurrentUserMiddleware(RequestDelegate next) {
     /// <summary>Seeds the current-user state for the active request scope.</summary>
     public async Task InvokeAsync(HttpContext context) {
-        var dispatchContext = new DispatchScopeContext();
-        dispatchContext.Set<ClaimsPrincipal>(context.User);
-        context.RequestServices.SeedScope(dispatchContext);
+        context.SeedElarionCurrentUser();
 
         await next(context);
     }

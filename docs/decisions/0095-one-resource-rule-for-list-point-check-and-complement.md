@@ -264,3 +264,17 @@ must not stand alone between a caller and the rows.
 - **Inverting a tenant-scoped generated filter by comparing the claim text with the column's text.** It agrees with
   the forward filter only while every stored tenant claim is formatted exactly as the database renders the column; a
   differently cased claim would silently drop principals.
+
+## Amendment (2026-11-27): direct directory questions and an id precondition
+
+- **`HoldersOf(permission)` and `MembersOf(role)`** are extension methods over `IPrincipalDirectory<TKey>` rather than
+  members of it or a second `IPermissionHolderQuery` service: they are one `Where`/`Select`/`Distinct` over the two
+  queries every directory already has, so a host that replaces the directory gets them right without implementing
+  anything, and "who holds P" can never be derived differently from "who may see this row". Eligibility (active, staff)
+  stays the caller's candidate set, as for `WhereAuthorizedFor`.
+- **`QueryAuthorizers.RequireUserId<TEntity, TKey>()`** states "the caller's id must parse" as its own building block.
+  An application wrote it as `ForUser<…>((_, _) => true)`, which works but reads as a relation that relates nothing.
+  It is unrestricted for the callers it admits, so in an `AllOf` it adds only the check; its inverse is the same
+  always-true relation, refused for a directory of another key type like `ForUser`.
+- Rejected: an `IsAuthenticated`-free mode of the generated filter for test doubles. Failing closed for an
+  unauthenticated caller is the point; the resource-authorization page now says a stub must set it.

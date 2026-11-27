@@ -1,6 +1,5 @@
-using System.Security.Claims;
-using Elarion.Abstractions.Dispatch;
 using Elarion.AspNetCore;
+using Elarion.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -124,9 +123,7 @@ public static class WebDavEndpointRouteBuilderExtensions {
         var services = context.RequestServices;
         // Authentication of the DAV scheme ran in the authorization middleware, after any middleware that seeded the scope
         // with the browser principal; seed it again with the DAV principal, so ICurrentUser and the sources see it.
-        var dispatchContext = new DispatchScopeContext();
-        dispatchContext.Set<ClaimsPrincipal>(context.User);
-        services.SeedScope(dispatchContext);
+        context.SeedElarionCurrentUser();
 
         var request = context.Request;
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
