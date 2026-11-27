@@ -169,6 +169,19 @@ minor releases may include breaking changes.
   types are contributed once. See
   [Cross-module communication](https://elarion.wimmesberger.dev/docs/concepts/cross-module-communication#what-a-contracts-consumer-must-know).
 
+- **`Elarion.Typst`: required packages and a package-not-found error** (ADR-0093). `TypstOptions.RequiredPackages`
+  (`@local/acme-documents:1.0.0`) makes the startup check refuse a deployment without the application's template
+  package, like a missing executable; `TypstToolchain.HasPackage` runs the same test at render time. A compilation
+  whose import names a package Typst cannot find throws `TypstPackageNotFoundException` (with `Package`, telemetry
+  outcome `package_not_found`) instead of `TypstCompilationException`, so a missing package is no longer reported as a
+  template defect. See [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#startup-check).
+- **`Elarion.Typst`: asset and compiler conveniences.** `TypstAsset.IsValidName` and `TypstAsset.TryCreate` expose the
+  asset-name rule, so a user-supplied name can be rejected with the application's own error; `TypstAsset.FromJson`
+  serializes a second model into an asset the template reads with `json(assets.at("letterhead.json"))`;
+  `TypstCompiler.Create(options, loggerFactory)` builds the compiler without a service collection, for tests that need
+  their own executable, package directory or working directory. See
+  [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#several-models).
+
 ### Changed
 - **BREAKING: `withDecisions` throws `RpcDecisionCancelledError` when `ask` cancels.** It threw the decision error, so a
   caller could not tell a declined question from a failed call. The new error carries the `question` and the decision
@@ -190,6 +203,12 @@ minor releases may include breaking changes.
   [Web push](https://elarion.wimmesberger.dev/docs/capabilities/web-push).
 
 ### Fixed
+- **The documented container build of `Elarion.Typst` failed in `mcr.microsoft.com/dotnet/sdk` images.** Their GNU
+  tar unpacks the Typst `.tar.xz` only through the `xz` program, which the images do not install, so the build failed
+  after the download with `xz: Cannot exec`. The targets now check for an unpacker before downloading and stop with an
+  error that names the package to install (`apt-get install -y xz-utils`) or `ElarionTypstExecutable`, and the
+  documented Dockerfile installs `xz-utils`. See
+  [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#containers).
 - **A NativeAOT application with a body-bound `[HttpEndpoint]` published with trimming warnings.** The generated
   mapping resolved the request body's JSON metadata with a fallback to the reflection-based
   `JsonSerializerOptions.Default`, which made the publish report `IL2026` and `IL3050`. The fallback is gone; a missing

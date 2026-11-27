@@ -51,5 +51,6 @@ internal static class TypstOutcome {
     public const string CompilationError = "compilation_error";
     public const string Timeout = "timeout";
     public const string Unavailable = "unavailable";
+    public const string PackageNotFound = "package_not_found";
     public const string Cancelled = "cancelled";
 }

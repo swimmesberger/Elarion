@@ -105,6 +105,49 @@ public sealed class TypstCompilerTests : IDisposable {
     }
 
     [Fact]
+    public async Task Missing_package_throws_package_not_found_exception() {
+        var compiler = CreateCompiler();
+
+        var act = () => compiler.CompilePdfAsync(
+            new TypstCompileRequest { Source = TypstSource.Package("@local/elarion-missing:1.0.0", "invoice") },
+            TestContext.Current.CancellationToken);
+
+        var exception = (await act.Should().ThrowAsync<TypstPackageNotFoundException>()).Which;
+        exception.Package.Should().Be("@local/elarion-missing:1.0.0");
+        exception.ExitCode.Should().NotBe(0);
+        exception.Diagnostics.Should().Contain("package not found");
+        Directory.GetFileSystemEntries(_workingDirectory).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Json_asset_is_a_second_model_the_template_parses() {
+        var compiler = CreateCompiler();
+
+        await using var pdf = await compiler.CompilePdfAsync(new TypstCompileRequest {
+            Source = TypstSource.Main("""
+                #let letterhead = json(read("/assets/letterhead.json", encoding: none))
+                #assert.eq(letterhead.company, "Acme Gmbh & Co. KG")
+                #letterhead.company
+                """),
+            Assets = [TypstAsset.FromJson("letterhead.json", new TypstLetterhead { Company = "Acme Gmbh & Co. KG" },
+                TypstTestJsonContext.Default.TypstLetterhead)]
+        }, TestContext.Current.CancellationToken);
+
+        (await ReadHeaderAsync(pdf)).Should().Be("%PDF-");
+    }
+
+    [Fact]
+    public async Task Compiler_factory_compiles_without_a_service_provider() {
+        var options = new TypstOptions { WorkingDirectory = _workingDirectory };
+        Assert.SkipUnless(new TypstToolchain(options).ExecutableExists, "Typst is not available.");
+        using var compiler = TypstCompiler.Create(options, NullLoggerFactory.Instance);
+
+        await using var pdf = await compiler.CompilePdfAsync(InvoiceRequest(), TestContext.Current.CancellationToken);
+
+        (await ReadHeaderAsync(pdf)).Should().Be("%PDF-");
+    }
+
+    [Fact]
     public async Task Exceeded_timeout_kills_the_process_and_throws_timeout_exception() {
         var compiler = CreateCompiler();
 
@@ -222,6 +265,10 @@ internal sealed record TypstInvoiceDocument {
     public required IReadOnlyList<TypstInvoiceItem> Items { get; init; }
 }
 
+internal sealed record TypstLetterhead {
+    public required string Company { get; init; }
+}
+
 internal sealed record TypstInvoiceItem {
     public required string Name { get; init; }
     public required string Amount { get; init; }
@@ -229,4 +276,5 @@ internal sealed record TypstInvoiceItem {
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(TypstInvoiceDocument))]
+[JsonSerializable(typeof(TypstLetterhead))]
 internal sealed partial class TypstTestJsonContext : JsonSerializerContext;
