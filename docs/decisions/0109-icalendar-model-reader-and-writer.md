@@ -274,8 +274,8 @@ controls it had built on its own side. Each is decided here; the published page 
   window for monthly and yearly frequencies too, not only for weekly and shorter ones; a rule with `COUNT` is still
   counted from `DTSTART`, because skipping would need the number of instances of every skipped period, which `BY`
   parts and `BYSETPOS` make irregular, and `MaxCandidates` bounds it. `Expand` takes a cancellation token, checked per
-  series and per period. Repeated `BY` values count once, and a `BY` list longer than its part has distinct values
-  does not parse. Rejected: a per-period cap next to a per-series one (one total bound covers both and is one setting),
+  series and per period. Repeated `BY` values count once (the bound on a list's length was later dropped; see the
+  next amendment). Rejected: a per-period cap next to a per-series one (one total bound covers both and is one setting),
   and a streaming `IEnumerable` per series (the window and the caps already bound the result; a caller that caps by days
   passes a smaller window).
 - **Reading has a line and an item limit, and checks its token while mapping.** `MaxLines` (1,000,000) and `MaxItems`
@@ -311,3 +311,35 @@ controls it had built on its own side. Each is decided here; the published page 
 - **Override matching stays exact.** An override whose `RECURRENCE-ID` names the right day at another time is an extra
   occurrence, as RFC 5545 says and the page states; matching by day, as one library did, would merge distinct
   instances of an hourly series.
+
+## Amendment (2026-11-27, second): repeated `BY` values, override versions, limits and byte-order marks
+
+An application adopting the first amendment found that it refused a valid rule, and three smaller gaps.
+
+- **A `BY` list may repeat its values without bound.** The first amendment refused a list with more items than its
+  part has distinct values, to bound a rule's lists by the RFC rather than by the line. But RFC 5545 allows repeats, and
+  the parser already kept each value once, so the bound only turned a valid, cheap rule (`BYMONTH=1,1,…` 101 times,
+  meaning January) into `calendar.invalid_value`, the code of a broken rule, and an importer that refuses broken rules
+  refused the file. The parser now dedupes and accepts. What the deduplication leaves is bounded by the RFC (at most a
+  part's values, `BYDAY` at most 7 × 107); what it reads is bounded by the line: the items are walked as spans with no
+  allocation per item, so the work is linear in the rule's length (two million items, 7 MB of text, parse in about
+  20 ms, against 170 ms to refuse them before), and a reader's `MaxLineBytes` bounds that length, reported as
+  `calendar.line_too_long`, a code of its own. No parser limit remains, so no new code is needed. Rejected: a distinct
+  code for an over-long list while still refusing it (it keeps refusing a valid rule; the application would only learn
+  to ignore the code), and a separate cap on the raw item count (the line limit already is one).
+- **Which override version won is public.** `ResolveOverrideVersions` decided it inside the expansion only, so an
+  application that stores or shows items rather than occurrences repeated the rule on its side.
+  `CalendarRecurrence.LatestVersions(items, floatingTimeZone)` returns the items without the losing versions, in their
+  order, by the expansion's own rule (one implementation serves both). Rejected: a property on `CalendarOccurrence` or
+  a list of dropped versions on `CalendarOccurrences` (an override moved out of the window yields no occurrence, so the
+  answer would depend on the window).
+- **`IsStructural` keeps the per-item limits; `IsLimit` is added.** `TooManyProperties` and `NestingTooDeep` (and
+  `LineTooLong` inside an item) stop an item from being read whole, which is a matter of the file's form, so a strict
+  importer keeps refusing on them. A lenient importer does not need them removed: it skips the entries that have errors
+  and keeps the rest, and where an error is reported (`FileErrors` or an entry's errors) says what it affects. What
+  such an importer lacked was a way to tell "past a limit" from "broken" when wording the problem; `IsLimit(code)`
+  names the codes that report a configured read or expansion limit. Rejected: removing the per-item limits from
+  `IsStructural` (a strict importer would then accept a file with an item silently cut short).
+- **A byte-order mark at the start of a line is nothing in iCalendar too.** Files concatenated from several exports
+  carry one before each later `BEGIN:VCALENDAR`; the vCard rules already skipped it, the iCalendar rules now do, and
+  the calendar after the mark is no longer lost as a malformed line.

@@ -92,8 +92,11 @@ public sealed record CalendarRecurrenceRule {
 
     /// <summary>
     /// Parses a rule. An <c>RSCALE</c> other than <c>GREGORIAN</c> (FR-037), an unknown <c>FREQ</c>, a part out of
-    /// range, or a <c>BY</c> list with more items than the part has distinct values does not parse. Repeated values of a
-    /// <c>BY</c> list are kept once. Unknown parts such as <c>SKIP</c> are ignored.
+    /// range does not parse. Repeated values of a <c>BY</c> list are allowed, as RFC 5545 allows them, and kept once, so
+    /// a list holds at most as many values as its part has however long the text is (<c>BYMONTH=1,1,1</c> is January).
+    /// Parsing is linear in the text's length, with no allocation per list item; a reader bounds that length by
+    /// <see cref="CalendarReadOptions.MaxLineBytes"/>, reported as <see cref="CalendarErrorCodes.LineTooLong"/>. Unknown
+    /// parts such as <c>SKIP</c> are ignored.
     /// </summary>
     public static bool TryParse(string? text, out CalendarRecurrenceRule? rule) => TryParse(text, null, out rule);
 
@@ -147,20 +150,7 @@ public sealed record CalendarRecurrenceRule {
                 case "BYMONTH" when TryList(value, 1, 12, false, out var list): byMonth = list; break;
                 case "BYSETPOS" when TryList(value, 1, 366, true, out var list): bySetPos = list; break;
                 case "BYDAY":
-                    var days = new List<CalendarWeekday>();
-                    var distinctDays = new HashSet<CalendarWeekday>();
-                    var dayItems = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    // Seven weekdays, each alone or at one of 2 × 53 positions.
-                    if (dayItems.Length > 7 * (1 + 2 * 53)) return false;
-                    foreach (var item in dayItems) {
-                        if (item.Length < 2 || !TryDay(item[^2..], out var day)) return false;
-                        var offset = 0;
-                        if (item.Length > 2 && (!int.TryParse(item[..^2], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out offset)
-                                                || offset == 0 || Math.Abs(offset) > 53)) return false;
-                        if (distinctDays.Add(new CalendarWeekday(day, offset))) days.Add(new CalendarWeekday(day, offset));
-                    }
-
-                    byDay = days;
+                    if (!TryDays(value, out byDay)) return false;
                     break;
                 case "WKST":
                     if (!TryDay(value, out weekStart)) return false;
@@ -241,30 +231,51 @@ public sealed record CalendarRecurrenceRule {
         _ => "SU",
     };
 
-    private static bool TryDay(string text, out DayOfWeek day) {
-        DayOfWeek? found = text.ToUpperInvariant() switch {
-            "MO" => DayOfWeek.Monday,
-            "TU" => DayOfWeek.Tuesday,
-            "WE" => DayOfWeek.Wednesday,
-            "TH" => DayOfWeek.Thursday,
-            "FR" => DayOfWeek.Friday,
-            "SA" => DayOfWeek.Saturday,
-            "SU" => DayOfWeek.Sunday,
-            _ => null,
-        };
+    private static bool TryDay(ReadOnlySpan<char> text, out DayOfWeek day) {
+        DayOfWeek? found = text.Length != 2 ? null
+            : text.Equals("MO", StringComparison.OrdinalIgnoreCase) ? DayOfWeek.Monday
+            : text.Equals("TU", StringComparison.OrdinalIgnoreCase) ? DayOfWeek.Tuesday
+            : text.Equals("WE", StringComparison.OrdinalIgnoreCase) ? DayOfWeek.Wednesday
+            : text.Equals("TH", StringComparison.OrdinalIgnoreCase) ? DayOfWeek.Thursday
+            : text.Equals("FR", StringComparison.OrdinalIgnoreCase) ? DayOfWeek.Friday
+            : text.Equals("SA", StringComparison.OrdinalIgnoreCase) ? DayOfWeek.Saturday
+            : text.Equals("SU", StringComparison.OrdinalIgnoreCase) ? DayOfWeek.Sunday
+            : null;
         day = found ?? DayOfWeek.Monday;
         return found is not null;
     }
 
-    // A BY list, without repeated values; a list with more items than the part has distinct values does not parse, so a
-    // rule's lists are bounded by the RFC, not by the line length.
+    // A BYDAY list, without repeated values: at most the seven weekdays alone and at 2 × 53 positions each, however long
+    // the text. The items are walked as spans, so a long list costs time linear in its length and no allocation per item.
+    private static bool TryDays(string text, out IReadOnlyList<CalendarWeekday> values) {
+        var list = new List<CalendarWeekday>();
+        values = list;
+        var distinct = new HashSet<CalendarWeekday>();
+        var span = text.AsSpan();
+        foreach (var range in span.Split(',')) {
+            var item = span[range].Trim();
+            if (item.IsEmpty) continue;
+            if (item.Length < 2 || !TryDay(item[^2..], out var day)) return false;
+            var offset = 0;
+            if (item.Length > 2 && (!int.TryParse(item[..^2], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out offset)
+                                    || offset == 0 || Math.Abs(offset) > 53)) return false;
+            if (distinct.Add(new CalendarWeekday(day, offset))) list.Add(new CalendarWeekday(day, offset));
+        }
+
+        return true;
+    }
+
+    // A BY list, without repeated values: at most as many values as the part has, however long the text (RFC 5545 allows
+    // repeats, BYMONTH=1,1,1 is January). The items are walked as spans, so a long list costs time linear in its length
+    // and no allocation per item; the length itself is bounded by the reader's line limit.
     private static bool TryList(string text, int min, int max, bool allowNegative, out IReadOnlyList<int> values) {
         var list = new List<int>();
         values = list;
-        var items = text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (items.Length > (max - min + 1) * (allowNegative ? 2 : 1)) return false;
         var distinct = new HashSet<int>();
-        foreach (var item in items) {
+        var span = text.AsSpan();
+        foreach (var range in span.Split(',')) {
+            var item = span[range].Trim();
+            if (item.IsEmpty) continue;
             if (!int.TryParse(item, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value)) return false;
             var magnitude = Math.Abs(value);
             if (value < 0 && !allowNegative) return false;
