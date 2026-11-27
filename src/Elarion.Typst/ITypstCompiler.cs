@@ -24,6 +24,7 @@ namespace Elarion.Typst;
 public interface ITypstCompiler {
     /// <summary>Compiles <paramref name="request"/> to a PDF.</summary>
     /// <exception cref="TypstUnavailableException">The Typst executable cannot be started.</exception>
+    /// <exception cref="TypstPackageNotFoundException">A package the document imports is not installed.</exception>
     /// <exception cref="TypstCompilationException">Typst rejected the document.</exception>
     /// <exception cref="TypstTimeoutException">The compilation exceeded its timeout.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>

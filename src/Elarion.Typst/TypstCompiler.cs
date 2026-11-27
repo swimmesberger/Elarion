@@ -2,18 +2,22 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Elarion.Typst;
 
-/// <summary>The CLI-backed <see cref="ITypstCompiler"/>.</summary>
-internal sealed class TypstCompiler : ITypstCompiler, IDisposable {
+/// <summary>
+/// The CLI-backed <see cref="ITypstCompiler"/>. <c>AddElarionTypst()</c> registers it; <see cref="Create"/> builds one
+/// without a service provider.
+/// </summary>
+public sealed class TypstCompiler : ITypstCompiler, IDisposable {
     private readonly TypstOptions _options;
     private readonly TypstToolchain _toolchain;
     private readonly ILogger<TypstCompiler> _logger;
     private readonly SemaphoreSlim _slots;
     private readonly string _workingDirectory;
 
-    public TypstCompiler(TypstOptions options, TypstToolchain toolchain, ILogger<TypstCompiler> logger) {
+    internal TypstCompiler(TypstOptions options, TypstToolchain toolchain, ILogger<TypstCompiler> logger) {
         _options = options;
         _toolchain = toolchain;
         _logger = logger;
@@ -21,6 +25,30 @@ internal sealed class TypstCompiler : ITypstCompiler, IDisposable {
         _workingDirectory = Path.GetFullPath(options.WorkingDirectory ?? Path.Combine(Path.GetTempPath(), "elarion-typst"));
     }
 
+    /// <summary>
+    /// Builds a compiler from <paramref name="options"/> without dependency injection: for tests that need a compiler
+    /// with their own executable, package directory, or working directory, and for tools without a host. The options
+    /// and the toolchain are read once here; later changes to <paramref name="options"/> have no effect. No startup check
+    /// runs: probe <see cref="TypstToolchain"/> yourself when it matters.
+    /// </summary>
+    /// <param name="options">The options, as <c>AddElarionTypst(options => …)</c> would set them.</param>
+    /// <param name="loggerFactory">Where the compiler logs diagnostics. <see langword="null"/>: nothing is logged.</param>
+    /// <returns>A compiler that is safe for concurrent use. Dispose it when done.</returns>
+    /// <exception cref="ArgumentException">An option is out of range or a required package is not a package specification.</exception>
+    /// <example>
+    /// <code>
+    /// using var compiler = TypstCompiler.Create(new TypstOptions { WorkingDirectory = workspace, Timeout = TimeSpan.FromSeconds(5) });
+    /// await using var pdf = await compiler.CompilePdfAsync(request, cancellationToken);
+    /// </code>
+    /// </example>
+    public static TypstCompiler Create(TypstOptions options, ILoggerFactory? loggerFactory = null) {
+        ArgumentNullException.ThrowIfNull(options);
+        options.Validate();
+        var logger = loggerFactory?.CreateLogger<TypstCompiler>() ?? NullLogger<TypstCompiler>.Instance;
+        return new TypstCompiler(options, new TypstToolchain(options), logger);
+    }
+
+    /// <inheritdoc/>
     public async Task<TypstPdf> CompilePdfAsync(TypstCompileRequest request, CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(request);
         request.Validate();
@@ -85,10 +113,19 @@ internal sealed class TypstCompiler : ITypstCompiler, IDisposable {
         var errors = run.StandardError.Trim();
         var output = run.StandardOutput.Trim();
         if (run.ExitCode != 0) {
-            Complete(activity, TypstOutcome.CompilationError, started);
             // A process ended by a signal printed nothing useful: SIGKILL usually means the kernel's out-of-memory killer.
             var termination = run.Signal is { } signal ? $"Typst was terminated by {signal}." : "";
             var diagnostics = string.Join(Environment.NewLine, new[] { termination, errors, output }.Where(s => s.Length > 0));
+            if (TypstPackageSpec.TryFindMissing(errors, out var package)) {
+                Complete(activity, TypstOutcome.PackageNotFound, started);
+                _logger.LogError("Typst could not find the package {Package} for {Document} (package directory: {PackagePath}): {Diagnostics}",
+                    package, request.Source.Description, _toolchain.PackagePath ?? "<none>", diagnostics);
+                throw new TypstPackageNotFoundException(
+                    $"The Typst package {package} that {request.Source.Description} imports is not installed.", package, run.ExitCode,
+                    diagnostics);
+            }
+
+            Complete(activity, TypstOutcome.CompilationError, started);
             _logger.LogError("Typst rejected {Document} with exit code {ExitCode}: {Diagnostics}",
                 request.Source.Description, run.ExitCode, diagnostics);
             throw new TypstCompilationException(
@@ -188,5 +225,6 @@ internal sealed class TypstCompiler : ITypstCompiler, IDisposable {
         }
     }
 
+    /// <summary>Releases the concurrency limiter. Compilations still running complete.</summary>
     public void Dispose() => _slots.Dispose();
 }

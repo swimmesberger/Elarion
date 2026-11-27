@@ -58,6 +58,10 @@ internal sealed class TypstStartupCheckService(
             if (!Directory.Exists(fontPath)) problems.Add($"The configured font directory '{fontPath}' does not exist.");
         }
 
+        foreach (var package in options.RequiredPackages.Distinct(StringComparer.Ordinal)) {
+            if (!toolchain.HasPackage(package)) problems.Add(toolchain.MissingPackageMessage(package));
+        }
+
         return problems;
     }
 }

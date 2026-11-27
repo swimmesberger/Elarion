@@ -64,7 +64,7 @@ public sealed partial class TypstSource {
     public static TypstSource Package(string package, string function) {
         ArgumentException.ThrowIfNullOrWhiteSpace(package);
         ArgumentException.ThrowIfNullOrWhiteSpace(function);
-        if (!PackageSpecPattern().IsMatch(package))
+        if (!TypstPackageSpec.TryParse(package, out _))
             throw new ArgumentException(
                 $"'{package}' is not a Typst package specification of the form @namespace/name:major.minor.patch.",
                 nameof(package));
@@ -195,9 +195,6 @@ public sealed partial class TypstSource {
         builder.Append("))\n");
         return builder.ToString();
     }
-
-    [GeneratedRegex(@"^@[a-z0-9][a-z0-9-]*/[a-zA-Z0-9][a-zA-Z0-9_-]*:\d+\.\d+\.\d+$", RegexOptions.CultureInvariant)]
-    private static partial Regex PackageSpecPattern();
 
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_-]*$", RegexOptions.CultureInvariant)]
     private static partial Regex IdentifierPattern();

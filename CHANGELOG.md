@@ -138,6 +138,19 @@ minor releases may include breaking changes.
   the build error `ELVAL004`; `ELVAL002` now also covers such a type in a compilation without `Elarion.Validation`. See
   [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation#validating-outside-a-handler-request).
 
+- **`Elarion.Typst`: required packages and a package-not-found error** (ADR-0093). `TypstOptions.RequiredPackages`
+  (`@local/acme-documents:1.0.0`) makes the startup check refuse a deployment without the application's template
+  package, like a missing executable; `TypstToolchain.HasPackage` runs the same test at render time. A compilation
+  whose import names a package Typst cannot find throws `TypstPackageNotFoundException` (with `Package`, telemetry
+  outcome `package_not_found`) instead of `TypstCompilationException`, so a missing package is no longer reported as a
+  template defect. See [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#startup-check).
+- **`Elarion.Typst`: asset and compiler conveniences.** `TypstAsset.IsValidName` and `TypstAsset.TryCreate` expose the
+  asset-name rule, so a user-supplied name can be rejected with the application's own error; `TypstAsset.FromJson`
+  serializes a second model into an asset the template reads with `json(assets.at("letterhead.json"))`;
+  `TypstCompiler.Create(options, loggerFactory)` builds the compiler without a service collection, for tests that need
+  their own executable, package directory or working directory. See
+  [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#several-models).
+
 ### Changed
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
   type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
@@ -164,6 +177,12 @@ minor releases may include breaking changes.
   before filtering (a yearly rule with every second of a year allocated 2 GB) and walked monthly and yearly rules from
   `DTSTART`; the new `CalendarExpandOptions.MaxCandidates` (1,000,000) stops a series as candidates are built, and rules
   without `COUNT` skip ahead to the window for every frequency (582 ms and 2 GB became 23 ms and 64 MB).
+- **The documented container build of `Elarion.Typst` failed in `mcr.microsoft.com/dotnet/sdk` images.** Their GNU
+  tar unpacks the Typst `.tar.xz` only through the `xz` program, which the images do not install, so the build failed
+  after the download with `xz: Cannot exec`. The targets now check for an unpacker before downloading and stop with an
+  error that names the package to install (`apt-get install -y xz-utils`) or `ElarionTypstExecutable`, and the
+  documented Dockerfile installs `xz-utils`. See
+  [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#containers).
 - **A NativeAOT application with a body-bound `[HttpEndpoint]` published with trimming warnings.** The generated
   mapping resolved the request body's JSON metadata with a fallback to the reflection-based
   `JsonSerializerOptions.Default`, which made the publish report `IL2026` and `IL3050`. The fallback is gone; a missing
