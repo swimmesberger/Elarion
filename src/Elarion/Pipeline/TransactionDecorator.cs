@@ -27,8 +27,10 @@ public sealed class TransactionDecorator<TRequest, TResponse>(
     IUnitOfWork unitOfWork,
     IEnumerable<IUnitOfWorkFailureTranslator> failureTranslators
 ) : IHandler<TRequest, TResponse> {
-    // Materialized once per decorator: the translators are asked only on the exception path.
-    private readonly IUnitOfWorkFailureTranslator[] _failureTranslators = [.. failureTranslators];
+    // The container resolves IEnumerable<T> as an array, so the common case copies nothing; the translators are asked
+    // only on the exception path.
+    private readonly IUnitOfWorkFailureTranslator[] _failureTranslators =
+        failureTranslators as IUnitOfWorkFailureTranslator[] ?? [.. failureTranslators];
 
     /// <summary>
     /// Attaches to commands and integration-event handlers, except those whose pipeline already owns the unit of
