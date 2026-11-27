@@ -93,6 +93,7 @@
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false"/>
     <ProjectReference Include="../../src/Elarion.Calendars/Elarion.Calendars.csproj"/>
+    <ProjectReference Include="../../src/Elarion.Contacts/Elarion.Contacts.csproj"/>
     <ProjectReference Include="../../src/Elarion.Spreadsheets/Elarion.Spreadsheets.csproj"/>
     <ProjectReference Include="../../src/Elarion.Spreadsheets.Generators/Elarion.Spreadsheets.Generators.csproj"/>
     <!-- Also applied as an analyzer so the Spreadsheets tests write REAL generated records compiled into this

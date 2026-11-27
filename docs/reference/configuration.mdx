@@ -173,6 +173,24 @@ member, `ReadDefaults`, holds the `SpreadsheetReadOptions` a read uses when it p
 Write options (`SpreadsheetWriteOptions`) are passed per call, not configured. See
 [Spreadsheets](/docs/capabilities/spreadsheets#limits-and-options).
 
+## Contacts
+
+`AddElarionContacts(configuration)` binds `ContactOptions` (package `Elarion.Contacts`), conventionally from the
+`Contacts` section (`ContactOptions.SectionName`), with the configuration-binding source generator. Its one member,
+`ReadDefaults`, holds the `ContactReadOptions` a read uses when it passes none.
+
+| Key | Default |
+| --- | --- |
+| `Contacts:ReadDefaults:MaxBytes` | `33554432` (32 MiB) |
+| `Contacts:ReadDefaults:MaxContacts` | `10000` |
+| `Contacts:ReadDefaults:MaxPropertiesPerContact` | `1000` |
+| `Contacts:ReadDefaults:MaxLineBytes` | `1048576` (1 MiB) |
+| `Contacts:ReadDefaults:MaxPhotoBytes` | `1048576` (1 MiB) |
+| `Contacts:ReadDefaults:FallbackEncoding` | `windows-1252` (an unknown name throws when the reader is resolved) |
+
+Write options (`ContactWriteOptions`) are passed per call, not configured. See
+[Contacts](/docs/capabilities/contacts#limits-and-options).
+
 ## Proxy identity
 
 `AddElarionProxyIdentity(configuration, environment)` binds the `ProxyIdentity` section (package
