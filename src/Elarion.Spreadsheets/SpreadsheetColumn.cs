@@ -54,8 +54,9 @@ public sealed class SpreadsheetColumn<T> where T : class {
     public IReadOnlyList<string> Aliases { get; }
 
     /// <summary>
-    /// The labels a <see cref="SpreadsheetValueKind.Choice"/> column offers, in declaration order (enum members, or the
-    /// true and the false label of a boolean); empty for every other kind.
+    /// The labels a <see cref="SpreadsheetValueKind.Choice"/> column offers, in declaration order (enum members, the
+    /// true and the false label of a boolean, or the list a text column's <see cref="SpreadsheetColumnAttribute.Choices"/>
+    /// member holds); empty for every other kind.
     /// </summary>
     public IReadOnlyList<string> Choices { get; }
 

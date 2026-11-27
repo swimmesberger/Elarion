@@ -22,14 +22,24 @@ internal sealed class SpreadsheetStyles {
 
     /// <summary>The style of a column's data cells.</summary>
     public int StyleFor(SpreadsheetValueKind kind, string? format) {
+        return kind is SpreadsheetValueKind.Integer or SpreadsheetValueKind.Number or SpreadsheetValueKind.Date
+                   or SpreadsheetValueKind.DateTime or SpreadsheetValueKind.Time
+               && format is not null
+            ? Custom(format)
+            : BuiltInStyleFor(kind);
+    }
+
+    /// <summary>
+    /// The style of a cell of <paramref name="kind"/> without a declared format: the text format, the viewer's own date,
+    /// date-and-time or time notation, or the default.
+    /// </summary>
+    public static int BuiltInStyleFor(SpreadsheetValueKind kind) {
         return kind switch {
             SpreadsheetValueKind.Text or SpreadsheetValueKind.Guid or SpreadsheetValueKind.DateTimeOffset
                 or SpreadsheetValueKind.Choice => Text,
-            SpreadsheetValueKind.Boolean => Default,
-            SpreadsheetValueKind.Integer or SpreadsheetValueKind.Number => format is null ? Default : Custom(format),
-            SpreadsheetValueKind.Date => format is null ? Date : Custom(format),
-            SpreadsheetValueKind.DateTime => format is null ? DateTime : Custom(format),
-            SpreadsheetValueKind.Time => format is null ? Time : Custom(format),
+            SpreadsheetValueKind.Date => Date,
+            SpreadsheetValueKind.DateTime => DateTime,
+            SpreadsheetValueKind.Time => Time,
             _ => Default
         };
     }

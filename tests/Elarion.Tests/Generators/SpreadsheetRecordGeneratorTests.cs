@@ -571,6 +571,73 @@ public sealed class SpreadsheetRecordGeneratorTests {
         GetGenerated(result, "Sample_Row.SpreadsheetRowMapper.g.cs").Should().Contain("public bool HasValidation => true;");
     }
 
+    private const string ChoicesSource =
+        """
+        using System.Collections.Generic;
+        using Elarion.Spreadsheets;
+
+        namespace Sample.Channels {
+            public abstract class ChannelBase {
+                internal static readonly string[] Platforms = { "Web", "Mail" };
+            }
+
+            [SpreadsheetRecord]
+            public sealed partial class ChannelRow : ChannelBase {
+                public static IReadOnlyList<string> Labels { get; } = new List<string> { "Private", "Work" };
+
+                [SpreadsheetColumn(Choices = nameof(Labels))]
+                public string? Label { get; init; }
+
+                [SpreadsheetColumn(Choices = nameof(Platforms), StrictChoices = true)]
+                public string Platform { get; init; } = "";
+            }
+        }
+        """;
+
+    [Fact]
+    public void StringColumnWithChoices_IsAChoiceColumnFedByTheStaticMember() {
+        var result = Generate(ChoicesSource);
+
+        NoErrors(result);
+        var source = GetGenerated(result, "Sample_Channels_ChannelRow.SpreadsheetRowMapper.g.cs");
+        source.Should().Contain(
+            "(0, \"Label\", \"Label\", global::Elarion.Spreadsheets.SpreadsheetValueKind.Choice, true, null, 0d, global::System.Array.Empty<string>(), global::Sample.Channels.ChannelRow.Labels),");
+        source.Should().Contain(
+            "(1, \"Platform\", \"Platform\", global::Elarion.Spreadsheets.SpreadsheetValueKind.Choice, false, null, 0d, global::System.Array.Empty<string>(), global::Sample.Channels.ChannelBase.Platforms),");
+        source.Should().Contain("writer.WriteText(record.Label);");
+        source.Should().Contain("var __Label = reader.ReadText(0);");
+        source.Should().Contain("var __Platform = reader.ReadTextChoice(1);");
+        CompileErrors([ChoicesSource, .. result.GeneratedTrees.Select(tree => tree.ToString())]).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("public int Count { get; init; }", "Choices = nameof(Labels)", "applies only to a string property")]
+    [InlineData("public string? Text { get; init; }", "Choices = \"Missing\"", "no static field or property named 'Missing'")]
+    [InlineData("public string? Text { get; init; }", "Choices = nameof(InstanceLabels)", "must be static")]
+    [InlineData("public string? Text { get; init; }", "Choices = nameof(PrivateLabels)", "must be public or internal")]
+    [InlineData("public string? Text { get; init; }", "Choices = nameof(Numbers)", "is not IReadOnlyList<string>")]
+    [InlineData("public string? Text { get; init; }", "StrictChoices = true", "StrictChoices applies only to a column with Choices")]
+    public void ChoicesMisused_FailTheBuildWithElsheet009(string property, string arguments, string reason) {
+        var result = Generate(
+            $$"""
+              namespace Sample {
+                  [Elarion.Spreadsheets.SpreadsheetRecord]
+                  public sealed partial class Row {
+                      public static string[] Labels = { "A" };
+                      [Elarion.Spreadsheets.SpreadsheetIgnore] public string[] InstanceLabels => new[] { "A" };
+                      private static string[] PrivateLabels = { "A" };
+                      public static int[] Numbers = { 1 };
+
+                      [Elarion.Spreadsheets.SpreadsheetColumn({{arguments}})]
+                      {{property}}
+                  }
+              }
+              """);
+
+        result.Diagnostics.Should().ContainSingle(d => d.Id == "ELSHEET009")
+            .Which.GetMessage().Should().Contain(reason);
+    }
+
     [Fact]
     public void IrrelevantEditReusesTrackedOutputs() {
         GeneratorCacheAssert.ReusesOutputsAfterIrrelevantEdit(

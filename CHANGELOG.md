@@ -132,6 +132,19 @@ minor releases may include breaking changes.
   that read as the member but are never written or offered. Mapping problems are build errors
   `ELSHEET001`–`ELSHEET008`. See
   [Spreadsheets](https://elarion.wimmesberger.dev/docs/capabilities/spreadsheets).
+- **`Elarion.Spreadsheets`: worksheets shaped per call** (ADR-0108, amendment 2026-11-27). A worksheet whose columns
+  are known only at run time is a `SpreadsheetSheetDefinition` of `SpreadsheetColumnDefinition`s (`Text`, `Number`,
+  `Boolean`, `Date`, `DateTime`, `Time`, `Choice`), written by `SpreadsheetWorkbook.AddWorksheetAsync(sheet, rows)` from
+  rows of values with the same header, formats, widths and dropdowns as a record; each value is a cell of its own type,
+  so a total row's label can stand in a date column. `SpreadsheetWorksheetOptions` gains `IncludedColumns` and
+  `ExcludedColumns` (by property name, for columns that depend on a permission) and `FooterRows`;
+  `SpreadsheetWorkbook.ToFileAsync(fileName, write)` fills an `ElarionFile` with several worksheets.
+  `[SpreadsheetColumn(Choices = nameof(Labels))]` gives a `string` column a dropdown from a static
+  `IReadOnlyList<string>` of the record (`ELSHEET009` otherwise), and `StrictChoices` reads only those labels.
+  `SpreadsheetReader.ReadRows(ReadOnlyMemory<byte>)` and `Open(ReadOnlyMemory<byte>)` read a workbook already in
+  memory synchronously, and `SpreadsheetCell.NumberFormat` carries a number or date cell's format code. The docs now say
+  that a plain-rows read counts the header row against `MaxRows`, and that `too_many_rows` and `too_many_columns` keep
+  the rows read before them.
 - **`[ValidationRoot]`: validate a type outside a handler request** (ADR-0108). A marked type gets the same generated,
   constant-constructed validation metadata as a handler request, in the module whose namespace contains it, and is
   validated through `IRequestValidator.ValidateAsync`. A marked type with validation attributes outside every module is

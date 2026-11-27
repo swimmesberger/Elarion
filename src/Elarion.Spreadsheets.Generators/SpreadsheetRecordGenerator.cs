@@ -94,6 +94,14 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
         DiagnosticSeverity.Error,
         true);
 
+    private static readonly DiagnosticDescriptor InvalidChoices = new(
+        "ELSHEET009",
+        "Invalid choices of a text column",
+        "Property '{0}.{1}': {2}",
+        Category,
+        DiagnosticSeverity.Error,
+        true);
+
     // The members the generated ISpreadsheetRecord<T> half adds to the record.
     private static readonly string[] ReservedMemberNames = ["Columns", "SpreadsheetMapper"];
 
@@ -160,7 +168,11 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
         string ValueTypeFqn,
         string PropertyTypeFqn,
         // Whether the generated mapper can set the property in an object initializer.
-        bool CanSet);
+        bool CanSet,
+        // The static member a text column's choices come from, as a C# expression; null otherwise.
+        string? ChoicesExpression = null,
+        // Whether reading the text column accepts only its choices.
+        bool StrictChoices = false);
 
     private sealed record SpreadsheetRecordModel(
         string Namespace,
@@ -317,7 +329,7 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
                 continue;
             }
 
-            var column = MapColumn(property, typeFqn, diagnostics);
+            var column = MapColumn(type, property, typeFqn, diagnostics);
             if (column is null) {
                 Remove(property.Name);
                 continue;
@@ -346,7 +358,10 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
     }
 
     private static ColumnModel? MapColumn(
-        IPropertySymbol property, string typeFqn, ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+        INamedTypeSymbol recordType, IPropertySymbol property, string typeFqn,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) {
+        string? choicesMember = null;
+        var strictChoices = false;
         string? header = null;
         var order = -1;
         string? format = null;
@@ -386,6 +401,12 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
                                 break;
                             case "FalseLabel":
                                 falseLabel = argument.Value.Value as string;
+                                break;
+                            case "Choices":
+                                choicesMember = argument.Value.Value as string;
+                                break;
+                            case "StrictChoices" when argument.Value.Value is bool value:
+                                strictChoices = value;
                                 break;
                         }
 
@@ -435,6 +456,24 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
             }
         }
 
+        if (choicesMember is not null || strictChoices) {
+            string? expression = null;
+            var problem = choicesMember is null
+                ? "StrictChoices applies only to a column with Choices"
+                : effective.SpecialType != SpecialType.System_String
+                    ? "Choices applies only to a string property; an enum column offers its members, a boolean its labels"
+                    : ResolveChoices(recordType, choicesMember, out expression);
+            if (problem is not null) {
+                diagnostics.Add(DiagnosticInfo.Create(InvalidChoices, LocationInfo.From(property), typeFqn, property.Name, problem));
+                return null;
+            }
+
+            return new ColumnModel(
+                property.Name, header, "Choice", WriteKind.Text, isNullable, format, width,
+                aliases.ToEquatableArray(), null, EquatableArray<EnumMemberModel>.Empty, EquatableArray<string>.Empty,
+                null, null, order, valueTypeFqn, propertyTypeFqn, canSet, expression, strictChoices);
+        }
+
         if (effective.TypeKind == TypeKind.Enum && effective is INamedTypeSymbol enumType) {
             var members = EnumMembers(enumType);
             if (ReportAmbiguousChoices(property, typeFqn, enumType, members, diagnostics)) return null;
@@ -465,6 +504,60 @@ public sealed partial class SpreadsheetRecordGenerator : IIncrementalGenerator {
             property.Name, header, mapped.Value.Kind, mapped.Value.WriteKind, isNullable, format, width,
             aliases.ToEquatableArray(), null, EquatableArray<EnumMemberModel>.Empty, EquatableArray<string>.Empty,
             null, null, order, valueTypeFqn, propertyTypeFqn, canSet);
+    }
+
+    /// <summary>
+    /// Finds the static field or property <paramref name="name"/> of the record or a base type that a text column's
+    /// choices come from (FR-077), as a C# expression the generated mapper can read; returns why it cannot otherwise.
+    /// </summary>
+    private static string? ResolveChoices(INamedTypeSymbol recordType, string name, out string? expression) {
+        expression = null;
+        for (var current = recordType;
+             current is not null && current.SpecialType != SpecialType.System_Object;
+             current = current.BaseType)
+            foreach (var member in current.GetMembers(name)) {
+                ITypeSymbol type;
+                Accessibility accessibility;
+                switch (member) {
+                    case IFieldSymbol field:
+                        type = field.Type;
+                        accessibility = field.DeclaredAccessibility;
+                        break;
+                    case IPropertySymbol { IsIndexer: false, GetMethod: { } getter } property:
+                        type = property.Type;
+                        accessibility = getter.DeclaredAccessibility < property.DeclaredAccessibility
+                            ? getter.DeclaredAccessibility
+                            : property.DeclaredAccessibility;
+                        break;
+                    default:
+                        continue;
+                }
+
+                if (!member.IsStatic) return $"the choices member '{name}' must be static";
+
+                var accessible = accessibility == Accessibility.Public
+                                 || (accessibility is Accessibility.Internal or Accessibility.ProtectedOrInternal
+                                     && SymbolEqualityComparer.Default.Equals(member.ContainingAssembly, recordType.ContainingAssembly));
+                if (!accessible) return $"the choices member '{name}' must be public or internal, so the generated mapper can read it";
+
+                if (!IsReadOnlyListOfString(type))
+                    return $"the choices member '{name}' is of type '{type.ToDisplayString()}', which is not IReadOnlyList<string>";
+
+                expression = current.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + Identifier(member.Name);
+                return null;
+            }
+
+        return $"the record has no static field or property named '{name}' to take the choices from";
+    }
+
+    private static bool IsReadOnlyListOfString(ITypeSymbol type) {
+        return IsIt(type) || type.AllInterfaces.Any(IsIt);
+
+        static bool IsIt(ITypeSymbol candidate) {
+            return candidate is INamedTypeSymbol { IsGenericType: true } named
+                   && named.OriginalDefinition.ToDisplayString() == "System.Collections.Generic.IReadOnlyList<T>"
+                   && named.TypeArguments[0].SpecialType == SpecialType.System_String;
+        }
     }
 
     private static (string Kind, WriteKind WriteKind)? MapScalar(ITypeSymbol type) {
