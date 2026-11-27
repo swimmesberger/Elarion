@@ -1,0 +1,314 @@
+---
+title: Contacts
+description: Import uploaded .vcf files of any vCard version and from any common producer into contacts, with every contact kept and every problem located, and export contacts as vCard 3.0 or 4.0 files, NativeAOT-safe.
+icon: Contact
+---
+
+People export their address book from a phone, Apple Contacts, Google Contacts, Outlook, Thunderbird or Nextcloud
+and upload it; an application hands its contacts out as a file those programs import. `Elarion.Contacts` reads and
+writes those `.vcf` files. It reads vCard 2.1, 3.0 and 4.0, and files that mix them, with the quirks each producer
+has; it writes vCard 3.0 or 4.0. It has no reflection and no third-party library, so an application that reads and
+writes vCards still publishes with NativeAOT.
+
+| Piece | Role |
+| --- | --- |
+| `Contact` | The fixed model: names, organization, title, phone numbers, e-mail, postal and web addresses with their types and labels, birthday, anniversary, note, categories, photo, UID, and every property it does not map. |
+| `ContactProperty` | One property as the file states it: the lossless layer under a contact. |
+| `ContactReader` | Reads a `.vcf` stream into a `ContactReadResult`: every vCard as an entry, every problem as a coded, located error. |
+| `ContactWriter` | Writes contacts forward-only to a stream, an `ElarionFile` or an `ElarionStreamedFile`. |
+| `ContactOptions` | The read limits and the fallback encoding, bound from configuration. |
+
+Why it is shaped this way, and what was rejected, is in
+[ADR-0110](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0110-vcard-contacts.md). The package
+follows the [file-format design](https://github.com/swimmesberger/Elarion/blob/main/.github/instructions/framework.instructions.md#file-formats-import-and-export)
+`Elarion.Spreadsheets` set: read results, codes, `ToAppError` and file tiers work the same way.
+
+## Getting started
+
+<Steps>
+<Step>
+
+### Reference the package
+
+```bash
+dotnet add package Elarion.Contacts
+```
+
+It depends on `Elarion.Abstractions` and the `Microsoft.Extensions` abstractions only.
+
+</Step>
+<Step>
+
+### Register the reader
+
+```csharp
+builder.Services.AddElarionContacts(builder.Configuration.GetSection(ContactOptions.SectionName));
+```
+
+`AddElarionContacts` registers `ContactReader` as a singleton and binds `ContactOptions` with the configuration-binding
+source generator. The writer needs no registration.
+
+</Step>
+</Steps>
+
+## The contact model
+
+A vCard is a list of properties. The package keeps that list, and offers `Contact` as a view over it: the fields
+every address book has, in one shape for reading and writing. The application maps a contact to its own entity in
+plain code, where "which of three phone numbers is the mobile one" belongs. An application whose own entity is also
+called `Contact` aliases one of the two (`using VContact = Elarion.Contacts.Contact;`).
+
+| Member | From |
+| --- | --- |
+| `FormattedName`, `Name` (family, given, additional, prefix, suffix), `Nicknames` | `FN`, `N`, `NICKNAME` |
+| `Kind` (individual or organization) | `KIND:org`, Apple's `X-ABSHOWAS:COMPANY` |
+| `Organization`, `Department`, `Title`, `Role` | the first two components of `ORG`, `TITLE`, `ROLE` |
+| `Phones`, `Emails`, `Addresses`, `Urls` | `TEL`, `EMAIL`, `ADR` (seven components), `URL`, each with `Types`, `Preferred` and `Label` |
+| `Birthday`, `Anniversary` | `BDAY`; `ANNIVERSARY`, `X-ANNIVERSARY`, `X-MS-ANNIVERSARY` or an Apple `X-ABDATE` labelled as one, in that order |
+| `Note`, `Categories`, `Photo`, `Uid` | `NOTE`, `CATEGORIES`, the first `PHOTO`, `UID` |
+| `AdditionalProperties` | every other property, with its group, parameters and value, written back as it was read |
+| `DisplayName` | the formatted name, else the name, else the organization, else the first e-mail address, else the first phone number |
+
+`ContactTypes` is a set of flags (`Home`, `Work`, `Cell`, `Voice`, `Fax`, `Pager`, `Text`, `Video`, `Main`), read from
+`TYPE` parameters, bare vCard 2.1 parameters (`TEL;WORK;VOICE`) and Apple's `_$!<Mobile>!$_`-style labels. Any other
+label of an Apple `itemN.X-ABLabel` is the value's `Label`. `ContactDate` is a day of a month with an optional year:
+`--MMDD` and Apple's year 1604 read as a date without a year. Equality is structural, so a contact written and read
+back equals the one written.
+
+`contact.ToProperties(version)` turns a contact into its property list and `Contact.TryFromProperties` maps a list back,
+so an application can also prune or rewrite a card at the property level.
+
+## Import
+
+### Read an upload
+
+A handler takes the uploaded file and injects `ContactReader`. A small upload can arrive as an `ElarionFile`; a larger
+one arrives as an [`UploadedFile`](/docs/capabilities/blob-uploads#passing-an-upload-to-a-handler) with its limits
+declared, which the handler opens through `IUploadedFiles`.
+
+```csharp
+using VContact = Elarion.Contacts.Contact;
+
+[Handler("people.import")]
+public sealed class ImportPeople(ContactReader reader, IUploadedFiles uploads, CrmDbContext db)
+    : IHandler<ImportPeople.Command, Result<ImportPeople.Response>> {
+    public sealed record Command : ICommand {
+        [UploadLimits(MaxBytes = 32L * 1024 * 1024, FileExtensions = [".vcf", ".vcard"])]
+        public required UploadedFile Contacts { get; init; }
+    }
+
+    public sealed record Response(int Imported);
+
+    public async ValueTask<Result<Response>> HandleAsync(Command command, CancellationToken ct) {
+        var opened = await uploads.OpenAsync(command.Contacts, cancellationToken: ct);
+        if (!opened.IsSuccess) return opened.Error;
+        await using var file = opened.Value;
+
+        var result = await reader.ReadAsync(file.Content, cancellationToken: ct);
+        if (result.HasErrors) return result.ToAppError("contacts");
+
+        foreach (var contact in result.Contacts) db.People.Add(ToPerson(contact));
+        await db.SaveChangesAsync(ct);
+        return new Response(result.Entries.Count);
+    }
+
+    private static Person ToPerson(VContact contact) => new() {
+        Name = contact.DisplayName,
+        Email = contact.Emails.FirstOrDefault(static e => e.Preferred)?.Address ?? contact.Emails.FirstOrDefault()?.Address,
+        Mobile = contact.Phones.FirstOrDefault(static p => p.Types.HasFlag(ContactTypes.Cell))?.Number,
+        Birthday = contact.Birthday?.ToDateOnly(),
+    };
+}
+```
+
+The reader recognizes the vCards from the content, not the file name. It reads 2.1, 3.0 and 4.0, and files that mix
+them; names in any case; CRLF, LF and CR line ends; folded lines whatever their indentation; groups (`item1.TEL`);
+quoted, repeated and comma-joined parameters and RFC 6868 carets; quoted-printable values with soft line breaks; Base64
+values that end at a blank line; `#` comment lines; and Google's `\:` escapes. Line breaks in values read as `\n` on
+every platform, and invisible directional marks are removed from phone numbers.
+
+### Encodings
+
+A UTF-8 or UTF-16 byte-order mark, or a `BEGIN` in UTF-16 without one, decides the encoding of the whole file.
+Otherwise each value is decoded on its own: with its `CHARSET` parameter when the runtime knows it, else as UTF-8 when
+its bytes are valid UTF-8, else with `FallbackEncoding` (Windows-1252 by default). So an old Outlook export in
+Windows-1252 reads, and so does a file whose values mix encodings. The result says when the fallback was used
+(`UsedFallbackEncoding`) and which encoding a byte-order mark chose (`ByteOrderMarkEncoding`). A `CHARSET` the runtime
+does not know is a `contact.unknown_charset` error, and the value is decoded by the same ladder. The package holds its
+own code pages: it never registers an encoding provider process-wide.
+
+An application whose users export from Central European Windows sets the fallback once:
+
+```json
+{ "Contacts": { "ReadDefaults": { "FallbackEncoding": "windows-1250" } } }
+```
+
+### A preview: every contact, then decide
+
+A read never throws because of what a file contains; it throws only on cancellation and on misconfiguration. Every
+vCard becomes an entry, so a handler can show a preview before it saves anything.
+
+| Member | Meaning |
+| --- | --- |
+| `result.Entries` | Every vCard in file order, with or without a contact. |
+| `entry.Index`, `entry.LineNumber`, `entry.Version` | Its 1-based index, the line of its `BEGIN`, the version it states. |
+| `entry.Properties` | Every property in file order, with its group, parameters, value as written and line, mapped or not. |
+| `entry.Value`, `entry.HasValue` | The contact, and whether there is one. |
+| `entry.Errors` | Its errors. |
+| `result.FileErrors` | Problems with the file: unreadable, too large, too many contacts. |
+| `result.Errors`, `result.HasErrors`, `result.Contacts` | All errors in file order; whether there are any; the contacts of the entries that have one. |
+
+An error costs only what is broken. A birthday that reads as no date, invalid Base64, a photo over the limit, an unknown
+charset, a line over the limit or a line without a colon drops that property: the contact comes back without it, and
+the entry carries the error. An entry has no contact only when nothing usable is left (no formatted name, name,
+organization, e-mail address or phone number) or when the card has more lines than the limit. `HasValue` is therefore
+not `IsValid`: an entry with errors keeps its contact, and the application decides what an error means for it.
+
+The handler adds its own errors, under its own code prefix, located like the package's:
+
+```csharp
+foreach (var entry in result.Entries.Where(static entry => entry.HasValue)) {
+    var email = entry.Value.Emails.FirstOrDefault()?.Address;
+    if (email is not null && await db.People.AnyAsync(p => p.Email == email, ct))
+        entry.AddError("import.duplicate", "A person with this e-mail address is already stored.", "EMAIL");
+}
+```
+
+## Error codes and wording
+
+Every error has a stable code, the data its wording needs, and an English default `Message`. `ToString()` prefixes
+the location: `Contact 12 (Jane Doe), line 340: The value of BDAY is not a date.`
+
+| Code | When | Data |
+| --- | --- | --- |
+| `contact.unreadable` | The upload holds no `BEGIN:VCARD` line: a PDF, an empty file, a spreadsheet. | — |
+| `contact.too_large` | The upload is larger than `MaxBytes`. | `Limit` |
+| `contact.too_many_contacts` | More vCards than `MaxContacts`; the entries before it are kept. | `Limit` |
+| `contact.too_many_properties` | A card has more lines than `MaxPropertiesPerContact`; its entry has no contact. | `Limit` |
+| `contact.line_too_long` | An unfolded line is longer than `MaxLineBytes`; the property is dropped. | `Property`, `Limit` |
+| `contact.photo_too_large` | A photo is larger than `MaxPhotoBytes`; it is dropped. | `Property`, `Limit` |
+| `contact.invalid_value` | A value does not read as its kind (a date, a photo, an address). | `Property`, `Value`, `ExpectedKind` |
+| `contact.unknown_charset` | A `CHARSET` the runtime does not know. | `Property`, `Charset` |
+| `contact.malformed_line` | A line inside a card without a name or a colon; it is skipped. | `Value` |
+| `contact.empty` | A card with nothing usable; its entry has no contact. | — |
+| `contact.unexpected_end` | A card not closed by `END:VCARD`; it is read. | — |
+
+Every error about a contact also carries `ItemIndex`, `ItemLineNumber`, `LineNumber` and the contact's `DisplayName`,
+the location fields the calendar errors carry too. `result.ToAppError("contacts")` converts the errors to a validation
+`AppError` keyed by the upload member, with at most 100 messages and one that counts the rest. Pass a formatter to word
+them in the application's language from the code and the data:
+
+```csharp
+return result.ToAppError("contacts", static error => error.Code switch {
+    ContactErrorCodes.InvalidValue => $"Kontakt {error.ItemIndex}, Zeile {error.LineNumber}: {error.Property} ist ungültig.",
+    _ => error.ToString(),
+});
+```
+
+## Photos
+
+An inline photo (vCard 2.1 and 3.0 Base64, a 4.0 `data:` URI) reads as its bytes, with the media type the bytes show
+(JPEG, PNG, GIF, WebP or BMP) whatever the file declared. Bytes of no known image format are dropped with
+`contact.invalid_value`; a photo over `MaxPhotoBytes` is dropped with `contact.photo_too_large`, without decoding it.
+Only the first `PHOTO` is read; later ones stay additional properties.
+
+A photo given as an address reads as a `Uri`, only for `http` and `https`; any other scheme (`file:`, `ftp:`) is
+dropped with `contact.invalid_value`. **The package never requests an address.** An upload that made the server fetch
+an address it names would let the uploader send requests from inside the network (server-side request forgery), so the
+decision to fetch is the application's: check the host against an allow list, bound the size and the time, and fetch
+through a client that cannot reach internal addresses.
+
+## Export
+
+### A small file for any transport
+
+```csharp
+[Handler("people.export")]
+public sealed class ExportPeople(CrmDbContext db) : IHandler<ExportPeople.Query, Result<ElarionFile>> {
+    public sealed record Query : IQuery;
+
+    public async ValueTask<Result<ElarionFile>> HandleAsync(Query query, CancellationToken ct) {
+        var people = await db.People.AsNoTracking().ToListAsync(ct);
+        return await ContactWriter.ToFileAsync(people.Select(ToContact), "contacts.vcf", cancellationToken: ct);
+    }
+
+    private static Contact ToContact(Person person) => new() {
+        Name = new ContactName(person.LastName, person.FirstName, null, null, null),
+        Emails = person.Email is null ? [] : [new ContactEmail(person.Email) { Types = ContactTypes.Work }],
+        Phones = person.Mobile is null ? [] : [new ContactPhone(person.Mobile) { Types = ContactTypes.Cell, Preferred = true }],
+    };
+}
+```
+
+The file is vCard 3.0, which Apple Contacts, Google Contacts, Android and Outlook import, served as
+`text/vcard; charset=utf-8` (`ContactWriter.ContentType` is `text/vcard`). Pass
+`new ContactWriteOptions { Version = ContactFormatVersion.V4_0 }` for vCard 4.0. vCard 2.1 is never written.
+
+### A large file, streamed
+
+From an HTTP endpoint, return an `ElarionStreamedFile`: the contacts are written to the response body as they are
+produced, and the server holds one contact at a time.
+
+```csharp
+return ContactWriter.ToStreamedFile(
+    db.People.AsNoTracking().Select(p => new Contact { FormattedName = p.Name }).AsAsyncEnumerable(), "contacts.vcf");
+```
+
+`ContactWriter.ToStreamedFile(fileName, async (writer, ct) => …)` hands the writer to a delegate, and
+`ContactWriter.Create(stream)` writes to any stream; `writer.AddAsync(entry.Properties)` writes a card exactly as it
+was read.
+
+### One file per contact for Outlook classic
+
+Outlook classic imports only the first card of a file. For it, write each contact to a file of its own:
+
+```csharp
+var file = await ContactWriter.ToFileAsync([contact], $"{contact.DisplayName}.vcf", cancellationToken: ct);
+```
+
+### What a written file looks like
+
+UTF-8 without a byte-order mark, CRLF line ends, lines folded at 75 octets without splitting a character. Types are
+`TYPE=` parameters; a preferred value is `TYPE=pref` in 3.0 and `PREF=1` in 4.0; a custom label is an
+`itemN.X-ABLabel` property of the value's group. A photo is `ENCODING=b` with its type in 3.0 and a `data:` URI in 4.0.
+A date without a year is `X-APPLE-OMIT-YEAR=1604` with year 1604 in 3.0 and `--MMDD` in 4.0; an organization is
+`X-ABSHOWAS:COMPANY` in 3.0 and `KIND:org` in 4.0. Every card has an `FN`, derived from the display name when the
+contact has no formatted name, and in 3.0 an `N`. Additional properties are written as they were read. The same
+contacts give byte-identical files.
+
+A contact the writer cannot represent (an additional property whose name, group or parameter name is not a valid vCard
+name, or whose value holds a line break) fails with a `ContactWriteException` that names the contact (`ItemIndex`) and
+the property. The writer checks a contact before it writes any of it, so the writer takes further contacts.
+
+## Limits and options
+
+On top of the upload limits the handler declares, the read options bound what a file costs. A per-contact limit costs
+at most that contact or property, and the read continues; a file limit stops the read with one error and keeps the
+contacts before it. Reading is one pass, linear in the input, and nothing recurses.
+
+| `ContactReadOptions` | Default | Exceeded |
+| --- | --- | --- |
+| `MaxBytes` | 32 MiB | `contact.too_large`; the reader holds no more than the limit |
+| `MaxContacts` | 10,000 | `contact.too_many_contacts`; the read stops |
+| `MaxPropertiesPerContact` | 1,000 | `contact.too_many_properties`; the card has no contact |
+| `MaxLineBytes` | 1 MiB | `contact.line_too_long`; the property is dropped |
+| `MaxPhotoBytes` | 1 MiB | `contact.photo_too_large`; the photo is dropped |
+| `FallbackEncoding` | `windows-1252` | an unknown name throws `InvalidOperationException` |
+
+A read that passes its own options uses those instead of the defaults; derive them with `with`:
+
+```csharp
+var options = contactOptions.Value.ReadDefaults with { MaxContacts = 50_000 };   // IOptions<ContactOptions>
+```
+
+The keys are listed in the [configuration reference](/docs/reference/configuration#contacts).
+
+## Out of scope
+
+- Writing vCard 2.1; jCard (RFC 7095) and xCard.
+- Group cards (`KIND:group`, `MEMBER`), and mapping `RELATED`, `IMPP`, `GEO`, `TZ`, `SOUND`, `LOGO`, `KEY`, `LABEL`,
+  `AGENT`, `X-SOCIALPROFILE` or phonetic names into the model; they stay additional properties. An `AGENT` value is
+  never parsed as a vCard.
+- Fetching photo addresses, and resizing or re-encoding photos.
+- Detecting duplicates and merging contacts; that is the application's, through `AddError`.
+- CardDAV.

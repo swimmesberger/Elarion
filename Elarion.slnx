@@ -23,6 +23,7 @@
       Path="src/Elarion.Authorization.EntityFrameworkCore.Generators/Elarion.Authorization.EntityFrameworkCore.Generators.csproj"/>
     <Project Path="src/Elarion.Coordination.PostgreSql/Elarion.Coordination.PostgreSql.csproj"/>
     <Project Path="src/Elarion.Coordination.PostgreSql.Generators/Elarion.Coordination.PostgreSql.Generators.csproj"/>
+    <Project Path="src/Elarion.Contacts/Elarion.Contacts.csproj"/>
     <Project Path="src/Elarion.Blobs/Elarion.Blobs.csproj"/>
     <Project Path="src/Elarion.Calendars/Elarion.Calendars.csproj"/>
     <Project Path="src/Elarion.Blobs.AspNetCore/Elarion.Blobs.AspNetCore.csproj"/>

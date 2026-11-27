@@ -136,6 +136,7 @@ public package, grouped by capability, with the reason to add each one.
 | PDF documents               | `Elarion.Typst`                                    | Typst templates rendered by a pinned CLI the build bundles into each executable                                    |
 | Spreadsheets                | `Elarion.Spreadsheets`                             | `.xlsx` exports and templates, and imports with every row and located problem, from generated record mappings      |
 | Calendars                   | `Elarion.Calendars`                                | `.ics` imports with every item and located problem, recurrence expansion, time zones, and deterministic feeds      |
+| Contacts                    | `Elarion.Contacts`                                 | `.vcf` imports of any vCard version with every contact and located error, and vCard 3.0 or 4.0 exports             |
 | Runtime settings            | `Elarion.Settings`                                 | EF persistence, configuration reload, and PostgreSQL cross-node notifications                                       |
 | Frontend tooling            | `@swimmesberger/elarion-jsonrpc-client-generator`  | Typed frontend contributions and framework bindings; `@swimmesberger/elarion-pwa` to install as an app, `@swimmesberger/elarion-webpush` for browser push |
 

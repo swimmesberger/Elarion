@@ -3,6 +3,7 @@
 ## 2026-11-27
 
 * **Update**: [specs 0004 plan](../specs/0004-icalendar-files.plan.md) — Elarion.Calendars implemented; time zones convert to TimeZoneInfo with one rule per year, the shape its rule engine evaluates without seams
+* **Update**: [ADR-0110](decisions/0110-vcard-contacts.md) is implemented: Elarion.Contacts ships the reader, the writer and the contact model as [spec 0005](../specs/0005-vcard-contacts.md) describes, with the published [contacts](capabilities/contacts.mdx) page; the shared content-line layer now folds before a non-blank character, consumes the soft breaks of an over-long quoted-printable line, and sniffs BOM-less UTF-16 on code-unit boundaries.
 
 ## 2026-11-26
 

@@ -19,6 +19,15 @@ minor releases may include breaking changes.
   stream, an `ElarionFile` or a streamed file, byte-identical for the same input, with a `VTIMEZONE` per zone used. No
   reflection and no third-party library, so applications keep publishing with NativeAOT. See
   [Calendars](https://elarion.wimmesberger.dev/docs/capabilities/calendars).
+- **`Elarion.Contacts`: vCard contacts** (ADR-0110). `ContactReader` (`AddElarionContacts`) reads uploaded `.vcf` files
+  of vCard 2.1, 3.0 and 4.0, and files that mix them, as Android, Apple, Google, Outlook, Thunderbird and Nextcloud
+  write them, into a fixed `Contact` model over a lossless property list: every vCard is an entry with its contact and
+  every problem a located error under a stable `contact.*` code, with `AddError` for the application's own and
+  `ToAppError`. Text is decoded by a byte-order mark, else per value by `CHARSET`, UTF-8 or `FallbackEncoding`, without
+  registering an encoding provider; photos are decoded inline and never fetched; size, contact, property, line and photo
+  limits bound hostile uploads. `ContactWriter` writes vCard 3.0 or 4.0 deterministically, forward-only to a stream, an
+  `ElarionFile` or a streamed file. No reflection and no third-party library, so the application still publishes with
+  NativeAOT. See [Contacts](https://elarion.wimmesberger.dev/docs/capabilities/contacts).
 - **`Elarion.Spreadsheets`: spreadsheet records** (ADR-0108). A `partial` class marked `[SpreadsheetRecord]` maps to
   the rows of a worksheet through a bundled generator, with no reflection, so the application still publishes with
   NativeAOT. `SpreadsheetWorkbook` writes records as an `.xlsx` workbook, forward-only to a stream, an `ElarionFile` or
