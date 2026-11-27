@@ -52,6 +52,6 @@ internal sealed class SchedulerClaimPurgeService<TDbContext>(
             .ExecuteDeleteAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (deleted > 0) logger.LogInformation("Purged {Count} scheduler claim row(s) past retention.", deleted);
+        if (deleted > 0) logger.LogDebug("Purged {Count} scheduler claim row(s) past retention.", deleted);
     }
 }

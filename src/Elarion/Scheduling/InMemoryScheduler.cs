@@ -837,6 +837,10 @@ public sealed class InMemoryScheduler(
 
             if (!TryBeginRun(item, timeProvider.GetUtcNow(), runCancellation, out var skipReason)) {
                 // Note 37: Overlap and job-local concurrency decisions are recorded as skipped outcomes, not silent drops.
+                // The job overran its schedule: the previous run(s) still hold the slot this occurrence needed.
+                logger.LogWarning(
+                    "Scheduled job {JobName} ({RunId}) skipped an occurrence ({SkipReason}): an earlier run is still active.",
+                    descriptor.Name, item.RunId, skipReason);
                 RecordSkipped(item, skipReason);
                 RecordOutcome(
                     item,
@@ -1159,7 +1163,9 @@ public sealed class InMemoryScheduler(
                 item.IsRuntimeScheduled,
                 runCancellation);
 
-            logger.LogInformation("Starting scheduled job {JobName} ({RunId}).", descriptor.Name, item.RunId);
+            // A routine run is not news: start and successful completion log at Debug, so a job on a short
+            // interval does not flood an application's console; cancelled, failed and overrunning runs warn.
+            logger.LogDebug("Starting scheduled job {JobName} ({RunId}).", descriptor.Name, item.RunId);
             var invocationPolicy = item.ResilienceMode == ScheduledJobResilienceMode.DeferredRetry
                 ? null
                 : item.ResiliencePolicy ?? descriptor.ResiliencePolicy;
@@ -1198,7 +1204,8 @@ public sealed class InMemoryScheduler(
                     item.RunId);
             }
             else {
-                logger.LogInformation("Scheduled job {JobName} ({RunId}) completed.", descriptor.Name, item.RunId);
+                logger.LogDebug("Scheduled job {JobName} ({RunId}) completed in {ElapsedMilliseconds} ms.",
+                    descriptor.Name, item.RunId, (long)timeProvider.GetElapsedTime(startedTimestamp).TotalMilliseconds);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) {

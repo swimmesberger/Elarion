@@ -142,6 +142,12 @@ minor releases may include breaking changes.
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
   type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
   member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
+- **The scheduler logs a routine run at `Debug`.** A run's start and successful completion moved from `Information` to
+  `Debug`, and the completion line now carries the run's duration, so a job on a short interval no longer floods a
+  console. The scheduler's lifecycle stays at `Information`, cancelled runs at `Warning`, failed runs at `Error`; an
+  occurrence skipped because an earlier run still holds its slot (overlap, coalesced, per-job concurrency) now logs a
+  `Warning`, and the database backend's claims purge logs at `Debug`. See
+  [Scheduling](https://elarion.wimmesberger.dev/docs/capabilities/scheduling#operational-characteristics).
 
 ### Fixed
 - **A NativeAOT application with a body-bound `[HttpEndpoint]` published with trimming warnings.** The generated
