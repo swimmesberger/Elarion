@@ -8,6 +8,8 @@ minor releases may include breaking changes.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-27
+
 ### Added
 - **`Elarion.Calendars`: iCalendar files** (ADR-0109). `CalendarReader` (`AddElarionCalendars`) reads uploaded `.ics`
   files leniently into events and to-dos, each with its typed value, its lossless component and every problem located
@@ -3208,7 +3210,8 @@ Initial preview line.
 - Optional Entity Framework Core source generation for `DbSet`s and entity configuration.
 - OpenTelemetry-compatible tracing and metrics for JSON-RPC, scheduling, caching, and resilience.
 
-[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.4.6...HEAD
+[Unreleased]: https://github.com/swimmesberger/Elarion/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/swimmesberger/Elarion/releases/tag/v0.5.0
 [0.4.6]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.6
 [0.4.5]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.5
 [0.4.4]: https://github.com/swimmesberger/Elarion/releases/tag/v0.4.4
