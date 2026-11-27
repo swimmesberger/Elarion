@@ -279,6 +279,11 @@ minor releases may include breaking changes.
   `TypstCompiler.Create(options, loggerFactory)` builds the compiler without a service collection, for tests that need
   their own executable, package directory or working directory. See
   [PDF documents](https://elarion.wimmesberger.dev/docs/capabilities/pdf-documents#several-models).
+- **`ELMOD009` and `ELMOD010`: `DependsOn` cycles and unknown names are reported.** Modules that depend on each other
+  (two modules injecting each other's contracts name each other for `ELMOD008`) are reported as `ELMOD009` (Info) with
+  the order the bootstrapper chose; a `DependsOn` name no module carries is `ELMOD010` (Warning). A mutual dependency
+  is allowed when each module needs the other. See
+  [Modules](https://elarion.wimmesberger.dev/docs/concepts/modules#modules-that-depend-on-each-other).
 
 ### Changed
 - **BREAKING: `withDecisions` throws `RpcDecisionCancelledError` when `ask` cancels.** It threw the decision error, so a
@@ -416,6 +421,18 @@ minor releases may include breaking changes.
   public `{Filter}ElarionRegistration` for a non-public filter, and the bootstrapper registers the filter through it;
   public filters are registered as before. See
   [Resource authorization](https://elarion.wimmesberger.dev/docs/concepts/resource-authorization).
+- **A `[ClientTag("timeout", …)]` the generated client could not read was ignored without a sign.** The client fell back
+  to its default timeout for the method. The build now refuses such a value as `ELRPC013` (Error): a positive number
+  with `ms`, `s` or `m` (a bare number is seconds), at most 2147483647 ms. The generated client also ignores a zero or
+  overlong value instead of aborting the request at once. A project that carries an unreadable tag no longer builds;
+  correct the value. See
+  [TypeScript client](https://elarion.wimmesberger.dev/docs/capabilities/transports/typescript-client#timeouts-error-mapping-and-retries).
+- **Modules in a `DependsOn` cycle, and the modules after them, were initialized in name order.** The bootstrapper
+  appended every module it could not sort by name, so a module depending on a cycle could come before it, and a typo
+  in `DependsOn` pushed a module and its dependents to the end. A cycle is now placed as one unit, after what it
+  depends on and before what depends on it, its members Core first and then by name; an unknown name orders nothing.
+  The order of an application without cycles or unknown names is unchanged. See
+  [Modules](https://elarion.wimmesberger.dev/docs/concepts/modules#ordering-with-dependson).
 
 ## [0.4.6] - 2026-11-24
 

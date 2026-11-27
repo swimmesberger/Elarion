@@ -66,7 +66,9 @@ public sealed class AppModuleAttribute(string name) : Attribute {
 
     /// <summary>
     /// Optional comma-separated list of module names this module depends on.
-    /// The generator topologically sorts modules so dependencies are initialized first.
+    /// The generator topologically sorts modules so dependencies are initialized first; ties go to Core modules, then
+    /// to module names in ordinal order. Modules that depend on each other are placed together and ordered by that
+    /// tie-break (reported as ELMOD009); a name no module carries is ignored (ELMOD010).
     /// </summary>
     public string? DependsOn { get; init; }
 }

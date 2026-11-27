@@ -84,3 +84,24 @@ Project the declarations outward from the one source; never ask an application t
   generator and couple the HTTP transport to ASP.NET authorization middleware being present.
 - **`HandlerMetadata` on `AuthorizationContext`.** Stream handlers carry `StreamHandlerMetadata`, a different type;
   the handler type is what a rule needs and is available on both paths.
+
+## Amendment (2026-11-27): the `timeout` tag is checked at build time
+
+The generated TypeScript client reads `[ClientTag("timeout", …)]` as a method's default timeout and silently falls
+back to the client's own default for a value it cannot parse, so a typo dropped a slow method's timeout without a
+sign.
+
+**Decision.** The `timeout` key is the one tag key whose value Elarion interprets, so its value is checked where it is
+declared: `ClientTagAnalyzer` reports `ELRPC013` (Error) for a value the client would ignore. The format is the
+client's: digits with an optional fraction, an optional unit `ms`, `s` or `m` in any case (a bare number is seconds),
+spaces or tabs around; the result must be above zero and at most 2147483647 ms, since a JavaScript timer fires at once
+for a longer delay. The client now also ignores a zero or overlong value instead of aborting at once, so the two
+agree. Both are tested against one list of cases, `tests/timeout-tag-cases.json` of the client generator package,
+which the .NET test project links.
+
+**Why an error.** The value is wrong for every client, the fallback is silent, and the framework's rule is a clear
+build error over a delayed run-time fallback. Other keys stay free text.
+
+**Rejected.** *Checking in the TypeScript generator*: it runs after the build, in the frontend's toolchain, and would
+fail far from the attribute. *A stricter format* (integer and unit only): it would refuse values the client has always
+read.

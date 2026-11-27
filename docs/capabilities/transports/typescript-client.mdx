@@ -509,8 +509,10 @@ const queryClient = new QueryClient({
 - **Timeouts.** A request still unanswered after its timeout is aborted and throws `RpcTimeoutError` (`timeoutMs`,
   `methods`). The timeout of a method is, first to last: the call's `timeoutMs` option (`false` sends it without
   one), `timeoutFor(method)`, the handler's `[ClientTag("timeout", "180s")]` (`rpcMethodInfo[m].tags.timeout`, in
-  `ms`, `s` or `m`; a bare number is seconds), and the client's `timeoutMs`. A batch waits for the longest of its
-  methods. The caller's own `AbortSignal` still cancels, and its abort is never reported as a timeout.
+  `ms`, `s` or `m`; a bare number is seconds), and the client's `timeoutMs`. A tag value must be above zero and at most
+  2147483647 ms; the build refuses any other value with `ELRPC013`, so a typo cannot silently fall back to the
+  client's default. A batch waits for the longest of its methods. The caller's own `AbortSignal` still cancels, and
+  its abort is never reported as a timeout.
 - **Error mapping.** `mapError(error, context)` receives every error a call or batch throws — `RpcError`,
   `RpcTransportError`, `RpcTimeoutError`, a params or protocol error, a network failure — and what it returns is
   thrown instead (`undefined` keeps the original). Keep the original as `cause`: `isRetryable`,

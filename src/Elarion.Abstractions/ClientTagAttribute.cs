@@ -8,7 +8,9 @@ namespace Elarion.Abstractions;
 /// <remarks>
 /// Tags are client hints, never enforcement: the handler pipeline does not read them. A key has one value per
 /// operation; a tag on a derived handler overrides the same key on a base handler, and a key repeated on one class
-/// keeps its last declaration. Key and value are free text agreed between the server and its clients.
+/// keeps its last declaration. Key and value are free text agreed between the server and its clients, except the
+/// <c>timeout</c> key the generated TypeScript client reads: its value is a positive number with <c>ms</c>, <c>s</c> or
+/// <c>m</c> (a bare number is seconds), and the build refuses any other value (ELRPC013).
 /// </remarks>
 /// <example>
 /// <code>
