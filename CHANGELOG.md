@@ -137,6 +137,11 @@ minor releases may include breaking changes.
   validated through `IRequestValidator.ValidateAsync`. A marked type with validation attributes outside every module is
   the build error `ELVAL004`; `ELVAL002` now also covers such a type in a compilation without `Elarion.Validation`. See
   [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation#validating-outside-a-handler-request).
+- **`ElarionStreamedFile.Length`: a streamed file states its size.** A forward-only stream whose size is known (a
+  decoded message part) or a writer that produces a known count sets `with { Length = … }`; the response sends it as
+  `Content-Length`, so a browser shows the download's progress, and counts the bytes written: a content that writes
+  more or fewer aborts the connection like any other failure after the first byte. See
+  [HTTP endpoints](https://elarion.wimmesberger.dev/docs/capabilities/transports/http-endpoints#streamed-files-http-only-endpoints).
 
 ### Changed
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
