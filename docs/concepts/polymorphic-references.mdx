@@ -82,7 +82,35 @@ public sealed class NoteConfiguration : IEntityTypeConfiguration<Note> {
 }
 ```
 
-EF Core indexes each foreign key by convention, so "the notes of contact X" is an index lookup on its own column. The
+EF Core indexes each foreign key by convention, so "the notes of contact X" is an index lookup on its own column.
+Most of each column is null, so a partial index keeps those indexes small:
+`note.HasIndex(n => n.ContactId).HasFilter("contact_id IS NOT NULL")` configures the convention's index rather than
+adding a second one.
+
+With more than a handful of kinds, keep the list in one place and derive the foreign keys, the indexes and the CHECK
+from it, so a new kind is one line:
+
+```csharp
+private static readonly (Type Owner, string Property, string Column)[] Owners = [
+    (typeof(Property), nameof(Note.PropertyId), "property_id"),
+    (typeof(Contact), nameof(Note.ContactId), "contact_id"),
+    (typeof(Invoice), nameof(Note.InvoiceId), "invoice_id"),
+];
+
+public void Configure(EntityTypeBuilder<Note> note) {
+    foreach (var (owner, property, column) in Owners) {
+        note.HasOne(owner).WithMany().HasForeignKey(property).OnDelete(DeleteBehavior.Cascade);
+        note.HasIndex(property).HasFilter($"{column} IS NOT NULL");
+    }
+    note.ToTable(t => t.HasCheckConstraint("ck_notes_one_owner",
+        $"num_nonnulls({string.Join(", ", Owners.Select(o => o.Column))}) = 1"));
+}
+```
+
+`num_nonnulls` is PostgreSQL's; another provider spells the CHECK as a sum of
+`CASE WHEN column IS NULL THEN 0 ELSE 1 END`. Querying needs no helper — "the notes of contact X" is
+`db.Notes.Where(n => n.ContactId == id)` — and a `(kind, id)` value the API exposes maps to one of those predicates
+in the application, which owns that vocabulary. The
 nullable pointer works directly with
 [`WhereAuthorizedVia`](/docs/concepts/resource-authorization#data-that-belongs-to-a-resource):
 `db.Notes.WhereAuthorizedVia(n => n.ContactId, db.Contacts, c => (Guid?)c.Id, contactAccess, user)`.
