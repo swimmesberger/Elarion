@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Elarion.Typst;
 
@@ -67,7 +68,10 @@ public static class TypstServiceCollectionExtensions {
 
         services.AddSingleton(options);
         services.TryAddSingleton(static provider => new TypstToolchain(provider.GetRequiredService<TypstOptions>()));
-        services.TryAddSingleton<ITypstCompiler, TypstCompiler>();
+        services.TryAddSingleton<ITypstCompiler>(static provider => new TypstCompiler(
+            provider.GetRequiredService<TypstOptions>(),
+            provider.GetRequiredService<TypstToolchain>(),
+            provider.GetRequiredService<ILogger<TypstCompiler>>()));
         // Registered even when the check is None: the decision is read when the host starts, after every configure call.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, TypstStartupCheckService>());
         return services;
