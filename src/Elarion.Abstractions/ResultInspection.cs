@@ -48,4 +48,23 @@ public static class ResultInspection {
         error = null;
         return false;
     }
+
+    /// <summary>
+    /// Creates a failed <typeparamref name="T"/> carrying <paramref name="error"/> when <typeparamref name="T"/> is one of
+    /// the result types (<see cref="Result"/>, <see cref="Result{T}"/>); <see langword="false"/> for any other type. For
+    /// generic code whose response type is not constrained to <see cref="IResultFailureFactory{TSelf}"/>, such as a
+    /// decorator that attaches to every command.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static bool TryCreateFailure<T>(AppError error, [MaybeNullWhen(false)] out T failure) {
+        ArgumentNullException.ThrowIfNull(error);
+        // The result types are structs, so default(T) is an instance to ask; a reference type answers null and fails.
+        if (default(T) is IResultFailureSource<T> source) {
+            failure = source.CreateFailure(error);
+            return true;
+        }
+
+        failure = default;
+        return false;
+    }
 }

@@ -209,7 +209,7 @@ public sealed class PreviewDecoratorTests {
         // preview decorator, its scope nests and commits, and the preview still rolls the whole thing back.
         var unitOfWork = new RecordingUnitOfWork();
         var transaction = new TransactionDecorator<PreviewImportCommand, Result<PreviewImportOutcome>>(
-            new DecidingHandler(AsPreviewed), unitOfWork);
+            new DecidingHandler(AsPreviewed), unitOfWork, []);
 
         var result = await Decorate(transaction, unitOfWork).HandleAsync(new PreviewImportCommand("s1", true), Ct);
 

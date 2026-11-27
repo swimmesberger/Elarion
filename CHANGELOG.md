@@ -137,11 +137,25 @@ minor releases may include breaking changes.
   validated through `IRequestValidator.ValidateAsync`. A marked type with validation attributes outside every module is
   the build error `ELVAL004`; `ELVAL002` now also covers such a type in a compilation without `Elarion.Validation`. See
   [Validation](https://elarion.wimmesberger.dev/docs/concepts/validation#validating-outside-a-handler-request).
+- **Constraint violations as results: `IUnitOfWorkFailureTranslator`** (ADR-0003 amendment). `TransactionDecorator`
+  offers an exception that ends its unit of work — from the handler, or from the commit, where PostgreSQL checks a
+  `DEFERRABLE INITIALLY DEFERRED` constraint outside every `SaveChangesInterceptor` — to the registered translators;
+  the first `AppError` one returns becomes the command's failed `Result` after the rollback, instead of an unexpected
+  error. Without a translator nothing changes. `ResultInspection.TryCreateFailure<T>` builds a failed `Result`/`Result<T>`
+  from generic code with an unconstrained response type. See
+  [Persistence & transactions](https://elarion.wimmesberger.dev/docs/concepts/persistence-and-transactions#constraint-violations-as-results).
+- **`[NoTransaction]`: a command without the framework's transaction.** `TransactionDecorator` stays off a handler
+  marked with it, so a command whose work is outside the database (a test mail, a slow external call) no longer holds
+  a pooled connection and a transaction for the whole call; the request stays an `ICommand`. See
+  [Persistence & transactions](https://elarion.wimmesberger.dev/docs/concepts/persistence-and-transactions#commands-without-a-transaction).
 
 ### Changed
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
   type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
   member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
+- **BREAKING: `TransactionDecorator` takes the failure translators.** Its constructor gained an
+  `IEnumerable<IUnitOfWorkFailureTranslator>` parameter. The generated pipeline supplies it; code that constructs the
+  decorator by hand (a test) passes `[]`.
 
 ### Fixed
 - **A NativeAOT application with a body-bound `[HttpEndpoint]` published with trimming warnings.** The generated

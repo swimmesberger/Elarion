@@ -244,7 +244,7 @@ public sealed class EfCoreAuditTrailIntegrationTests(PostgreSqlAuditTrailFixture
             var handler = new DelegateHandler(db, auditScope, body);
             var commit = new AuditCommitDecorator<DemoCommand, Result<string>>(handler, auditScope, trail);
             IHandler<DemoCommand, Result<string>> transaction =
-                new TransactionDecorator<DemoCommand, Result<string>>(commit, unitOfWork);
+                new TransactionDecorator<DemoCommand, Result<string>>(commit, unitOfWork, []);
             if (wrapTransaction is not null)
                 // The position between the outer audit decorator and the transaction — where cache
                 // invalidation and other post-commit decorators live in the generated chain.

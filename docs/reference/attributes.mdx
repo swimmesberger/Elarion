@@ -505,6 +505,15 @@ See [Idempotency](/docs/concepts/idempotency).
 
 See [Handling duplicates](/docs/capabilities/events/consuming-events#handling-duplicates).
 
+## Transactions
+
+### `[NoTransaction]`
+
+- **Package:** `Elarion.Abstractions` (Pipeline) · **Applies to:** class (single, not inherited)
+- **Triggers:** keeps `TransactionDecorator` off a command handler, so the handler runs without a framework-owned unit of work and nothing holds a connection or a transaction for the whole call — for a command whose work is mostly outside the database (a test mail, a slow external call). The request stays an `ICommand`. Each `SaveChanges` commits on its own; the handler opens a transaction itself around writes that must commit together. No effect on `[Idempotent]` commands or inboxed integration-event consumers, which own their transaction.
+
+See [Persistence & transactions](/docs/concepts/persistence-and-transactions#commands-without-a-transaction).
+
 ## Auditing
 
 ### `[Auditable]`

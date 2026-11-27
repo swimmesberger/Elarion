@@ -14,7 +14,7 @@ public sealed class TransactionDecoratorTests {
     public async Task SuccessfulResult_Commits() {
         var uow = new RecordingUnitOfWork();
         var decorator = new TransactionDecorator<TestCommand, Result<string>>(
-            new StubHandler(Result<string>.Success("ok")), uow);
+            new StubHandler(Result<string>.Success("ok")), uow, []);
 
         var result = await decorator.HandleAsync(new TestCommand(), Ct);
 
@@ -27,7 +27,7 @@ public sealed class TransactionDecoratorTests {
     public async Task FailedResult_RollsBack() {
         var uow = new RecordingUnitOfWork();
         var decorator = new TransactionDecorator<TestCommand, Result<string>>(
-            new StubHandler(Result<string>.Failure(AppError.BusinessRule("no"))), uow);
+            new StubHandler(Result<string>.Failure(AppError.BusinessRule("no"))), uow, []);
 
         await decorator.HandleAsync(new TestCommand(), Ct);
 
@@ -40,7 +40,7 @@ public sealed class TransactionDecoratorTests {
         var uow = new RecordingUnitOfWork();
         using var cts = new CancellationTokenSource();
         var decorator = new TransactionDecorator<TestCommand, Result<string>>(
-            new CancelAfterSuccessHandler(cts, Result<string>.Success("ok")), uow);
+            new CancelAfterSuccessHandler(cts, Result<string>.Success("ok")), uow, []);
 
         // A cancellation arriving after the handler succeeds must not roll back a completed command — the commit
         // runs uncancellably (M8). The recording scope throws if a cancelled token reaches commit.
@@ -74,6 +74,96 @@ public sealed class TransactionDecoratorTests {
     [Fact]
     public void AppliesTo_DomainConsumer_False() {
         AppliesTo(typeof(DomainConsumer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void AppliesTo_Command_False_WhenItOptsOutWithNoTransaction() {
+        AppliesTo(typeof(NoTransactionCommandHandler)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CommitFailure_TheFirstTranslatorThatAnswers_BecomesTheFailedResult() {
+        var uow = new RecordingUnitOfWork { CommitFailure = new InvalidOperationException("23P01") };
+        var decorator = new TransactionDecorator<TestCommand, Result<string>>(
+            new StubHandler(Result<string>.Success("ok")), uow,
+            [new Translator(_ => null), new Translator(_ => AppError.Conflict("overlap", "periods.overlap")),
+                new Translator(_ => AppError.Internal("never asked"))]);
+
+        var result = await decorator.HandleAsync(new TestCommand(), Ct);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Code.Should().Be("periods.overlap");
+        uow.Scope!.Disposed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task HandlerException_IsTranslatedToo_AndTheScopeIsNotCommitted() {
+        var uow = new RecordingUnitOfWork();
+        var decorator = new TransactionDecorator<TestCommand, Result<string>>(
+            new ThrowingHandler(new InvalidOperationException("unique")), uow,
+            [new Translator(_ => AppError.Conflict("taken"))]);
+
+        var result = await decorator.HandleAsync(new TestCommand(), Ct);
+
+        result.Error.Kind.Should().Be(ErrorKind.Conflict);
+        uow.Scope!.Commits.Should().Be(0);
+        uow.Scope.Disposed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CommitFailure_NoTranslatorAnswers_Propagates() {
+        var uow = new RecordingUnitOfWork { CommitFailure = new InvalidOperationException("boom") };
+        var decorator = new TransactionDecorator<TestCommand, Result<string>>(
+            new StubHandler(Result<string>.Success("ok")), uow, [new Translator(_ => null)]);
+
+        var act = async () => await decorator.HandleAsync(new TestCommand(), Ct);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("boom");
+    }
+
+    [Fact]
+    public async Task Failure_ForAResponseThatIsNotAResult_Propagates() {
+        var uow = new RecordingUnitOfWork();
+        var decorator = new TransactionDecorator<PlainCommand, string>(
+            new PlainHandler(), uow, [new Translator(_ => AppError.Conflict("taken"))]);
+
+        var act = async () => await decorator.HandleAsync(new PlainCommand(), Ct);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Cancellation_IsNeverTranslated() {
+        var uow = new RecordingUnitOfWork();
+        var decorator = new TransactionDecorator<TestCommand, Result<string>>(
+            new ThrowingHandler(new OperationCanceledException()), uow,
+            [new Translator(_ => AppError.Conflict("taken"))]);
+
+        var act = async () => await decorator.HandleAsync(new TestCommand(), Ct);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    private sealed class Translator(Func<Exception, AppError?> translate) : IUnitOfWorkFailureTranslator {
+        public AppError? Translate(Exception exception) => translate(exception);
+    }
+
+    private sealed record PlainCommand : ICommand;
+
+    private sealed class PlainHandler : IHandler<PlainCommand, string> {
+        public ValueTask<string> HandleAsync(PlainCommand request, CancellationToken ct) =>
+            throw new InvalidOperationException("boom");
+    }
+
+    private sealed class ThrowingHandler(Exception exception) : IHandler<TestCommand, Result<string>> {
+        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) => throw exception;
+    }
+
+    [NoTransaction]
+    private sealed class NoTransactionCommandHandler : IHandler<TestCommand, Result<string>> {
+        public ValueTask<Result<string>> HandleAsync(TestCommand request, CancellationToken ct) {
+            return ValueTask.FromResult(Result<string>.Success("ok"));
+        }
     }
 
     private static bool AppliesTo(Type handlerType) {
@@ -139,8 +229,10 @@ public sealed class TransactionDecoratorTests {
     private sealed class RecordingUnitOfWork : IUnitOfWork {
         public RecordingScope? Scope { get; private set; }
 
+        public Exception? CommitFailure { get; init; }
+
         public ValueTask<IUnitOfWorkScope> BeginAsync(UnitOfWorkOptions options, CancellationToken ct) {
-            Scope = new RecordingScope();
+            Scope = new RecordingScope { CommitFailure = CommitFailure };
             return new ValueTask<IUnitOfWorkScope>(Scope);
         }
 
@@ -148,8 +240,13 @@ public sealed class TransactionDecoratorTests {
             public int Commits { get; private set; }
             public int Rollbacks { get; private set; }
 
+            public bool Disposed { get; private set; }
+
+            public Exception? CommitFailure { get; init; }
+
             public ValueTask CommitAsync(CancellationToken ct) {
                 ct.ThrowIfCancellationRequested();
+                if (CommitFailure is not null) throw CommitFailure;
                 Commits++;
                 return default;
             }
@@ -169,6 +266,7 @@ public sealed class TransactionDecoratorTests {
             }
 
             public ValueTask DisposeAsync() {
+                Disposed = true;
                 return default;
             }
         }
