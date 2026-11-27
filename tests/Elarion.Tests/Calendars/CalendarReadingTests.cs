@@ -229,7 +229,7 @@ public sealed class CalendarReadingTests {
     public async Task AllDayEventWithoutEnd_LastsOneDay() {
         var result = await ReadAsync(Calendar(Event("UID:a", "DTSTART;VALUE=DATE:20261201")));
 
-        var occurrence = result.Expand(new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero))
+        var occurrence = result.Expand(new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero), cancellationToken: TestContext.Current.CancellationToken)
             .Occurrences.Should().ContainSingle().Subject;
         occurrence.End.Date.Should().Be(new DateOnly(2026, 12, 2));
         occurrence.EndKind.Should().Be(CalendarEndKind.DefaultDay);
@@ -315,7 +315,7 @@ public sealed class CalendarReadingTests {
         var item = result.Events[0].Value!;
         var alarm = item.Alarms.Should().ContainSingle().Subject;
         alarm.Action.Should().Be(CalendarAlarmAction.Unknown);
-        var occurrence = result.Expand(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero))
+        var occurrence = result.Expand(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero), cancellationToken: TestContext.Current.CancellationToken)
             .Occurrences.Single();
         alarm.GetTriggerTimes(occurrence).Should().BeEmpty();
     }
@@ -325,7 +325,7 @@ public sealed class CalendarReadingTests {
         var result = await ReadAsync(Calendar(Event("UID:a", "DTSTART:20260101T090000Z", "BEGIN:VALARM", "ACTION:DISPLAY",
             "DESCRIPTION:Reminder", "TRIGGER:-PT15M", "REPEAT:2", "DURATION:PT5M", "END:VALARM")));
 
-        var occurrence = result.Expand(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero))
+        var occurrence = result.Expand(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero), cancellationToken: TestContext.Current.CancellationToken)
             .Occurrences.Single();
         var start = new DateTimeOffset(2026, 1, 1, 9, 0, 0, TimeSpan.Zero);
         result.Events[0].Value!.Alarms[0].GetTriggerTimes(occurrence)

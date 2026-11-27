@@ -155,8 +155,28 @@ minor releases may include breaking changes.
 - **BREAKING: `IRequestValidator.HasMetadata(Type)`.** The validation seam answers whether it holds metadata for a
   type, so a caller outside the pipeline can tell "valid" from "never checked" (a disabled module answers `false`). The
   member is abstract: a custom `IRequestValidator` must implement it, answering `true` only for the types it checks.
+- **`Elarion.Calendars`: overrides, `EXRULE`, strict reads and more limits** (ADR-0109, amendment 2026-11-27). Of
+  several overrides of one instance, expansion now keeps only the latest (highest `SEQUENCE`, then latest `DTSTAMP`);
+  `CalendarExpandOptions.ResolveOverrideVersions = false` keeps them all. `SkipCancelled` (off by default) leaves out
+  `STATUS:CANCELLED` items, a cancelled override removing its instance. `EXRULE` is read into
+  `CalendarItem.ExceptionRules`, applied in expansion (never to `DTSTART`) and written back in the item's fixed property
+  order, where it used to be an unmapped property written at the end. Repeated `BY` values count once, and a `BY` list
+  longer than its part has values no longer parses. New read options `MaxLines` (1,000,000), `MaxItems` (50,000, events
+  and to-dos only) and `Strict` (refuses `COUNT` with `UNTIL`, skips values with control characters as
+  `calendar.control_character`); `CalendarErrorCodes.IsStructural(code)` names the errors about a file's form.
+  `CalendarRecurrence.Expand` and `CalendarReadResult.Expand` take a `CancellationToken`, and `ReadAsync` checks its token
+  per item while mapping. See [Calendars](https://elarion.wimmesberger.dev/docs/capabilities/calendars#recurrences).
 
 ### Fixed
+- **`Elarion.Calendars` reads and expands hostile files in bounded time and memory.** Resolving a vendor-prefixed
+  `TZID` was quadratic in its length (64 KB of `/a` took 3.1 s); it is now linear, tries only an id's last four
+  segments, and a read refuses ids longer than `CalendarReadOptions.MaxTimeZoneIdLength` (128) as
+  `calendar.unknown_time_zone`. The process-wide time-zone cache was keyed by the id as written and cached misses, so
+  every distinct id of every upload stayed in memory (200 reads of a 100 KB id kept 39 MB); it now holds only zones the
+  system knows, and the writer's `VTIMEZONE` cache only system zones. Expansion built every candidate of a period
+  before filtering (a yearly rule with every second of a year allocated 2 GB) and walked monthly and yearly rules from
+  `DTSTART`; the new `CalendarExpandOptions.MaxCandidates` (1,000,000) stops a series as candidates are built, and rules
+  without `COUNT` skip ahead to the window for every frequency (582 ms and 2 GB became 23 ms and 64 MB).
 - **The documented container build of `Elarion.Typst` failed in `mcr.microsoft.com/dotnet/sdk` images.** Their GNU
   tar unpacks the Typst `.tar.xz` only through the `xz` program, which the images do not install, so the build failed
   after the download with `xz: Cannot exec`. The targets now check for an unpacker before downloading and stop with an

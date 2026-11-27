@@ -12,10 +12,11 @@ namespace Elarion.Calendars.Reading;
 internal static class CalendarItemMapper {
     // The properties whose failure leaves the item without a typed value (FR-014).
     private static readonly HashSet<string> TimePlacing = new(StringComparer.Ordinal) {
-        "DTSTART", "DTEND", "DURATION", "DUE", "RRULE", "RDATE", "EXDATE", "RECURRENCE-ID",
+        "DTSTART", "DTEND", "DURATION", "DUE", "RRULE", "EXRULE", "RDATE", "EXDATE", "RECURRENCE-ID",
     };
 
-    public static bool TryMap(CalendarComponent component, TimeZoneResolver? resolver, out CalendarItem? item, out IReadOnlyList<CalendarError> errors) {
+    public static bool TryMap(CalendarComponent component, TimeZoneResolver? resolver, out CalendarItem? item, out IReadOnlyList<CalendarError> errors,
+        bool strict = false) {
         var list = new List<CalendarError>();
         errors = list;
         item = null;
@@ -29,7 +30,7 @@ internal static class CalendarItemMapper {
         var valid = true;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in component.Properties) {
-            var error = MapProperty(result, property, resolver, seen);
+            var error = MapProperty(result, property, resolver, seen, strict);
             if (error is null) continue;
             list.Add(error);
             if (TimePlacing.Contains(property.Name)) valid = false;
@@ -60,7 +61,8 @@ internal static class CalendarItemMapper {
 
     // ---- reading ------------------------------------------------------------------------------------------------
 
-    private static CalendarError? MapProperty(CalendarItem item, CalendarProperty property, TimeZoneResolver resolver, HashSet<string> seen) {
+    private static CalendarError? MapProperty(CalendarItem item, CalendarProperty property, TimeZoneResolver resolver, HashSet<string> seen,
+        bool strict) {
         var name = property.Name;
         var single = name is "UID" or "DTSTAMP" or "CREATED" or "LAST-MODIFIED" or "SEQUENCE" or "DTSTART" or "DTEND" or "DUE"
             or "DURATION" or "RECURRENCE-ID" or "SUMMARY" or "DESCRIPTION" or "LOCATION" or "CLASS" or "PRIORITY" or "URL" or "GEO"
@@ -92,10 +94,12 @@ internal static class CalendarItemMapper {
             case "COMPLETED" when todo is not null: return Timestamp(property, resolver, value => todo.Completed = value);
             case "PERCENT-COMPLETE" when todo is not null:
                 return Integer(property, value => todo.PercentComplete = value, 0, 100);
-            case "RRULE":
-                if (!CalendarRecurrenceRule.TryParse(property.RawValue, parsed => Compose(parsed, null, null), out var rule))
+            case "RRULE" or "EXRULE":
+                // RFC 5545 forbids COUNT with UNTIL; the lenient reader takes both, a strict read refuses the rule.
+                if (!CalendarRecurrenceRule.TryParse(property.RawValue, parsed => Compose(parsed, null, null), out var rule)
+                    || (strict && rule!.Count is not null && rule.Until is not null))
                     return Invalid(property, "recurrence");
-                item.RecurrenceRules.Add(rule!);
+                (name == "RRULE" ? item.RecurrenceRules : item.ExceptionRules).Add(rule!);
                 return null;
             case "RDATE": return RecurrenceDates(item, property, resolver);
             case "EXDATE": return DateTimeList(property, resolver, item.ExceptionDates);
@@ -382,6 +386,7 @@ internal static class CalendarItemMapper {
         }
 
         foreach (var date in item.ExceptionDates) p.Add(CalendarProperty.DateTime("EXDATE", date));
+        foreach (var rule in item.ExceptionRules) p.Add(new CalendarProperty("EXRULE", rule.ToString()));
         if (item.Summary is not null) p.Add(CalendarProperty.Text("SUMMARY", item.Summary));
         if (item.Description is not null) p.Add(CalendarProperty.Text("DESCRIPTION", item.Description));
         if (item.Location is not null) p.Add(CalendarProperty.Text("LOCATION", item.Location));

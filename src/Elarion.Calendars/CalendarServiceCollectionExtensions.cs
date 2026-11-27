@@ -43,6 +43,12 @@ public static class CalendarServiceCollectionExtensions {
             options.ExpandDefaults.MaxOccurrences = occurrences;
         if (int.TryParse(expand[nameof(CalendarExpandOptions.MaxIterations)], NumberStyles.None, CultureInfo.InvariantCulture, out var iterations))
             options.ExpandDefaults.MaxIterations = iterations;
+        if (int.TryParse(expand[nameof(CalendarExpandOptions.MaxCandidates)], NumberStyles.None, CultureInfo.InvariantCulture, out var candidates))
+            options.ExpandDefaults.MaxCandidates = candidates;
+        if (bool.TryParse(expand[nameof(CalendarExpandOptions.ResolveOverrideVersions)], out var resolveVersions))
+            options.ExpandDefaults.ResolveOverrideVersions = resolveVersions;
+        if (bool.TryParse(expand[nameof(CalendarExpandOptions.SkipCancelled)], out var skipCancelled))
+            options.ExpandDefaults.SkipCancelled = skipCancelled;
         if (expand[nameof(CalendarExpandOptions.FloatingTimeZone)] is { Length: > 0 } zoneId) {
             options.ExpandDefaults.FloatingTimeZone = CalendarTimeZones.TryResolve(zoneId, out var zone)
                 ? zone
