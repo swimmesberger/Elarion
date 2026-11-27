@@ -16,6 +16,9 @@ public static class DavNames {
     /// <summary>The CalDAV namespace (RFC 4791).</summary>
     public const string CalDav = "urn:ietf:params:xml:ns:caldav";
 
+    /// <summary>The CardDAV namespace (RFC 6352).</summary>
+    public const string CardDav = "urn:ietf:params:xml:ns:carddav";
+
     /// <summary>The Apple CalendarServer namespace, for <c>getctag</c>.</summary>
     public const string CalendarServer = "http://calendarserver.org/ns/";
 
@@ -100,5 +103,29 @@ public static class DavNames {
         public static readonly DavName Timezone = new(CalDav, "timezone");
         public static readonly DavName ValidFilter = new(CalDav, "valid-filter");
         public static readonly DavName SupportedFilter = new(CalDav, "supported-filter");
+    }
+
+    /// <summary>Names in the CardDAV namespace.</summary>
+    internal static class Card {
+        public static readonly DavName AddressBook = new(CardDav, "addressbook");
+        public static readonly DavName AddressBookHomeSet = new(CardDav, "addressbook-home-set");
+        public static readonly DavName AddressBookDescription = new(CardDav, "addressbook-description");
+        public static readonly DavName SupportedAddressData = new(CardDav, "supported-address-data");
+        public static readonly DavName AddressDataType = new(CardDav, "address-data-type");
+        public static readonly DavName AddressData = new(CardDav, "address-data");
+        public static readonly DavName AddressBookMultiget = new(CardDav, "addressbook-multiget");
+        public static readonly DavName AddressBookQuery = new(CardDav, "addressbook-query");
+        public static readonly DavName Filter = new(CardDav, "filter");
+        public static readonly DavName PropFilter = new(CardDav, "prop-filter");
+        public static readonly DavName ParamFilter = new(CardDav, "param-filter");
+        public static readonly DavName TextMatch = new(CardDav, "text-match");
+        public static readonly DavName IsNotDefined = new(CardDav, "is-not-defined");
+        public static readonly DavName Prop = new(CardDav, "prop");
+        public static readonly DavName AllProp = new(CardDav, "allprop");
+        public static readonly DavName Limit = new(CardDav, "limit");
+        public static readonly DavName NResults = new(CardDav, "nresults");
+        public static readonly DavName SupportedCollationSet = new(CardDav, "supported-collation-set");
+        public static readonly DavName SupportedCollation = new(CardDav, "supported-collation");
+        public static readonly DavName SupportedFilter = new(CardDav, "supported-filter");
     }
 }

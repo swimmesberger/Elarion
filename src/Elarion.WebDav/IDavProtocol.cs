@@ -52,7 +52,20 @@ public interface IDavProtocol {
     /// CalDAV feeds use <c>feeds</c>), or returns <see langword="null"/> when the path is not the protocol's.
     /// </summary>
     ValueTask<DavResponse?> HandleOtherAsync(DavContext context, IReadOnlyList<string> segments, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The representation a <c>GET</c> of <paramref name="member"/> answers when the request asks for another one than the
+    /// stored bytes (CardDAV converts a vCard 3.0 card to 4.0 by the <c>Accept</c> header), or <see langword="null"/> for
+    /// the stored bytes. The answer carries the stored object's ETag either way.
+    /// </summary>
+    ValueTask<DavRepresentation?> GetRepresentationAsync(DavContext context, DavStoredObject member, CancellationToken cancellationToken) =>
+        ValueTask.FromResult<DavRepresentation?>(null);
 }
+
+/// <summary>A representation of a member other than its stored bytes, which a <c>GET</c> answers.</summary>
+/// <param name="Content">The bytes.</param>
+/// <param name="ContentType">The media type.</param>
+public sealed record DavRepresentation(ReadOnlyMemory<byte> Content, string ContentType);
 
 /// <summary>
 /// A published collection the current user may see, as a protocol resolved it. A protocol derives from it to carry its

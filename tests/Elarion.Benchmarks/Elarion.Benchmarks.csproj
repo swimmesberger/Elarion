@@ -53,6 +53,7 @@
     <ProjectReference Include="../../src/Elarion.BulkOperations.PostgreSql/Elarion.BulkOperations.PostgreSql.csproj"/>
     <ProjectReference Include="../../src/Elarion.Sql/Elarion.Sql.csproj"/>
     <ProjectReference Include="../../src/Elarion.Spreadsheets/Elarion.Spreadsheets.csproj"/>
+    <ProjectReference Include="../../src/Elarion.CardDav/Elarion.CardDav.csproj"/>
     <!-- The mapper generator applied as an analyzer, so the benchmarks exercise the REAL generated
          mapper (in-repo ProjectReferences do not flow bundled analyzers). -->
     <ProjectReference Include="../../src/Elarion.Sql.Generators/Elarion.Sql.Generators.csproj"

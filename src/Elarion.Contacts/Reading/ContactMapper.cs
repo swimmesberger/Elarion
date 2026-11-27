@@ -18,7 +18,7 @@ internal static class ContactMapper {
         var kind = ContactKind.Individual;
         bool sawFn = false, sawN = false, sawOrg = false, sawTitle = false, sawRole = false, sawNote = false, sawUid = false,
             sawKind = false, sawBirthday = false, sawPhoto = false;
-        List<string>? nicknames = null, categories = null;
+        List<string>? nicknames = null, categories = null, members = null;
         List<ContactPhone>? phones = null;
         List<ContactEmail>? emails = null;
         List<ContactAddress>? addresses = null;
@@ -55,7 +55,23 @@ internal static class ContactMapper {
                     else if (kindValue.Equals("individual", StringComparison.OrdinalIgnoreCase)) {
                         sawKind = consumed[i] = true;
                     }
+                    else if (kindValue.Equals("group", StringComparison.OrdinalIgnoreCase)) {
+                        sawKind = consumed[i] = true;
+                        kind = ContactKind.Group;
+                    }
 
+                    break;
+                // Apple's 3.0 group card (ADR-0114); some servers keep it in 4.0 cards too.
+                case "X-ADDRESSBOOKSERVER-KIND" when ContentText.Unescape(property.Value).Trim().Equals("group", StringComparison.OrdinalIgnoreCase):
+                    consumed[i] = true;
+                    kind = ContactKind.Group;
+                    break;
+                case "MEMBER":
+                case "X-ADDRESSBOOKSERVER-MEMBER":
+                    if (property.Value.Trim().Length == 0) break;
+                    consumed[i] = true;
+                    // A URI value: no text escaping applies, so it is kept as written.
+                    (members ??= []).Add(property.Value.Trim());
                     break;
                 case "X-ABSHOWAS" when ContentText.Unescape(property.Value).Trim().Equals("COMPANY", StringComparison.OrdinalIgnoreCase):
                     consumed[i] = true;
@@ -180,6 +196,7 @@ internal static class ContactMapper {
             Categories = categories ?? [],
             Photo = photo,
             Uid = uid,
+            Members = members ?? [],
             AdditionalProperties = additional ?? [],
         };
     }

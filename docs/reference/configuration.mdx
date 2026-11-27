@@ -226,6 +226,19 @@ package.
 
 See [CalDAV](/docs/capabilities/caldav#configuration).
 
+## CardDAV
+
+`AddElarionCardDav(configuration)` binds `CardDavOptions` (package `Elarion.CardDav`), conventionally from the `CardDav`
+section (`CardDavOptions.SectionName`). Contact data uses `Elarion.Contacts`' own option type, not limits of this
+package; the store, journal and request limits are `WebDav`'s.
+
+| Key | Default |
+| --- | --- |
+| `CardDav:ContactRead:MaxBytes` (and the other `ContactReadOptions` keys) | `33554432` |
+| `CardDav:ContactRead:MaxPropertiesPerContact` (also the largest card that can be published, so the largest group) | `1000` |
+
+See [CardDAV](/docs/capabilities/carddav#configuration).
+
 ## App passwords
 
 `AddElarionAppPasswords(configuration)` (and `AddElarionAppPasswordsEntityFrameworkCore<TDbContext>(configuration)`)

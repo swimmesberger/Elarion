@@ -101,6 +101,18 @@ NativeAOT.
 - Given an anniversary as `ANNIVERSARY`, `X-ANNIVERSARY`, `X-MS-ANNIVERSARY`, or `item3.X-ABDATE` labelled
   `_$!<Anniversary>!$_`, when each is read, then the contact's anniversary holds that date.
 - Given a card with `KIND:org`, or with `X-ABSHOWAS:COMPANY`, when it is read, then the contact is an organization.
+
+### Read and write group cards (P2)
+
+- Given a vCard 3.0 card with `X-ADDRESSBOOKSERVER-KIND:group` and two `X-ADDRESSBOOKSERVER-MEMBER` values, or a 4.0
+  card with `KIND:group` and two `MEMBER` values, when it is read, then the contact is a group whose members are the
+  two references in order.
+- Given a group with two members, when it is written as vCard 3.0, then the card holds `X-ADDRESSBOOKSERVER-KIND:group`,
+  one `X-ADDRESSBOOKSERVER-MEMBER` per member and an `N` with the group's name; written as 4.0, it holds `KIND:group`
+  and one `MEMBER` per member and none of Apple's properties.
+- Given a 3.0 group card read and written as 4.0 and back as 3.0, then each card states the same group and members.
+- Given a 4.0 card with `KIND:individual`, when it is written as 3.0, then the card holds no kind.
+- Given a contact that is not a group but has members, when it is written, then the write fails naming `MEMBER`.
 - Given `N:Doe;John;Richter,James;Mr.;Sr.`, when it is read, then the family name is "Doe", the given name "John",
   the additional names "Richter, James", the prefix "Mr." and the suffix "Sr.".
 - Given a Google address with an eighth component, when it is read, then the seven standard components read and the
@@ -301,6 +313,15 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
   trimming or AOT warning from the package.
 - FR-067: A contact MUST convert to its property list and back, and the writer MUST also write an entry's property
   list as it holds it, so a card read and written again keeps every property, mapped or not.
+- FR-068: `KIND:group` and `X-ADDRESSBOOKSERVER-KIND:group`, in any case and either version, MUST make the contact a
+  group (`ContactKind.Group`), and `KIND:individual` an individual.
+- FR-069: Every `MEMBER` and `X-ADDRESSBOOKSERVER-MEMBER` value MUST be a member of the contact (`Contact.Members`), in
+  file order; `ContactMember.FromUid(uid)` MUST build the `urn:uuid:` reference to a contact.
+- FR-070: Writing MUST write a group as `X-ADDRESSBOOKSERVER-KIND:group` with one `X-ADDRESSBOOKSERVER-MEMBER` per
+  member and an `N` whose family name is the group's display name in 3.0, and as `KIND:group` with one `MEMBER` per
+  member in 4.0, with neither version holding the other's group properties.
+- FR-071: Writing a contact that is not a group but has members MUST fail with a `ContactWriteException` naming
+  `MEMBER`.
 
 ## Success criteria
 
@@ -322,7 +343,7 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
 ## Out of scope
 
 - Writing vCard 2.1; jCard (RFC 7095) and xCard.
-- Group cards (`KIND:group`, `MEMBER`), and mapping `RELATED`, `IMPP`, `GEO`, `TZ`, `SOUND`, `LOGO`, `KEY`, `LABEL`,
+- Mapping `RELATED`, `IMPP`, `GEO`, `TZ`, `SOUND`, `LOGO`, `KEY`, `LABEL`,
   `X-SOCIALPROFILE`, `X-ANDROID-CUSTOM` or phonetic names into the model; they stay additional properties.
 - Fetching photo URIs, and resizing or re-encoding photos.
 - Detecting duplicates within a file or against stored contacts, and merging contacts.
@@ -333,6 +354,7 @@ The key words MUST, SHOULD and MAY are to be interpreted as described in RFC 211
 
 ## Decisions
 
+- [ADR-0114](../docs/decisions/0114-contact-groups.md): group cards in the model (FR-068–FR-071).
 - [ADR-0110](../docs/decisions/0110-vcard-contacts.md): the fixed contact model over a lossless property list, the own
   reader and writer, the per-line decoding ladder, the read result, photos, limits, the written versions.
 - [ADR-0109](../docs/decisions/0109-icalendar-model-reader-and-writer.md): the sibling format package whose entry,

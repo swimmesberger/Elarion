@@ -324,6 +324,12 @@ Don't hand-roll a CalDAV server, a change log or an ICS feed endpoint — `Elari
 `CalDavLinks.FeedUrl`. Syncing an external calendar: `CalDavClient.DiscoverAsync`/`SyncAsync(calendar, state)`; store the
 returned state string and schedule the steps yourself.
 
+Address books work the same way — `Elarion.CardDav` (ADR-0113): `AddElarionCardDav(section)` beside the same store and
+`MapElarionDav()`; an `ICardDavSource<TSelf>` query handler registered with `AddElarionCardDavSource<TQuery>()` decides
+who sees which address book, and the handler that changes the data calls
+`ICardDavPublisher.PublishAsync(new CardDavAddress(source, key), contact, ct)` (the `Contact` needs `Uid` and a name).
+Apple clients use one address book per account: publish one per user for them, with groups (`ContactKind.Group`, `Members = [ContactMember.FromUid(uid)]`) for subsets. No feeds or client.
+
 Don't hand-roll Web Push either — `Elarion.WebPush` owns notifying users whose app is **closed** (ADR-0076):
 `AddElarionWebPushEntityFrameworkCore<TDbContext>(o => o.Subject = "mailto:…")` + `[GenerateElarionWebPush]`
 on the context, three `[Handler]`s delegating to `WebPushSubscriptionService` (subscribe, unsubscribe, public key — so your

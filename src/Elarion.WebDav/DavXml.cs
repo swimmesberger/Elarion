@@ -5,7 +5,7 @@ namespace Elarion.WebDav;
 
 /// <summary>
 /// An element of a parsed WebDAV body: its name, attributes, child elements and text. Request and response bodies of
-/// WebDAV are small trees, so the hardened reader (<see cref="DavXml.Parse"/>) builds one instead of streaming.
+/// WebDAV are small trees, so the hardened reader (<see cref="DavXml.Parse(ReadOnlyMemory{byte}, DavXmlLimits)"/>) builds one instead of streaming.
 /// </summary>
 public sealed class DavXmlElement {
     private static readonly IReadOnlyDictionary<string, string> NoAttributes = new Dictionary<string, string>();
@@ -102,6 +102,7 @@ public static class DavXml {
     internal const string CalDavPrefix = "C";
     internal const string CalendarServerPrefix = "CS";
     internal const string AppleIcalPrefix = "ICAL";
+    internal const string CardDavPrefix = "CARD";
 
     /// <summary>
     /// Parses <paramref name="body"/>. Never throws for what the body holds: a malformed, oversized or too deep
@@ -109,7 +110,14 @@ public static class DavXml {
     /// </summary>
     /// <param name="body">The whole body, already bounded by the caller's byte limit.</param>
     /// <param name="limits">The limits.</param>
-    public static DavXmlParseResult Parse(ReadOnlyMemory<byte> body, DavXmlLimits limits) {
+    public static DavXmlParseResult Parse(ReadOnlyMemory<byte> body, DavXmlLimits limits) => Parse(body, limits, checkCharacters: true);
+
+    /// <summary>
+    /// Parses <paramref name="body"/>; with <paramref name="checkCharacters"/> false, characters XML 1.0 forbids (raw control
+    /// characters in calendar data, as some servers send them) are read instead of failing the document. The client reads
+    /// servers' answers this way; requests to this server are read strictly.
+    /// </summary>
+    internal static DavXmlParseResult Parse(ReadOnlyMemory<byte> body, DavXmlLimits limits, bool checkCharacters) {
         if (body.Length > limits.MaxBytes)
             return DavXmlParseResult.Failure(DavXmlErrorKind.TooLarge, $"The body is larger than {limits.MaxBytes} bytes.");
         var settings = new XmlReaderSettings {
@@ -120,6 +128,7 @@ public static class DavXml {
             IgnoreComments = true,
             IgnoreProcessingInstructions = true,
             CloseInput = true,
+            CheckCharacters = checkCharacters,
         };
 
         try {
@@ -206,6 +215,7 @@ public static class DavXml {
         writer.WriteAttributeString("xmlns", CalDavPrefix, null, DavNames.CalDav);
         writer.WriteAttributeString("xmlns", CalendarServerPrefix, null, DavNames.CalendarServer);
         writer.WriteAttributeString("xmlns", AppleIcalPrefix, null, DavNames.AppleIcal);
+        writer.WriteAttributeString("xmlns", CardDavPrefix, null, DavNames.CardDav);
     }
 
     /// <summary>Starts <paramref name="name"/> with the fixed prefix of its namespace, or a generated one.</summary>
@@ -215,6 +225,7 @@ public static class DavXml {
             DavNames.CalDav => CalDavPrefix,
             DavNames.CalendarServer => CalendarServerPrefix,
             DavNames.AppleIcal => AppleIcalPrefix,
+            DavNames.CardDav => CardDavPrefix,
             _ => null,
         };
         if (prefix is not null) writer.WriteStartElement(prefix, name.LocalName, name.Namespace);

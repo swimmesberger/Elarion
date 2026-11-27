@@ -293,6 +293,31 @@ continuation line loses (vCard: all leading whitespace; iCalendar: one character
 first of the two packages to be implemented creates the folder; the second links it. Tests of the layer live in
 `tests/Elarion.Tests/ContentLines/` and run against both rule sets.
 
+## Contact groups (FR-068–FR-071, ADR-0114)
+
+Built test-first from the ported cases (sabre/vobject `testConvertGroupCard` V05 and `testConvertIndividualCard` V07,
+Cyrus `put_missing_name` C28, `huge_group` C31, `filter_x_props` C12), one commit with its tests:
+
+- `ContactKind.Group`; `Contact.Members` (`IReadOnlyList<string>`, default empty), part of equality and of the test
+  that enumerates the model's members; `ContactMember.FromUid(string uid)` returns `urn:uuid:{uid}`.
+- `ContactMapper`: `KIND` (any case) `group` → `Group`, `individual` → `Individual`, `org` as today;
+  `X-ADDRESSBOOKSERVER-KIND:group` → `Group`; `MEMBER` and `X-ADDRESSBOOKSERVER-MEMBER` values → `Members` in file
+  order, values kept as written (a URI; no escaping applies). The mapped properties leave `AdditionalProperties`, as
+  `KIND` and `X-ABSHOWAS` do today.
+- `ContactSerializer`: a group writes `X-ADDRESSBOOKSERVER-KIND:group`, its members as `X-ADDRESSBOOKSERVER-MEMBER`, and
+  `N` = `{display name};;;;` in 3.0; `KIND:group` and `MEMBER` in 4.0; `KIND:individual` is never written. Members on a
+  non-group throw `ContactWriteException` with property `MEMBER`.
+- CardDAV (spec 0007 FR-032–FR-034): `CardDavFilterEvaluator` maps a `prop-filter` name `KIND` to `KIND` or
+  `X-ADDRESSBOOKSERVER-KIND`, `MEMBER` to `MEMBER` or `X-ADDRESSBOOKSERVER-MEMBER`; `CardDavObjects.ToContentAsync`
+  counts the properties of `Contact.ToProperties(V3_0)` against `CardDavOptions.ContactRead.MaxPropertiesPerContact` and
+  throws an `ArgumentException` naming the limit.
+- Tests: `Contacts/ContactGroupTests.cs` (reading both forms, writing both versions, the round trip 3.0 → 4.0 → 3.0,
+  `KIND:individual` dropped, members on a non-group refused, a group without `N`), and `CardDav/CardDavGroupTests.cs`
+  (the scenarios of spec 0007 "Publish a group inside an address book", the 2,500-member group with and without the
+  raised limit).
+- Docs: the contacts and CardDAV pages, the configuration row for `MaxPropertiesPerContact` in `CardDav:ContactRead`,
+  the changelog.
+
 ## Risks
 
 - **The corpus may hide quirks no fixture shows** (Outlook's non-ASCII output, UTF-16 files, a missing `END`): the

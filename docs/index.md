@@ -25,6 +25,8 @@ okf_version: "0.2"
 * [CalDAV clients and .NET libraries](research/2026-11-26-caldav-servers-clients-and-dotnet.md) - what iOS, macOS, Thunderbird, DAVx5 and Outlook require of a CalDAV server, the quirks of the servers a client meets, and which .NET libraries fit NativeAOT; input for ADR-0111.
 * [iCalendar in .NET](research/2026-11-26-icalendar-libraries-and-producers.md) - which .NET iCalendar libraries work under NativeAOT, how .NET resolves time zones, and what Google, Outlook, Apple and municipal calendars publish; input for ADR-0109.
 * [vCard libraries and producers](research/2026-11-26-vcard-libraries-and-producers.md) - which .NET vCard libraries are AOT-safe and safe against hostile uploads, and what Android, Google, Apple, Outlook, Thunderbird and Nextcloud write into .vcf files; input for ADR-0110.
+* [CardDAV clients](research/2026-11-27-carddav-clients.md) - how iOS, macOS, Thunderbird, DAVx5 and Evolution discover, sync and present CardDAV address books, which vCard version each asks for and how each treats a read-only address book; input for ADR-0113.
+* [DAV conformance suites](research/2026-11-27-dav-conformance-suites.md) - the edge cases of Apple's CalDAVTester, litmus, sabre, Radicale, Xandikos, Cyrus and the DAV clients, ported as Elarion's tests; the faults they found and the answers Elarion pins where those projects disagree.
 
 # Published documentation
 

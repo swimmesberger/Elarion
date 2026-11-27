@@ -61,6 +61,7 @@ public sealed class CalDavClient {
         var principalBody = $"<D:propfind {Ns}><D:prop><D:current-user-principal/><D:resourcetype/></D:prop></D:propfind>";
         Uri? principal = null;
         CalDavError? firstError = null;
+        var answeredWithoutPrincipal = false;
         foreach (var candidate in new[] { baseUrl, new Uri(baseUrl, "/.well-known/caldav") }) {
             var answer = await SendMultistatusAsync(PropFind, candidate, principalBody, "0", cancellationToken).ConfigureAwait(false);
             if (!answer.HasValue) {
@@ -71,26 +72,64 @@ public sealed class CalDavClient {
 
             principal = answer.Value.Responses.Select(r => r.Href(DavNames.D.CurrentUserPrincipal)).FirstOrDefault(static h => h is not null);
             if (principal is not null) break;
+            answeredWithoutPrincipal |= candidate == baseUrl;
         }
 
-        if (principal is null)
-            return CalDavResult<CalDavAccount>.Failure(firstError ?? Error(CalDavErrorCodes.NotFound, "The server names no current-user-principal.", null, baseUrl));
+        var homes = principal is null ? null : await HomesOfAsync(principal, cancellationToken).ConfigureAwait(false);
+        if (homes is { HasValue: false }) return CalDavResult<CalDavAccount>.Failure(homes.Error);
+        if (principal is null) {
+            if (!answeredWithoutPrincipal)
+                return CalDavResult<CalDavAccount>.Failure(firstError ?? Error(CalDavErrorCodes.NotFound, "The server names no current-user-principal.", null, baseUrl));
+            // Servers without current-user-principal (Synology, DavMail): the given URL, which answered as WebDAV, is the
+            // principal when it names a home.
+            homes = await HomesOfAsync(baseUrl, cancellationToken).ConfigureAwait(false);
+            if (!homes.HasValue || homes.Value.Homes.Count == 0) {
+                if (homes is { HasValue: false, Error.Code: CalDavErrorCodes.Unauthorized }) return CalDavResult<CalDavAccount>.Failure(homes.Error);
+                // A URL that answered as WebDAV but names no principal is "not found", whatever the well-known URL said.
+                return CalDavResult<CalDavAccount>.Failure(Error(CalDavErrorCodes.NotFound, "The server names no current-user-principal.", null, baseUrl));
+            }
 
-        var homeAnswer = await SendMultistatusAsync(PropFind, principal,
-            $"<D:propfind {Ns}><D:prop><C:calendar-home-set/><D:displayname/></D:prop></D:propfind>", "0", cancellationToken).ConfigureAwait(false);
-        if (!homeAnswer.HasValue) return CalDavResult<CalDavAccount>.Failure(homeAnswer.Error);
-        var principalResponse = homeAnswer.Value.Responses.FirstOrDefault(r => r.Href(DavNames.C.CalendarHomeSet) is not null);
-        var home = principalResponse?.Href(DavNames.C.CalendarHomeSet);
-        if (home is null) return CalDavResult<CalDavAccount>.Failure(Error(CalDavErrorCodes.NotFound, "The principal names no calendar-home-set.", null, principal));
+            principal = baseUrl;
+        }
 
-        var calendars = await ListCalendarsAsync(home, cancellationToken).ConfigureAwait(false);
-        if (!calendars.HasValue) return CalDavResult<CalDavAccount>.Failure(calendars.Error);
+        // A principal without calendar-home-set (Nextcloud's public shares) holds its calendars itself.
+        var homeSet = homes!.Value!;
+        var homeUrls = homeSet.Homes.Count > 0 ? homeSet.Homes : [principal];
+        var calendars = new List<CalDavCalendar>();
+        foreach (var home in homeUrls) {
+            var listed = await ListCalendarsAsync(home, cancellationToken).ConfigureAwait(false);
+            if (!listed.HasValue) return CalDavResult<CalDavAccount>.Failure(listed.Error);
+            foreach (var calendar in listed.Value)
+                if (calendars.All(known => known.Url != calendar.Url))
+                    calendars.Add(calendar);
+        }
+
         return CalDavResult<CalDavAccount>.Success(new CalDavAccount {
             PrincipalUrl = principal,
-            HomeUrl = home,
-            DisplayName = principalResponse!.Text(DavNames.D.DisplayName),
-            Calendars = calendars.Value,
+            HomeUrl = homeUrls[0],
+            HomeUrls = homeUrls,
+            DisplayName = homeSet.DisplayName,
+            Calendars = calendars,
         });
+    }
+
+    private sealed record HomeSet(IReadOnlyList<Uri> Homes, string? DisplayName);
+
+    // The hrefs of calendar-home-set on the principal (depth 0; iCloud refuses depth 1 there), every one of them.
+    private async Task<CalDavResult<HomeSet>> HomesOfAsync(Uri principal, CancellationToken cancellationToken) {
+        var answer = await SendMultistatusAsync(PropFind, principal,
+            $"<D:propfind {Ns}><D:prop><C:calendar-home-set/><D:displayname/></D:prop></D:propfind>", "0", cancellationToken).ConfigureAwait(false);
+        if (!answer.HasValue) return CalDavResult<HomeSet>.Failure(answer.Error);
+        var homes = new List<Uri>();
+        string? displayName = null;
+        foreach (var response in answer.Value.Responses) {
+            displayName ??= response.Text(DavNames.D.DisplayName);
+            foreach (var href in response.Prop(DavNames.C.CalendarHomeSet)?.ChildrenNamed(DavNames.D.Href) ?? [])
+                if (MultistatusResponse.Resolve(answer.Value.BaseUrl, href.Text.Trim()) is { } url && !homes.Contains(url))
+                    homes.Add(url);
+        }
+
+        return CalDavResult<HomeSet>.Success(new HomeSet(homes, displayName));
     }
 
     /// <summary>The calendars of the calendar home at <paramref name="homeUrl"/>, with their names, colors, component kinds and whether they are writable.</summary>
@@ -151,8 +190,9 @@ public sealed class CalDavClient {
         Listing listing;
         if (calendar.SupportsSyncCollection || previous.Token is not null) {
             var answer = await SyncCollectionAsync(calendar, previous.Token, cancellationToken).ConfigureAwait(false);
-            // An expired or unknown token: start over with a full listing and compare ETags (Evolution's and DAVx5's rule).
-            if (!answer.HasValue && previous.Token is not null && answer.Error.StatusCode is 403 or 409 or 412)
+            // An expired or unknown token: start over with a full listing and compare ETags (Evolution's and DAVx5's rule). Ox
+            // answers a bare 400; a 500 stays an error, since retrying would hide an outage behind a second failure.
+            if (!answer.HasValue && previous.Token is not null && answer.Error.StatusCode is 400 or 403 or 409 or 412)
                 answer = await SyncCollectionAsync(calendar, null, cancellationToken).ConfigureAwait(false);
             if (!answer.HasValue && answer.Error.StatusCode is 403 or 405 or 501 && previous.Token is null)
                 answer = await ListByETagAsync(calendar, previous, cancellationToken).ConfigureAwait(false);
@@ -180,8 +220,8 @@ public sealed class CalDavClient {
             if (etags.Remove(name) || !listing.IsFull)
                 removed.Add(name);
 
-        var wanted = listing.Present.Where(pair => pair.Value is null || !etags.TryGetValue(pair.Key, out var known) || known != pair.Value)
-            .Select(static pair => pair.Key).ToList();
+        var wanted = listing.Present.Where(pair => pair.Value.ETag is null || !etags.TryGetValue(pair.Key, out var known) || known != pair.Value.ETag)
+            .Select(static pair => (pair.Key, pair.Value.Url)).ToList();
         var deferred = wanted.Count > _options.MaxObjectsPerStep;
         if (deferred) wanted = wanted[.._options.MaxObjectsPerStep];
 
@@ -197,7 +237,7 @@ public sealed class CalDavClient {
                 }
 
                 changed.Add(item);
-                etags[name] = item.ETag ?? listing.Present.GetValueOrDefault(name) ?? "";
+                etags[name] = item.ETag ?? listing.Present.GetValueOrDefault(name)?.ETag ?? "";
             }
         }
 
@@ -209,7 +249,9 @@ public sealed class CalDavClient {
             ETags = etags,
         };
         return CalDavResult<CalDavSyncStep>.Success(new CalDavSyncStep {
-            Changed = changed, Removed = removed.Distinct(StringComparer.Ordinal).ToList(), State = next.Serialize(), HasMore = deferred || listing.Truncated,
+            Changed = changed, Removed = removed.Distinct(StringComparer.Ordinal).ToList(), State = next.Serialize(),
+            // A truncated answer whose token did not move would page forever (python-caldav's sync-token.limit quirk).
+            HasMore = deferred || (listing.Truncated && listing.Token != previous.Token),
         });
     }
 
@@ -244,7 +286,11 @@ public sealed class CalDavClient {
             : CalDavResult<CalDavWriteOutcome>.Failure(answer.Error);
     }
 
-    private sealed record Listing(bool IsFull, Dictionary<string, string?> Present, List<string> Removed, string? Token, string? CTag, bool Truncated,
+    // A listed member: its ETag, and its URL as the server spelled it, which a multiget asks for again (Robur lists
+    // "a@b.ics" and answers 404 for "a%40b.ics").
+    private sealed record Member(string? ETag, Uri Url);
+
+    private sealed record Listing(bool IsFull, Dictionary<string, Member> Present, List<string> Removed, string? Token, string? CTag, bool Truncated,
         bool Unchanged = false);
 
     private async Task<CalDavResult<Listing>> SyncCollectionAsync(CalDavCalendar calendar, string? token, CancellationToken cancellationToken) {
@@ -252,7 +298,7 @@ public sealed class CalDavClient {
                    + "<D:prop><D:getetag/></D:prop></D:sync-collection>";
         var answer = await SendMultistatusAsync(Report, calendar.Url, body, "1", cancellationToken).ConfigureAwait(false);
         if (!answer.HasValue) return CalDavResult<Listing>.Failure(answer.Error);
-        var present = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var present = new Dictionary<string, Member>(StringComparer.Ordinal);
         var removed = new List<string>();
         var truncated = false;
         foreach (var response in answer.Value.Responses) {
@@ -263,8 +309,11 @@ public sealed class CalDavClient {
 
             var name = NameOf(response.Url);
             if (name is null) continue;
-            if (response.Status is 404 || (response.Status is null && !response.HasOkPropstat)) removed.Add(name);
-            else present[name] = response.Text(DavNames.D.GetETag);
+            // The same href twice in one answer (Cyrus, Stalwart after a re-create): the last entry decides.
+            present.Remove(name);
+            removed.Remove(name);
+            if (response.Status is 404 or 410 || (response.Status is null && !response.HasOkPropstat)) removed.Add(name);
+            else present[name] = new Member(response.Text(DavNames.D.GetETag), response.Url);
         }
 
         var newToken = answer.Value.Root.Child(DavNames.D.SyncToken)?.Text.Trim();
@@ -285,37 +334,41 @@ public sealed class CalDavClient {
         var answer = await SendMultistatusAsync(PropFind, calendar.Url, $"<D:propfind {Ns}><D:prop><D:getetag/><D:resourcetype/></D:prop></D:propfind>", "1",
             cancellationToken).ConfigureAwait(false);
         if (!answer.HasValue) return CalDavResult<Listing>.Failure(answer.Error);
-        var present = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var present = new Dictionary<string, Member>(StringComparer.Ordinal);
         foreach (var response in answer.Value.Responses) {
             if (IsSelf(calendar, response.Url) || response.Prop(DavNames.D.ResourceType)?.Child(DavNames.D.Collection) is not null) continue;
-            if (NameOf(response.Url) is { } name && response.HasOkPropstat) present[name] = response.Text(DavNames.D.GetETag);
+            if (NameOf(response.Url) is { } name && response.HasOkPropstat) present[name] = new Member(response.Text(DavNames.D.GetETag), response.Url);
         }
 
         return CalDavResult<Listing>.Success(new Listing(true, present, [], null, ctag, false));
     }
 
-    private async Task<CalDavResult<List<(string Name, CalDavObject? Item)>>> MultigetAsync(CalDavCalendar calendar, string[] names,
+    // The named members, asked for by the URL the server listed; a member the answer leaves out (sabre/dav, so Nextcloud,
+    // Baikal, DAViCal) or answers 404 is a removal, and an href answered twice is one object, the last.
+    private async Task<CalDavResult<List<(string Name, CalDavObject? Item)>>> MultigetAsync(CalDavCalendar calendar, (string Name, Uri Url)[] members,
         CancellationToken cancellationToken) {
-        var hrefs = string.Concat(names.Select(name => "<D:href>" + Escape(MemberUrl(calendar, name).AbsolutePath) + "</D:href>"));
+        var hrefs = string.Concat(members.Select(static member => "<D:href>" + Escape(member.Url.AbsolutePath) + "</D:href>"));
         var body = $"<C:calendar-multiget {Ns}><D:prop><D:getetag/><C:calendar-data/></D:prop>{hrefs}</C:calendar-multiget>";
         var answer = await SendMultistatusAsync(Report, calendar.Url, body, "1", cancellationToken).ConfigureAwait(false);
         if (!answer.HasValue) return CalDavResult<List<(string, CalDavObject?)>>.Failure(answer.Error);
 
-        var results = new List<(string Name, CalDavObject? Item)>();
-        var wanted = names.ToHashSet(StringComparer.Ordinal);
+        var results = new Dictionary<string, CalDavObject?>(StringComparer.Ordinal);
+        var wanted = members.Select(static member => member.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var response in answer.Value.Responses) {
             if (NameOf(response.Url) is not { } name || !wanted.Contains(name)) continue;
-            if (response.Status == 404 || response.Prop(DavNames.C.CalendarData) is not { } data) {
-                if (response.Status == 404 || !response.HasOkPropstat) results.Add((name, null));
+            if (response.Status is 404 or 410 || response.Prop(DavNames.C.CalendarData) is not { } data) {
+                if (response.Status is 404 or 410 || !response.HasOkPropstat) results[name] = null;
                 continue;
             }
 
             using var stream = new MemoryStream(Encoding.UTF8.GetBytes(data.Text), false);
             var read = await _reader.ReadAsync(stream, _options.CalendarRead, cancellationToken).ConfigureAwait(false);
-            results.Add((name, new CalDavObject(name, response.Url, response.Text(DavNames.D.GetETag), read)));
+            results[name] = new CalDavObject(name, response.Url, response.Text(DavNames.D.GetETag), read);
         }
 
-        return CalDavResult<List<(string, CalDavObject?)>>.Success(results);
+        foreach (var name in wanted)
+            results.TryAdd(name, null);
+        return CalDavResult<List<(string, CalDavObject?)>>.Success([.. members.Select(member => (member.Name, results[member.Name]))]);
     }
 
     private sealed record Answer(int Status, string? ETag, byte[] Body, Uri Url);
@@ -327,7 +380,13 @@ public sealed class CalDavClient {
         if (answer.Value.Status != 207)
             return CalDavResult<Multistatus>.Failure(Error(CalDavErrorCodes.InvalidResponse,
                 $"The server answered {answer.Value.Status} instead of 207 Multi-Status.", answer.Value.Status, answer.Value.Url));
-        var parsed = DavXml.Parse(answer.Value.Body, new DavXmlLimits(_options.MaxResponseBytes, _options.MaxXmlDepth, _options.MaxXmlElements));
+        // An empty 207 (python-caldav and dav4jvm read it as no responses) lists nothing.
+        if (answer.Value.Body.AsSpan().Trim(" \t\r\n"u8).IsEmpty)
+            return CalDavResult<Multistatus>.Success(new Multistatus(new DavXmlElement(DavNames.D.Multistatus, [], ""), answer.Value.Url));
+        // Servers' answers are read with characters XML forbids allowed: some pass raw control characters in calendar data
+        // through, and one such object must not fail the whole step.
+        var parsed = DavXml.Parse(WithoutControlBytes(answer.Value.Body),
+            new DavXmlLimits(_options.MaxResponseBytes, _options.MaxXmlDepth, _options.MaxXmlElements), checkCharacters: false);
         if (parsed.Root is null)
             return CalDavResult<Multistatus>.Failure(parsed.Error == DavXmlErrorKind.TooLarge
                 ? Error(CalDavErrorCodes.TooLarge, parsed.Message!, 207, answer.Value.Url) with { Limit = _options.MaxXmlElements }
@@ -361,10 +420,18 @@ public sealed class CalDavClient {
 
                 using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
                 var status = (int)response.StatusCode;
+                var isWrite = method == HttpMethod.Put || method == HttpMethod.Delete;
+                // 303 to a write says it was done and where to look (RFC 9110 §15.4.4); repeating the PUT would be wrong.
+                if (status == 303 && isWrite) return CalDavResult<Answer>.Success(new Answer(status, RawETag(response), [], url));
                 if (status is 301 or 302 or 303 or 307 or 308 && response.Headers.Location is { } location) {
                     if (redirect >= _options.MaxRedirects)
                         return CalDavResult<Answer>.Failure(Error(CalDavErrorCodes.InvalidResponse, $"More than {_options.MaxRedirects} redirects.", status, url));
-                    url = location.IsAbsoluteUri ? location : new Uri(url, location);
+                    var target = location.IsAbsoluteUri ? location : new Uri(url, location);
+                    // Never from https to http: the credentials would go out in clear text (python-caldav, dav4jvm).
+                    if (url.Scheme == Uri.UriSchemeHttps && target.Scheme != Uri.UriSchemeHttps)
+                        return CalDavResult<Answer>.Failure(Error(CalDavErrorCodes.InvalidResponse,
+                            $"The server redirected from https to {target.Scheme}; the client does not follow it.", status, url));
+                    url = target;
                     continue;
                 }
 
@@ -372,7 +439,9 @@ public sealed class CalDavClient {
                 if (response.Content.Headers.ContentLength > _options.MaxResponseBytes) return CalDavResult<Answer>.Failure(TooLarge(url, status));
                 var bytes = await ReadBoundedAsync(response.Content, token).ConfigureAwait(false);
                 if (bytes is null) return CalDavResult<Answer>.Failure(TooLarge(url, status));
-                return CalDavResult<Answer>.Success(new Answer(status, response.Headers.ETag?.ToString(), bytes, url));
+                // A 207 to a write reports per resource (Xandikos, dav4jvm): any failed member fails the write.
+                if (status == 207 && isWrite && FailedMemberStatus(bytes) is { } failed) return CalDavResult<Answer>.Failure(StatusError(failed, url));
+                return CalDavResult<Answer>.Success(new Answer(status, RawETag(response), bytes, url));
             }
         }
         catch (OperationCanceledException) when (timeout is not null && timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested) {
@@ -399,7 +468,8 @@ public sealed class CalDavClient {
         401 => Error(CalDavErrorCodes.Unauthorized, "The server refused the credentials.", status, url),
         403 => Error(CalDavErrorCodes.Forbidden, "The server refused the request.", status, url),
         404 or 410 => Error(CalDavErrorCodes.NotFound, "The resource does not exist.", status, url),
-        412 => Error(CalDavErrorCodes.Conflict, "The object was changed on the server meanwhile.", status, url),
+        // 409 is how SOGo and Radicale refuse a write that conflicts with another object (no-uid-conflict).
+        409 or 412 => Error(CalDavErrorCodes.Conflict, "The object was changed on the server meanwhile, or conflicts with another.", status, url),
         _ => Error(CalDavErrorCodes.ServerError, $"The server answered {status}.", status, url),
     };
 
@@ -410,8 +480,38 @@ public sealed class CalDavClient {
 
     private static Uri WithSlash(Uri url) => url.AbsolutePath.EndsWith('/') ? url : new Uri(url + "/");
 
+    // Compared decoded: a server may spell the collection "%40" in one place and "@" in another.
     private static bool IsSelf(CalDavCalendar calendar, Uri url) =>
-        string.Equals(WithSlash(url).AbsolutePath, WithSlash(calendar.Url).AbsolutePath, StringComparison.Ordinal);
+        string.Equals(Uri.UnescapeDataString(WithSlash(url).AbsolutePath), Uri.UnescapeDataString(WithSlash(calendar.Url).AbsolutePath), StringComparison.Ordinal);
+
+    // C0 control characters other than tab and line ends are one byte in UTF-8 and never part of a multi-byte sequence, so
+    // they can be dropped from the bytes; the XML reader refuses them raw even when it does not check references.
+    private static byte[] WithoutControlBytes(byte[] body) {
+        if (body.AsSpan().IndexOfAnyInRange((byte)0, (byte)0x1F) < 0) return body;
+        var kept = new byte[body.Length];
+        var count = 0;
+        foreach (var b in body)
+            if (b >= 0x20 || b is (byte)'\t' or (byte)'\n' or (byte)'\r')
+                kept[count++] = b;
+        return count == body.Length ? body : kept[..count];
+    }
+
+    // The ETag header as sent; HttpClient's typed header is null for the unquoted or percent-encoded ones some servers send.
+    private static string? RawETag(HttpResponseMessage response) =>
+        response.Headers.TryGetValues("ETag", out var values) ? values.FirstOrDefault()?.Trim() : null;
+
+    private int? FailedMemberStatus(byte[] body) {
+        var parsed = DavXml.Parse(body, new DavXmlLimits(_options.MaxResponseBytes, _options.MaxXmlDepth, _options.MaxXmlElements), checkCharacters: false);
+        if (parsed.Root is null || !parsed.Root.Is(DavNames.D.Multistatus)) return null;
+        foreach (var response in parsed.Root.ChildrenNamed(DavNames.D.Response)) {
+            var status = MultistatusResponse.ParseStatus(response.Child(DavNames.D.Status)?.Text)
+                         ?? response.ChildrenNamed(DavNames.D.Propstat).Select(static p => MultistatusResponse.ParseStatus(p.Child(DavNames.D.Status)?.Text))
+                             .FirstOrDefault(static s => s >= 400);
+            if (status >= 400) return status;
+        }
+
+        return null;
+    }
 
     private static string? NameOf(Uri url) {
         var path = url.AbsolutePath;
@@ -420,7 +520,12 @@ public sealed class CalDavClient {
         return segment.Length == 0 ? null : Uri.UnescapeDataString(segment);
     }
 
-    private static string? StrongETag(string? etag) => etag is null || etag.StartsWith("W/", StringComparison.Ordinal) ? null : etag;
+    // A weak tag cannot be used in If-Match; a bare one (Robur) is quoted, a percent-encoded one (Bedework 5) decoded.
+    private static string? StrongETag(string? etag) {
+        if (string.IsNullOrEmpty(etag) || etag.StartsWith("W/", StringComparison.OrdinalIgnoreCase)) return null;
+        if (etag.StartsWith("%22", StringComparison.OrdinalIgnoreCase)) etag = Uri.UnescapeDataString(etag);
+        return etag.StartsWith('"') && etag.EndsWith('"') && etag.Length >= 2 ? etag : "\"" + etag.Trim('"') + "\"";
+    }
 
     private static string Escape(string text) => text.Replace("&", "&amp;", StringComparison.Ordinal).Replace("<", "&lt;", StringComparison.Ordinal)
         .Replace(">", "&gt;", StringComparison.Ordinal);
@@ -429,8 +534,10 @@ public sealed class CalDavClient {
     private sealed class Multistatus(DavXmlElement root, Uri baseUrl) {
         public DavXmlElement Root { get; } = root;
 
+        public Uri BaseUrl { get; } = baseUrl;
+
         public IEnumerable<MultistatusResponse> Responses =>
-            Root.ChildrenNamed(DavNames.D.Response).Select(r => new MultistatusResponse(r, baseUrl)).Where(static r => r.IsValid);
+            Root.ChildrenNamed(DavNames.D.Response).Select(r => new MultistatusResponse(r, BaseUrl)).Where(static r => r.IsValid);
     }
 
     private sealed class MultistatusResponse {
@@ -441,8 +548,9 @@ public sealed class CalDavClient {
             _element = element;
             _base = baseUrl;
             var href = element.Child(DavNames.D.Href)?.Text.Trim();
-            IsValid = href is { Length: > 0 } && Uri.TryCreate(baseUrl, href, out var resolved);
-            Url = IsValid ? new Uri(baseUrl, href!) : baseUrl;
+            var resolved = href is { Length: > 0 } ? Resolve(baseUrl, href) : null;
+            IsValid = resolved is not null;
+            Url = resolved ?? baseUrl;
             Status = ParseStatus(element.Child(DavNames.D.Status)?.Text);
         }
 
@@ -452,11 +560,11 @@ public sealed class CalDavClient {
 
         public int? Status { get; }
 
-        public bool HasOkPropstat => _element.ChildrenNamed(DavNames.D.Propstat).Any(static p => ParseStatus(p.Child(DavNames.D.Status)?.Text) is >= 200 and < 300);
+        public bool HasOkPropstat => _element.ChildrenNamed(DavNames.D.Propstat).Any(static p => IsOk(p));
 
         public DavXmlElement? Prop(DavName name) {
             foreach (var propstat in _element.ChildrenNamed(DavNames.D.Propstat)) {
-                if (ParseStatus(propstat.Child(DavNames.D.Status)?.Text) is not (>= 200 and < 300)) continue;
+                if (!IsOk(propstat)) continue;
                 if (propstat.Child(DavNames.D.Prop)?.Child(name) is { } found) return found;
             }
 
@@ -466,9 +574,25 @@ public sealed class CalDavClient {
         public string? Text(DavName name) => Prop(name)?.Text.Trim() is { Length: > 0 } text ? text : null;
 
         public Uri? Href(DavName name) =>
-            Prop(name)?.Child(DavNames.D.Href)?.Text.Trim() is { Length: > 0 } href && Uri.TryCreate(_base, href, out var url) ? url : null;
+            Prop(name)?.Child(DavNames.D.Href)?.Text.Trim() is { Length: > 0 } href ? Resolve(_base, href) : null;
 
-        private static int? ParseStatus(string? line) {
+        // A propstat without a status is read as 200 (dav4jvm, vdirsyncer: servers omit it); one with a status that does
+        // not parse is not.
+        private static bool IsOk(DavXmlElement propstat) =>
+            propstat.Child(DavNames.D.Status) is not { } status || ParseStatus(status.Text) is >= 200 and < 300;
+
+        /// <summary>
+        /// An href resolved against the answering URL: an absolute http(s) URL, or a path. Anything else with a colon, such
+        /// as "urn:uuid:4fbe.ics", is a relative path segment, not a URI of another scheme (dav4jvm).
+        /// </summary>
+        public static Uri? Resolve(Uri baseUrl, string href) {
+            if (href.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || href.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                return Uri.TryCreate(href, UriKind.Absolute, out var absolute) ? absolute : null;
+            var relative = href.StartsWith('/') ? href : "./" + href;
+            return Uri.TryCreate(baseUrl, relative, out var resolved) ? resolved : null;
+        }
+
+        internal static int? ParseStatus(string? line) {
             if (line is null) return null;
             var parts = line.Trim().Split(' ', 3, StringSplitOptions.RemoveEmptyEntries);
             return parts.Length >= 2 && int.TryParse(parts[1], out var code) ? code : null;

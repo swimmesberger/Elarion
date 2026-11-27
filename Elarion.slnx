@@ -97,6 +97,7 @@
     <Project Path="src/Elarion.Validation/Elarion.Validation.csproj"/>
     <Project Path="src/Elarion.Typst/Elarion.Typst.csproj"/>
     <Project Path="src/Elarion.CalDav/Elarion.CalDav.csproj"/>
+    <Project Path="src/Elarion.CardDav/Elarion.CardDav.csproj"/>
     <Project Path="src/Elarion.WebDav/Elarion.WebDav.csproj"/>
     <Project Path="src/Elarion.WebDav.AspNetCore/Elarion.WebDav.AspNetCore.csproj"/>
     <Project Path="src/Elarion.WebDav.EntityFrameworkCore/Elarion.WebDav.EntityFrameworkCore.csproj"/>

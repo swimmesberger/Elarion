@@ -63,7 +63,7 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
         return method switch {
             "PROPFIND" => await PropFindAsync(context, resource, cancellationToken).ConfigureAwait(false),
             "REPORT" => await ReportAsync(context, resource, cancellationToken).ConfigureAwait(false),
-            _ => Get(context, resource),
+            _ => await GetAsync(context, resource, cancellationToken).ConfigureAwait(false),
         };
     }
 
@@ -180,7 +180,7 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
         }));
     }
 
-    private static DavResponse Get(DavContext context, DavResource resource) {
+    private static async ValueTask<DavResponse> GetAsync(DavContext context, DavResource resource, CancellationToken cancellationToken) {
         if (resource.Kind != DavResourceKind.Member || resource.Member is not DavStoredObject stored) return WithAllow(DavResponse.Status(405));
         if (DavETag.Matches(context.Request.Header("If-None-Match"), stored.ETag)) {
             var notModified = DavResponse.Status(304);
@@ -188,7 +188,14 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
             return notModified;
         }
 
-        var response = DavResponse.Bytes(200, stored.Content, stored.ContentType);
+        // A protocol may answer another representation the client asked for (CardDAV: vCard 4.0 by Accept); the ETag is
+        // the stored object's either way.
+        var representation = resource.Protocol is { } protocol
+            ? await protocol.GetRepresentationAsync(context, stored, cancellationToken).ConfigureAwait(false)
+            : null;
+        var response = representation is null
+            ? DavResponse.Bytes(200, stored.Content, stored.ContentType)
+            : DavResponse.Bytes(200, representation.Content, representation.ContentType);
         response.Headers["ETag"] = stored.ETag;
         return response;
     }
@@ -212,6 +219,11 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
         }
         else if (!body.Is(DavNames.D.PropFind)) {
             return DavResponse.Text(400, "The PROPFIND body must be a DAV:propfind element.");
+        }
+        // RFC 4918 §14.20: exactly one of propname, allprop and prop (an empty body is allprop); unknown siblings are ignored.
+        else if ((body.Child(DavNames.D.PropName) is null ? 0 : 1) + (body.Child(DavNames.D.AllProp) is null ? 0 : 1)
+                 + (body.Child(DavNames.D.Prop) is null ? 0 : 1) != 1) {
+            return DavResponse.Text(400, "A DAV:propfind holds exactly one of propname, allprop and prop.");
         }
         else if (body.Child(DavNames.D.PropName) is not null) {
             selection = DavPropertySelection.PropName;
@@ -327,7 +339,12 @@ public sealed class DavDispatcher(IEnumerable<IDavProtocol> protocols, IOptions<
     private static async ValueTask<DavResponse> SyncCollectionAsync(DavContext context, DavResource resource, DavXmlElement body,
         CancellationToken cancellationToken) {
         var level = body.Child(DavNames.D.SyncLevel)?.Text.Trim();
-        if (level is not null && level != "1") return DavResponse.Error(403, DavNames.D.SyncTraversalSupported);
+        // RFC 6578 §6.3: "1" or "infinity" (DAVx5 spells it "infinite"); collections have no child collections, so infinity
+        // is refused as not supported, and anything else is a malformed request.
+        if (level is not null && level != "1")
+            return level.Equals("infinity", StringComparison.OrdinalIgnoreCase) || level.Equals("infinite", StringComparison.OrdinalIgnoreCase)
+                ? DavResponse.Error(403, DavNames.D.SyncTraversalSupported)
+                : DavResponse.Text(400, "DAV:sync-level must be 1 or infinity.");
         int? limit = null;
         if (body.Child(DavNames.D.Limit)?.Child(DavNames.D.NResults)?.Text.Trim() is { Length: > 0 } nresults) {
             if (!int.TryParse(nresults, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedLimit) || parsedLimit < 1)

@@ -23,13 +23,20 @@ internal static class ContactSerializer {
 
         if (contact.Kind == ContactKind.Organization)
             list.Add(v3 ? new ContactProperty("X-ABSHOWAS", "COMPANY") : new ContactProperty("KIND", "org"));
+        // FR-070: each version in the form its clients read, never the other's (ADR-0114).
+        var isGroup = contact.Kind == ContactKind.Group;
+        if (isGroup) list.Add(v3 ? new ContactProperty("X-ADDRESSBOOKSERVER-KIND", "group") : new ContactProperty("KIND", "group"));
+        else if (contact.Members.Count > 0)
+            throw new ContactWriteException("Only a group has members; set Kind to ContactKind.Group or remove the members.", null, "MEMBER");
 
         var formattedName = string.IsNullOrWhiteSpace(contact.FormattedName) ? contact.DisplayName : contact.FormattedName;
         list.Add(new ContactProperty("FN", ContentText.Escape(formattedName)));
 
         if (contact.Name is not null || v3) {
             var n = contact.Name;
-            list.Add(new ContactProperty("N", Structured(n?.Family, n?.Given, n?.Additional, n?.Prefix, n?.Suffix)));
+            // A 3.0 group without a name carries its own as the family name, as Apple and Cyrus write it.
+            var family = n?.Family ?? (isGroup && n is null ? formattedName : null);
+            list.Add(new ContactProperty("N", Structured(family, n?.Given, n?.Additional, n?.Prefix, n?.Suffix)));
         }
 
         if (contact.Nicknames.Count > 0) list.Add(new ContactProperty("NICKNAME", List(contact.Nicknames)));
@@ -72,6 +79,8 @@ internal static class ContactSerializer {
         if (contact.Categories.Count > 0) list.Add(new ContactProperty("CATEGORIES", List(contact.Categories)));
         if (contact.Photo is { } photo) list.Add(Photo(photo, v3));
         if (contact.Uid is not null) list.Add(new ContactProperty("UID", ContentText.Escape(contact.Uid)));
+        foreach (var member in contact.Members)
+            list.Add(new ContactProperty(v3 ? "X-ADDRESSBOOKSERVER-MEMBER" : "MEMBER", member));
         list.AddRange(contact.AdditionalProperties);
         return list;
     }

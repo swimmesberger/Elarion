@@ -178,6 +178,9 @@ public static class DavETag {
         foreach (var part in header.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)) {
             if (part == "*") return true;
             var candidate = part.StartsWith("W/", StringComparison.Ordinal) ? part[2..] : part;
+            // Evolution sends the tag with its quotes escaped (\"tag\"), as sabre/dav tolerates.
+            if (candidate.StartsWith("\\\"", StringComparison.Ordinal) && candidate.EndsWith("\\\"", StringComparison.Ordinal) && candidate.Length >= 4)
+                candidate = "\"" + candidate[2..^2] + "\"";
             if (string.Equals(candidate, etag, StringComparison.Ordinal)) return true;
         }
 

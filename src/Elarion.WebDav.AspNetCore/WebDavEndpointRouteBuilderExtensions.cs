@@ -91,6 +91,28 @@ public static class WebDavEndpointRouteBuilderExtensions {
 
     // RFC 6764 §5: the well-known URI redirects to the context path and serves nothing itself. iOS, Thunderbird and DAVx5
     // send PROPFIND here, so every method is redirected; the Location is relative, so it keeps the scheme the client used.
+    /// <summary>
+    /// The request path below the prefix, still percent-encoded as the client sent it. The dispatcher decodes it once;
+    /// <see cref="HttpRequest.Path"/> is already decoded, and re-encoding it would keep a literal "%20" in a name as "%20",
+    /// which the dispatcher would decode a second time (Apple caldavtester M-09: "%2520" names a member called "%20").
+    /// </summary>
+    internal static string EscapedPathBelow(HttpContext context, PathString prefix) {
+        var request = context.Request;
+        var raw = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpRequestFeature>()?.RawTarget;
+        if (string.IsNullOrEmpty(raw) || raw[0] != '/') {
+            // No origin-form target (a test server, an absolute-form request): re-encode the decoded path.
+            var path = request.Path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase, out var rest) ? rest : request.Path;
+            return path.ToUriComponent();
+        }
+
+        var end = raw.IndexOfAny(['?', '#']);
+        if (end >= 0) raw = raw[..end];
+        // Drop as many segments as the path base and the prefix hold; routing matched them on the decoded path already.
+        var skip = (request.PathBase + prefix).Value?.Split('/', StringSplitOptions.RemoveEmptyEntries).Length ?? 0;
+        var below = string.Join('/', raw.Split('/', StringSplitOptions.RemoveEmptyEntries).Skip(skip));
+        return "/" + below + (raw.EndsWith('/') && below.Length > 0 ? "/" : "");
+    }
+
     private static Task RedirectAsync(HttpContext context, PathString prefix) {
         context.Response.StatusCode = StatusCodes.Status301MovedPermanently;
         context.Response.Headers.Location = (context.Request.PathBase + prefix).Add("/").ToUriComponent();
@@ -107,7 +129,6 @@ public static class WebDavEndpointRouteBuilderExtensions {
         services.SeedScope(dispatchContext);
 
         var request = context.Request;
-        var path = request.Path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase, out var rest) ? rest : request.Path;
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var name in (ReadOnlySpan<string>)["Depth", "If-Match", "If-None-Match", "Prefer", "Brief", "CalDAV-Timezones"])
             if (request.Headers.TryGetValue(name, out var value))
@@ -115,7 +136,7 @@ public static class WebDavEndpointRouteBuilderExtensions {
 
         var response = await services.GetRequiredService<DavDispatcher>().HandleAsync(new DavRequest {
             Method = request.Method,
-            Path = path.ToUriComponent(),
+            Path = EscapedPathBelow(context, prefix),
             HrefBase = (request.PathBase + prefix).ToUriComponent(),
             Headers = headers,
             Body = request.Body,

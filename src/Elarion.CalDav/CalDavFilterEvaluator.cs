@@ -22,7 +22,7 @@ public static class CalDavFilterEvaluator {
     private static readonly DateTimeOffset Latest = new(2200, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     /// <summary>The collations <c>text-match</c> supports.</summary>
-    public static IReadOnlyList<string> Collations { get; } = ["i;ascii-casemap", "i;unicode-casemap", "i;octet"];
+    public static IReadOnlyList<string> Collations => DavTextMatch.Collations;
 
     /// <summary>Whether <paramref name="calendar"/> matches <paramref name="filter"/>, a <c>C:filter</c> element.</summary>
     /// <param name="calendar">The calendar object, read by <see cref="CalendarReader"/>.</param>
@@ -44,12 +44,25 @@ public static class CalDavFilterEvaluator {
     /// <c>VCALENDAR</c> at the top, names on every filter, parseable <c>time-range</c>s with a start or an end, known
     /// collations.
     /// </summary>
-    public static string? Validate(DavXmlElement? filter) {
+    public static string? Validate(DavXmlElement? filter) => Check(filter, out _);
+
+    /// <summary>
+    /// The problem of <paramref name="filter"/> and the precondition it answers (RFC 4791 §7.5.1: an unknown collation is
+    /// <c>supported-collation</c>, any other problem <c>valid-filter</c>), or <see langword="null"/> when it is valid.
+    /// </summary>
+    internal static string? Check(DavXmlElement? filter, out DavName condition) {
+        condition = DavNames.C.ValidFilter;
         if (filter is null || !filter.Is(DavNames.C.Filter)) return "The calendar-query needs a CALDAV:filter element.";
         var tops = filter.ChildrenNamed(DavNames.C.CompFilter).ToList();
         if (tops.Count != 1 || !string.Equals(tops[0].Attribute("name"), "VCALENDAR", StringComparison.OrdinalIgnoreCase))
             return "The filter must hold exactly one comp-filter named VCALENDAR.";
-        return ValidateElement(tops[0]);
+        // A calendar has no time of its own; sabre/dav refuses it rather than match nothing (Radicale and Xandikos apply it
+        // to the children instead).
+        if (tops[0].Child(DavNames.C.TimeRange) is not null) return "A time-range applies to a component below VCALENDAR, not to VCALENDAR.";
+        var problem = ValidateElement(tops[0]);
+        if (problem is not null && problem.StartsWith("The collation", StringComparison.Ordinal))
+            condition = new DavName(DavNames.CalDav, "supported-collation");
+        return problem;
 
         static string? ValidateElement(DavXmlElement element) {
             if ((element.Is(DavNames.C.CompFilter) || element.Is(DavNames.C.PropFilter) || element.Is(DavNames.C.ParamFilter))
@@ -175,21 +188,10 @@ public static class CalDavFilterEvaluator {
         }
 
         private static bool TextMatches(string value, DavXmlElement textMatch) {
-            var needle = textMatch.Text;
-            var comparison = textMatch.Attribute("collation") switch {
-                "i;octet" => StringComparison.Ordinal,
-                "i;unicode-casemap" => StringComparison.OrdinalIgnoreCase,
-                _ => StringComparison.Ordinal,
-            };
-            bool found;
-            if (textMatch.Attribute("collation") is null or "i;ascii-casemap") found = AsciiFold(value).Contains(AsciiFold(needle), StringComparison.Ordinal);
-            else found = value.Contains(needle, comparison);
+            // RFC 4791 §9.7.5: i;ascii-casemap is CalDAV's default collation, and contains its only match type.
+            var found = DavTextMatch.Matches(value, textMatch.Text, textMatch.Attribute("collation") ?? DavTextMatch.AsciiCasemap, DavMatchType.Contains);
             var negate = string.Equals(textMatch.Attribute("negate-condition"), "yes", StringComparison.OrdinalIgnoreCase);
             return found != negate;
-
-            static string AsciiFold(string text) => string.Create(text.Length, text, static (span, source) => {
-                for (var i = 0; i < source.Length; i++) span[i] = source[i] is >= 'a' and <= 'z' ? (char)(source[i] - 32) : source[i];
-            });
         }
 
         private bool MatchTimeRange(CalendarComponent component, DavXmlElement timeRange) {
@@ -203,6 +205,8 @@ public static class CalDavFilterEvaluator {
                 }
                 case "VJOURNAL": {
                     if (component.FindProperty("DTSTART") is not { } dtStart || !dtStart.TryGetDateTime(out var value, _resolve)) return false;
+                    if (component.FindProperty("RRULE") is not null || component.FindProperty("RDATE") is not null)
+                        return JournalOccurrences(component, start, end).Any(o => EventMatches(o, start, end));
                     if (value.ToUtc(_zone) is not { } s) return false;
                     return value.IsDate ? start < s.AddDays(1) && end > s : start <= s && end > s;
                 }
@@ -223,6 +227,18 @@ public static class CalDavFilterEvaluator {
             var series = _calendar.Items.Where(other => other.Uid == item.Uid).ToList();
             if (series.Count == 0) series = [item];
             return CalendarRecurrence.Expand(series, from, to, _caps).Occurrences.Where(o => ReferenceEquals(o.Item, item));
+        }
+
+        // A recurring journal (Radicale's yearly journal) expands as an event without an end would: an instant for a
+        // DATE-TIME start, its day for a DATE start, which is exactly the journal row of RFC 4791 §9.9.
+        private IEnumerable<CalendarOccurrence> JournalOccurrences(CalendarComponent journal, DateTimeOffset start, DateTimeOffset end) {
+            var asEvent = new CalendarComponent("VEVENT");
+            foreach (var property in journal.Properties.Where(static p => p.Name is not ("DTEND" or "DURATION"))) asEvent.Properties.Add(property.Clone());
+            if (asEvent.FindProperty("DTSTAMP") is null) asEvent.Properties.Add(CalendarProperty.Timestamp("DTSTAMP", Earliest));
+            if (!CalendarEvent.TryFromComponent(asEvent, out var item, out _) || item is null) return [];
+            var from = start == Earliest ? start : start.AddMinutes(-1);
+            var to = end == Latest ? end : end.AddMinutes(1);
+            return CalendarRecurrence.Expand([item], from, to, _caps).Occurrences;
         }
 
         // RFC 4791 §9.9, VEVENT.
@@ -288,6 +304,19 @@ public static class CalDavFilterEvaluator {
             var index = parent.Components.Where(static c => c.Name == "VALARM").ToList().IndexOf(component);
             if (index < 0 || index >= item.Alarms.Count) return false;
             var alarm = item.Alarms[index];
+            // An absolute trigger fires at its own time (and its repetitions), whichever occurrence it belongs to; widening
+            // the expansion by it would have to reach arbitrarily far (sabre Q69/Q77).
+            if (alarm.AbsoluteTrigger is { } absolute) {
+                var step = alarm.RepeatInterval ?? TimeSpan.Zero;
+                for (var k = 0; k <= Math.Max(alarm.Repeat, 0); k++) {
+                    var time = absolute + step * k;
+                    if (start <= time && end > time) return true;
+                    if (step <= TimeSpan.Zero) break;
+                }
+
+                return false;
+            }
+
             var reach = TimeSpan.FromDays(1) + (alarm.Trigger is { } trigger ? trigger.Duration() : TimeSpan.Zero)
                                               + (alarm.RepeatInterval is { } interval ? interval * Math.Max(alarm.Repeat, 0) : TimeSpan.Zero);
             var from = start == Earliest ? start : start - reach;

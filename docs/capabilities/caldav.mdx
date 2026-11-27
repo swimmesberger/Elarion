@@ -16,6 +16,8 @@ answers the calendar apps' WebDAV requests from it, so sync is exact on every no
 | `Elarion.WebDav.AspNetCore` | The host: `MapElarionDav()`, `/.well-known/caldav`, the app-password scheme on the DAV routes only. |
 | `Elarion.AppPasswords` (+ `.EntityFrameworkCore`, `.AspNetCore`) | The credential calendar apps send: see [App passwords](/docs/capabilities/app-passwords). |
 
+Address books are served from the same packages and host by [CardDAV](/docs/capabilities/carddav).
+
 Why it is shaped this way, and what was rejected, is in
 [ADR-0111](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0111-caldav.md).
 
@@ -215,18 +217,22 @@ stored.State = step.Value.State;                                  // a string; s
 ```
 
 - **Discovery** asks the URL for `current-user-principal`, then `/.well-known/caldav`, then `calendar-home-set` on the
-  principal at depth 0 (iCloud refuses depth 1 there), then lists the home's calendars with their names, colors,
-  component kinds, whether they are writable, and whether they offer `sync-collection`.
+  principal at depth 0 (iCloud refuses depth 1 there), then lists the calendars of every home (`HomeUrls`) with their
+  names, colors, component kinds, whether they are writable, and whether they offer `sync-collection`. A URL that
+  answers without `current-user-principal` but names a home (Synology) is the principal; a principal without
+  `calendar-home-set` (a Nextcloud share) is its own home.
 - **A sync step** uses `sync-collection` when the calendar offers it, and compares the ETags of a full listing when it
-  does not (after a `getctag` check) or when the server refuses the token (`403`, `409`, `412`). Changed objects are
-  fetched with `calendar-multiget` in batches of `MultigetBatchSize`; an object a multiget answers `404` for (Zimbra) is
-  a removal. At most `MaxObjectsPerStep` objects are fetched per step; the rest follow in the next. A name can appear in
+  does not (after a `getctag` check) or when the server refuses the token (`400`, `403`, `409`, `412`; a `500` stays an
+  error). Changed objects are fetched with `calendar-multiget` in batches of `MultigetBatchSize`, by the href the server
+  listed; an object a multiget answers `404` for (Zimbra) or leaves out (sabre-based servers) is a removal. A truncated
+  answer sets `HasMore` only while its token moves. At most `MaxObjectsPerStep` objects are fetched per step; the rest follow in the next. A name can appear in
   `Removed` again in a later step; removing is idempotent.
 - **Credentials** come from the `Authorization` delegate per request: an app password as Basic, or an OAuth bearer
   token the application refreshes (Google's CalDAV endpoint accepts only that).
 - **Writes**: `PutAsync(calendar, name, calendarObject, ifMatch)` sends `If-Match`, or `If-None-Match: *` to create;
-  `DeleteAsync` sends `If-Match`. A failed precondition is `caldav.conflict`. The new ETag is returned when the server
-  sends a strong one, else `null` and the next step fetches it.
+  `DeleteAsync` sends `If-Match`. A failed precondition (`412`) or a conflict (`409`) is `caldav.conflict`, and a `207`
+  that reports a failed member fails the write. The new ETag is returned when the server sends a strong one (a bare or
+  percent-encoded one is quoted), else `null` and the next step fetches it. Redirects from https to http are not followed.
 - **What the server sends is input.** A refused credential (`caldav.unauthorized`), a refused request
   (`caldav.forbidden`), a missing calendar (`caldav.not_found`), another error status (`caldav.server_error`), an answer
   that is not WebDAV (`caldav.invalid_response`) or over a limit (`caldav.too_large`, with the limit) is a result with a

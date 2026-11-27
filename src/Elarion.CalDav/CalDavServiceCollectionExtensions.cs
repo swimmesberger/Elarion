@@ -38,9 +38,7 @@ public static class CalDavServiceCollectionExtensions {
         if (configuration is not null) builder.Configure(options => Bind(configuration, options));
         if (configure is not null) builder.Configure(configure);
         builder.ValidateOnStart();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<CalDavOptions>, CalDavSourceHandlerValidator>());
-
-        services.TryAddSingleton<CalDavSourceRegistry>();
+        DavSources.AddRegistry<CalDavSourceListing, CalDavOptions>(services, CalDavSourceKind.Value);
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IDavProtocol, CalDavProtocol>());
         services.TryAddScoped<ICalDavPublisher, CalDavPublisher>();
         services.TryAddSingleton<CalDavLinks>();
@@ -61,18 +59,7 @@ public static class CalDavServiceCollectionExtensions {
     /// </remarks>
     public static IServiceCollection AddElarionCalDavSource<TQuery>(this IServiceCollection services) where TQuery : ICalDavSource<TQuery>, new() {
         ArgumentNullException.ThrowIfNull(services);
-        var name = TQuery.SourceName;
-        if (!CalDavAddress.IsValidSegment(name))
-            throw new InvalidOperationException(
-                $"The calendar source {typeof(TQuery).Name} is named '{name}'; a source name must be 1 to 64 ASCII letters, digits, '-' or '_'.");
-        foreach (var descriptor in services)
-            if (descriptor.ServiceType == typeof(CalDavSourceRegistration) && descriptor.ImplementationInstance is CalDavSourceRegistration existing
-                                                                           && existing.Name == name)
-                throw new InvalidOperationException($"Two calendar sources are named '{name}'; {typeof(TQuery).Name} must use another name.");
-
-        services.AddSingleton(new CalDavSourceRegistration(name, typeof(TQuery), typeof(IHandler<TQuery, Result<CalDavSourceListing>>),
-            static (provider, cancellationToken) =>
-            provider.GetRequiredService<IHandler<TQuery, Result<CalDavSourceListing>>>().HandleAsync(new TQuery(), cancellationToken)));
+        DavSources.Register<TQuery, CalDavSourceListing, CalDavOptions>(services, TQuery.SourceName, CalDavSourceKind.Value);
         return services;
     }
 

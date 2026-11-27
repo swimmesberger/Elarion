@@ -1,0 +1,177 @@
+---
+title: CardDAV
+description: Publish an application's contacts read-only as address books to iOS, macOS, Thunderbird, DAVx5 and Evolution, decide who sees which address book in a handler, and serve them beside calendars from the same host and app passwords, NativeAOT-safe and exact on several nodes over one PostgreSQL.
+icon: Contact
+---
+
+People see the application's customers, colleagues and suppliers in the contacts app they already use. A module
+publishes contacts in the handler that changes its data; the framework keeps them in the same store, journal and host
+as [CalDAV](/docs/capabilities/caldav), so sync is exact on every node and after every restart, and one app password
+serves calendars and address books alike.
+
+| Package | Role |
+| --- | --- |
+| `Elarion.CardDav` | Address-book sources, `ICardDavPublisher`, the address-book properties and reports. NativeAOT-safe. |
+| `Elarion.WebDav`, `Elarion.WebDav.EntityFrameworkCore`, `Elarion.WebDav.AspNetCore` | The WebDAV core, the store and the host, shared with CalDAV: see [CalDAV](/docs/capabilities/caldav#the-host). |
+| `Elarion.AppPasswords` (+ `.EntityFrameworkCore`, `.AspNetCore`) | The credential contacts apps send: see [App passwords](/docs/capabilities/app-passwords). |
+| `Elarion.Contacts` | The contact model, reader and writer: see [Contacts](/docs/capabilities/contacts). |
+
+Why it is shaped this way, and what was left out, is in
+[ADR-0113](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0113-carddav-address-books.md), on top of
+[ADR-0111](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0111-caldav.md).
+
+## Getting started
+
+```bash
+dotnet add package Elarion.CardDav
+dotnet add package Elarion.WebDav.EntityFrameworkCore
+dotnet add package Elarion.WebDav.AspNetCore
+```
+
+```csharp
+builder.Services.AddElarionWebDavEntityFrameworkCore<AppDbContext>(builder.Configuration.GetSection("WebDav"));
+builder.Services.AddElarionCardDav(builder.Configuration.GetSection("CardDav"));
+// app passwords and MapElarionDav() as on the CalDAV page; nothing else changes on the host
+```
+
+`MapElarionDav()` serves every registered DAV protocol: with `AddElarionCardDav` it also answers
+`/dav/addressbooks/{user}/…` and `/.well-known/carddav`, and `OPTIONS` names `addressbook` beside `calendar-access`. A
+person adds a CardDAV account with the host name, their e-mail and an app password of scope `dav`; DAVx5 and Evolution
+find calendars and address books in one account, iOS, macOS and Thunderbird add contacts as an account of its own with
+the same credentials.
+
+## Address-book sources: who sees which address book
+
+A module declares an **address-book source**: a query request implementing `ICardDavSource<TSelf>`, whose static
+`SourceName` names it, and an ordinary handler that returns the address books of the source the current user may see.
+
+```csharp
+public sealed record CustomerAddressBooks : ICardDavSource<CustomerAddressBooks> {
+    public static string SourceName => "customers";
+}
+
+[RequirePermission("customers", Verbs.Read)]
+public sealed class ListCustomerAddressBooks : IHandler<CustomerAddressBooks, Result<CardDavSourceListing>> {
+    public ValueTask<Result<CardDavSourceListing>> HandleAsync(CustomerAddressBooks query, CancellationToken ct) =>
+        ValueTask.FromResult(Result<CardDavSourceListing>.Success(new CardDavSourceListing([
+            new PublishedAddressBookInfo(Key: "all", DisplayName: "Customers") { Description = "Every active customer" },
+        ])));
+}
+
+// in the module's ConfigureServices, so a disabled module registers no source
+services.AddElarionCardDavSource<CustomerAddressBooks>();
+```
+
+Sources behave as calendar sources do: every DAV request invokes them through the handler pipeline as the
+authenticated user, so `[RequirePermission]`, resource rules and `[FeatureGate]` apply; a source that answers
+not-found, forbidden or unauthorized shows no address books; an address book no source returns, and another user's
+home, answer `404`. Leave `[Handler]` off the handler. Names and keys are 1 to 64 ASCII letters, digits, `-` and `_`,
+the URL segment is `{source}.{key}`, and a source whose handler is not registered stops the host from starting. An
+address-book source and a calendar source may share a name; they share nothing else.
+
+### One address book per account on Apple devices
+
+macOS Contacts downloads one address book of an account, and which one is not predictable; iOS at best merges them into
+one list. Thunderbird, DAVx5 and Evolution list every address book and let the person choose. If your users are on
+Apple devices, publish **one address book per user** that holds every contact they may see, for example a source that
+returns a single "Contacts" book keyed by the user, beside or instead of finer ones:
+
+```csharp
+new PublishedAddressBookInfo(Key: $"u-{user.UserId}", DisplayName: "Contacts")
+```
+
+Publishing then writes a contact into the books of every user who may see it, as per-viewer calendars do.
+
+## Publishing contacts
+
+The handler that changes the application's data publishes the contacts it changes, in its own transaction:
+
+```csharp
+public sealed class CreateCustomer(AppDbContext db, ICardDavPublisher addressBooks) : IHandler<CreateCustomer.Command, Result<Guid>> {
+    public async ValueTask<Result<Guid>> HandleAsync(Command command, CancellationToken ct) {
+        // ... write the customer
+        await addressBooks.PublishAsync(new CardDavAddress("customers", "all"), new Contact {
+            Uid = customer.Id.ToString(),
+            FormattedName = customer.Name,
+            Emails = [new ContactEmail(customer.Email) { Types = ContactTypes.Work }],
+        }, ct);
+        return customer.Id;
+    }
+}
+```
+
+| Call | Does |
+| --- | --- |
+| `PublishAsync(address, contact)` | Adds or replaces the contact of its UID; `false` when the written bytes equal the stored ones. |
+| `RemoveAsync(address, uid)` | Removes it; clients syncing receive it as removed. |
+| `ReplaceAsync(address, contacts)` | Makes the set the address book's whole content, recording only what differs; two contacts of one UID throw before anything changes. |
+
+The publisher writes the `Contact` with `ContactWriter` as **vCard 3.0**, the version Apple asks for and every client
+reads, under the name `{uid}.vcf` (a hash for a UID with other characters); the strong ETag is a hash of the bytes. The
+writer writes no clock value, so publishing an unchanged contact changes nothing, not even the sync token. A contact
+without `Uid`, or with nothing to show as its name (`DisplayName` empty: no formatted name, name, organization, e-mail
+or phone), throws: Apple drops a card without `FN`. Keep photos under 224 KiB, the largest iCloud accepts; DAVx5 shrinks
+photos over 1 MB.
+
+## Address books as contacts apps see them
+
+- **Properties.** The principal answers `addressbook-home-set`; address books answer `resourcetype` with `addressbook`,
+  `displayname`, `addressbook-description`, `supported-address-data` (vCard 3.0 and 4.0), `supported-collation-set`,
+  `sync-token` and `getctag`. Properties Apple asks about and the server does not keep (`me-card`, `max-image-size`,
+  `directory-gateway`) answer `404` inside the `multistatus`, which Apple tolerates.
+- **Reports.** `sync-collection`, `addressbook-multiget` and `addressbook-query`.
+- **Versions.** `address-data` without a version answers the stored vCard 3.0; `version="4.0"` answers the same contact
+  written as 4.0 (DAVx5 and Evolution prefer it), with the same ETag; another version or content type answers `403`
+  with `supported-address-data`. `GET` answers 3.0 unless `Accept` ranks `text/vcard; version=4.0` higher.
+  `address-data` naming properties answers only those, plus `VERSION`, `UID` and `FN`.
+- **Search.** `addressbook-query` matches `prop-filter`, `param-filter` and `text-match` (`equals`, `contains`,
+  `starts-with`, `ends-with`; collations `i;unicode-casemap` by default, `i;ascii-casemap`, `i;octet`;
+  `negate-condition`, `is-not-defined`, `test="anyof|allof"`) against each card's properties, including `X-` properties
+  and grouped ones such as Apple's `item1.EMAIL`. A query without a filter answers every contact, a `limit` lower than
+  the matches answers that many and a `507`. Nothing is indexed: every card is read per query, which suits the few
+  thousand contacts of an address book; the clients search their local copy and rarely send a query.
+- **Read-only.** Every address book grants `read` and `read-current-user-privilege-set` only, and `PUT`, `DELETE`,
+  `PROPPATCH`, `MKCOL`, `MOVE` and `COPY` answer `403` with `need-privileges`. Thunderbird, DAVx5 and Evolution show the
+  address book as read-only; DAVx5 reverts a local edit at the next sync. On iOS, editing such a contact may show an
+  alert or copy it into the default account, and an account whose address books are all read-only cannot be iOS's
+  default contacts account.
+
+## Groups
+
+A group is a contact of kind `ContactKind.Group` whose `Members` reference the contacts in it, published like any
+contact, usually into the same address book:
+
+```csharp
+await addressBooks.PublishAsync(new CardDavAddress("customers", "all"), new Contact {
+    Uid = $"team-{team.Id}",
+    FormattedName = team.Name,
+    Kind = ContactKind.Group,
+    Members = [.. team.MemberIds.Select(id => ContactMember.FromUid(id.ToString()))],
+}, ct);
+```
+
+The stored card is Apple's form (`X-ADDRESSBOOKSERVER-KIND:group`, `X-ADDRESSBOOKSERVER-MEMBER`); a client asking for
+vCard 4.0 gets `KIND:group` with `MEMBER`, under the same ETag, and an `addressbook-query` on `KIND` or `MEMBER` finds
+either form. Apple's Contacts shows groups as groups, which is the only way to show subsets within the one address book
+it reads per account; DAVx5 does when the account uses "groups are separate vCards", and in its "categories" mode
+groups by `Categories`, which the application sets on the members if it wants both; Thunderbird shows a group as a
+plain card. Members are not checked against the address book. A group counts one property per member against
+`CardDav:ContactRead:MaxPropertiesPerContact` (1,000 by default): publishing a larger one throws until the limit is
+raised.
+
+## What is not there
+
+Two-way editing, a CardDAV client, vCard feed URLs (no contacts app subscribes to a URL; Outlook and Google Contacts
+import a `.vcf` file, which `ContactWriter.ToStreamedFile` produces) and Apple's directory gateway.
+
+## Configuration
+
+`AddElarionCardDav(configuration)` binds `CardDavOptions` from the `CardDav` section. Contact data uses
+`Elarion.Contacts`' own options:
+
+| Key | Default |
+| --- | --- |
+| `CardDav:ContactRead:MaxBytes` (and the other `ContactReadOptions` keys) | `33554432` |
+| `CardDav:ContactRead:MaxPropertiesPerContact` (also the largest card, so the largest group, that can be published) | `1000` |
+
+The store, journal and request limits are `WebDav`'s; see [CalDAV](/docs/capabilities/caldav#configuration).

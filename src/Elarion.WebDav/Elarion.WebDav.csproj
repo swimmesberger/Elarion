@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>The WebDAV core of Elarion's CalDAV support (ADR-0111), without a wire: a hardened XML reader and a forward XML writer, the DavDispatcher for OPTIONS, PROPFIND, REPORT and GET over principals, homes, published collections and their objects, RFC 6578 sync-collection with durable sync tokens, the IDavCollectionStore seam of the published-collection store and its change journal, and the IDavProtocol seam CalDAV (and later CardDAV) plugs into. No ASP.NET Core, no EF Core, no reflection.</Description>
+    <Description>The WebDAV core of Elarion's CalDAV and CardDAV support (ADR-0111), without a wire: a hardened XML reader and a forward XML writer, the DavDispatcher for OPTIONS, PROPFIND, REPORT and GET over principals, homes, published collections and their objects, RFC 6578 sync-collection with durable sync tokens, the IDavCollectionStore seam of the published-collection store and its change journal, and the IDavProtocol seam CalDAV and CardDAV plug into. No ASP.NET Core, no EF Core, no reflection.</Description>
     <PackageTags>elarion;webdav;caldav;carddav;rfc4918;rfc6578;sync;dotnet</PackageTags>
     <IsAotCompatible>true</IsAotCompatible>
     <!-- AddElarionWebDav(IConfiguration) binds through the configuration-binding source generator, not the reflection binder. -->
@@ -22,6 +22,7 @@
     <InternalsVisibleTo Include="Elarion.Tests"/>
     <!-- The protocol packages share the XML name tables and the hardened reader settings, not a public surface. -->
     <InternalsVisibleTo Include="Elarion.CalDav"/>
+    <InternalsVisibleTo Include="Elarion.CardDav"/>
     <InternalsVisibleTo Include="Elarion.WebDav.AspNetCore"/>
     <InternalsVisibleTo Include="Elarion.WebDav.EntityFrameworkCore"/>
   </ItemGroup>
