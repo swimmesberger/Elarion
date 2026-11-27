@@ -17,8 +17,9 @@ internal sealed class ContentLineRules {
     /// groups, bare parameters, <c>CHARSET</c>, quoted-printable soft breaks, Base64 ending at a blank line, and
     /// <c>#</c> comment lines, and a byte-order mark at the start of a line.
     /// </summary>
-    public static ContentLineRules VCard(int maxLineBytes, Func<ReadOnlySpan<byte>, int>? lineLimitFor = null) => new() {
+    public static ContentLineRules VCard(int maxLineBytes, Func<ReadOnlySpan<byte>, int>? lineLimitFor = null, int maxParameters = int.MaxValue) => new() {
         MaxLineBytes = maxLineBytes,
+        MaxParameters = maxParameters,
         UnfoldAllWhitespace = true,
         AllowGroups = true,
         AllowBareParameters = true,
@@ -32,6 +33,12 @@ internal sealed class ContentLineRules {
 
     /// <summary>The longest unfolded line kept, in bytes; a longer one is consumed and reported as too long.</summary>
     public int MaxLineBytes { get; init; }
+
+    /// <summary>
+    /// The most parameter values of one line, a bare parameter and a parameter without a value counting one each; the
+    /// tokenizer stops at the first one past it, so a line of millions of empty parameters costs no more than the limit.
+    /// </summary>
+    public int MaxParameters { get; init; } = int.MaxValue;
 
     /// <summary>A continuation line loses every leading space and tab (vCard), not just the first one (iCalendar).</summary>
     public bool UnfoldAllWhitespace { get; init; }

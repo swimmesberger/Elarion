@@ -90,7 +90,7 @@ public sealed class ContactWriterTests {
         text.Should().Contain("X-ANNIVERSARY:2010-06-12\r\n");
         text.Should().Contain("item4.X-ABDATE:2010-06-12\r\nitem4.X-ABLabel:_$!<Anniversary>!$_\r\n");
         text.Should().Contain("item2.TEL;TYPE=WORK,FAX:+43 1 234\r\nitem2.X-ABLabel:Office fax\r\n");
-        text.Should().Contain("TEL;TYPE=CELL,VOICE,pref:+43 660 1234567\r\n");
+        text.Should().Contain("TEL;TYPE=CELL,VOICE,PREF:+43 660 1234567\r\n");
         text.Should().Contain("X-ABShowAs:COMPANY\r\n");
         text.Should().Contain("PHOTO;VALUE=uri:https://example.com/logo.png\r\n");
         text.Should().Contain("N:;;;;\r\n");
@@ -367,13 +367,25 @@ public sealed class ContactWriterTests {
         (await ReadAsync(text)).Contacts.Single().Urls.Single().Value.Should().Be("https://example.com/a;b,c?x=1");
     }
 
+    [Theory]
+    [InlineData(ContactFormatVersion.V3_0)]
+    [InlineData(ContactFormatVersion.V4_0)]
+    public async Task AWebAddressWithALineBreakOrTab_IsWrittenWithoutThem_AsAUrlParserReadsIt(ContactFormatVersion version) {
+        var contact = new Contact { FormattedName = "A", Urls = [new ContactUrl("https://example.com/\r\nX-EVIL:1\tz")] };
+
+        var text = await WriteAsync([contact], version);
+
+        text.Should().Contain("URL:https://example.com/X-EVIL:1z\r\n").And.NotContain("\r\nX-EVIL");
+        (await ReadAsync(text)).Contacts.Single().Urls.Single().Value.Should().Be("https://example.com/X-EVIL:1z");
+    }
+
     [Fact]
-    public async Task AWebAddressWithALineBreak_FailsTheWrite() {
-        var contact = new Contact { FormattedName = "A", Urls = [new ContactUrl("https://example.com/\r\nX-EVIL:1")] };
+    public async Task ATelUriWithALineBreak_IsWrittenWithoutIt() {
+        var contact = new Contact { FormattedName = "A", Phones = [new ContactPhone("tel:+43-1-\n234")] };
 
-        var write = async () => await WriteAsync([contact]);
+        var text = await WriteAsync([contact], ContactFormatVersion.V4_0);
 
-        (await write.Should().ThrowAsync<ContactWriteException>()).Which.Property.Should().Be("URL");
+        text.Should().Contain("TEL;VALUE=uri:tel:+43-1-234\r\n");
     }
 
     [Fact]
@@ -451,5 +463,39 @@ public sealed class ContactWriterTests {
 
         Encoding.UTF8.GetString(stream.ToArray()).Should().Be(expected);
         ContactWriter.ToText(Organization).Should().Be(await WriteAsync([Organization]));
+    }
+
+    [Fact]
+    public async Task APropertyList_IsWrittenSynchronouslyInItsOwnOrderAndSpelling() {
+        var card = new List<ContactProperty> {
+            new("UID", "u-1"),
+            new(null, "EMAIL", [new ContactParameter("type", ["INTERNET", "pref"])], "a@example.com"),
+            new("FN", "Ada"),
+        };
+        var expected = await WriteCardsAsync([card]);
+        using var stream = new MemoryStream();
+
+        ContactWriter.Write(stream, [card, card]);
+        var text = ContactWriter.ToText(card, new ContactWriteOptions { FoldLines = false });
+
+        text.Should().Be("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:u-1\r\nEMAIL;type=INTERNET,pref:a@example.com\r\nFN:Ada\r\nEND:VCARD\r\n");
+        text.Should().Be(expected);
+        Encoding.UTF8.GetString(stream.ToArray()).Should().Be(expected + expected);
+    }
+
+    [Fact]
+    public void APropertyListTheWriterCannotRepresent_FailsTheSynchronousWrite() {
+        var write = () => ContactWriter.ToText([new ContactProperty("FN", "A\r\nX-EVIL:1")]);
+
+        write.Should().Throw<ContactWriteException>().Which.Property.Should().Be("FN");
+    }
+
+    private static async Task<string> WriteCardsAsync(IEnumerable<IReadOnlyList<ContactProperty>> cards) {
+        using var stream = new MemoryStream();
+        await using (var writer = ContactWriter.Create(stream)) {
+            foreach (var card in cards) await writer.AddAsync(card, TestCancellation);
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
     }
 }

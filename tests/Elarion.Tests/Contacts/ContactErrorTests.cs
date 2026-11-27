@@ -188,4 +188,36 @@ public sealed class ContactErrorTests {
         Assert.Single(utf16Text.FileErrors).MediaType.Should().BeNull();
         text.FileErrors[0].Message.Should().Be("The file holds no vCard.");
     }
+
+    [Theory]
+    [InlineData(ContactErrorCodes.Unreadable, true)]
+    [InlineData(ContactErrorCodes.TooLarge, true)]
+    [InlineData(ContactErrorCodes.TooManyContacts, true)]
+    [InlineData(ContactErrorCodes.TooManyPropertiesInFile, true)]
+    [InlineData(ContactErrorCodes.TooManyProperties, true)]
+    [InlineData(ContactErrorCodes.TooManyParameters, true)]
+    [InlineData(ContactErrorCodes.LineTooLong, true)]
+    [InlineData(ContactErrorCodes.MalformedLine, true)]
+    [InlineData(ContactErrorCodes.UnexpectedEnd, true)]
+    [InlineData(ContactErrorCodes.TooManyErrors, false)]
+    [InlineData(ContactErrorCodes.InvalidValue, false)]
+    [InlineData(ContactErrorCodes.PartialDate, false)]
+    [InlineData(ContactErrorCodes.PhotoTooLarge, false)]
+    [InlineData(ContactErrorCodes.UnknownCharset, false)]
+    [InlineData(ContactErrorCodes.Empty, false)]
+    [InlineData("import.duplicate", false)]
+    public void IsStructural_NamesTheErrorsAboutTheFilesForm(string code, bool structural) =>
+        ContactErrorCodes.IsStructural(code).Should().Be(structural);
+
+    [Fact]
+    public async Task ACompleteReadPastMaxErrors_HasOnlyANonStructuralFileError() {
+        var builder = new StringBuilder();
+        for (var i = 0; i < 20; i++) builder.Append(Card($"FN:Person {i}", "BDAY:soon"));
+
+        var result = await ReadAsync(builder.ToString(), new ContactReadOptions { MaxErrors = 5 });
+
+        result.Entries.Should().HaveCount(20).And.OnlyContain(static entry => entry.HasValue);
+        Assert.Single(result.FileErrors).Code.Should().Be(ContactErrorCodes.TooManyErrors);
+        result.FileErrors.Any(static e => ContactErrorCodes.IsStructural(e.Code)).Should().BeFalse("the read is complete");
+    }
 }

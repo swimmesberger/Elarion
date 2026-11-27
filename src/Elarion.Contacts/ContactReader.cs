@@ -25,7 +25,8 @@ namespace Elarion.Contacts;
 /// <example>
 /// <code>
 /// var result = await reader.ReadAsync(request.Contacts.OpenReadStream(), cancellationToken: ct);
-/// if (result.FileErrors.Count > 0) return result.ToAppError("contacts");
+/// // A file error other than contact.too_many_errors means the read stopped or never started.
+/// if (result.FileErrors.Any(static e => ContactErrorCodes.IsStructural(e.Code))) return result.ToAppError("contacts");
 /// foreach (var contact in result.Contacts)
 ///     db.People.Add(new Person { Name = contact.DisplayName, Email = contact.Emails.FirstOrDefault()?.Address });
 /// </code>

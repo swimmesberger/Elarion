@@ -19,7 +19,8 @@ internal static class VCardFileReader {
         // A photo line may hold the Base64 of MaxPhotoBytes plus its name, parameters and folding slack (FR-050).
         var photoLineLimit = (int)Math.Min(int.MaxValue - 1, (options.MaxPhotoBytes + 2L) / 3 * 4 + 64 * 1024);
         var lineLimit = options.MaxLineBytes;
-        var rules = ContentLineRules.VCard(lineLimit, line => IsPhotoLine(line) ? Math.Max(photoLineLimit, lineLimit) : lineLimit);
+        var rules = ContentLineRules.VCard(
+            lineLimit, line => IsPhotoLine(line) ? Math.Max(photoLineLimit, lineLimit) : lineLimit, options.MaxParametersPerProperty);
 
         var entries = new List<ContactEntry>();
         var fileErrors = new List<ContactError>();
@@ -39,7 +40,8 @@ internal static class VCardFileReader {
 
                 var isTooLong = reader.IsTooLong;
                 ParsedContentLine parsed = default;
-                var isParsed = !isTooLong && ContentLineParser.TryParse(line, rules, decoder, out parsed);
+                var tooManyParameters = false;
+                var isParsed = !isTooLong && ContentLineParser.TryParse(line, rules, decoder, out parsed, out tooManyParameters);
 
                 if (isParsed && parsed.Name == "BEGIN" && IsVCard(parsed.Value)) {
                     sawBegin = true;
@@ -75,7 +77,8 @@ internal static class VCardFileReader {
                 }
 
                 if (!card.CountLine(lineNumber, options)) continue;
-                if (!state.CountLine()) {
+                // FR-090: a parameter costs a result about what a line does, so it counts against the file's budget too.
+                if (!state.CountLine(isParsed ? 1 + ParameterValues(parsed.Parameters) : 1)) {
                     // FR-073: the file-wide bound; the card being read is incomplete and is not kept.
                     fileErrors.Add(state.TooManyProperties(lineNumber));
                     card = null;
@@ -94,6 +97,16 @@ internal static class VCardFileReader {
                             ContactErrorCodes.LineTooLong,
                             $"The line is longer than {reader.Limit.ToString(CultureInfo.InvariantCulture)} bytes.",
                             lineNumber: lineNumber, property: name.Length == 0 ? null : name, limit: reader.Limit));
+                    continue;
+                }
+
+                if (tooManyParameters) {
+                    card.AgentPending = false;
+                    var name = ContentLineParser.PeekName(line, allowGroups: true);
+                    card.Errors.Add(new ContactError(
+                        ContactErrorCodes.TooManyParameters,
+                        $"The line has more than {options.MaxParametersPerProperty.ToString(CultureInfo.InvariantCulture)} parameter values; it was skipped.",
+                        lineNumber: lineNumber, property: name, limit: options.MaxParametersPerProperty));
                     continue;
                 }
 
@@ -138,6 +151,12 @@ internal static class VCardFileReader {
         }
 
         return new ContactReadResult(entries, fileErrors, fileEncoding.ByteOrderMarkEncoding, decoder.UsedFallbackEncoding, state.OmittedErrors);
+    }
+
+    private static int ParameterValues(List<ContentParameter> parameters) {
+        var count = 0;
+        foreach (var parameter in parameters) count += Math.Max(1, parameter.Values.Count);
+        return count;
     }
 
     private static ContactError UnexpectedEnd() =>
@@ -302,18 +321,18 @@ internal static class VCardFileReader {
 
         private readonly Dictionary<string, string> _strings = new(StringComparer.Ordinal);
         private readonly Dictionary<(string Name, string Value), ContactParameter> _parameters = [];
-        private int _lines;
+        private long _lines;
         private int _errors;
 
         /// <summary>The errors over <see cref="ContactReadOptions.MaxErrors"/>, counted and not kept.</summary>
         public int OmittedErrors { get; private set; }
 
-        /// <summary>Counts a line of a card against <see cref="ContactReadOptions.MaxProperties"/>.</summary>
-        public bool CountLine() => ++_lines <= options.MaxProperties;
+        /// <summary>Counts a line of a card and its parameter values (<paramref name="weight"/>) against <see cref="ContactReadOptions.MaxProperties"/>.</summary>
+        public bool CountLine(int weight) => (_lines += weight) <= options.MaxProperties;
 
         public ContactError TooManyProperties(int lineNumber) =>
             new(ContactErrorCodes.TooManyPropertiesInFile,
-                $"The file holds more than {options.MaxProperties.ToString(CultureInfo.InvariantCulture)} properties; the contact being read and the rest were not read.",
+                $"The file holds more than {options.MaxProperties.ToString(CultureInfo.InvariantCulture)} properties and parameters; the contact being read and the rest were not read.",
                 lineNumber: lineNumber, limit: options.MaxProperties);
 
         /// <summary>Keeps as many of <paramref name="errors"/> as <see cref="ContactReadOptions.MaxErrors"/> still allows and counts the rest.</summary>

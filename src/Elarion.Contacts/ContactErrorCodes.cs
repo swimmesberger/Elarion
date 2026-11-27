@@ -41,6 +41,12 @@ public static class ContactErrorCodes {
     /// </summary>
     public const string TooManyErrors = "contact.too_many_errors";
 
+    /// <summary>
+    /// A line has more parameter values than <see cref="ContactReadOptions.MaxParametersPerProperty"/>; the property is
+    /// dropped and the card is read on.
+    /// </summary>
+    public const string TooManyParameters = "contact.too_many_parameters";
+
     /// <summary>An unfolded line is longer than <see cref="ContactReadOptions.MaxLineBytes"/>; the property is dropped.</summary>
     public const string LineTooLong = "contact.line_too_long";
 
@@ -67,4 +73,23 @@ public static class ContactErrorCodes {
 
     /// <summary>A vCard not closed by <c>END:VCARD</c> before the next <c>BEGIN:VCARD</c> or the end of the input; it is read.</summary>
     public const string UnexpectedEnd = "contact.unexpected_end";
+
+    /// <summary>
+    /// Whether <paramref name="code"/> is about the file's form rather than a contact's values (FR-091): the file is not
+    /// a vCard file or past a file limit, a card past a per-card limit or not closed, a line malformed, too long or with
+    /// too many parameters. An application that refuses broken files refuses when one of these occurs; one that imports
+    /// what it can checks only <see cref="ContactReadResult.FileErrors"/> for them, since a structural file error means
+    /// the read stopped or never started. <see cref="TooManyErrors"/> is not structural: the read is complete and only
+    /// the listing of errors stopped. The value errors (<see cref="InvalidValue"/>, <see cref="PartialDate"/>,
+    /// <see cref="PhotoTooLarge"/>, <see cref="UnknownCharset"/>, <see cref="Empty"/>) and an application's own codes are
+    /// not structural either.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// // The file is not a vCard file, or the read stopped early: refuse the upload.
+    /// if (result.FileErrors.Any(static e => ContactErrorCodes.IsStructural(e.Code))) return result.ToAppError("contacts");
+    /// </code>
+    /// </example>
+    public static bool IsStructural(string code) => code is Unreadable or TooLarge or TooManyContacts or TooManyPropertiesInFile
+        or TooManyProperties or TooManyParameters or LineTooLong or MalformedLine or UnexpectedEnd;
 }
