@@ -43,6 +43,7 @@ links every top-level section of the website. `public/` holds the website's stat
 | What a new feature must do, and how it is built | `../specs/` | primary | per feature |
 | How the shipped framework behaves and is used | `concepts/`, `capabilities/`, `reference/`, `tutorial/`, `getting-started/` (`.mdx`) | primary for current behavior and public API | on demand |
 | How the framework is shaped and why | `architecture.md` | secondary, compiled from code, ADRs and the package reference | on demand |
+| A proposed direction that spans several decisions, before they are ADRs and specs | a `type: Concept` page at the top of `docs/` (`packaged-modules.md`) | primary until its decisions are ADRs, then secondary | on demand |
 | How the engineering skills find the tracker and the domain docs | `agents/` | primary, seeded from the skills' setup | by the skills |
 | How we work: steps, practices, skills | `workflow.md` | secondary | on demand, pointed to from `AGENTS.md` |
 | Research notes: a synthesis of outside material, with its URLs | `research/` | secondary, `type: Research note` | on demand |

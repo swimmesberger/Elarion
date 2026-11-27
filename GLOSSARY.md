@@ -93,7 +93,7 @@ _Avoid_: kernel, base, the framework (when the one package is meant)
 A replaceable contract with a fixed shape: the contract and its attribute in Abstractions, the
 transport-neutral decorator in core, the default implementation in an opt-in package. It is designed for its
 strongest intended implementation.
-_Avoid_: extension point (a frontend term here), hook, plug-in point, abstraction layer
+_Avoid_: extension point (a module-owned place others contribute to), hook, plug-in point, abstraction layer
 
 **Provider**:
 A package that implements a seam for one concrete technology. Replacing it changes no handler attribute and no
@@ -402,8 +402,46 @@ interface; it is neither a route system nor a security model.
 _Avoid_: plugin, widget, slot content
 
 **Extension point**:
-A typed place in the frontend shell that modules contribute to.
-_Avoid_: slot, seam (a backend term here), hook
+A typed place that a module or the shell owns and other modules contribute to: on the frontend a token from
+`defineExtensionPoint`, on the backend a module contract the owner consumes as a set. The owner renders, the
+contributor supplies, and no contribution is a designed state.
+_Avoid_: slot, seam (a framework-level replaceable contract), hook, plug-in point
+
+**Bound component**:
+A styled component of Elarion's UI package whose behaviour follows from a framework contract: the data table over
+a list method, the command form, the decision and preview dialogs. Elarion owns its behaviour and structure; the
+application owns its look through design tokens. Proposed in ADR-0112.
+_Avoid_: smart component, widget, framework component
+
+### Packaged modules
+
+**Packaged module**:
+A module that owns its data in a schema of its own and ships as versioned packages (a contract, the module,
+optional providers, a UI package) from a module suite, so several consuming applications compose it. It meets the
+application only through its contract package. Proposed in `docs/packaged-modules.md`.
+_Avoid_: reusable module, portable module, plugin, building block, micro-frontend
+
+**Module suite**:
+One repository that holds packaged modules with the foundation they share (a shared kernel, components several
+of its modules use) and releases all of them as one version.
+_Avoid_: toolbox, catalog (which names a runtime list), marketplace, module library
+
+**Required port**:
+An interface in a packaged module's contract package that the host must implement exactly once; a host without
+it refuses to start and names the module and the port.
+_Avoid_: dependency, host service, driven port (outside a translation)
+
+**Shell contract**:
+What every application's shell gives user interface modules and Elarion's components: the shell's extension
+points and the services they may use (navigation, capabilities, notifications, labels, the client transport).
+It lives in Elarion's headless UI package and fixes what a module counts on, not how the shell looks. Proposed in
+ADR-0112.
+_Avoid_: shell library, app context, host API
+
+**Install test**:
+The check that a packaged module, composed alone into the module suite's reference host with stub required
+ports, migrates a fresh database, starts and passes its own tests.
+_Avoid_: move test, smoke test, integration test (which is broader)
 
 **Request preset**:
 A named value of a handler's request type (`[RequestPreset]` on a static readonly field of the handler), exported
