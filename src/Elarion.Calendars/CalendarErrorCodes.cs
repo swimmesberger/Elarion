@@ -74,6 +74,24 @@ public static class CalendarErrorCodes {
     /// value errors (<see cref="Required"/>, <see cref="InvalidValue"/>, <see cref="UnknownTimeZone"/>,
     /// <see cref="DuplicateUid"/>) and the expansion's are not structural.
     /// </summary>
+    /// <remarks>
+    /// A per-item limit (<see cref="TooManyProperties"/>, <see cref="NestingTooDeep"/>, and <see cref="LineTooLong"/> inside
+    /// an item) is structural, because the item was not read whole. Where an error is reported says what it affects: in
+    /// <see cref="CalendarReadResult.FileErrors"/> the file, in an entry's errors only that item, which has no value when
+    /// a limit stopped it. A lenient importer that skips broken items and keeps the rest therefore looks at the entry, not
+    /// at this method; <see cref="IsLimit"/> tells a limit apart from a broken file.
+    /// </remarks>
     public static bool IsStructural(string code) => code is Unreadable or TooLarge or LineTooLong or TooManyComponents
         or TooManyProperties or NestingTooDeep or MalformedLine or UnexpectedEnd or TooManyLines or TooManyItems or ControlCharacter;
+
+    /// <summary>
+    /// Whether <paramref name="code"/> reports a limit of <see cref="CalendarReadOptions"/> or
+    /// <see cref="CalendarExpandOptions"/> rather than a mistake in the file: <see cref="TooLarge"/>,
+    /// <see cref="LineTooLong"/>, <see cref="TooManyComponents"/>, <see cref="TooManyProperties"/>,
+    /// <see cref="NestingTooDeep"/>, <see cref="TooManyLines"/>, <see cref="TooManyItems"/>,
+    /// <see cref="TooManyOccurrences"/> and <see cref="RecurrenceLimit"/>. Each carries <see cref="CalendarError.Limit"/>
+    /// where it has one; an application words them as "too large or too costly" rather than "broken".
+    /// </summary>
+    public static bool IsLimit(string code) => code is TooLarge or LineTooLong or TooManyComponents or TooManyProperties
+        or NestingTooDeep or TooManyLines or TooManyItems or TooManyOccurrences or RecurrenceLimit;
 }
