@@ -113,6 +113,9 @@ public sealed class TypstRequestTests {
     [InlineData("photo_0001-a.JPG")]
     public void Asset_accepts_a_plain_file_name(string name) {
         new TypstAsset(name, ReadOnlyMemory<byte>.Empty).Name.Should().Be(name);
+        TypstAsset.IsValidName(name).Should().BeTrue();
+        TypstAsset.TryCreate(name, ReadOnlyMemory<byte>.Empty, out var asset).Should().BeTrue();
+        asset!.Name.Should().Be(name);
     }
 
     [Theory]
@@ -128,6 +131,32 @@ public sealed class TypstRequestTests {
         var act = () => new TypstAsset(name, ReadOnlyMemory<byte>.Empty);
 
         act.Should().Throw<ArgumentException>();
+        TypstAsset.IsValidName(name).Should().BeFalse();
+        TypstAsset.TryCreate(name, ReadOnlyMemory<byte>.Empty, out var asset).Should().BeFalse();
+        asset.Should().BeNull();
+    }
+
+    [Fact]
+    public void Asset_name_validation_rejects_null_and_names_longer_than_255_characters() {
+        TypstAsset.IsValidName(null).Should().BeFalse();
+        TypstAsset.IsValidName(new string('a', 255)).Should().BeTrue();
+        TypstAsset.IsValidName(new string('a', 256)).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Json_asset_holds_the_utf8_serialization_of_the_model() {
+        var asset = TypstAsset.FromJson(
+            "letterhead.json", new TypstLetterhead { Company = "Acme Gmbh & Co. KG" }, TypstTestJsonContext.Default.TypstLetterhead);
+
+        asset.Name.Should().Be("letterhead.json");
+        System.Text.Encoding.UTF8.GetString(asset.Content.Span).Should().Be("""{"company":"Acme Gmbh \u0026 Co. KG"}""");
+    }
+
+    [Fact]
+    public void Json_asset_rejects_an_invalid_name() {
+        var act = () => TypstAsset.FromJson("../letterhead.json", new TypstLetterhead { Company = "Acme" }, TypstTestJsonContext.Default.TypstLetterhead);
+
+        act.Should().Throw<ArgumentException>().WithParameterName("name");
     }
 
     [Fact]

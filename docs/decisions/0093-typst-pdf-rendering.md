@@ -115,3 +115,41 @@ decides where a PDF goes (`IBlobStore`, a response, an e-mail).
   It stays an opt-in second implementation of `ITypstCompiler`, not the default.
 - **Returning `Result<TypstPdf>`.** Would make every caller handle infrastructure faults as domain outcomes and would
   differ from `IBlobStore`. Rejected; the document service maps exceptions once.
+
+## Amendment (2026-11-27): unpacking without xz, required packages, and conveniences from the first adoption
+
+The first application to adopt the package found one broken deployment recipe and five small gaps.
+
+**The `.tar.xz` archives need the `xz` program under GNU tar.** The targets unpack the Linux and macOS releases with
+`tar -xJf`. bsdtar (macOS, Windows) decompresses xz itself; GNU tar starts the external `xz`, which the
+`mcr.microsoft.com/dotnet/sdk` images (Ubuntu 24.04) do not install, so the documented Dockerfile failed after the
+download with `xz: Cannot exec`. Decision: the targets check for an unpacker before downloading (on a non-Windows
+build host: `xz` on `PATH`, or a `tar` that reports itself as bsdtar) and stop with an error that names the package
+to install and the `ElarionTypstExecutable` alternative; the documented Dockerfile installs `xz-utils`. Rejected:
+
+- *Decompressing in MSBuild* (an inline or compiled task with a managed LZMA2 decoder). The BCL has no xz decoder, so
+  this means carrying several hundred lines of decompressor in the build targets, or shipping a task assembly and
+  its loading rules in a package that has none today, to save one line in a Dockerfile.
+- *Re-hosting the binary as `.tar.gz` or `.zip`.* Moves provenance from Typst's own GitHub release to an artifact the
+  framework would have to publish and keep in sync with every Typst version, which the checksum table exists to avoid.
+- *Installing `xz` from the targets.* A build must not run a package manager.
+
+**The startup check can require the application's own package.** `TypstOptions.RequiredPackages`
+(`@local/acme-documents:1.0.0`) lists packages the startup check requires in `PackagePath`
+(`<namespace>/<name>/<version>/typst.toml`), and `TypstToolchain.HasPackage` runs the same test at render time. Without
+it, an unset `PackagePath` silently resolved to none when `typst/packages` was missing, the host started, and every
+document failed with a compilation error. A compilation whose diagnostics say `package not found` now throws
+`TypstPackageNotFoundException` (telemetry outcome `package_not_found`) instead of `TypstCompilationException`, so a
+deployment fault is no longer reported as a template defect. The detection matches Typst's wording, checked against
+0.15; if a later Typst rewords it, the failure falls back to `TypstCompilationException`, not to success. Rejected:
+probing the generated package import before every compilation, because Typst also resolves packages from its data and
+cache directories and would download a `@preview` package the probe called missing.
+
+**Smaller additions.** `TypstAsset.IsValidName` and `TypstAsset.TryCreate` make the asset-name rule public, so an
+application rejects a user-supplied name with its own error instead of duplicating the rule. `TypstAsset.FromJson`
+serializes a second model, such as a letterhead every document receives, into an asset the template reads with
+`json(assets.at("letterhead.json"))`; a second `Data` slot was rejected because one model per request plus assets
+already covers it. `TypstCompiler` is public with `TypstCompiler.Create(options, loggerFactory)`, so tests and tools
+build the compiler `AddElarionTypst` registers without a service collection; its constructor stays internal.
+"Code defaults, then configuration" is documented as two `AddElarionTypst` calls rather than a `defaults:` delegate,
+because the calls already compose onto one options instance in order.
