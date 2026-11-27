@@ -1,3 +1,4 @@
+using System.Buffers;
 using Elarion.ContentLines;
 
 namespace Elarion.Calendars.Reading;
@@ -22,12 +23,18 @@ internal sealed class TopLevelComponent(CalendarComponent component, int lineNum
 /// the build; per-item limits skip to the item's end and cost only that item.
 /// </summary>
 internal sealed class CalendarTreeBuilder {
+    // RFC 5545 CONTROL: every control character but tab.
+    private static readonly SearchValues<char> Controls = SearchValues.Create(
+        "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\u0008\u000A\u000B\u000C\u000D\u000E\u000F"
+        + "\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001A\u001B\u001C\u001D\u001E\u001F\u007F");
+
     private readonly CalendarReadOptions _options;
     private readonly ContentTextDecoder _decoder;
     private readonly ContentLineRules _rules;
     private readonly List<CalendarComponent> _stack = [];
     private TopLevelComponent? _current;
     private int _components;
+    private int _items;
     private bool _rootLimitReported;
 
     // While an item is skipped past a limit: the depth of open components inside it still to be closed.
@@ -55,9 +62,17 @@ internal sealed class CalendarTreeBuilder {
         Root = new CalendarComponent("VCALENDAR") { LineNumber = reader.LineNumber };
         _stack.Add(Root);
         _components = 1;
-        var lines = 0;
+        var lines = 1;
         while (reader.Read()) {
             if ((++lines & 0x3FF) == 0) cancellationToken.ThrowIfCancellationRequested();
+            if (lines > _options.MaxLines) {
+                StopAt(new CalendarError(CalendarErrorCodes.TooManyLines, $"The file has more than {_options.MaxLines} lines; reading stopped.") {
+                    LineNumber = reader.LineNumber,
+                    Limit = _options.MaxLines,
+                });
+                return;
+            }
+
             if (!Line(reader)) return;
         }
 
@@ -122,7 +137,16 @@ internal sealed class CalendarTreeBuilder {
             return true;
         }
 
-        var property = new CalendarProperty(line.Name, _decoder.Decode(line.Value),
+        var value = _decoder.Decode(line.Value);
+        if (_options.Strict && value.AsSpan().ContainsAny(Controls)) {
+            AddError(new CalendarError(CalendarErrorCodes.ControlCharacter, "The value holds a control character; the line was skipped.") {
+                Property = line.Name,
+                LineNumber = reader.LineNumber,
+            });
+            return true;
+        }
+
+        var property = new CalendarProperty(line.Name, value,
             line.Parameters.Select(static p => new CalendarParameter(p.Name, p.Values))) { LineNumber = reader.LineNumber };
         parent.Properties.Add(property);
         return true;
@@ -142,17 +166,19 @@ internal sealed class CalendarTreeBuilder {
         }
 
         if (++_components > _options.MaxComponents) {
-            FileErrors.Add(new CalendarError(CalendarErrorCodes.TooManyComponents,
+            StopAt(new CalendarError(CalendarErrorCodes.TooManyComponents,
                 $"The file has more than {_options.MaxComponents} components; reading stopped.") {
                 LineNumber = lineNumber,
                 Limit = _options.MaxComponents,
             });
-            if (_current is not null && _stack.Count > 1) {
-                Root!.Components.Remove(_current.Component);
-                TopLevel.Remove(_current);
-            }
+            return false;
+        }
 
-            _stack.Clear();
+        if (_stack.Count == 1 && name is "VEVENT" or "VTODO" && ++_items > _options.MaxItems) {
+            StopAt(new CalendarError(CalendarErrorCodes.TooManyItems, $"The file has more than {_options.MaxItems} events and to-dos; reading stopped.") {
+                LineNumber = lineNumber,
+                Limit = _options.MaxItems,
+            });
             return false;
         }
 
@@ -207,6 +233,19 @@ internal sealed class CalendarTreeBuilder {
 
         _stack.RemoveRange(index, _stack.Count - index);
         if (_stack.Count <= 1) _current = null;
+    }
+
+    // A file limit: the read stops with one error and keeps the items before the one being read.
+    private void StopAt(CalendarError error) {
+        FileErrors.Add(error);
+        if (_current is not null && _stack.Count > 1) {
+            Root!.Components.Remove(_current.Component);
+            TopLevel.Remove(_current);
+        }
+
+        _current = null;
+        _skipDepth = 0;
+        _stack.Clear();
     }
 
     // A per-item limit: the item keeps what was read and has no typed value; the rest of it is skipped.

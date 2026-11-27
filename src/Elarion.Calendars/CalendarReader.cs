@@ -56,17 +56,18 @@ public sealed class CalendarReader {
         var builder = new CalendarTreeBuilder(options, decoder);
         builder.Build(data, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        return Map(builder, encoding.ByteOrderMarkEncoding, decoder.UsedFallbackEncoding);
+        return Map(builder, options, encoding.ByteOrderMarkEncoding, decoder.UsedFallbackEncoding, cancellationToken);
     }
 
     private CalendarReadResult Empty(CalendarError error) =>
         new(new CalendarHeader(), [], [], [error], null, null, false, _options.ExpandDefaults);
 
-    private CalendarReadResult Map(CalendarTreeBuilder builder, string? byteOrderMark, bool usedFallback) {
+    private CalendarReadResult Map(CalendarTreeBuilder builder, CalendarReadOptions options, string? byteOrderMark, bool usedFallback,
+        CancellationToken cancellationToken) {
         var root = builder.Root;
         var fileErrors = builder.FileErrors;
-        var header = root is null ? new CalendarHeader() : ReadHeader(root, fileErrors);
-        var resolver = root is null ? TimeZoneResolver.System : new TimeZoneResolver(root.Components.Where(static c => c.Name == "VTIMEZONE"));
+        var header = root is null ? new CalendarHeader() : ReadHeader(root, fileErrors, options.MaxTimeZoneIdLength);
+        var resolver = new TimeZoneResolver(root?.Components.Where(static c => c.Name == "VTIMEZONE") ?? [], options.MaxTimeZoneIdLength);
 
         var events = new List<CalendarEntry<CalendarEvent>>();
         var todos = new List<CalendarEntry<CalendarTodo>>();
@@ -78,10 +79,11 @@ public sealed class CalendarReader {
                 continue;
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             index++;
             CalendarItem? item = null;
             IReadOnlyList<CalendarError> mappingErrors = [];
-            if (!top.Limited) CalendarItemMapper.TryMap(top.Component, resolver, out item, out mappingErrors);
+            if (!top.Limited) CalendarItemMapper.TryMap(top.Component, resolver, out item, out mappingErrors, options.Strict);
 
             if (top.Component.Name == "VEVENT") {
                 var entry = new CalendarEntry<CalendarEvent>(index, top.LineNumber, top.Component, item as CalendarEvent);
@@ -116,7 +118,7 @@ public sealed class CalendarReader {
         }
     }
 
-    private static CalendarHeader ReadHeader(CalendarComponent root, List<CalendarError> errors) {
+    private static CalendarHeader ReadHeader(CalendarComponent root, List<CalendarError> errors, int maxTimeZoneIdLength) {
         var header = new CalendarHeader();
         string? name = null, wrName = null, description = null, wrDescription = null, color = null, appleColor = null;
         TimeSpan? refresh = null, ttl = null;
@@ -157,7 +159,9 @@ public sealed class CalendarReader {
                     else source = uri;
                     break;
                 case "X-WR-TIMEZONE":
-                    if (header.SuggestedTimeZone is null && CalendarTimeZones.TryResolve(property.GetText(), out var zone)) header.SuggestedTimeZone = zone;
+                    if (header.SuggestedTimeZone is null && property.GetText() is { } suggested && suggested.Length <= maxTimeZoneIdLength
+                        && CalendarTimeZones.TryResolve(suggested, out var zone))
+                        header.SuggestedTimeZone = zone;
                     else header.AdditionalProperties.Add(property.Clone());
                     break;
                 default:

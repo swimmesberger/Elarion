@@ -174,4 +174,101 @@ public sealed class TypstToolchainTests {
 
         act.Should().Throw<ArgumentOutOfRangeException>();
     }
+
+    [Fact]
+    public void Has_package_looks_for_the_manifest_in_the_package_directory() {
+        var packages = Path.Combine(Base, "typst", "packages");
+        var manifest = Path.Combine(packages, "local", "acme-documents", "1.0.0", "typst.toml");
+        var toolchain = new TypstToolchain(new TypstOptions(), "", Base, path => path == manifest, path => path == packages);
+
+        toolchain.HasPackage("@local/acme-documents:1.0.0").Should().BeTrue();
+        toolchain.HasPackage("@local/acme-documents:1.0.1").Should().BeFalse();
+        toolchain.HasPackage("@preview/cetz:0.3.4").Should().BeFalse("a server vendors @preview packages instead of downloading them");
+    }
+
+    [Fact]
+    public void Has_package_is_false_without_a_package_directory() {
+        var toolchain = new TypstToolchain(new TypstOptions(), "", Base, _ => true, _ => false);
+
+        toolchain.PackagePath.Should().BeNull();
+        toolchain.HasPackage("@local/acme-documents:1.0.0").Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("acme-documents:1.0.0")]
+    [InlineData("@local/acme-documents")]
+    [InlineData("@local/../acme:1.0.0")]
+    public void Has_package_rejects_a_malformed_specification(string package) {
+        var toolchain = new TypstToolchain(new TypstOptions(), "", Base, _ => true, _ => true);
+
+        var act = () => toolchain.HasPackage(package);
+
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task Fail_check_reports_a_missing_required_package() {
+        var options = new TypstOptions { StartupCheck = TypstStartupCheck.Fail };
+        options.RequiredPackages.Add("@local/acme-documents:1.0.0");
+        var service = new TypstStartupCheckService(
+            options, new TypstToolchain(options, "", Base, _ => true, _ => false), NullLogger<TypstStartupCheckService>.Instance);
+
+        var act = () => service.StartAsync(TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<TypstUnavailableException>()).Which.Message.Should()
+            .Contain("@local/acme-documents:1.0.0").And.Contain("ElarionTypstAssetsDirectory");
+    }
+
+    [Fact]
+    public void Startup_check_accepts_an_installed_required_package() {
+        var packages = Path.Combine(Base, "typst", "packages");
+        var manifest = Path.Combine(packages, "local", "acme-documents", "1.0.0", "typst.toml");
+        var options = new TypstOptions();
+        options.RequiredPackages.Add("@local/acme-documents:1.0.0");
+        var toolchain = new TypstToolchain(options, "", Base, path => path == manifest || path == BundledExecutable, path => path == packages);
+        var service = new TypstStartupCheckService(options, toolchain, NullLogger<TypstStartupCheckService>.Instance);
+
+        service.FindProblems().Should().BeEmpty();
+
+        options.RequiredPackages.Add("@local/acme-documents:2.0.0");
+        service.FindProblems().Should().ContainSingle().Which.Should().Contain(Path.Combine(packages, "local", "acme-documents", "2.0.0"));
+    }
+
+    [Fact]
+    public void A_malformed_required_package_is_rejected_at_registration() {
+        var act = () => new ServiceCollection().AddElarionTypst(options => options.RequiredPackages.Add("acme-documents"));
+
+        act.Should().Throw<ArgumentException>().WithMessage("*RequiredPackages*");
+    }
+
+    [Fact]
+    public void Code_defaults_in_a_first_call_yield_to_configuration_bound_in_a_second() {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> {
+            ["Typst:Timeout"] = "00:00:45",
+            ["Typst:RequiredPackages:0"] = "@local/acme-documents:1.0.0"
+        }).Build();
+        var services = new ServiceCollection();
+
+        services.AddElarionTypst(options => {
+            options.Timeout = TimeSpan.FromSeconds(30);
+            options.StartupCheck = TypstStartupCheck.Warn;
+        });
+        services.AddElarionTypst(configuration.GetSection(TypstOptions.SectionName));
+
+        var options = (TypstOptions)services.Single(descriptor => descriptor.ServiceType == typeof(TypstOptions)).ImplementationInstance!;
+        options.Timeout.Should().Be(TimeSpan.FromSeconds(45), "configuration bound in the second call overrides the code default");
+        options.StartupCheck.Should().Be(TypstStartupCheck.Warn, "a code default configuration does not set stays");
+        options.RequiredPackages.Should().Equal("@local/acme-documents:1.0.0");
+    }
+
+    [Fact]
+    public void Compiler_factory_builds_a_compiler_without_a_service_provider() {
+        var options = new TypstOptions { ExecutablePath = Path.Combine(Path.GetTempPath(), "no-such-typst") };
+
+        using var compiler = TypstCompiler.Create(options);
+
+        compiler.Should().BeAssignableTo<ITypstCompiler>();
+        var invalid = () => TypstCompiler.Create(new TypstOptions { MaxConcurrency = 0 });
+        invalid.Should().Throw<ArgumentOutOfRangeException>();
+    }
 }

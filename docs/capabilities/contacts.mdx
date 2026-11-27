@@ -61,23 +61,26 @@ called `Contact` aliases one of the two (`using VContact = Elarion.Contacts.Cont
 | Member | From |
 | --- | --- |
 | `FormattedName`, `Name` (family, given, additional, prefix, suffix), `Nicknames` | `FN`, `N`, `NICKNAME` |
-| `Kind` (individual, organization or group) | `KIND:org`, Apple's `X-ABSHOWAS:COMPANY`; `KIND:group`, Apple's `X-ADDRESSBOOKSERVER-KIND:group` |
+| `Kind` (individual, organization or group) | `KIND:org`, Apple's `X-ABShowAs:COMPANY`; `KIND:group`, Apple's `X-ADDRESSBOOKSERVER-KIND:group` |
 | `Members` (a group's member references, in order) | `MEMBER`, Apple's `X-ADDRESSBOOKSERVER-MEMBER`; `ContactMember.FromUid(uid)` builds `urn:uuid:{uid}` |
 | `Organization`, `Department`, `Title`, `Role` | the first two components of `ORG`, `TITLE`, `ROLE` |
-| `Phones`, `Emails`, `Addresses`, `Urls` | `TEL`, `EMAIL`, `ADR` (seven components), `URL`, each with `Types`, `Preferred` and `Label` |
+| `Phones`, `Emails`, `Addresses`, `Urls` | `TEL`, `EMAIL`, `ADR` (seven components), `URL`, each with `Types`, `Preferred` and `Label`, and the `LineNumber` and `Group` it was read from |
 | `Birthday`, `Anniversary` | `BDAY`; `ANNIVERSARY`, `X-ANNIVERSARY`, `X-MS-ANNIVERSARY` or an Apple `X-ABDATE` labelled as one, in that order |
-| `Note`, `Categories`, `Photo`, `Uid` | `NOTE`, `CATEGORIES`, the first `PHOTO`, `UID` |
+| `Note`, `Categories`, `Photo`, `Uid` | the first `NOTE`, `CATEGORIES`, the first `PHOTO` that reads, `UID` |
 | `AdditionalProperties` | every other property, with its group, parameters and value, written back as it was read |
 | `DisplayName` | the formatted name, else the name, else the organization, else the first e-mail address, else the first phone number |
 
-`ContactTypes` is a set of flags (`Home`, `Work`, `Cell`, `Voice`, `Fax`, `Pager`, `Text`, `Video`, `Main`), read from
+`ContactTypes` is a set of flags (`Home`, `Work`, `Cell`, `Voice`, `Fax`, `Pager`, `Text`, `Video`, `Main`, `Internet`), read from
 `TYPE` parameters, bare vCard 2.1 parameters (`TEL;WORK;VOICE`) and Apple's `_$!<Mobile>!$_`-style labels. Any other
 label of an Apple `itemN.X-ABLabel` is the value's `Label`. `ContactDate` is a day of a month with an optional year:
-`--MMDD` and Apple's year 1604 read as a date without a year. Equality is structural, so a contact written and read
-back equals the one written.
+`--MMDD` and Apple's year 1604 read as a date without a year. Several values of one `N` component are joined with
+`", "`: `N:Huber;Anna,Maria` reads the given name `Anna, Maria`. Equality is structural and ignores where a value was
+read from, so a contact written and read back equals the one written.
 
 `contact.ToProperties(version)` turns a contact into its property list and `Contact.TryFromProperties` maps a list back,
-so an application can also prune or rewrite a card at the property level.
+so an application can also prune or rewrite a card at the property level. A property the model does not map reads with
+`property.GetText()` (unescaped) or `GetTexts()` (a comma list), so a second `NOTE` or an `X-SOCIALPROFILE` needs no
+parsing of its own; a further `PHOTO` reads with `ContactPhoto.TryRead(property, maxBytes, out photo, out error)`.
 
 ## Import
 
@@ -125,8 +128,13 @@ public sealed class ImportPeople(ContactReader reader, IUploadedFiles uploads, C
 The reader recognizes the vCards from the content, not the file name. It reads 2.1, 3.0 and 4.0, and files that mix
 them; names in any case; CRLF, LF and CR line ends; folded lines whatever their indentation; groups (`item1.TEL`);
 quoted, repeated and comma-joined parameters and RFC 6868 carets; quoted-printable values with soft line breaks; Base64
-values that end at a blank line; `#` comment lines; and Google's `\:` escapes. Line breaks in values read as `\n` on
-every platform, and invisible directional marks are removed from phone numbers.
+values that end at a blank line; `#` comment lines; Google's `\:` escapes; and files concatenated from several exports,
+with a byte-order mark before each card. Line breaks in values read as `\n` on every platform, and invisible
+directional marks are removed from phone numbers.
+
+vCard 2.1 escapes only the semicolon, so in a 2.1 card every other backslash is a character: Outlook's
+`N:C:\Daten` reads `C:\Daten`. The entry's property holds such a value in the escaping of 3.0, its backslashes
+doubled, so it maps, unescapes and writes like any other.
 
 ### Encodings
 
@@ -156,7 +164,8 @@ vCard becomes an entry, so a handler can show a preview before it saves anything
 | `entry.Properties` | Every property in file order, with its group, parameters, value as written and line, mapped or not. |
 | `entry.Value`, `entry.HasValue` | The contact, and whether there is one. |
 | `entry.Errors` | Its errors. |
-| `result.FileErrors` | Problems with the file: unreadable, too large, too many contacts. |
+| `result.FileErrors` | Problems with the file: unreadable, too large, too many contacts, lines or errors. |
+| `result.OmittedErrorCount` | The errors past `MaxErrors`, counted and not listed. |
 | `result.Errors`, `result.HasErrors`, `result.Contacts` | All errors in file order; whether there are any; the contacts of the entries that have one. |
 
 An error costs only what is broken. A birthday that reads as no date, invalid Base64, a photo over the limit, an unknown
@@ -182,13 +191,16 @@ the location: `Contact 12 (Jane Doe), line 340: The value of BDAY is not a date.
 
 | Code | When | Data |
 | --- | --- | --- |
-| `contact.unreadable` | The upload holds no `BEGIN:VCARD` line: a PDF, an empty file, a spreadsheet. | — |
+| `contact.unreadable` | The upload holds no `BEGIN:VCARD` line: a PDF, an empty file, a spreadsheet. | `MediaType` when it is not text (`application/pdf`, `application/zip`, `application/octet-stream`) |
 | `contact.too_large` | The upload is larger than `MaxBytes`. | `Limit` |
 | `contact.too_many_contacts` | More vCards than `MaxContacts`; the entries before it are kept. | `Limit` |
 | `contact.too_many_properties` | A card has more lines than `MaxPropertiesPerContact`; its entry has no contact. | `Limit` |
+| `contact.too_many_properties_in_file` | The cards hold more lines than `MaxProperties`; the entries before the card being read are kept. | `Limit` |
+| `contact.too_many_errors` | More errors than `MaxErrors`; the rest are counted in `OmittedErrorCount`. | `Limit` |
 | `contact.line_too_long` | An unfolded line is longer than `MaxLineBytes`; the property is dropped. | `Property`, `Limit` |
 | `contact.photo_too_large` | A photo is larger than `MaxPhotoBytes`; it is dropped. | `Property`, `Limit` |
-| `contact.invalid_value` | A value does not read as its kind (a date, a photo, an address). | `Property`, `Value`, `ExpectedKind` |
+| `contact.invalid_value` | A value does not read as its kind: `date`, `uri`, `photo`, or `photo-format` for an image the package does not read. | `Property`, `Value`, `ExpectedKind`; `MediaType` for `photo-format` |
+| `contact.partial_date` | A birthday or anniversary names no month and day (`1985`, `1985-04`, `--04`, `---12`); it is dropped. | `Property`, `Value` |
 | `contact.unknown_charset` | A `CHARSET` the runtime does not know. | `Property`, `Charset` |
 | `contact.malformed_line` | A line inside a card without a name or a colon; it is skipped. | `Value` |
 | `contact.empty` | A card with nothing usable; its entry has no contact. | — |
@@ -210,8 +222,11 @@ return result.ToAppError("contacts", static error => error.Code switch {
 
 An inline photo (vCard 2.1 and 3.0 Base64, a 4.0 `data:` URI) reads as its bytes, with the media type the bytes show
 (JPEG, PNG, GIF, WebP or BMP) whatever the file declared. Bytes of no known image format are dropped with
-`contact.invalid_value`; a photo over `MaxPhotoBytes` is dropped with `contact.photo_too_large`, without decoding it.
-Only the first `PHOTO` is read; later ones stay additional properties.
+`contact.invalid_value` and the expected kind `photo-format`; its `MediaType` names what the bytes are (`image/heic`,
+`application/pdf`) or else what the file declared, so a preview can say "the HEIC picture is not imported". A photo
+over `MaxPhotoBytes` is dropped with `contact.photo_too_large`, without decoding it. The first `PHOTO` that reads is
+the contact's photo; later ones stay additional properties, which `ContactPhoto.TryRead` reads. To build a photo from
+stored bytes without an exception, use `ContactPhoto.TryFromData`.
 
 A photo given as an address reads as a `Uri`, only for `http` and `https`; any other scheme (`file:`, `ftp:`) is
 dropped with `contact.invalid_value`. **The package never requests an address.** An upload that made the server fetch
@@ -259,6 +274,16 @@ return ContactWriter.ToStreamedFile(
 `ContactWriter.Create(stream)` writes to any stream; `writer.AddAsync(entry.Properties)` writes a card exactly as it
 was read.
 
+### A payload that is not a file
+
+A QR code or an NFC tag carries one card, built in synchronous code, and its readers do not unfold lines:
+
+```csharp
+var payload = ContactWriter.ToText(contact, new ContactWriteOptions { FoldLines = false });
+```
+
+`ContactWriter.Write(stream, contacts, options)` writes synchronously to a stream.
+
 ### One file per contact for Outlook classic
 
 Outlook classic imports only the first card of a file. For it, write each contact to a file of its own:
@@ -269,19 +294,23 @@ var file = await ContactWriter.ToFileAsync([contact], $"{contact.DisplayName}.vc
 
 ### What a written file looks like
 
-UTF-8 without a byte-order mark, CRLF line ends, lines folded at 75 octets without splitting a character. Types are
-`TYPE=` parameters; a preferred value is `TYPE=pref` in 3.0 and `PREF=1` in 4.0; a custom label is an
+UTF-8 without a byte-order mark, CRLF line ends, lines folded at 75 octets without splitting a character or an escape
+(unless `FoldLines` is off). Types are `TYPE=` parameters, `TYPE=INTERNET` among them; a preferred value is
+`TYPE=pref` in 3.0 and `PREF=1` in 4.0; a custom label is an
 `itemN.X-ABLabel` property of the value's group. A photo is `ENCODING=b` with its type in 3.0 and a `data:` URI in 4.0.
 A date without a year is `X-APPLE-OMIT-YEAR=1604` with year 1604 in 3.0 and `--MMDD` in 4.0; an organization is
-`X-ABSHOWAS:COMPANY` in 3.0 and `KIND:org` in 4.0. A group is `X-ADDRESSBOOKSERVER-KIND:group` with one
+`X-ABShowAs:COMPANY` in 3.0 and `KIND:org` in 4.0. A web address is a URI, written as it is (`;` and `,`
+unescaped), and so is a 4.0 phone number given as a `tel:` URI, with `VALUE=uri`. Control characters other than the
+tab (U+0000–U+001F, U+007F–U+009F) are left out of every value: a card a CardDAV server embeds in XML must not hold
+one. A group is `X-ADDRESSBOOKSERVER-KIND:group` with one
 `X-ADDRESSBOOKSERVER-MEMBER` per member in 3.0, which Apple and DAVx5 read, and `KIND:group` with `MEMBER` in 4.0, never
 both; a contact that is not a group but has members fails the write. Every card has an `FN`, derived from the display
 name when the contact has no formatted name, and in 3.0 an `N` (a group's name when it has none). Additional properties are written as they were read. The same
 contacts give byte-identical files.
 
 A contact the writer cannot represent (an additional property whose name, group or parameter name is not a valid vCard
-name, or whose value holds a line break) fails with a `ContactWriteException` that names the contact (`ItemIndex`) and
-the property. The writer checks a contact before it writes any of it, so the writer takes further contacts.
+name, or whose value holds a line break, or a web address with a line break) fails with a `ContactWriteException` that
+names the contact (`ItemIndex`) and the property. The writer checks a contact before it writes any of it, so the writer takes further contacts.
 
 ## Limits and options
 
@@ -289,11 +318,18 @@ On top of the upload limits the handler declares, the read options bound what a 
 at most that contact or property, and the read continues; a file limit stops the read with one error and keeps the
 contacts before it. Reading is one pass, linear in the input, and nothing recurses.
 
+The bytes bound the input; the lines and errors bound the result. Every property of every card stays in the result,
+and a property costs 60 to 150 bytes however short its line: a 20 MB file of four-byte lines held 600 MB before
+`MaxProperties` existed. With the defaults a result holds at most about 200 MB, whatever the file holds; a 20 MB file
+of short lines now holds 70–115 MB, and one of malformed lines 2 MB.
+
 | `ContactReadOptions` | Default | Exceeded |
 | --- | --- | --- |
 | `MaxBytes` | 32 MiB | `contact.too_large`; the reader holds no more than the limit |
 | `MaxContacts` | 10,000 | `contact.too_many_contacts`; the read stops |
-| `MaxPropertiesPerContact` | 1,000 | `contact.too_many_properties`; the card has no contact |
+| `MaxPropertiesPerContact` | 1,000 | `contact.too_many_properties`; the card has no contact and keeps only its `FN`, `N`, `ORG`, `EMAIL`, `TEL` and `UID` |
+| `MaxProperties` | 1,000,000 | `contact.too_many_properties_in_file`; the read stops |
+| `MaxErrors` | 10,000 | `contact.too_many_errors`; the read goes on, further errors are counted |
 | `MaxLineBytes` | 1 MiB | `contact.line_too_long`; the property is dropped |
 | `MaxPhotoBytes` | 1 MiB | `contact.photo_too_large`; the photo is dropped |
 | `FallbackEncoding` | `windows-1252` | an unknown name throws `InvalidOperationException` |

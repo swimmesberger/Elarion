@@ -8,7 +8,9 @@ namespace Elarion.Spreadsheets;
 /// <summary>
 /// Writes spreadsheet records as an <c>.xlsx</c> workbook, forward-only to a stream (ADR-0108): one worksheet per
 /// <see cref="AddWorksheetAsync{T}(IEnumerable{T}, SpreadsheetWorksheetOptions?, CancellationToken)"/> call, in the
-/// order written, each with a bold, filled, bordered and frozen header row, then one row per record.
+/// order written, each with a bold, filled, bordered and frozen header row, then one row per record. A worksheet whose
+/// columns are known only at run time is a <see cref="SpreadsheetSheetDefinition"/>, written the same way from rows of
+/// values.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -156,6 +158,45 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
     }
 
     /// <summary>
+    /// Writes a workbook that <paramref name="write"/> fills with any number of worksheets into memory and returns it as a
+    /// file with the <c>.xlsx</c> content type, for a handler that returns a small export to any transport.
+    /// </summary>
+    /// <param name="fileName">The name the caller saves the file with, such as <c>customers.xlsx</c>.</param>
+    /// <param name="write">Adds the worksheets, at least one. The workbook is completed after it returns; do not dispose it.</param>
+    /// <param name="options">The write options.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <example>
+    /// <code>
+    /// return await SpreadsheetWorkbook.ToFileAsync("customers.xlsx", async (workbook, ct) => {
+    ///     await workbook.AddWorksheetAsync(sheet, rows, ct);
+    ///     await workbook.AddWorksheetAsync(bankAccounts, cancellationToken: ct);
+    /// }, cancellationToken: ct);
+    /// </code>
+    /// </example>
+    public static async ValueTask<ElarionFile> ToFileAsync(
+        string fileName,
+        Func<SpreadsheetWorkbook, CancellationToken, ValueTask> write,
+        SpreadsheetWriteOptions? options = null,
+        CancellationToken cancellationToken = default) {
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+        ArgumentNullException.ThrowIfNull(write);
+
+        using var stream = new MemoryStream();
+        var workbook = Create(stream, options);
+        try {
+            await write(workbook, cancellationToken).ConfigureAwait(false);
+        }
+        catch {
+            workbook._faulted = true;
+            await workbook.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        await workbook.DisposeAsync().ConfigureAwait(false);
+        return ToFile(stream, fileName);
+    }
+
+    /// <summary>
     /// A streamed file with the <c>.xlsx</c> content type whose workbook holds <paramref name="records"/> in one
     /// worksheet, written to the response body as the records come, for an HTTP endpoint that exports more than fits a
     /// buffered <see cref="ElarionFile"/>.
@@ -261,6 +302,62 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
     }
 
     /// <summary>
+    /// Adds a worksheet whose columns are known only at run time (FR-073): <paramref name="sheet"/> names it and declares
+    /// its columns, and each row is a list of values in column order, written as a record's would be.
+    /// </summary>
+    /// <param name="sheet">The worksheet's name and columns.</param>
+    /// <param name="rows">
+    /// The rows, one list of values each. A value's type decides its cell — text, a boolean, a number, a date, a time, a
+    /// <see cref="DateTimeOffset"/>, a <see cref="Guid"/>, an enum (its name), or <see langword="null"/> for an empty cell
+    /// — and the column's format applies when the value is of the column's kind, so a row may hold a label such as
+    /// "Total" in a date column, or a second block of other types below the first (FR-074). A row shorter than the
+    /// columns ends with empty cells.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="SpreadsheetWriteException">
+    /// A value cannot be written or has a type no cell holds, a row has more values than the worksheet has columns, or
+    /// another worksheet of the workbook has the same name ignoring case.
+    /// </exception>
+    /// <example>
+    /// <code>
+    /// var sheet = new SpreadsheetSheetDefinition("Contacts", [
+    ///     SpreadsheetColumnDefinition.Text("Name"),
+    ///     .. Enumerable.Range(1, 4).Select(slot => SpreadsheetColumnDefinition.Choice($"E-mail {slot} label", labels)),
+    ///     SpreadsheetColumnDefinition.Number("Area", format: "#,##0.00"),
+    /// ]);
+    /// await workbook.AddWorksheetAsync(sheet, contacts.Select(contact => contact.ToRow()), ct);
+    /// </code>
+    /// </example>
+    public ValueTask AddWorksheetAsync(
+        SpreadsheetSheetDefinition sheet,
+        IEnumerable<IReadOnlyList<object?>> rows,
+        CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ArgumentNullException.ThrowIfNull(rows);
+        return AddDefinedWorksheetCoreAsync(sheet, new SynchronousRecords<IReadOnlyList<object?>>(rows), cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds a worksheet whose columns are known only at run time (FR-073), its rows produced one at a time; they stream
+    /// to the destination as they come.
+    /// </summary>
+    /// <param name="sheet">The worksheet's name and columns.</param>
+    /// <param name="rows">The rows, one list of values each, as for the synchronous overload.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="SpreadsheetWriteException">
+    /// A value cannot be written or has a type no cell holds, a row has more values than the worksheet has columns, or
+    /// another worksheet of the workbook has the same name ignoring case.
+    /// </exception>
+    public ValueTask AddWorksheetAsync(
+        SpreadsheetSheetDefinition sheet,
+        IAsyncEnumerable<IReadOnlyList<object?>> rows,
+        CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ArgumentNullException.ThrowIfNull(rows);
+        return AddDefinedWorksheetCoreAsync(sheet, rows, cancellationToken);
+    }
+
+    /// <summary>
     /// Writes the workbook's remaining parts and completes the archive. A workbook to which no worksheet was added fails
     /// with an <see cref="InvalidOperationException"/>, because a workbook needs at least one worksheet; a workbook whose
     /// write failed is only closed.
@@ -305,12 +402,25 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         IAsyncEnumerable<T> records,
         SpreadsheetWorksheetOptions? options,
         CancellationToken cancellationToken) where T : class, ISpreadsheetRecord<T> {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_faulted)
-            throw new InvalidOperationException("An earlier write of this workbook failed; it is incomplete and takes no further worksheets.");
+        EnsureWritable();
+        var mapper = T.SpreadsheetMapper;
+        var (columns, map) = SelectColumns(mapper.Columns, options);
+        var footerRows = options?.FooterRows ?? [];
+        if (footerRows.Any(static row => row is null))
+            throw new ArgumentException("A footer row must not be null.", nameof(options));
 
+        var name = options?.Name ?? mapper.WorksheetName;
         try {
-            await WriteWorksheetAsync(T.SpreadsheetMapper, records, options?.Name, cancellationToken).ConfigureAwait(false);
+            await WriteWorksheetAsync(
+                name, columns, map, records,
+                (cells, record, rowNumber) => {
+                    if (record is null)
+                        throw new SpreadsheetWriteException(
+                            $"Cannot write row {rowNumber} of worksheet '{name}': the record is null.", name, rowNumber);
+
+                    mapper.WriteRow(record, cells);
+                },
+                footerRows, cancellationToken).ConfigureAwait(false);
         }
         catch {
             _faulted = true;
@@ -318,49 +428,109 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         }
     }
 
-    private async ValueTask WriteWorksheetAsync<T>(
-        ISpreadsheetRowMapper<T> mapper,
-        IAsyncEnumerable<T> records,
-        string? requestedName,
-        CancellationToken cancellationToken) where T : class {
-        var name = requestedName ?? mapper.WorksheetName;
+    private async ValueTask AddDefinedWorksheetCoreAsync(
+        SpreadsheetSheetDefinition sheet,
+        IAsyncEnumerable<IReadOnlyList<object?>> rows,
+        CancellationToken cancellationToken) {
+        EnsureWritable();
+        var columns = sheet.Columns
+            .Select(static column => new WorksheetColumn(column.Header, column.Kind, column.Format, column.Width, column.Choices))
+            .ToArray();
+        try {
+            await WriteWorksheetAsync<IReadOnlyList<object?>>(
+                sheet.Name, columns, null, rows,
+                (cells, row, rowNumber) => {
+                    if (row is null)
+                        throw new SpreadsheetWriteException(
+                            $"Cannot write row {rowNumber} of worksheet '{sheet.Name}': the row is null.", sheet.Name, rowNumber);
+
+                    cells.WriteValues(row);
+                },
+                [], cancellationToken).ConfigureAwait(false);
+        }
+        catch {
+            _faulted = true;
+            throw;
+        }
+    }
+
+    private void EnsureWritable() {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_faulted)
+            throw new InvalidOperationException("An earlier write of this workbook failed; it is incomplete and takes no further worksheets.");
+    }
+
+    /// <summary>
+    /// The columns a record's worksheet writes, after <see cref="SpreadsheetWorksheetOptions.IncludedColumns"/> and
+    /// <see cref="SpreadsheetWorksheetOptions.ExcludedColumns"/>, and the worksheet column of each record column (-1 for
+    /// one left out); no map when every column is written.
+    /// </summary>
+    private static (WorksheetColumn[] Columns, int[]? Map) SelectColumns<T>(
+        IReadOnlyList<SpreadsheetColumn<T>> all, SpreadsheetWorksheetOptions? options) where T : class {
+        var included = options?.IncludedColumns;
+        var excluded = options?.ExcludedColumns;
+        if (included is null && excluded is null)
+            return ([.. all.Select(ToWorksheetColumn)], null);
+
+        // A name no column has is a mistake, not a filter that happens to match nothing.
+        var unknown = (included ?? []).Concat(excluded ?? [])
+            .Where(name => !all.Any(column => string.Equals(column.PropertyName, name, StringComparison.Ordinal)))
+            .ToList();
+        if (unknown.Count > 0)
+            throw new ArgumentException(
+                $"The record '{typeof(T).Name}' has no column for the propert{(unknown.Count == 1 ? "y" : "ies")} "
+                + $"{string.Join(", ", unknown.Select(static name => $"'{name}'"))}; name columns by their property name, "
+                + "for example nameof(Record.Property).",
+                nameof(options));
+
+        var map = new int[all.Count];
+        var columns = new List<WorksheetColumn>(all.Count);
+        for (var i = 0; i < all.Count; i++) {
+            var name = all[i].PropertyName;
+            var written = (included is null || included.Contains(name)) && (excluded is null || !excluded.Contains(name));
+            map[i] = written ? columns.Count : -1;
+            if (written) columns.Add(ToWorksheetColumn(all[i]));
+        }
+
+        return ([.. columns], map);
+    }
+
+    private static WorksheetColumn ToWorksheetColumn<T>(SpreadsheetColumn<T> column) where T : class {
+        return new WorksheetColumn(column.Header, column.Kind, column.Format, column.Width, column.Choices);
+    }
+
+    private async ValueTask WriteWorksheetAsync<TRow>(
+        string name,
+        IReadOnlyList<WorksheetColumn> columns,
+        int[]? map,
+        IAsyncEnumerable<TRow> rows,
+        Action<SpreadsheetCellWriter, TRow, int> writeRow,
+        IReadOnlyList<IReadOnlyList<object?>> footerRows,
+        CancellationToken cancellationToken) {
         if (SpreadsheetCells.ValidateWorksheetName(name) is { } reason) throw new SpreadsheetWriteException(reason, name);
         if (_worksheetNames.Contains(name))
             throw new SpreadsheetWriteException(
                 $"The workbook already has a worksheet named '{name}'; worksheet names must differ ignoring case.", name);
 
-        var columns = mapper.Columns;
         if (columns.Count > SpreadsheetCells.MaxColumns)
             throw new SpreadsheetWriteException(
                 $"The worksheet '{name}' has {columns.Count} columns; a worksheet holds at most {SpreadsheetCells.MaxColumns}.", name);
 
-        var headers = new string[columns.Count];
-        var kinds = new SpreadsheetValueKind[columns.Count];
-        var formats = new string?[columns.Count];
         var styles = new int[columns.Count];
-        for (var i = 0; i < columns.Count; i++) {
-            var column = columns[i];
-            headers[i] = column.Header;
-            kinds[i] = column.Kind;
-            formats[i] = column.Kind is SpreadsheetValueKind.Integer or SpreadsheetValueKind.Number
-                or SpreadsheetValueKind.Date or SpreadsheetValueKind.DateTime or SpreadsheetValueKind.Time
-                ? column.Format
-                : null;
-            styles[i] = _styles.StyleFor(column.Kind, formats[i]);
-        }
+        for (var i = 0; i < columns.Count; i++) styles[i] = _styles.StyleFor(columns[i].Kind, columns[i].EffectiveFormat);
 
         using var xml = new Utf8XmlBuffer();
-        var cells = new SpreadsheetCellWriter(name, headers, kinds, formats, styles, xml);
-        var enumerator = records.GetAsyncEnumerator(cancellationToken);
+        var cells = new SpreadsheetCellWriter(name, columns, styles, map, xml);
+        var enumerator = rows.GetAsyncEnumerator(cancellationToken);
         await using (enumerator.ConfigureAwait(false)) {
             // Read ahead and measure the sample before anything is written: <cols> precedes <sheetData> (FR-019).
-            var sample = new List<T>(Math.Min(_options.WidthSampleRows, 1024));
+            var sample = new List<TRow>(Math.Min(_options.WidthSampleRows, 1024));
             while (sample.Count < _options.WidthSampleRows && await enumerator.MoveNextAsync().ConfigureAwait(false)) {
-                var record = enumerator.Current;
+                var row = enumerator.Current;
                 cells.BeginRow(sample.Count + 2, measuring: true);
-                WriteRecord(mapper, cells, record, name, sample.Count + 2);
+                writeRow(cells, row, sample.Count + 2);
                 cells.EndRow();
-                sample.Add(record);
+                sample.Add(row);
             }
 
             var archive = await GetArchiveAsync(cancellationToken).ConfigureAwait(false);
@@ -374,10 +544,10 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
                 cells.WriteHeaderRow();
 
                 var rowNumber = 1;
-                foreach (var record in sample) {
+                foreach (var row in sample) {
                     rowNumber++;
                     cells.BeginRow(rowNumber, measuring: false);
-                    WriteRecord(mapper, cells, record, name, rowNumber);
+                    writeRow(cells, row, rowNumber);
                     cells.EndRow();
                     if (xml.Length >= Utf8XmlBuffer.FlushThreshold)
                         await xml.FlushAsync(stream, cancellationToken).ConfigureAwait(false);
@@ -387,16 +557,27 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
                 while (await enumerator.MoveNextAsync().ConfigureAwait(false)) {
                     rowNumber++;
                     cells.BeginRow(rowNumber, measuring: false);
-                    WriteRecord(mapper, cells, enumerator.Current, name, rowNumber);
+                    writeRow(cells, enumerator.Current, rowNumber);
                     cells.EndRow();
                     if (xml.Length >= Utf8XmlBuffer.FlushThreshold)
                         await xml.FlushAsync(stream, cancellationToken).ConfigureAwait(false);
                 }
 
-                xml.Append("</sheetData>"u8);
                 // Every written row and the first DropdownRows data rows offer the lists, so a template (no records)
-                // still has them where a person fills it in (FR-021, FR-022).
-                var dropdownEnd = Math.Min(SpreadsheetCells.MaxRows, Math.Max(rowNumber, _options.DropdownRows + 1));
+                // still has them where a person fills it in (FR-021, FR-022); footer rows end the data, so the lists
+                // stop above them (FR-075).
+                var dropdownEnd = footerRows.Count > 0
+                    ? rowNumber
+                    : Math.Min(SpreadsheetCells.MaxRows, Math.Max(rowNumber, _options.DropdownRows + 1));
+
+                foreach (var footer in footerRows) {
+                    rowNumber++;
+                    cells.BeginRow(rowNumber, measuring: false, mapped: false);
+                    cells.WriteValues(footer);
+                    cells.EndRow();
+                }
+
+                xml.Append("</sheetData>"u8);
                 _dropdowns.AppendDataValidations(xml, columns, dropdownEnd, _worksheetNames);
                 xml.Append("</worksheet>"u8);
                 await xml.FlushAsync(stream, cancellationToken).ConfigureAwait(false);
@@ -404,22 +585,12 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         }
     }
 
-    private static void WriteRecord<T>(
-        ISpreadsheetRowMapper<T> mapper, SpreadsheetCellWriter cells, T? record, string worksheet, int rowNumber)
-        where T : class {
-        if (record is null)
-            throw new SpreadsheetWriteException(
-                $"Cannot write row {rowNumber} of worksheet '{worksheet}': the record is null.", worksheet, rowNumber);
-
-        mapper.WriteRow(record, cells);
-    }
-
-    private void WriteWorksheetStart<T>(
+    private void WriteWorksheetStart(
         Utf8XmlBuffer xml,
-        IReadOnlyList<SpreadsheetColumn<T>> columns,
+        IReadOnlyList<WorksheetColumn> columns,
         int[] styles,
         ReadOnlySpan<int> measuredWidths,
-        bool isFirst) where T : class {
+        bool isFirst) {
         xml.Append("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""u8);
         xml.Append("""<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"""u8);
         // The header row stays in place while scrolling (FR-020).

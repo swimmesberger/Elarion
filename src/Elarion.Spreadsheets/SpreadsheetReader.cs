@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Elarion.Abstractions.Serialization;
 using Elarion.Abstractions.Validation;
@@ -99,6 +100,51 @@ public sealed class SpreadsheetReader {
         if (!await CopyBoundedAsync(workbook, content, options.MaxUnpackedBytes, cancellationToken).ConfigureAwait(false))
             return new SpreadsheetReadDocument(this, options, null, SpreadsheetErrors.TooLarge(options.MaxUnpackedBytes));
 
+        return OpenBuffered(content, options);
+    }
+
+    /// <summary>
+    /// Opens a workbook the caller already holds in memory, such as an <c>ElarionFile</c>'s <c>Bytes</c>, without copying or
+    /// awaiting anything (FR-079); otherwise the same as <see cref="OpenAsync"/>.
+    /// </summary>
+    /// <param name="workbook">The workbook's bytes; the document reads them in place, so do not change them until it is disposed.</param>
+    /// <param name="options">The read options; <see langword="null"/> uses <see cref="SpreadsheetOptions.ReadDefaults"/>.</param>
+    /// <returns>The document; a file that cannot be read opens with its one error in <see cref="SpreadsheetReadDocument.FileErrors"/>.</returns>
+    public SpreadsheetReadDocument Open(ReadOnlyMemory<byte> workbook, SpreadsheetReadOptions? options = null) {
+        options ??= _defaults;
+        options.Validate();
+
+        if (workbook.Length > options.MaxUnpackedBytes)
+            return new SpreadsheetReadDocument(this, options, null, SpreadsheetErrors.TooLarge(options.MaxUnpackedBytes));
+
+        // The stream wraps the caller's array in place; memory not backed by an array is copied once.
+        var content = MemoryMarshal.TryGetArray(workbook, out var segment)
+            ? new MemoryStream(segment.Array!, segment.Offset, segment.Count, writable: false, publiclyVisible: true)
+            : new MemoryStream(workbook.ToArray(), 0, workbook.Length, writable: false, publiclyVisible: true);
+        return OpenBuffered(content, options);
+    }
+
+    /// <summary>
+    /// Reads one worksheet of a workbook the caller already holds in memory as plain rows, synchronously (FR-079);
+    /// otherwise the same as <see cref="ReadRowsAsync"/>.
+    /// </summary>
+    /// <param name="workbook">The workbook's bytes.</param>
+    /// <param name="options">The read options; <see langword="null"/> uses <see cref="SpreadsheetOptions.ReadDefaults"/>.</param>
+    /// <param name="selection">The worksheet; <see langword="null"/> takes the first visible one.</param>
+    /// <example>
+    /// <code>
+    /// var sheet = reader.ReadRows(file.Bytes);
+    /// </code>
+    /// </example>
+    public SpreadsheetRowsResult ReadRows(
+        ReadOnlyMemory<byte> workbook,
+        SpreadsheetReadOptions? options = null,
+        SpreadsheetWorksheetSelection? selection = null) {
+        using var document = Open(workbook, options);
+        return document.ReadRows(selection);
+    }
+
+    private SpreadsheetReadDocument OpenBuffered(MemoryStream content, SpreadsheetReadOptions options) {
         var inspection = WorkbookInspector.Inspect(content, options.MaxUnpackedBytes, out var error);
         if (inspection is null) return new SpreadsheetReadDocument(this, options, null, error);
 

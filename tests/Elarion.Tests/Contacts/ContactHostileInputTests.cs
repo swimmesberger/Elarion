@@ -60,7 +60,8 @@ public sealed class ContactHostileInputTests {
         var error = Assert.Single(result.Entries[0].Errors);
         error.Code.Should().Be(ContactErrorCodes.TooManyProperties);
         error.Limit.Should().Be(1_000);
-        result.Entries[0].Properties.Should().HaveCount(1_000);
+        // Only what names the card is kept, so a file of such cards does not hold every line it has.
+        result.Entries[0].Properties.Select(static p => p.Name).Should().Equal("FN");
         result.Entries[1].Value!.FormattedName.Should().Be("Next");
     }
 
@@ -193,5 +194,72 @@ public sealed class ContactHostileInputTests {
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task AFileOfMoreLinesThanMaxProperties_StopsWithOneFileErrorAndKeepsTheContactsBefore() {
+        var builder = new StringBuilder();
+        for (var card = 0; card < 50; card++) {
+            builder.Append("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:P\r\n");
+            for (var i = 0; i < 98; i++) builder.Append("X:\r\n");
+            builder.Append("END:VCARD\r\n");
+        }
+
+        var result = await ReadAsync(builder.ToString(), new ContactReadOptions { MaxProperties = 1_000 });
+
+        // 100 lines per card between BEGIN and END: ten cards fill the limit, the eleventh's first line passes it.
+        result.Entries.Should().HaveCount(10);
+        result.Entries.Should().OnlyContain(static entry => entry.HasValue && entry.Errors.Count == 0);
+        var error = Assert.Single(result.FileErrors);
+        error.Code.Should().Be(ContactErrorCodes.TooManyPropertiesInFile);
+        error.Limit.Should().Be(1_000);
+        error.LineNumber.Should().Be(10 * 102 + 2);
+    }
+
+    [Fact]
+    public async Task ErrorsPastMaxErrors_AreCountedNotListed() {
+        var builder = new StringBuilder("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:A\r\n");
+        for (var i = 0; i < 500; i++) builder.Append("x\r\n");
+        builder.Append("END:VCARD\r\n").Append(Card("FN:B", "BDAY:soon"));
+
+        var result = await ReadAsync(builder.ToString(), new ContactReadOptions { MaxErrors = 100 });
+
+        result.Entries.Should().HaveCount(2);
+        result.Entries[0].Errors.Should().HaveCount(100).And.OnlyContain(static e => e.Code == ContactErrorCodes.MalformedLine);
+        result.Entries[1].HasValue.Should().BeTrue();
+        result.Entries[1].Errors.Should().BeEmpty();
+        result.OmittedErrorCount.Should().Be(401);
+        var error = Assert.Single(result.FileErrors);
+        error.Code.Should().Be(ContactErrorCodes.TooManyErrors);
+        error.Limit.Should().Be(100);
+        result.ToAppError("contacts").Message.Should().Be("The contact file has 502 problems.");
+    }
+
+    [Fact]
+    public async Task ParameterNamesAndShortValues_AreSharedAcrossProperties() {
+        var entry = Assert.Single((await ReadAsync(Card("FN:A", "X;A=;B=1:x", "X;A=;B=1:x", "TEL;TYPE=CELL:1", "TEL;TYPE=CELL:2", "Y:"))).Entries);
+
+        var properties = entry.Properties.Where(static p => p.Name is "X" or "TEL").ToList();
+        properties[0].Parameters[1].Should().BeSameAs(properties[1].Parameters[1]);
+        properties[0].Name.Should().BeSameAs(properties[1].Name);
+        properties[0].Value.Should().BeSameAs(properties[1].Value);
+        properties[2].Parameters[0].Should().BeSameAs(properties[3].Parameters[0]);
+        entry.Properties.Single(static p => p.Name == "Y").Parameters.Should().BeSameAs(Array.Empty<ContactParameter>());
+    }
+
+    [Fact]
+    public async Task ManyCardsOverThePropertyLimit_KeepOnlyTheirNamingProperties() {
+        var builder = new StringBuilder();
+        for (var card = 0; card < 20; card++) {
+            builder.Append("BEGIN:VCARD\r\nVERSION:3.0\r\nX-FIRST:1\r\nFN:Many\r\nEMAIL:a@example.com\r\n");
+            for (var i = 0; i < 300; i++) builder.Append("X:\r\n");
+            builder.Append("END:VCARD\r\n");
+        }
+
+        var result = await ReadAsync(builder.ToString(), new ContactReadOptions { MaxPropertiesPerContact = 100 });
+
+        result.Entries.Should().HaveCount(20);
+        result.Entries.Should().OnlyContain(static entry => !entry.HasValue);
+        result.Entries.Should().OnlyContain(static entry => entry.Properties.Select(static p => p.Name).SequenceEqual(new[] { "FN", "EMAIL" }));
     }
 }

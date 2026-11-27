@@ -71,6 +71,12 @@ public static class CalDavServiceCollectionExtensions {
             options.CalendarExpand.MaxOccurrences = occurrences;
         if (int.TryParse(expand[nameof(CalendarExpandOptions.MaxIterations)], NumberStyles.None, CultureInfo.InvariantCulture, out var iterations))
             options.CalendarExpand.MaxIterations = iterations;
+        if (int.TryParse(expand[nameof(CalendarExpandOptions.MaxCandidates)], NumberStyles.None, CultureInfo.InvariantCulture, out var candidates))
+            options.CalendarExpand.MaxCandidates = candidates;
+        if (bool.TryParse(expand[nameof(CalendarExpandOptions.ResolveOverrideVersions)], out var resolveVersions))
+            options.CalendarExpand.ResolveOverrideVersions = resolveVersions;
+        if (bool.TryParse(expand[nameof(CalendarExpandOptions.SkipCancelled)], out var skipCancelled))
+            options.CalendarExpand.SkipCancelled = skipCancelled;
         if (bool.TryParse(configuration[nameof(CalDavOptions.FeedsEnabled)], out var feeds)) options.FeedsEnabled = feeds;
         if (configuration[nameof(CalDavOptions.ProductId)] is { Length: > 0 } productId) options.ProductId = productId;
     }

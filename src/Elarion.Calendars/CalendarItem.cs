@@ -183,6 +183,12 @@ public abstract class CalendarItem {
     /// <summary>The excluded instances, <c>EXDATE</c>.</summary>
     public IList<CalendarDateTime> ExceptionDates { get; set; } = new List<CalendarDateTime>();
 
+    /// <summary>
+    /// The exception rules, <c>EXRULE</c>: RFC 2445 rules whose instances are excluded from the series. RFC 5545
+    /// deprecates them, but older producers still write them; expansion applies them, and <c>DTSTART</c> is never excluded.
+    /// </summary>
+    public IList<CalendarRecurrenceRule> ExceptionRules { get; set; } = new List<CalendarRecurrenceRule>();
+
     /// <summary>The alarms, <c>VALARM</c>.</summary>
     public IList<CalendarAlarm> Alarms { get; set; } = new List<CalendarAlarm>();
 

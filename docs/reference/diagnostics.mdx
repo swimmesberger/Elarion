@@ -519,6 +519,7 @@ As with `[SqlRecord]`, there is no reflection fallback: if a record builds, it m
 | ELSHEET006 | Error | `[SpreadsheetRecord]` is on a struct, or on a nested, generic or abstract type. | Use a top-level, non-generic, concrete class or record class. |
 | ELSHEET007 | Error | The record declares a member named `Columns` or `SpreadsheetMapper`, which collides with a generated member. | Rename the member; its column can keep its header through `[SpreadsheetColumn("…")]`. |
 | ELSHEET008 | Error | Two members of an enum that a record's column uses have a label (`[Display(Name)]`), name or `[SpreadsheetChoice]` alias that are equal ignoring case; the message names both. | Change the label or remove the alias, so that every spelling names one member. |
+| ELSHEET009 | Error | `[SpreadsheetColumn(Choices = …)]` is on a property that is not a `string`, names no static field or property of the record or its base types, names one that is not public or internal, or one whose type is not `IReadOnlyList<string>`; or `StrictChoices` is set without `Choices`. The message says which. | Point `Choices` at a static `IReadOnlyList<string>` (such as `string[]`) of the record with `nameof`, on a `string` property; use an enum property for an enum's members. |
 
 ## ELSQL — SQL row mapping and interpolation
 

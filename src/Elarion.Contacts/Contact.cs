@@ -75,13 +75,19 @@ public sealed class Contact : IEquatable<Contact> {
     /// </summary>
     public ContactDate? Anniversary { get; init; }
 
-    /// <summary>The note (<c>NOTE</c>), its line breaks as <c>\n</c>.</summary>
+    /// <summary>
+    /// The note: the first <c>NOTE</c>, its line breaks as <c>\n</c>. A further one stays among
+    /// <see cref="AdditionalProperties"/>; <see cref="ContactProperty.GetText"/> reads it.
+    /// </summary>
     public string? Note { get; init; }
 
     /// <summary>The categories (<c>CATEGORIES</c>).</summary>
     public IReadOnlyList<string> Categories { get; init; } = [];
 
-    /// <summary>The photo: the first <c>PHOTO</c> of the card (FR-032).</summary>
+    /// <summary>
+    /// The photo: the first <c>PHOTO</c> of the card that reads (FR-032); one that does not costs its error and the next
+    /// is tried. A further one stays among <see cref="AdditionalProperties"/>; <see cref="ContactPhoto.TryRead"/> reads it.
+    /// </summary>
     public ContactPhoto? Photo { get; init; }
 
     /// <summary>The unique identifier (<c>UID</c>).</summary>
@@ -95,7 +101,7 @@ public sealed class Contact : IEquatable<Contact> {
     public IReadOnlyList<string> Members { get; init; } = [];
 
     /// <summary>
-    /// The properties the model does not map (<c>IMPP</c>, <c>X-SOCIALPROFILE</c>, <c>AGENT</c>, a second <c>PHOTO</c>,
+    /// The properties the model does not map (<c>IMPP</c>, <c>X-SOCIALPROFILE</c>, <c>AGENT</c>, a second <c>NOTE</c> or <c>PHOTO</c>,
     /// …), with their group, parameters and still-escaped value, written back as they were read (FR-060). The
     /// <c>CHARSET</c> and quoted-printable <c>ENCODING</c> parameters are left out, because the value is decoded.
     /// </summary>

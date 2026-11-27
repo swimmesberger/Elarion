@@ -12,7 +12,9 @@ namespace Elarion.Spreadsheets.Generated;
 /// <remarks>
 /// A value a spreadsheet cannot hold fails with a <see cref="SpreadsheetWriteException"/> that names the row, the column
 /// and the cell (FR-026). Text is always an inline-string cell, never a formula (FR-015). The same instance first measures
-/// the sampled records for the column widths and then renders every row, so both passes see the same values.
+/// the sampled records for the column widths and then renders every row, so both passes see the same values. A column
+/// the worksheet leaves out (<see cref="SpreadsheetWorksheetOptions.IncludedColumns"/>,
+/// <see cref="SpreadsheetWorksheetOptions.ExcludedColumns"/>) still receives its call, which writes nothing.
 /// </remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public sealed class SpreadsheetCellWriter {
@@ -31,29 +33,34 @@ public sealed class SpreadsheetCellWriter {
     private readonly Utf8XmlBuffer _xml;
     private readonly byte[] _rowDigits = new byte[16];
 
+    // The worksheet column of each column the mapper writes, or -1 for one the worksheet leaves out; null when every
+    // column is written in place.
+    private readonly int[]? _map;
+
     private int _rowDigitsLength;
     private int _row;
     private int _column;
     private bool _measuring;
+    private bool _mapped;
 
     internal SpreadsheetCellWriter(
         string worksheet,
-        string[] headers,
-        SpreadsheetValueKind[] kinds,
-        string?[] formats,
+        IReadOnlyList<WorksheetColumn> columns,
         int[] styles,
+        int[]? map,
         Utf8XmlBuffer xml) {
         _worksheet = worksheet;
-        _headers = headers;
-        _kinds = kinds;
-        _formats = formats;
+        _headers = [.. columns.Select(static column => column.Header)];
+        _kinds = [.. columns.Select(static column => column.Kind)];
+        _formats = [.. columns.Select(static column => column.EffectiveFormat)];
         _styles = styles;
+        _map = map;
         _xml = xml;
-        _letters = new byte[headers.Length][];
-        _widths = new int[headers.Length];
-        for (var i = 0; i < headers.Length; i++) {
+        _letters = new byte[_headers.Length][];
+        _widths = new int[_headers.Length];
+        for (var i = 0; i < _headers.Length; i++) {
             _letters[i] = Encoding.ASCII.GetBytes(SpreadsheetCells.ColumnLetters(i));
-            _widths[i] = headers[i].Length;
+            _widths[i] = _headers[i].Length;
         }
     }
 
@@ -63,71 +70,63 @@ public sealed class SpreadsheetCellWriter {
     /// <summary>Writes a text cell, or an empty cell for <see langword="null"/>.</summary>
     public void WriteText(string? value) {
         var column = NextColumn();
+        if (column < 0) return;
+
         if (value is null) WriteBlank(column);
-        else WriteTextCell(column, value);
+        else WriteTextCell(column, value, _styles[column]);
     }
 
     /// <summary>Writes a boolean cell, or an empty cell for <see langword="null"/>.</summary>
     public void WriteBoolean(bool? value) {
         var column = NextColumn();
-        if (value is not { } flag) {
-            WriteBlank(column);
-            return;
-        }
+        if (column < 0) return;
 
-        if (_measuring) {
-            Measure(column, BooleanWidth);
-            return;
-        }
-
-        BeginCell(column, _styles[column], "b"u8);
-        _xml.Append(flag ? "<v>1</v></c>"u8 : "<v>0</v></c>"u8);
+        if (value is { } flag) WriteBooleanCell(column, flag, _styles[column]);
+        else WriteBlank(column);
     }
 
     /// <summary>Writes a signed integral number cell, or an empty cell for <see langword="null"/>.</summary>
     public void WriteInteger(long? value) {
         var column = NextColumn();
-        if (value is { } number) WriteNumberCell(column, number, null);
+        if (column < 0) return;
+
+        if (value is { } number) WriteNumberCell(column, number, null, _styles[column], _formats[column]);
         else WriteBlank(column);
     }
 
     /// <summary>Writes an unsigned integral number cell, or an empty cell for <see langword="null"/>.</summary>
     public void WriteUnsignedInteger(ulong? value) {
         var column = NextColumn();
-        if (value is { } number) WriteNumberCell(column, number, null);
+        if (column < 0) return;
+
+        if (value is { } number) WriteNumberCell(column, number, null, _styles[column], _formats[column]);
         else WriteBlank(column);
     }
 
     /// <summary>Writes a number cell, or an empty cell for <see langword="null"/>; refuses <c>NaN</c> and infinities.</summary>
     public void WriteSingle(float? value) {
         var column = NextColumn();
-        if (value is not { } number) {
-            WriteBlank(column);
-            return;
-        }
+        if (column < 0) return;
 
-        if (!float.IsFinite(number)) throw Refuse(column, $"the value {number.ToString(CultureInfo.InvariantCulture)} is not a finite number.");
-
-        WriteNumberCell(column, number, "R");
+        if (value is { } number) WriteFloatingCell(column, number, _styles[column], _formats[column]);
+        else WriteBlank(column);
     }
 
     /// <summary>Writes a number cell, or an empty cell for <see langword="null"/>; refuses <c>NaN</c> and infinities.</summary>
     public void WriteDouble(double? value) {
         var column = NextColumn();
-        if (value is not { } number) {
-            WriteBlank(column);
-            return;
-        }
+        if (column < 0) return;
 
-        if (!double.IsFinite(number)) throw Refuse(column, $"the value {number.ToString(CultureInfo.InvariantCulture)} is not a finite number.");
-
-        WriteNumberCell(column, number, "R");
+        if (value is { } number) WriteFloatingCell(column, number, _styles[column], _formats[column]);
+        else WriteBlank(column);
     }
 
     /// <summary>Writes a number cell, or an empty cell for <see langword="null"/>.</summary>
     public void WriteDecimal(decimal? value) {
         var column = NextColumn();
-        if (value is { } number) WriteNumberCell(column, number, null);
+        if (column < 0) return;
+
+        if (value is { } number) WriteNumberCell(column, number, null, _styles[column], _formats[column]);
         else WriteBlank(column);
     }
 
@@ -137,35 +136,27 @@ public sealed class SpreadsheetCellWriter {
     /// </summary>
     public void WriteDateTime(DateTime? value) {
         var column = NextColumn();
-        if (value is not { } dateTime) {
-            WriteBlank(column);
-            return;
-        }
+        if (column < 0) return;
 
-        if (!SpreadsheetCells.TryGetSerial(dateTime, out var serial))
-            throw Refuse(column, $"the date {dateTime.ToString("O", CultureInfo.InvariantCulture)} is before 1900-01-01, the first date a spreadsheet holds.");
-
-        WriteDateCell(column, serial, DateTimeWidth);
+        if (value is { } dateTime) WriteDateTimeCell(column, dateTime, _styles[column], _formats[column]);
+        else WriteBlank(column);
     }
 
     /// <summary>Writes a date cell, or an empty cell for <see langword="null"/>; refuses dates before 1900-01-01.</summary>
     public void WriteDate(DateOnly? value) {
         var column = NextColumn();
-        if (value is not { } date) {
-            WriteBlank(column);
-            return;
-        }
+        if (column < 0) return;
 
-        if (!SpreadsheetCells.TryGetSerial(date.ToDateTime(TimeOnly.MinValue), out var serial))
-            throw Refuse(column, $"the date {date.ToString("O", CultureInfo.InvariantCulture)} is before 1900-01-01, the first date a spreadsheet holds.");
-
-        WriteDateCell(column, serial, DateWidth);
+        if (value is { } date) WriteDateOnlyCell(column, date, _styles[column], _formats[column]);
+        else WriteBlank(column);
     }
 
     /// <summary>Writes a time cell (the fraction of a day), or an empty cell for <see langword="null"/>.</summary>
     public void WriteTime(TimeOnly? value) {
         var column = NextColumn();
-        if (value is { } time) WriteDateCell(column, SpreadsheetCells.GetSerial(time), TimeWidth);
+        if (column < 0) return;
+
+        if (value is { } time) WriteDateCell(column, SpreadsheetCells.GetSerial(time), TimeWidth, _styles[column], _formats[column]);
         else WriteBlank(column);
     }
 
@@ -175,31 +166,105 @@ public sealed class SpreadsheetCellWriter {
     /// </summary>
     public void WriteDateTimeOffset(DateTimeOffset? value) {
         var column = NextColumn();
-        if (value is not { } instant) {
-            WriteBlank(column);
-            return;
-        }
+        if (column < 0) return;
 
-        Span<char> text = stackalloc char[40];
-        var format = instant.Ticks % TimeSpan.TicksPerSecond == 0 ? "yyyy'-'MM'-'dd'T'HH':'mm':'sszzz" : "O";
-        instant.TryFormat(text, out var written, format, CultureInfo.InvariantCulture);
-        WriteTextCell(column, text[..written]);
+        if (value is { } instant) WriteDateTimeOffsetCell(column, instant, _styles[column]);
+        else WriteBlank(column);
     }
 
     /// <summary>Writes a text cell holding the <see cref="Guid"/> in its hyphenated form, or an empty cell for <see langword="null"/>.</summary>
     public void WriteGuid(Guid? value) {
         var column = NextColumn();
-        if (value is not { } guid) {
-            WriteBlank(column);
-            return;
-        }
+        if (column < 0) return;
 
-        Span<char> text = stackalloc char[36];
-        guid.TryFormat(text, out var written, "D");
-        WriteTextCell(column, text[..written]);
+        if (value is { } guid) WriteGuidCell(column, guid, _styles[column]);
+        else WriteBlank(column);
     }
 
-    internal void BeginRow(int rowNumber, bool measuring) {
+    /// <summary>
+    /// Writes one cell of a row whose values carry their own type (a worksheet built at run time, a footer row): the
+    /// value's type decides the cell's, and the column's format applies when the value is of the column's kind, so a
+    /// label in a date column is a text cell (FR-074).
+    /// </summary>
+    internal void WriteValue(object? value) {
+        var column = NextColumn();
+        if (column < 0) return;
+
+        switch (value) {
+            case null:
+                WriteBlank(column);
+                break;
+            case string text:
+                WriteTextCell(column, text, Style(column, SpreadsheetValueKind.Text));
+                break;
+            case bool flag:
+                WriteBooleanCell(column, flag, Style(column, SpreadsheetValueKind.Boolean));
+                break;
+            case sbyte or short or int or long:
+                WriteNumberCell(column, Convert.ToInt64(value, CultureInfo.InvariantCulture), null,
+                    Style(column, SpreadsheetValueKind.Integer), Format(column, SpreadsheetValueKind.Integer));
+                break;
+            case byte or ushort or uint or ulong:
+                WriteNumberCell(column, Convert.ToUInt64(value, CultureInfo.InvariantCulture), null,
+                    Style(column, SpreadsheetValueKind.Integer), Format(column, SpreadsheetValueKind.Integer));
+                break;
+            case float number:
+                WriteFloatingCell(column, number, Style(column, SpreadsheetValueKind.Number), Format(column, SpreadsheetValueKind.Number));
+                break;
+            case double number:
+                WriteFloatingCell(column, number, Style(column, SpreadsheetValueKind.Number), Format(column, SpreadsheetValueKind.Number));
+                break;
+            case decimal number:
+                WriteNumberCell(column, number, null, Style(column, SpreadsheetValueKind.Number), Format(column, SpreadsheetValueKind.Number));
+                break;
+            case DateTime dateTime:
+                WriteDateTimeCell(column, dateTime, Style(column, SpreadsheetValueKind.DateTime), Format(column, SpreadsheetValueKind.DateTime));
+                break;
+            case DateOnly date:
+                WriteDateOnlyCell(column, date, Style(column, SpreadsheetValueKind.Date), Format(column, SpreadsheetValueKind.Date));
+                break;
+            case TimeOnly time:
+                WriteDateCell(column, SpreadsheetCells.GetSerial(time), TimeWidth, Style(column, SpreadsheetValueKind.Time),
+                    Format(column, SpreadsheetValueKind.Time));
+                break;
+            case DateTimeOffset instant:
+                WriteDateTimeOffsetCell(column, instant, Style(column, SpreadsheetValueKind.DateTimeOffset));
+                break;
+            case Guid guid:
+                WriteGuidCell(column, guid, Style(column, SpreadsheetValueKind.Guid));
+                break;
+            case Enum member:
+                WriteTextCell(column, member.ToString(), Style(column, SpreadsheetValueKind.Text));
+                break;
+            default:
+                throw Refuse(column,
+                    $"a value of type '{value.GetType()}' is not a cell value; use text, a boolean, a number, a date, a time, "
+                    + "a DateTimeOffset, a Guid, an enum or null.");
+        }
+    }
+
+    /// <summary>
+    /// Writes the values of a row whose values carry their own type, then empty cells for the columns after its last
+    /// value; refuses a row with more values than the worksheet has columns.
+    /// </summary>
+    internal void WriteValues(IReadOnlyList<object?> values) {
+        if (values.Count > _headers.Length)
+            throw new SpreadsheetWriteException(
+                $"Cannot write row {_row} of worksheet '{_worksheet}': it has {values.Count} values, but the worksheet has "
+                + $"{_headers.Length} columns.",
+                _worksheet,
+                _row);
+
+        for (var i = 0; i < values.Count; i++) WriteValue(values[i]);
+
+        while (_column < _headers.Length) WriteBlank(NextColumn());
+    }
+
+    /// <summary>
+    /// Starts a row. <paramref name="mapped"/> routes the calls of a record's mapper through the column filter; a row of
+    /// values that carry their own type addresses the written columns directly.
+    /// </summary>
+    internal void BeginRow(int rowNumber, bool measuring, bool mapped = true) {
         if (rowNumber > SpreadsheetCells.MaxRows)
             throw new SpreadsheetWriteException(
                 $"Cannot write row {rowNumber} of worksheet '{_worksheet}': a worksheet holds at most {SpreadsheetCells.MaxRows} rows.",
@@ -209,6 +274,7 @@ public sealed class SpreadsheetCellWriter {
         _row = rowNumber;
         _column = 0;
         _measuring = measuring;
+        _mapped = mapped && _map is not null;
         ((uint)rowNumber).TryFormat(_rowDigits, out _rowDigitsLength, default, CultureInfo.InvariantCulture);
         if (measuring) return;
 
@@ -218,15 +284,16 @@ public sealed class SpreadsheetCellWriter {
     }
 
     internal void EndRow() {
-        if (_column != _headers.Length)
+        var expected = _mapped ? _map!.Length : _headers.Length;
+        if (_column != expected)
             throw new InvalidOperationException(
-                $"The row mapper wrote {_column} of {_headers.Length} columns of worksheet '{_worksheet}'.");
+                $"The row mapper wrote {_column} of {expected} columns of worksheet '{_worksheet}'.");
 
         if (!_measuring) _xml.Append("</row>"u8);
     }
 
     internal void WriteHeaderRow() {
-        BeginRow(1, measuring: false);
+        BeginRow(1, measuring: false, mapped: false);
         for (var column = 0; column < _headers.Length; column++) {
             BeginCell(column, SpreadsheetStyles.Header, "inlineStr"u8);
             AppendInlineString(_headers[column]);
@@ -237,11 +304,39 @@ public sealed class SpreadsheetCellWriter {
     }
 
     private int NextColumn() {
-        if (_column >= _headers.Length)
+        var count = _mapped ? _map!.Length : _headers.Length;
+        if (_column >= count)
             throw new InvalidOperationException(
-                $"The row mapper wrote more than {_headers.Length} columns of worksheet '{_worksheet}'.");
+                $"The row mapper wrote more than {count} columns of worksheet '{_worksheet}'.");
 
-        return _column++;
+        var column = _column++;
+        return _mapped ? _map![column] : column;
+    }
+
+    // The column's own style for a value of its kind, or of its family with a declared format (an integer in a number
+    // column, a date-and-time in a date column); otherwise the value's built-in style, so a label in a date column is
+    // plain text and a number in a text column a plain number.
+    private int Style(int column, SpreadsheetValueKind kind) {
+        return UsesColumnFormat(column, kind) ? _styles[column] : SpreadsheetStyles.BuiltInStyleFor(kind);
+    }
+
+    private string? Format(int column, SpreadsheetValueKind kind) {
+        return UsesColumnFormat(column, kind) ? _formats[column] : null;
+    }
+
+    private bool UsesColumnFormat(int column, SpreadsheetValueKind kind) {
+        var own = _kinds[column];
+        if (own == kind) return true;
+
+        return _formats[column] is not null && Family(own) == Family(kind);
+    }
+
+    private static int Family(SpreadsheetValueKind kind) {
+        return kind switch {
+            SpreadsheetValueKind.Integer or SpreadsheetValueKind.Number => 1,
+            SpreadsheetValueKind.Date or SpreadsheetValueKind.DateTime or SpreadsheetValueKind.Time => 2,
+            _ => 0
+        };
     }
 
     private void WriteBlank(int column) {
@@ -252,7 +347,58 @@ public sealed class SpreadsheetCellWriter {
         _xml.Append("/>"u8);
     }
 
-    private void WriteTextCell(int column, ReadOnlySpan<char> text) {
+    private void WriteBooleanCell(int column, bool flag, int style) {
+        if (_measuring) {
+            Measure(column, BooleanWidth);
+            return;
+        }
+
+        BeginCell(column, style, "b"u8);
+        _xml.Append(flag ? "<v>1</v></c>"u8 : "<v>0</v></c>"u8);
+    }
+
+    private void WriteFloatingCell(int column, double number, int style, string? format) {
+        if (!double.IsFinite(number))
+            throw Refuse(column, $"the value {number.ToString(CultureInfo.InvariantCulture)} is not a finite number.");
+
+        WriteNumberCell(column, number, "R", style, format);
+    }
+
+    private void WriteFloatingCell(int column, float number, int style, string? format) {
+        if (!float.IsFinite(number))
+            throw Refuse(column, $"the value {number.ToString(CultureInfo.InvariantCulture)} is not a finite number.");
+
+        WriteNumberCell(column, number, "R", style, format);
+    }
+
+    private void WriteDateTimeCell(int column, DateTime dateTime, int style, string? format) {
+        if (!SpreadsheetCells.TryGetSerial(dateTime, out var serial))
+            throw Refuse(column, $"the date {dateTime.ToString("O", CultureInfo.InvariantCulture)} is before 1900-01-01, the first date a spreadsheet holds.");
+
+        WriteDateCell(column, serial, DateTimeWidth, style, format);
+    }
+
+    private void WriteDateOnlyCell(int column, DateOnly date, int style, string? format) {
+        if (!SpreadsheetCells.TryGetSerial(date.ToDateTime(TimeOnly.MinValue), out var serial))
+            throw Refuse(column, $"the date {date.ToString("O", CultureInfo.InvariantCulture)} is before 1900-01-01, the first date a spreadsheet holds.");
+
+        WriteDateCell(column, serial, DateWidth, style, format);
+    }
+
+    private void WriteDateTimeOffsetCell(int column, DateTimeOffset instant, int style) {
+        Span<char> text = stackalloc char[40];
+        var format = instant.Ticks % TimeSpan.TicksPerSecond == 0 ? "yyyy'-'MM'-'dd'T'HH':'mm':'sszzz" : "O";
+        instant.TryFormat(text, out var written, format, CultureInfo.InvariantCulture);
+        WriteTextCell(column, text[..written], style);
+    }
+
+    private void WriteGuidCell(int column, Guid guid, int style) {
+        Span<char> text = stackalloc char[36];
+        guid.TryFormat(text, out var written, "D");
+        WriteTextCell(column, text[..written], style);
+    }
+
+    private void WriteTextCell(int column, ReadOnlySpan<char> text, int style) {
         if (text.Length > SpreadsheetCells.MaxTextLength)
             throw Refuse(column, $"the text is {text.Length} characters long; a cell holds at most {SpreadsheetCells.MaxTextLength}.");
 
@@ -261,7 +407,7 @@ public sealed class SpreadsheetCellWriter {
             return;
         }
 
-        BeginCell(column, _styles[column], "inlineStr"u8);
+        BeginCell(column, style, "inlineStr"u8);
         AppendInlineString(text);
     }
 
@@ -273,27 +419,28 @@ public sealed class SpreadsheetCellWriter {
         _xml.Append("</t></is></c>"u8);
     }
 
-    private void WriteNumberCell<TValue>(int column, TValue value, string? format) where TValue : IUtf8SpanFormattable {
+    private void WriteNumberCell<TValue>(int column, TValue value, string? numberFormat, int style, string? format)
+        where TValue : IUtf8SpanFormattable {
         Span<byte> digits = stackalloc byte[64];
-        value.TryFormat(digits, out var written, format, CultureInfo.InvariantCulture);
+        value.TryFormat(digits, out var written, numberFormat, CultureInfo.InvariantCulture);
         if (_measuring) {
-            Measure(column, Math.Max(written, _formats[column]?.Length ?? 0));
+            Measure(column, Math.Max(written, format?.Length ?? 0));
             return;
         }
 
-        AppendCellStart(column, _styles[column]);
+        AppendCellStart(column, style);
         _xml.Append("><v>"u8);
         _xml.Append(digits[..written]);
         _xml.Append("</v></c>"u8);
     }
 
-    private void WriteDateCell(int column, double serial, int width) {
+    private void WriteDateCell(int column, double serial, int width, int style, string? format) {
         if (_measuring) {
-            Measure(column, _formats[column]?.Length ?? width);
+            Measure(column, format?.Length ?? width);
             return;
         }
 
-        AppendCellStart(column, _styles[column]);
+        AppendCellStart(column, style);
         _xml.Append("><v>"u8);
         _xml.AppendFormatted(serial, "R");
         _xml.Append("</v></c>"u8);

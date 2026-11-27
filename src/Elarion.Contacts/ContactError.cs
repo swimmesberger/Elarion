@@ -10,7 +10,7 @@ namespace Elarion.Contacts;
 /// </summary>
 /// <remarks>
 /// The location members are the ones <c>CalendarError</c> carries too; <see cref="DisplayName"/> and
-/// <see cref="Charset"/> are vCard's own. The constructor is public so a handler's tests can build a result by hand.
+/// <see cref="Charset"/> and <see cref="MediaType"/> are vCard's own. The constructor is public so a handler's tests can build a result by hand.
 /// <see cref="Message"/> does not repeat the location; <see cref="ToString"/> prefixes it.
 /// </remarks>
 public sealed class ContactError {
@@ -29,6 +29,7 @@ public sealed class ContactError {
     /// <param name="limit">The exceeded limit, for the <c>too_*</c> codes and <see cref="ContactErrorCodes.PhotoTooLarge"/>.</param>
     /// <param name="displayName">The display name of the entry's contact, when it has one.</param>
     /// <param name="charset">The unknown charset, for <see cref="ContactErrorCodes.UnknownCharset"/>.</param>
+    /// <param name="mediaType">What the bytes are, for a photo of no readable format or a file that is not text.</param>
     public ContactError(
         string code,
         string message,
@@ -40,7 +41,8 @@ public sealed class ContactError {
         string? expectedKind = null,
         long? limit = null,
         string? displayName = null,
-        string? charset = null) {
+        string? charset = null,
+        string? mediaType = null) {
         ArgumentException.ThrowIfNullOrEmpty(code);
         ArgumentNullException.ThrowIfNull(message);
         Code = code;
@@ -54,6 +56,7 @@ public sealed class ContactError {
         Limit = limit;
         DisplayName = displayName;
         Charset = charset;
+        MediaType = mediaType;
     }
 
     /// <summary>The stable code (FR-040, FR-041).</summary>
@@ -77,7 +80,11 @@ public sealed class ContactError {
     /// <summary>The property's value as written, cut to <see cref="MaxValueLength"/> characters, or <see langword="null"/>.</summary>
     public string? Value { get; }
 
-    /// <summary>The kind of value expected (<c>date</c>, <c>photo</c>, <c>uri</c>), for <see cref="ContactErrorCodes.InvalidValue"/>.</summary>
+    /// <summary>
+    /// The kind of value expected, for <see cref="ContactErrorCodes.InvalidValue"/>: <c>date</c>, <c>uri</c>, <c>photo</c>
+    /// (neither Base64 nor an address), or <c>photo-format</c> (bytes of no image format the package reads; see
+    /// <see cref="MediaType"/>).
+    /// </summary>
     public string? ExpectedKind { get; }
 
     /// <summary>The exceeded limit: bytes, contacts, lines or photo bytes.</summary>
@@ -88,6 +95,14 @@ public sealed class ContactError {
 
     /// <summary>The unknown charset, for <see cref="ContactErrorCodes.UnknownCharset"/>.</summary>
     public string? Charset { get; }
+
+    /// <summary>
+    /// What the bytes are, from their magic number or, failing that, the type the file declared: for a photo of no
+    /// readable format (<c>image/heic</c>, <c>application/pdf</c>), and for an <see cref="ContactErrorCodes.Unreadable"/>
+    /// file that is not text (<c>application/pdf</c>, <c>application/zip</c>, <c>application/octet-stream</c>);
+    /// <see langword="null"/> when unknown, and for a text file without a vCard.
+    /// </summary>
+    public string? MediaType { get; }
 
     /// <summary>
     /// The message prefixed with its location: <c>Contact 12 (Jane Doe), line 340: …</c>, without the name when the
@@ -102,5 +117,5 @@ public sealed class ContactError {
     }
 
     internal ContactError At(int itemIndex, int itemLineNumber, string? displayName) =>
-        new(Code, Message, itemIndex, itemLineNumber, LineNumber, Property, Value, ExpectedKind, Limit, displayName, Charset);
+        new(Code, Message, itemIndex, itemLineNumber, LineNumber, Property, Value, ExpectedKind, Limit, displayName, Charset, MediaType);
 }

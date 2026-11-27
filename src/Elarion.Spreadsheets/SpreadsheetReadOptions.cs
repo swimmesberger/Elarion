@@ -29,8 +29,10 @@ public sealed record SpreadsheetReadOptions {
     public long MaxUnpackedBytes { get; set; } = DefaultMaxUnpackedBytes;
 
     /// <summary>
-    /// The most data rows read from a worksheet (FR-056); empty rows do not count. Reading stops with
-    /// <see cref="SpreadsheetErrorCodes.TooManyRows"/> and keeps the rows before it.
+    /// The most rows read from a worksheet (FR-056); empty rows do not count. A record read counts the data rows below
+    /// its header row; a plain-rows read, which knows no header row, counts every non-empty row, the header row and any
+    /// lines above it included. Reading stops with <see cref="SpreadsheetErrorCodes.TooManyRows"/> and keeps the rows
+    /// before it.
     /// </summary>
     public int MaxRows { get; set; } = DefaultMaxRows;
 

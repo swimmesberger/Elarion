@@ -320,6 +320,12 @@ alias. A property the mapping cannot handle is a build error. Reading keeps ever
 carries, and reports a problem in the file as a coded, located error in the result, never as an exception.
 _Avoid_: Excel model, sheet DTO, export row, import row
 
+**Sheet definition**:
+A worksheet declared at run time (`SpreadsheetSheetDefinition`): its name and its columns (header, kind, format, width,
+dropdown labels), written from rows of values in column order, each value a cell of its own type. It serves schemas
+composed from data, where a spreadsheet record would repeat the schema; it only writes, and is read back as plain rows.
+_Avoid_: dynamic record, untyped sheet, schema sheet
+
 **Published calendar**:
 A calendar whose objects an application publishes into Elarion's store (`ICalDavPublisher`) in the transaction that
 changed its own data, and which Elarion serves to calendar apps over CalDAV and as an ICS feed, with exact sync. It

@@ -1,3 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
+using Elarion.Contacts.Reading;
+
 namespace Elarion.Contacts;
 
 /// <summary>
@@ -35,6 +38,35 @@ public sealed class ContactPhoto : IEquatable<ContactPhoto> {
         var mediaType = SniffMediaType(data.Span)
             ?? throw new ArgumentException("The bytes are not a JPEG, PNG, GIF, WebP or BMP image.", nameof(data));
         return new ContactPhoto(data, mediaType, null);
+    }
+
+    /// <summary>A photo of <paramref name="data"/> when the bytes are of a known image format (FR-079).</summary>
+    /// <param name="data">The bytes, such as a picture an application stored.</param>
+    /// <param name="photo">The photo, or <see langword="null"/> when the bytes are empty or of no known image format.</param>
+    /// <returns>Whether the bytes are a JPEG, PNG, GIF, WebP or BMP image.</returns>
+    public static bool TryFromData(ReadOnlyMemory<byte> data, [NotNullWhen(true)] out ContactPhoto? photo) {
+        var mediaType = SniffMediaType(data.Span);
+        photo = mediaType is null ? null : new ContactPhoto(data, mediaType, null);
+        return photo is not null;
+    }
+
+    /// <summary>
+    /// Reads a <c>PHOTO</c> property by the rules a read applies to the contact's first one (FR-078): inline Base64 or a
+    /// <c>data:</c> URI into bytes, an <c>http</c> or <c>https</c> address into a URI. For a further photo of a card,
+    /// which stays among <see cref="Contact.AdditionalProperties"/>.
+    /// </summary>
+    /// <param name="property">The <c>PHOTO</c> property, as read or built in code.</param>
+    /// <param name="maxBytes">The most decoded bytes, as <see cref="ContactReadOptions.MaxPhotoBytes"/>.</param>
+    /// <param name="photo">The photo, or <see langword="null"/>.</param>
+    /// <param name="error">Why it does not read, coded and located like a read's error; <see langword="null"/> when it does.</param>
+    /// <returns>Whether the property holds a photo.</returns>
+    public static bool TryRead(ContactProperty property, int maxBytes, [NotNullWhen(true)] out ContactPhoto? photo, out ContactError? error) {
+        ArgumentNullException.ThrowIfNull(property);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
+        var errors = new List<ContactError>(1);
+        photo = PhotoReader.Read(property, maxBytes, errors);
+        error = photo is null ? errors.FirstOrDefault() : null;
+        return photo is not null;
     }
 
     /// <summary>A photo given as the address of an image.</summary>

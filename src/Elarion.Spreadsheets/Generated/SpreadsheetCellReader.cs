@@ -187,6 +187,23 @@ public sealed class SpreadsheetCellReader {
         return cell.Text.Trim();
     }
 
+    /// <summary>
+    /// Reads a text column with <c>StrictChoices</c>: the trimmed text when it equals one of the column's labels ignoring
+    /// case, returned as the label is spelled; any other text is an <see cref="SpreadsheetErrorCodes.InvalidValue"/>
+    /// error that carries the labels (FR-078).
+    /// </summary>
+    public string? ReadTextChoice(int column) {
+        var text = ReadChoice(column);
+        if (text is null) return null;
+
+        foreach (var choice in _choices[column])
+            if (string.Equals(choice.Trim(), text, StringComparison.OrdinalIgnoreCase))
+                return choice;
+
+        RejectChoice(column);
+        return null;
+    }
+
     /// <summary>Reports that the choice column's text names no member: the error carries the allowed labels.</summary>
     public void RejectChoice(int column) {
         Invalid<string>(column, _cells[column]);
