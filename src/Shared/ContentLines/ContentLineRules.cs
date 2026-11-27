@@ -6,8 +6,11 @@ namespace Elarion.ContentLines;
 /// needs a limit per property passes <see cref="LineLimitFor"/>.
 /// </summary>
 internal sealed class ContentLineRules {
-    /// <summary>The iCalendar rule set (RFC 5545): one space or tab removed per fold, no groups, no vCard 2.1 grammar.</summary>
-    public static ContentLineRules ICalendar(int maxLineBytes) => new() { MaxLineBytes = maxLineBytes };
+    /// <summary>
+    /// The iCalendar rule set (RFC 5545): one space or tab removed per fold, no groups, no vCard 2.1 grammar, and a
+    /// byte-order mark at the start of a line, as calendars concatenated from several exports carry.
+    /// </summary>
+    public static ContentLineRules ICalendar(int maxLineBytes) => new() { MaxLineBytes = maxLineBytes, SkipByteOrderMarks = true };
 
     /// <summary>
     /// The vCard rule set (RFC 2425, 2426, 6350 and vCard 2.1): every leading space and tab of a continuation removed,
@@ -60,7 +63,7 @@ internal sealed class ContentLineRules {
 
     /// <summary>
     /// A byte-order mark (U+FEFF, as UTF-8) at the start of a physical line is nothing: files concatenated from several
-    /// exports carry one before each later <c>BEGIN</c>, which would otherwise not read as a line.
+    /// exports carry one before each later <c>BEGIN</c>, which would otherwise not read as a line. On for both formats.
     /// </summary>
     public bool SkipByteOrderMarks { get; init; }
 

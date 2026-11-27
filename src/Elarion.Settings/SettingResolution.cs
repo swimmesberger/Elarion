@@ -136,8 +136,19 @@ public sealed record SettingWriteFailure(string Key);
 /// <param name="Version">The store entry's version when <paramref name="Source"/> is <see cref="SettingSource.Store"/>.</param>
 /// <param name="IsPinned">Whether deployment configuration pins the definition.</param>
 public readonly record struct SettingValue<T>(T Value, SettingSource Source, int? Version, bool IsPinned) {
-    /// <summary>Whether the value was set (stored, pinned, or configured at the fallback key) rather than defaulted.</summary>
+    /// <summary>
+    /// Whether the value came from anywhere but the default: the store, a pinning configuration value, or the
+    /// deployment's value at the fallback key (<see cref="SettingSource.ConfigurationFallback"/>). To ask whether a
+    /// value is stored, use <see cref="IsStored"/>.
+    /// </summary>
     public bool IsSet => Source != SettingSource.Default;
+
+    /// <summary>
+    /// Whether the effective value is a value written to the settings store (<see cref="SettingSource.Store"/>):
+    /// <see langword="false"/> while the default or the fallback configuration value applies, and while deployment
+    /// configuration pins the definition, even if a stored value exists underneath the pin.
+    /// </summary>
+    public bool IsStored => Source == SettingSource.Store;
 }
 
 /// <summary>The success value of a settings write.</summary>

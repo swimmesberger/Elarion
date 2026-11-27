@@ -174,11 +174,15 @@ public sealed class SettingsManagerTests {
 
         unset.Should().Be(new SettingValue<bool>(true, SettingSource.Default, null, false));
         unset.IsSet.Should().BeFalse();
+        unset.IsStored.Should().BeFalse();
         stored.Value.Should().Be(25);
         stored.Source.Should().Be(SettingSource.Store);
         stored.Version.Should().Be(1);
         stored.IsSet.Should().BeTrue();
+        stored.IsStored.Should().BeTrue();
         pinned.Should().Be(new SettingValue<string>("pinned", SettingSource.Configuration, null, true));
+        pinned.IsSet.Should().BeTrue();
+        pinned.IsStored.Should().BeFalse("a pin is configuration, not a stored value");
     }
 
     [Fact]

@@ -8,9 +8,11 @@ namespace Elarion.Typst;
 
 /// <summary>
 /// The CLI-backed <see cref="ITypstCompiler"/>. <c>AddElarionTypst()</c> registers it; <see cref="Create"/> builds one
-/// without a service provider.
+/// without a service provider. It owns no unmanaged resource and is not disposable: its concurrency limiter is a
+/// <see cref="SemaphoreSlim"/> whose wait handle is never created, and each compilation's process, workspace, and output
+/// stream are released by that compilation (the PDF by disposing the <see cref="TypstPdf"/>).
 /// </summary>
-public sealed class TypstCompiler : ITypstCompiler, IDisposable {
+public sealed class TypstCompiler : ITypstCompiler {
     private readonly TypstOptions _options;
     private readonly TypstToolchain _toolchain;
     private readonly ILogger<TypstCompiler> _logger;
@@ -29,15 +31,19 @@ public sealed class TypstCompiler : ITypstCompiler, IDisposable {
     /// Builds a compiler from <paramref name="options"/> without dependency injection: for tests that need a compiler
     /// with their own executable, package directory, or working directory, and for tools without a host. The options
     /// and the toolchain are read once here; later changes to <paramref name="options"/> have no effect. No startup check
-    /// runs: probe <see cref="TypstToolchain"/> yourself when it matters.
+    /// runs, so <see cref="TypstOptions.RequiredPackages"/> is not checked and a missing executable or package shows only
+    /// when a compilation fails (<see cref="TypstUnavailableException"/>, <see cref="TypstPackageNotFoundException"/>).
+    /// To learn it earlier, without running Typst, probe <c>new TypstToolchain(options)</c>: its
+    /// <see cref="TypstToolchain.ExecutableExists"/> and <see cref="TypstToolchain.HasPackage"/> only look at files.
+    /// The compiler holds nothing to release, so a test kit may create one per test and drop it.
     /// </summary>
     /// <param name="options">The options, as <c>AddElarionTypst(options => …)</c> would set them.</param>
     /// <param name="loggerFactory">Where the compiler logs diagnostics. <see langword="null"/>: nothing is logged.</param>
-    /// <returns>A compiler that is safe for concurrent use. Dispose it when done.</returns>
+    /// <returns>A compiler that is safe for concurrent use.</returns>
     /// <exception cref="ArgumentException">An option is out of range or a required package is not a package specification.</exception>
     /// <example>
     /// <code>
-    /// using var compiler = TypstCompiler.Create(new TypstOptions { WorkingDirectory = workspace, Timeout = TimeSpan.FromSeconds(5) });
+    /// var compiler = TypstCompiler.Create(new TypstOptions { WorkingDirectory = workspace, Timeout = TimeSpan.FromSeconds(5) });
     /// await using var pdf = await compiler.CompilePdfAsync(request, cancellationToken);
     /// </code>
     /// </example>
@@ -224,7 +230,4 @@ public sealed class TypstCompiler : ITypstCompiler, IDisposable {
             activity.SetStatus(ActivityStatusCode.Error, outcome);
         }
     }
-
-    /// <summary>Releases the concurrency limiter. Compilations still running complete.</summary>
-    public void Dispose() => _slots.Dispose();
 }

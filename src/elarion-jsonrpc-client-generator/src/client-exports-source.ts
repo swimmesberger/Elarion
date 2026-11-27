@@ -12,7 +12,7 @@ import type {JsonSchema, RpcSchema} from './schema.js'
  * The values the server exports next to the method schemas (ADR-0100), rendered as typed constants at the end of the
  * schemas file: `rpcLimits` (every params member's limits, by path), `rpcUploadLimits` (every upload member with its
  * limits, which the client's uploadFile checks), `rpcPresets` (named params values, typed by the method), `rpcSortKeys`
- * and `rpcConstants`. Each block is emitted only when it has an entry, so a schema without any produces byte-identical
+ * with `rpcMaxSortLevels`, and `rpcConstants`. Each block is emitted only when it has an entry, so a schema without any produces byte-identical
  * output.
  */
 export function generateClientExportsLines(schema: RpcSchema, methods: readonly string[], typesImport: string): {
@@ -110,6 +110,19 @@ export function generateClientExportsLines(schema: RpcSchema, methods: readonly 
       `export const rpcSortKeys = ${literal(values, 0)} as const`,
       '',
       'export type RpcSortKeys = typeof rpcSortKeys',
+      '',
+    )
+  }
+
+  const sortLevelMethods = sortKeyMethods.filter((method) => schema.methods[method].maxSortLevels !== undefined)
+  if (sortLevelMethods.length > 0) {
+    const values = Object.fromEntries(sortLevelMethods.map((method) => [method, schema.methods[method].maxSortLevels]))
+    lines.push(
+      '/**',
+      ' * How many keys one sort may combine for each method in `rpcSortKeys` (its sort map\'s level cap). A sort with more',
+      ' * keys is refused, so a sort picker stops offering keys at this count.',
+      ' */',
+      `export const rpcMaxSortLevels = ${literal(values, 0)} as const`,
       '',
     )
   }

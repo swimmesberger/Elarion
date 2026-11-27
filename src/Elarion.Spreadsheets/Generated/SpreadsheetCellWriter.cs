@@ -292,8 +292,8 @@ public sealed class SpreadsheetCellWriter {
         if (!_measuring) _xml.Append("</row>"u8);
     }
 
-    internal void WriteHeaderRow() {
-        BeginRow(1, measuring: false, mapped: false);
+    internal void WriteHeaderRow(int rowNumber) {
+        BeginRow(rowNumber, measuring: false, mapped: false);
         for (var column = 0; column < _headers.Length; column++) {
             BeginCell(column, SpreadsheetStyles.Header, "inlineStr"u8);
             AppendInlineString(_headers[column]);
@@ -315,9 +315,13 @@ public sealed class SpreadsheetCellWriter {
 
     // The column's own style for a value of its kind, or of its family with a declared format (an integer in a number
     // column, a date-and-time in a date column); otherwise the value's built-in style, so a label in a date column is
-    // plain text and a number in a text column a plain number.
+    // plain text and a number in a text column a plain number. A general column keeps text in the default format too,
+    // so the whole column stays "General"; a date in it still needs its date format to show as a date.
     private int Style(int column, SpreadsheetValueKind kind) {
-        return UsesColumnFormat(column, kind) ? _styles[column] : SpreadsheetStyles.BuiltInStyleFor(kind);
+        if (UsesColumnFormat(column, kind)) return _styles[column];
+
+        var style = SpreadsheetStyles.BuiltInStyleFor(kind);
+        return style == SpreadsheetStyles.Text && _kinds[column] == SpreadsheetValueKind.General ? SpreadsheetStyles.Default : style;
     }
 
     private string? Format(int column, SpreadsheetValueKind kind) {

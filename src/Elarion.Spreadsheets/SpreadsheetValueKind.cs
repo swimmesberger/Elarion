@@ -30,5 +30,12 @@ public enum SpreadsheetValueKind {
     Guid,
 
     /// <summary>An enum, or a <c>bool</c> with labels, written as the text of its label.</summary>
-    Choice
+    Choice,
+
+    /// <summary>
+    /// Text or numbers mixed in one column, each value written as its own type with its own default format and the
+    /// column without a format of its own, so a cell typed below the data stays the spreadsheet's "General". Only a
+    /// run-time column has it (<see cref="SpreadsheetColumnDefinition.General"/>); a record's property never does.
+    /// </summary>
+    General
 }

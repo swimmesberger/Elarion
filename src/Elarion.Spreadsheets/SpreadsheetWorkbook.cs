@@ -45,7 +45,7 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
     private readonly SpreadsheetWriteOptions _options;
     private readonly SpreadsheetStyles _styles = new();
     private readonly SpreadsheetDropdowns _dropdowns = new();
-    private readonly List<string> _worksheets = [];
+    private readonly List<(string Name, bool Hidden)> _worksheets = [];
     private readonly HashSet<string> _worksheetNames = new(StringComparer.OrdinalIgnoreCase);
 
     private ZipArchive? _archive;
@@ -130,6 +130,105 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         using var stream = new MemoryStream();
         await WriteAsync(stream, records, options, cancellationToken).ConfigureAwait(false);
         return ToFile(stream, fileName);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="records"/> as a workbook with one worksheet, shaped by
+    /// <paramref name="worksheetOptions"/>, into memory and returns it as a file with the <c>.xlsx</c> content type
+    /// (FR-085).
+    /// </summary>
+    /// <param name="records">The records, one row each.</param>
+    /// <param name="fileName">The name the caller saves the file with, such as <c>contacts.xlsx</c>.</param>
+    /// <param name="worksheetOptions">The worksheet's name, column filter, title, footer rows and visibility.</param>
+    /// <param name="options">The write options.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <example>
+    /// <code>
+    /// return await SpreadsheetWorkbook.ToFileAsync(invoices, "invoices.xlsx",
+    ///     new SpreadsheetWorksheetOptions { FooterRows = [["Total", null, invoices.Sum(invoice => invoice.Amount)]] },
+    ///     cancellationToken: ct);
+    /// </code>
+    /// </example>
+    public static async ValueTask<ElarionFile> ToFileAsync<T>(
+        IEnumerable<T> records,
+        string fileName,
+        SpreadsheetWorksheetOptions worksheetOptions,
+        SpreadsheetWriteOptions? options = null,
+        CancellationToken cancellationToken = default) where T : class, ISpreadsheetRecord<T> {
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+
+        return await ToFileAsync(
+                fileName, (workbook, ct) => workbook.AddWorksheetAsync(records, worksheetOptions, ct), options, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="records"/> as a workbook with one worksheet, shaped by
+    /// <paramref name="worksheetOptions"/>, into memory and returns it as a file with the <c>.xlsx</c> content type
+    /// (FR-085).
+    /// </summary>
+    /// <param name="records">The records, one row each, produced one at a time.</param>
+    /// <param name="fileName">The name the caller saves the file with, such as <c>contacts.xlsx</c>.</param>
+    /// <param name="worksheetOptions">The worksheet's name, column filter, title, footer rows and visibility.</param>
+    /// <param name="options">The write options.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    public static async ValueTask<ElarionFile> ToFileAsync<T>(
+        IAsyncEnumerable<T> records,
+        string fileName,
+        SpreadsheetWorksheetOptions worksheetOptions,
+        SpreadsheetWriteOptions? options = null,
+        CancellationToken cancellationToken = default) where T : class, ISpreadsheetRecord<T> {
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+
+        return await ToFileAsync(
+                fileName, (workbook, ct) => workbook.AddWorksheetAsync(records, worksheetOptions, ct), options, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="records"/> as a workbook with one worksheet into memory, synchronously, and returns its
+    /// bytes (FR-086): for a caller without an asynchronous context, such as a test or a synchronous library seam.
+    /// </summary>
+    /// <param name="records">The records, one row each.</param>
+    /// <param name="worksheetOptions">The worksheet's options; <see langword="null"/> uses the name the record declares.</param>
+    /// <param name="options">The write options.</param>
+    /// <remarks>
+    /// The write runs on the calling thread and never blocks on a task: the destination is memory and the records are
+    /// a synchronous sequence, so nothing waits. The whole workbook is held in memory; a large export streams with
+    /// <see cref="ToStreamedFile{T}"/> instead.
+    /// </remarks>
+    /// <exception cref="SpreadsheetWriteException">A value cannot be written, or the worksheet name is invalid.</exception>
+    public static byte[] ToBytes<T>(
+        IEnumerable<T> records,
+        SpreadsheetWorksheetOptions? worksheetOptions = null,
+        SpreadsheetWriteOptions? options = null) where T : class, ISpreadsheetRecord<T> {
+        ArgumentNullException.ThrowIfNull(records);
+        return WriteSynchronously(workbook => workbook.AddWorksheetAsync(records, worksheetOptions), options);
+    }
+
+    /// <summary>
+    /// Writes a worksheet whose columns are known only at run time as a workbook into memory, synchronously, and
+    /// returns its bytes (FR-086).
+    /// </summary>
+    /// <param name="sheet">The worksheet's name and columns.</param>
+    /// <param name="rows">The rows, one list of values each, as for <see cref="AddWorksheetAsync(SpreadsheetSheetDefinition, IEnumerable{IReadOnlyList{object}}, CancellationToken)"/>.</param>
+    /// <param name="worksheetOptions">The worksheet's options, or <see langword="null"/>.</param>
+    /// <param name="options">The write options.</param>
+    /// <remarks>
+    /// The write runs on the calling thread and never blocks on a task: the destination is memory and the rows are a
+    /// synchronous sequence, so nothing waits.
+    /// </remarks>
+    /// <exception cref="SpreadsheetWriteException">A value cannot be written or has a type no cell holds.</exception>
+    public static byte[] ToBytes(
+        SpreadsheetSheetDefinition sheet,
+        IEnumerable<IReadOnlyList<object?>> rows,
+        SpreadsheetWorksheetOptions? worksheetOptions = null,
+        SpreadsheetWriteOptions? options = null) {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ArgumentNullException.ThrowIfNull(rows);
+        return WriteSynchronously(workbook => workbook.AddWorksheetAsync(sheet, rows, worksheetOptions), options);
     }
 
     /// <summary>
@@ -334,7 +433,62 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(rows);
-        return AddDefinedWorksheetCoreAsync(sheet, new SynchronousRecords<IReadOnlyList<object?>>(rows), cancellationToken);
+        return AddDefinedWorksheetCoreAsync(sheet, new SynchronousRecords<IReadOnlyList<object?>>(rows), null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds a worksheet whose columns are known only at run time (FR-073), shaped by <paramref name="options"/> (FR-084):
+    /// another name, title rows above the header, footer rows below the rows, or hidden.
+    /// </summary>
+    /// <param name="sheet">The worksheet's name and columns.</param>
+    /// <param name="rows">The rows, one list of values each, as for the overload without options.</param>
+    /// <param name="options">
+    /// The worksheet's options, or <see langword="null"/>. A column filter (<see cref="SpreadsheetWorksheetOptions.IncludedColumns"/>,
+    /// <see cref="SpreadsheetWorksheetOptions.ExcludedColumns"/>) throws an <see cref="ArgumentException"/>: leave the
+    /// column out of the definition instead.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="SpreadsheetWriteException">
+    /// A value cannot be written or has a type no cell holds, a row has more values than the worksheet has columns, or
+    /// another worksheet of the workbook has the same name ignoring case.
+    /// </exception>
+    /// <example>
+    /// <code>
+    /// await workbook.AddWorksheetAsync(sheet, rows, new SpreadsheetWorksheetOptions {
+    ///     FooterRows = [["Total", null, rows.Sum(row => (decimal)row[2]!)]]
+    /// }, ct);
+    /// </code>
+    /// </example>
+    public ValueTask AddWorksheetAsync(
+        SpreadsheetSheetDefinition sheet,
+        IEnumerable<IReadOnlyList<object?>> rows,
+        SpreadsheetWorksheetOptions? options,
+        CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ArgumentNullException.ThrowIfNull(rows);
+        return AddDefinedWorksheetCoreAsync(sheet, new SynchronousRecords<IReadOnlyList<object?>>(rows), options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds a worksheet whose columns are known only at run time (FR-073), its rows produced one at a time, shaped by
+    /// <paramref name="options"/> (FR-084).
+    /// </summary>
+    /// <param name="sheet">The worksheet's name and columns.</param>
+    /// <param name="rows">The rows, one list of values each, as for the synchronous overload.</param>
+    /// <param name="options">The worksheet's options, or <see langword="null"/>; a column filter throws an <see cref="ArgumentException"/>.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <exception cref="SpreadsheetWriteException">
+    /// A value cannot be written or has a type no cell holds, a row has more values than the worksheet has columns, or
+    /// another worksheet of the workbook has the same name ignoring case.
+    /// </exception>
+    public ValueTask AddWorksheetAsync(
+        SpreadsheetSheetDefinition sheet,
+        IAsyncEnumerable<IReadOnlyList<object?>> rows,
+        SpreadsheetWorksheetOptions? options,
+        CancellationToken cancellationToken = default) {
+        ArgumentNullException.ThrowIfNull(sheet);
+        ArgumentNullException.ThrowIfNull(rows);
+        return AddDefinedWorksheetCoreAsync(sheet, rows, options, cancellationToken);
     }
 
     /// <summary>
@@ -354,7 +508,7 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         CancellationToken cancellationToken = default) {
         ArgumentNullException.ThrowIfNull(sheet);
         ArgumentNullException.ThrowIfNull(rows);
-        return AddDefinedWorksheetCoreAsync(sheet, rows, cancellationToken);
+        return AddDefinedWorksheetCoreAsync(sheet, rows, null, cancellationToken);
     }
 
     /// <summary>
@@ -373,14 +527,45 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
             return;
         }
 
+        // A spreadsheet application cannot show a workbook without a visible worksheet; close what was written instead.
+        var allHidden = !_faulted && _worksheets.TrueForAll(static worksheet => worksheet.Hidden);
         try {
             // The closing parts are small and must complete for the file to be a workbook at all, so they are written
             // without the token of a worksheet call that has already returned.
-            if (!_faulted) await WritePackagePartsAsync(_archive, CancellationToken.None).ConfigureAwait(false);
+            if (!_faulted && !allHidden) await WritePackagePartsAsync(_archive, CancellationToken.None).ConfigureAwait(false);
         }
         finally {
             await _archive.DisposeAsync().ConfigureAwait(false);
         }
+
+        if (allHidden)
+            throw new InvalidOperationException(
+                "A workbook needs at least one worksheet that is not hidden; every worksheet added was hidden.");
+    }
+
+    // Drives the one asynchronous write path over memory and synchronous rows, where every await completes before it
+    // returns: nothing blocks on a task. A write that did not complete would be a defect of this path, not a wait.
+    private static byte[] WriteSynchronously(Func<SpreadsheetWorkbook, ValueTask> add, SpreadsheetWriteOptions? options) {
+        using var stream = new MemoryStream();
+        var workbook = Create(stream, options);
+        try {
+            CompleteSynchronously(add(workbook));
+        }
+        catch {
+            workbook._faulted = true;
+            CompleteSynchronously(workbook.DisposeAsync());
+            throw;
+        }
+
+        CompleteSynchronously(workbook.DisposeAsync());
+        return stream.ToArray();
+    }
+
+    private static void CompleteSynchronously(ValueTask task) {
+        if (!task.IsCompleted)
+            throw new InvalidOperationException("The in-memory spreadsheet write did not complete synchronously.");
+
+        task.GetAwaiter().GetResult();
     }
 
     private static SpreadsheetWriteOptions ValidateOptions(SpreadsheetWriteOptions? options) {
@@ -405,10 +590,7 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         EnsureWritable();
         var mapper = T.SpreadsheetMapper;
         var (columns, map) = SelectColumns(mapper.Columns, options);
-        var footerRows = options?.FooterRows ?? [];
-        if (footerRows.Any(static row => row is null))
-            throw new ArgumentException("A footer row must not be null.", nameof(options));
-
+        var layout = Layout(options);
         var name = options?.Name ?? mapper.WorksheetName;
         try {
             await WriteWorksheetAsync(
@@ -420,7 +602,7 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
 
                     mapper.WriteRow(record, cells);
                 },
-                footerRows, cancellationToken).ConfigureAwait(false);
+                layout, cancellationToken).ConfigureAwait(false);
         }
         catch {
             _faulted = true;
@@ -431,27 +613,55 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
     private async ValueTask AddDefinedWorksheetCoreAsync(
         SpreadsheetSheetDefinition sheet,
         IAsyncEnumerable<IReadOnlyList<object?>> rows,
+        SpreadsheetWorksheetOptions? options,
         CancellationToken cancellationToken) {
         EnsureWritable();
+        if (options is { IncludedColumns: not null } or { ExcludedColumns: not null })
+            throw new ArgumentException(
+                "A run-time worksheet declares its columns per call and takes no column filter; leave the column out of "
+                + "the definition instead.",
+                nameof(options));
+
         var columns = sheet.Columns
             .Select(static column => new WorksheetColumn(column.Header, column.Kind, column.Format, column.Width, column.Choices))
             .ToArray();
+        var layout = Layout(options);
+        var name = options?.Name ?? sheet.Name;
         try {
             await WriteWorksheetAsync<IReadOnlyList<object?>>(
-                sheet.Name, columns, null, rows,
+                name, columns, null, rows,
                 (cells, row, rowNumber) => {
                     if (row is null)
                         throw new SpreadsheetWriteException(
-                            $"Cannot write row {rowNumber} of worksheet '{sheet.Name}': the row is null.", sheet.Name, rowNumber);
+                            $"Cannot write row {rowNumber} of worksheet '{name}': the row is null.", name, rowNumber);
 
                     cells.WriteValues(row);
                 },
-                [], cancellationToken).ConfigureAwait(false);
+                layout, cancellationToken).ConfigureAwait(false);
         }
         catch {
             _faulted = true;
             throw;
         }
+    }
+
+    private static WorksheetLayout Layout(SpreadsheetWorksheetOptions? options) {
+        var titleRows = options?.TitleRows ?? [];
+        if (titleRows.Any(static row => row is null))
+            throw new ArgumentException("A title row must not be null.", nameof(options));
+
+        var footerRows = options?.FooterRows ?? [];
+        if (footerRows.Any(static row => row is null))
+            throw new ArgumentException("A footer row must not be null.", nameof(options));
+
+        // The header row and the first data row must fit on a worksheet, so the title rows are bounded before anything
+        // is written.
+        if (titleRows.Count > SpreadsheetCells.MaxRows - 1)
+            throw new ArgumentException(
+                $"A worksheet holds at most {SpreadsheetCells.MaxRows} rows; {titleRows.Count} title rows leave no room for its header.",
+                nameof(options));
+
+        return new WorksheetLayout(titleRows, footerRows, options?.Hidden ?? false);
     }
 
     private void EnsureWritable() {
@@ -505,7 +715,7 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         int[]? map,
         IAsyncEnumerable<TRow> rows,
         Action<SpreadsheetCellWriter, TRow, int> writeRow,
-        IReadOnlyList<IReadOnlyList<object?>> footerRows,
+        WorksheetLayout layout,
         CancellationToken cancellationToken) {
         if (SpreadsheetCells.ValidateWorksheetName(name) is { } reason) throw new SpreadsheetWriteException(reason, name);
         if (_worksheetNames.Contains(name))
@@ -521,29 +731,41 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
 
         using var xml = new Utf8XmlBuffer();
         var cells = new SpreadsheetCellWriter(name, columns, styles, map, xml);
+        // Title rows push the header row down (FR-082); the data rows follow it.
+        var headerRow = layout.TitleRows.Count + 1;
         var enumerator = rows.GetAsyncEnumerator(cancellationToken);
         await using (enumerator.ConfigureAwait(false)) {
             // Read ahead and measure the sample before anything is written: <cols> precedes <sheetData> (FR-019).
             var sample = new List<TRow>(Math.Min(_options.WidthSampleRows, 1024));
             while (sample.Count < _options.WidthSampleRows && await enumerator.MoveNextAsync().ConfigureAwait(false)) {
                 var row = enumerator.Current;
-                cells.BeginRow(sample.Count + 2, measuring: true);
-                writeRow(cells, row, sample.Count + 2);
+                cells.BeginRow(headerRow + sample.Count + 1, measuring: true);
+                writeRow(cells, row, headerRow + sample.Count + 1);
                 cells.EndRow();
                 sample.Add(row);
             }
 
             var archive = await GetArchiveAsync(cancellationToken).ConfigureAwait(false);
+            // The first worksheet that is not hidden is the one the workbook opens on.
+            var selected = !layout.Hidden && !_worksheets.Exists(static worksheet => !worksheet.Hidden);
             _worksheetNames.Add(name);
-            _worksheets.Add(name);
+            _worksheets.Add((name, layout.Hidden));
             var entry = archive.CreateEntry($"xl/worksheets/sheet{_worksheets.Count}.xml", CompressionLevel.Optimal);
             entry.LastWriteTime = EntryTimestamp;
             var stream = await entry.OpenAsync(cancellationToken).ConfigureAwait(false);
             await using (stream.ConfigureAwait(false)) {
-                WriteWorksheetStart(xml, columns, styles, cells.MeasuredWidths, isFirst: _worksheets.Count == 1);
-                cells.WriteHeaderRow();
+                WriteWorksheetStart(xml, columns, styles, cells.MeasuredWidths, selected, headerRow);
+                var rowNumber = 0;
+                foreach (var title in layout.TitleRows) {
+                    rowNumber++;
+                    cells.BeginRow(rowNumber, measuring: false, mapped: false);
+                    cells.WriteValues(title);
+                    cells.EndRow();
+                }
 
-                var rowNumber = 1;
+                cells.WriteHeaderRow(headerRow);
+
+                rowNumber = headerRow;
                 foreach (var row in sample) {
                     rowNumber++;
                     cells.BeginRow(rowNumber, measuring: false);
@@ -566,11 +788,11 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
                 // Every written row and the first DropdownRows data rows offer the lists, so a template (no records)
                 // still has them where a person fills it in (FR-021, FR-022); footer rows end the data, so the lists
                 // stop above them (FR-075).
-                var dropdownEnd = footerRows.Count > 0
+                var dropdownEnd = layout.FooterRows.Count > 0
                     ? rowNumber
-                    : Math.Min(SpreadsheetCells.MaxRows, Math.Max(rowNumber, _options.DropdownRows + 1));
+                    : (int)Math.Min(SpreadsheetCells.MaxRows, Math.Max(rowNumber, (long)headerRow + _options.DropdownRows));
 
-                foreach (var footer in footerRows) {
+                foreach (var footer in layout.FooterRows) {
                     rowNumber++;
                     cells.BeginRow(rowNumber, measuring: false, mapped: false);
                     cells.WriteValues(footer);
@@ -578,7 +800,7 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
                 }
 
                 xml.Append("</sheetData>"u8);
-                _dropdowns.AppendDataValidations(xml, columns, dropdownEnd, _worksheetNames);
+                _dropdowns.AppendDataValidations(xml, columns, headerRow + 1, dropdownEnd, _worksheetNames);
                 xml.Append("</worksheet>"u8);
                 await xml.FlushAsync(stream, cancellationToken).ConfigureAwait(false);
             }
@@ -590,13 +812,19 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         IReadOnlyList<WorksheetColumn> columns,
         int[] styles,
         ReadOnlySpan<int> measuredWidths,
-        bool isFirst) {
+        bool selected,
+        int headerRow) {
         xml.Append("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""u8);
         xml.Append("""<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"""u8);
-        // The header row stays in place while scrolling (FR-020).
-        xml.Append(isFirst
-            ? """<sheetViews><sheetView tabSelected="1" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>"""u8
-            : """<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>"""u8);
+        // The header row, and the title rows above it, stay in place while scrolling (FR-020, FR-082).
+        xml.Append(selected
+            ? """<sheetViews><sheetView tabSelected="1" workbookViewId="0"><pane ySplit="""u8
+            : """<sheetViews><sheetView workbookViewId="0"><pane ySplit="""u8);
+        xml.Append((byte)'"');
+        xml.AppendFormatted(headerRow);
+        xml.Append("\" topLeftCell=\"A"u8);
+        xml.AppendFormatted(headerRow + 1);
+        xml.Append("\" activePane=\"bottomLeft\" state=\"frozen\"/></sheetView></sheetViews>"u8);
         xml.Append("""<sheetFormatPr defaultRowHeight="15"/>"""u8);
         if (columns.Count > 0) {
             xml.Append("<cols>"u8);
@@ -642,12 +870,23 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
         }
 
         xml.Append("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""u8);
-        xml.Append("""<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>"""u8);
+        xml.Append("""<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"""u8);
+        // A workbook opens on its first tab unless it says otherwise; when that tab is hidden, it names the first
+        // visible one (FR-083). A workbook without hidden worksheets keeps its bytes.
+        var activeTab = _worksheets.FindIndex(static worksheet => !worksheet.Hidden);
+        if (activeTab > 0) {
+            xml.Append("<bookViews><workbookView activeTab=\""u8);
+            xml.AppendFormatted(activeTab);
+            xml.Append("\"/></bookViews>"u8);
+        }
+
+        xml.Append("<sheets>"u8);
         for (var i = 0; i < _worksheets.Count; i++) {
             xml.Append("<sheet name=\""u8);
-            xml.AppendAttribute(_worksheets[i]);
+            xml.AppendAttribute(_worksheets[i].Name);
             xml.Append("\" sheetId=\""u8);
             xml.AppendFormatted(i + 1);
+            if (_worksheets[i].Hidden) xml.Append("\" state=\"hidden"u8);
             xml.Append("\" r:id=\"rId"u8);
             xml.AppendFormatted(i + 1);
             xml.Append("\"/>"u8);
@@ -715,6 +954,12 @@ public sealed class SpreadsheetWorkbook : IAsyncDisposable {
             await xml.FlushAsync(stream, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>The rows a worksheet writes around its header and data, and whether it is hidden.</summary>
+    private sealed record WorksheetLayout(
+        IReadOnlyList<IReadOnlyList<object?>> TitleRows,
+        IReadOnlyList<IReadOnlyList<object?>> FooterRows,
+        bool Hidden);
 
     /// <summary>Presents a synchronous sequence to the one asynchronous worksheet path.</summary>
     private sealed class SynchronousRecords<T>(IEnumerable<T> records) : IAsyncEnumerable<T> {

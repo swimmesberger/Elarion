@@ -21,7 +21,7 @@ The generated files are:
 | File             | Purpose                                                                                                                                           |
 |------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `rpc-types.ts`   | `RpcMethods` interface mapping method names to params/result types.                                                                               |
-| `rpc-schemas.ts` | `rpcParamsSchemas` and `rpcResultSchemas` Zod maps for runtime params/result validation, plus `rpcLimits`, `rpcUploadLimits`, `rpcPresets`, `rpcSortKeys` and `rpcConstants` when the schema declares them. |
+| `rpc-schemas.ts` | `rpcParamsSchemas` and `rpcResultSchemas` Zod maps for runtime params/result validation, plus `rpcLimits`, `rpcUploadLimits`, `rpcPresets`, `rpcSortKeys`, `rpcMaxSortLevels` and `rpcConstants` when the schema declares them. |
 | `rpc-client.ts`  | Browser/Node.js fetch client with typed single calls, batching, headers, `AbortSignal`, JSON-RPC errors, and Zod-backed params/result validation. |
 
 The generated schema and client files import `zod`, so consuming applications should install `zod` as a runtime
@@ -140,8 +140,9 @@ npx elarion-jsonrpc-client-generator --schema rpc-schema.json --out src/generate
 
 It exports `createStartRpcApi` — a `createRpcApi` with request-scoped header forwarding pre-wired for SSR (the
 `cookie` by default) — plus the isomorphic headers functions on their own: `forwardRequestHeaders(names)` and
-`forwardRequestCookie`, and for a server entry `ssrStatusFor(error)` (`401`, `403`, `404`, `503`) and
-`withResponseStatus(response, status)`. The core client never imports the adapter, so consumers that don't opt in stay
+`forwardRequestCookie`, and for a server entry `ssrStatusFor(error, { classify })` (`401`, `403`, `404`, `503`, with
+the application's own error types mapped by `classify` first) and `withResponseStatus(result, status, headers?)`, which
+takes a `Response` or TanStack Start's `{ response, … }` stream result and keeps its cleanup attached. The core client never imports the adapter, so consumers that don't opt in stay
 framework-neutral and their output is byte-identical.
 
 ```ts

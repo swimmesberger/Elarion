@@ -159,3 +159,12 @@ the commit, so a request right after a save could read the old options.
   `SettingsConfigurationRefresher.RefreshAsync` was already public for code that must wait for it after the commit.
   A per-request overlay of the projection was rejected: `IConfiguration` and the options cache are process-wide, so
   it would need a second configuration per scope — the second source of truth this ADR removed.
+
+## Amendment (2026-11-27): `IsStored` next to `IsSet`
+
+`SettingValue<T>.IsSet` is `Source != SettingSource.Default`, so a value from the `FallbackConfigurationKey` (and a
+pin) counts as set. That is the right answer to "does anything override the default?", but an application asking "has
+someone saved a value?" (to offer a reset, say) had to write `Source == SettingSource.Store`. `SettingValue<T>.IsStored`
+now says it, and both properties document which sources they include. Changing `IsSet` to mean "stored" was rejected:
+it would silently change the meaning of existing checks, and a fallback value is set in the sense that the default does
+not apply.

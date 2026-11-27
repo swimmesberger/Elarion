@@ -265,9 +265,11 @@ public sealed class TypstToolchainTests {
     public void Compiler_factory_builds_a_compiler_without_a_service_provider() {
         var options = new TypstOptions { ExecutablePath = Path.Combine(Path.GetTempPath(), "no-such-typst") };
 
-        using var compiler = TypstCompiler.Create(options);
+        var compiler = TypstCompiler.Create(options);
 
         compiler.Should().BeAssignableTo<ITypstCompiler>();
+        // A per-test kit creates one compiler per test and drops it: there is nothing to release.
+        compiler.Should().NotBeAssignableTo<IDisposable>().And.NotBeAssignableTo<IAsyncDisposable>();
         var invalid = () => TypstCompiler.Create(new TypstOptions { MaxConcurrency = 0 });
         invalid.Should().Throw<ArgumentOutOfRangeException>();
     }
