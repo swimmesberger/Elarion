@@ -280,6 +280,25 @@ As built in slice 2 (`Elarion.WebDav`, `Elarion.WebDav.EntityFrameworkCore`), wh
   through `InternalsVisibleTo`; the seams (`IDavProtocol`, `DavCollection`, `DavProperty`, `IDavCollectionStore`,
   `DavDispatcher`, `DavRequest`, `DavResponse`, `DavXmlElement`) are public.
 
+As built in slice 3 (`Elarion.CalDav` server):
+
+- **Sources are invoked in the request's scope**, resolving `IHandler<TQuery, Result<CalDavSourceListing>>` from it (the
+  decorated chain), not through `HandlerInvoker` in a child scope: the host seeds the request scope with the DAV
+  principal, and `Elarion.CalDav` needs no reference to the `Elarion` core. `ICalDavSource<TSelf>` derives from
+  `IQuery<TSelf, CalDavSourceListing>` and needs a parameterless constructor.
+- **Publisher results**: `PublishAsync` and `RemoveAsync` return whether the calendar changed; `ReplaceAsync` returns the
+  store's `DavReplaceOutcome` (added, changed, removed), with an `IEnumerable` overload beside the `IAsyncEnumerable` one.
+- **The stored span** is computed from the written bytes read back with `CalendarReader`: an object with an item without
+  a start (a to-do with only `DUE`) is a candidate of every query; an endless series is expanded only to its first
+  occurrence; floating times and dates are widened by 14 hours.
+- **text-match** defaults to `i;ascii-casemap`, as RFC 4791 §9.7.5 says, not `i;unicode-casemap`; both and `i;octet`
+  are supported, an unknown collation is an invalid filter (`403` with `valid-filter`).
+- **calendar-query with `Depth: 0`** answers no members; a missing `Depth` is read as `1`, as clients send it. The
+  candidate range comes from the `time-range` of a single `VEVENT`, `VTODO` or `VJOURNAL` filter below `VCALENDAR`.
+- **free-busy** writes a `DTSTAMP` of the current time (the answer is computed, not stored) and `BUSY-TENTATIVE` for
+  tentative events.
+- **Options**: `CalDavOptions` also has `ProductId` (the `PRODID` of published objects).
+
 ## Adopting existing app passwords
 
 An application that already issues its own Basic credentials for DAV clients (as the consuming application whose

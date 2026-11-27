@@ -12,9 +12,115 @@ answers the calendar apps' WebDAV requests from it, so sync is exact on every no
 | --- | --- |
 | `Elarion.WebDav` | The WebDAV core without a wire: the hardened XML reader, the `DavDispatcher`, `sync-collection`, the store seam `IDavCollectionStore`. NativeAOT-safe. |
 | `Elarion.WebDav.EntityFrameworkCore` | The store and its journal on the application's `DbContext`: `[GenerateElarionDavStore]`. PostgreSQL. |
+| `Elarion.CalDav` | Calendar sources, `ICalDavPublisher`, the calendar properties and reports. NativeAOT-safe. |
 
 Why it is shaped this way, and what was rejected, is in
 [ADR-0111](https://github.com/swimmesberger/Elarion/blob/main/docs/decisions/0111-caldav.md).
+
+## Getting started
+
+```bash
+dotnet add package Elarion.CalDav
+dotnet add package Elarion.WebDav.EntityFrameworkCore
+```
+
+```csharp
+builder.Services.AddElarionWebDavEntityFrameworkCore<AppDbContext>(builder.Configuration.GetSection("WebDav"));
+builder.Services.AddElarionCalDav(builder.Configuration.GetSection("CalDav"));
+```
+
+## Calendar sources: who sees which calendar
+
+A module declares a **calendar source**: a query request implementing `ICalDavSource<TSelf>`, whose static
+`SourceName` names it, and an ordinary handler that returns the calendars of the source the current user may see.
+
+```csharp
+public sealed record MyShiftCalendars : ICalDavSource<MyShiftCalendars> {
+    public static string SourceName => "shifts";
+}
+
+[RequirePermission("shifts", Verbs.Read)]
+public sealed class ListMyShiftCalendars(ICurrentUser user) : IHandler<MyShiftCalendars, Result<CalDavSourceListing>> {
+    public ValueTask<Result<CalDavSourceListing>> HandleAsync(MyShiftCalendars query, CancellationToken ct) =>
+        ValueTask.FromResult(Result<CalDavSourceListing>.Success(new CalDavSourceListing([
+            new PublishedCalendarInfo(Key: $"u-{user.UserId}", DisplayName: "My shifts") {
+                Color = "#2E7D32",
+                Components = CalendarComponentKinds.Event,
+                TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Vienna"),
+            },
+        ])));
+}
+
+// in the module's ConfigureServices, so a disabled module registers no source
+services.AddElarionCalDavSource<MyShiftCalendars>();
+```
+
+Every DAV request invokes every registered source's handler through the handler pipeline as the authenticated user, so
+`[RequirePermission]`, resource rules with `WhereAuthorized` and `[FeatureGate]` decide what a calendar app shows
+exactly as they decide what the application shows. A source that answers not-found (a closed feature gate), forbidden or
+unauthorized shows no calendars; any other failure answers `500`. A calendar no source returns, and a principal or home
+of another user, answer `404`, never `403`. Leave `[Handler]` off a source's handler unless you also want it on JSON-RPC:
+it is invoked in process.
+
+A source name and a key are 1 to 64 ASCII letters, digits, `-` and `_`; a calendar's URL segment is `{source}.{key}`.
+Two sources with one name fail when the second is registered; an invalid or repeated key fails when it is returned,
+naming the source.
+
+Access is decided per calendar, not per object. A calendar whose content differs between viewers is published as one
+calendar per viewer (`u-{user}` above); losing access to a calendar needs no log, because the calendar leaves the home.
+
+## Publishing calendar objects
+
+The handler that changes the application's data publishes the calendar objects it changes, in its own transaction:
+
+```csharp
+public sealed class CreateShift(AppDbContext db, ICalDavPublisher calendars) : IHandler<CreateShift.Command, Result<Guid>> {
+    public async ValueTask<Result<Guid>> HandleAsync(Command command, CancellationToken ct) {
+        // ... write the shift
+        await calendars.PublishAsync(new CalDavAddress("shifts", $"u-{shift.UserId}"), ToEvent(shift), ct);
+        return shift.Id;
+    }
+}
+```
+
+| Call | Does |
+| --- | --- |
+| `PublishAsync(address, calendarObject)` | Adds or replaces the object of its UID; `false` when the written bytes equal the stored ones. |
+| `RemoveAsync(address, uid)` | Removes it; clients syncing receive it as removed. |
+| `ReplaceAsync(address, objects)` | Makes the set the calendar's whole content: the repair for a drifted calendar, or a nightly re-projection. Only what differs is recorded. |
+
+A `CalendarObject` (from `Elarion.Calendars`) is an event, a to-do, or a series' master and its overrides under one UID;
+it converts implicitly from a `CalendarEvent` or `CalendarTodo`. The publisher writes it with `CalendarWriter` and one
+`VTIMEZONE` per `TZID`, under the name `{uid}.ics` (a hash for a UID with other characters), and its strong ETag is a hash
+of the bytes. No clock value is passed to the writer, so every item needs a `Timestamp` (`DTSTAMP`) or `LastModified`:
+publishing an item with neither throws `CalendarWriteException`, because a clock value would change the bytes, and every
+client would refetch, on every re-publish. Publishing an object with a `METHOD` property, or into a source that is not
+registered, throws too.
+
+The store records the time span each object's occurrences cover (open for an endless series), so a `calendar-query`
+selects its candidates without reading the calendar.
+
+A handler that forgets to publish leaves the calendar stale. Publishing from a domain-event consumer, which shares the
+command's transaction, keeps every handler that changes a shift covered; `ReplaceAsync` repairs what drifted.
+
+## Calendars as calendar apps see them
+
+Every calendar answers the properties the surveyed clients read: `resourcetype` with `calendar`, `displayname`,
+`calendar-description`, Apple's `calendar-color`, `supported-calendar-component-set`, `calendar-timezone` (a `VTIMEZONE`
+DAVx5 uses as the Android calendar's zone), `supported-report-set`, `sync-token` and `getctag`, `owner`, and a
+`current-user-privilege-set` of `read` and `read-current-user-privilege-set` only, which Thunderbird, DAVx5 and
+Evolution read as read-only. The principal answers `calendar-home-set` and `calendar-user-address-set` (`mailto:` the
+user's e-mail, which DAVx5 asks for otherwise).
+
+| Report | Answer |
+| --- | --- |
+| `calendar-multiget` | The named objects in the order of their `href`s; one that does not exist as `404`. At most `MaxMultigetHrefs`. |
+| `calendar-query` | The objects matching the filter: `comp-filter`, `prop-filter`, `param-filter`, `text-match` (`i;ascii-casemap` by default, `i;unicode-casemap`, `i;octet`, `negate-condition`), `is-not-defined`, and `time-range` by the table of RFC 4791 §9.9 for events, to-dos, journals, free-busy and alarms, over every occurrence of a series. Floating times and dates are placed in the calendar's time zone. |
+| `free-busy-query` | One `VFREEBUSY` of the opaque, not cancelled events in the range, merged, tentative ones as `BUSY-TENTATIVE`. |
+
+`calendar-data` may ask for `expand` (every instance in UTC, without rules), `limit-recurrence-set`, or a partial
+`comp`/`prop` selection; `CalDAV-Timezones: F` (RFC 7809) leaves standard `VTIMEZONE`s out. `CalendarExpandOptions` in
+`CalDavOptions.CalendarExpand` caps every expansion. `CalDavFilterEvaluator.Matches` evaluates a filter on its own.
 
 ## The published-collection store
 
@@ -78,6 +184,11 @@ Request bodies are read with DTDs and external entities refused and with `MaxBod
 
 | Key | Default | Meaning |
 | --- | --- | --- |
+| `CalDav:CalendarRead:…` | the `CalendarReadOptions` defaults | How published objects and server answers are read (`MaxBytes`, `MaxComponents`, …). |
+| `CalDav:CalendarExpand:MaxOccurrences` | `10000` | The most occurrences one expansion yields. |
+| `CalDav:CalendarExpand:MaxIterations` | `100000` | The most candidates a rule examines. |
+| `CalDav:FeedsEnabled` | `true` | Whether calendars are also served as ICS feeds. |
+| `CalDav:ProductId` | `-//Elarion//Elarion.Calendars//EN` | The `PRODID` of published objects; changing it changes every ETag once. |
 | `WebDav:Prefix` | `/dav` | The path the DAV routes are served under. |
 | `WebDav:MaxBodyBytes` | `1048576` | The largest request body. |
 | `WebDav:MaxXmlDepth` | `32` | The deepest element nesting of a request body. |

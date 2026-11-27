@@ -39,6 +39,16 @@ minor releases may include breaking changes.
   transaction, writes nothing for unchanged bytes, serialises writers per collection under its row lock and prunes its
   journal while the collection changes (`JournalRetention`, `MaxJournalRowsPerCollection`). See
   [CalDAV](https://elarion.wimmesberger.dev/docs/capabilities/caldav).
+- **CalDAV server: `Elarion.CalDav`** (ADR-0111, spec 0006). A module declares a calendar source, a query request
+  implementing `ICalDavSource<TSelf>` registered with `AddElarionCalDavSource<TQuery>()`, whose ordinary handler returns
+  the calendars (`PublishedCalendarInfo`: key, name, color, description, component kinds, time zone) the current user
+  may see; every DAV request runs the sources through the handler pipeline as that user. `ICalDavPublisher` publishes,
+  removes and replaces `Elarion.Calendars` objects in the handler's transaction (no change for equal bytes; `METHOD`, a
+  missing `DTSTAMP` or an unregistered source throw). Calendars answer the properties iOS, macOS, Thunderbird, DAVx5 and
+  Evolution read, read-only, and the reports `calendar-multiget`, `calendar-query` (every RFC 4791 filter, the §9.9
+  time-range table over recurrences, floating times in the calendar's zone), `free-busy-query`, `expand`,
+  `limit-recurrence-set` and partial `calendar-data`. `CalDavOptions` embeds `CalendarReadOptions` and
+  `CalendarExpandOptions`. See [CalDAV](https://elarion.wimmesberger.dev/docs/capabilities/caldav).
 - **App passwords: `Elarion.AppPasswords`, `Elarion.AppPasswords.EntityFrameworkCore`, `Elarion.AppPasswords.AspNetCore`**
   (ADR-0111, spec 0006). Calendar apps and calendar subscriptions authenticate without a browser sign-in.
   `IAppPasswords` creates a named app password for a user with a scope (`AppPasswordScope.Dav`, or

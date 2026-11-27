@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>CalDAV for Elarion (ADR-0111): calendar sources (ordinary query handlers that decide who sees which calendar), ICalDavPublisher publishing Elarion.Calendars objects into the published-collection store in the handler's transaction, the calendar properties and reports (calendar-multiget, calendar-query with every RFC 4791 filter and time-range rule, expand, limit-recurrence-set, free-busy-query) on the WebDAV core, read-only for iOS, macOS, Thunderbird, DAVx5 and Evolution. No ASP.NET Core, no EF Core, no reflection.</Description>
+    <PackageTags>elarion;caldav;webdav;calendar;icalendar;ics;rfc4791;sync;dotnet</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- AddElarionCalDav(IConfiguration) binds through the configuration-binding source generator, not the reflection binder. -->
+    <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Elarion.WebDav/Elarion.WebDav.csproj"/>
+    <ProjectReference Include="../Elarion.Calendars/Elarion.Calendars.csproj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+    <PackageReference Include="Microsoft.Extensions.Options"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Elarion.Tests"/>
+  </ItemGroup>
+
+</Project>

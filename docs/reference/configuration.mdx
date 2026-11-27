@@ -210,6 +210,22 @@ the host starts.
 
 See [CalDAV](/docs/capabilities/caldav#configuration).
 
+## CalDAV
+
+`AddElarionCalDav(configuration)` binds `CalDavOptions` (package `Elarion.CalDav`), conventionally from the `CalDav`
+section (`CalDavOptions.SectionName`). Calendar data uses `Elarion.Calendars`' own option types, not limits of this
+package.
+
+| Key | Default |
+| --- | --- |
+| `CalDav:CalendarRead:MaxBytes` (and the other `CalendarReadOptions` keys) | `16777216` |
+| `CalDav:CalendarExpand:MaxOccurrences` | `10000` |
+| `CalDav:CalendarExpand:MaxIterations` | `100000` |
+| `CalDav:FeedsEnabled` | `true` |
+| `CalDav:ProductId` | `-//Elarion//Elarion.Calendars//EN` |
+
+See [CalDAV](/docs/capabilities/caldav#configuration).
+
 ## App passwords
 
 `AddElarionAppPasswords(configuration)` (and `AddElarionAppPasswordsEntityFrameworkCore<TDbContext>(configuration)`)
